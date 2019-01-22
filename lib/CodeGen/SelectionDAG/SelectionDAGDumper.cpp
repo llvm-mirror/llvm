@@ -1,9 +1,8 @@
 //===- SelectionDAGDumper.cpp - Implement SelectionDAG::dump() ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,30 +19,33 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/Printable.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
+#include "SDNodeDbgValue.h"
 #include <cstdint>
 #include <iterator>
 
@@ -85,6 +87,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::ATOMIC_LOAD_ADD:            return "AtomicLoadAdd";
   case ISD::ATOMIC_LOAD_SUB:            return "AtomicLoadSub";
   case ISD::ATOMIC_LOAD_AND:            return "AtomicLoadAnd";
+  case ISD::ATOMIC_LOAD_CLR:            return "AtomicLoadClr";
   case ISD::ATOMIC_LOAD_OR:             return "AtomicLoadOr";
   case ISD::ATOMIC_LOAD_XOR:            return "AtomicLoadXor";
   case ISD::ATOMIC_LOAD_NAND:           return "AtomicLoadNand";
@@ -120,6 +123,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::RETURNADDR:                 return "RETURNADDR";
   case ISD::ADDROFRETURNADDR:           return "ADDROFRETURNADDR";
   case ISD::FRAMEADDR:                  return "FRAMEADDR";
+  case ISD::SPONENTRY:                  return "SPONENTRY";
   case ISD::LOCAL_RECOVER:              return "LOCAL_RECOVER";
   case ISD::READ_REGISTER:              return "READ_REGISTER";
   case ISD::WRITE_REGISTER:             return "WRITE_REGISTER";
@@ -140,6 +144,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
     unsigned IID = cast<ConstantSDNode>(getOperand(OpNo))->getZExtValue();
     if (IID < Intrinsic::num_intrinsics)
       return Intrinsic::getName((Intrinsic::ID)IID, None);
+    else if (!G)
+      return "Unknown intrinsic";
     else if (const TargetIntrinsicInfo *TII = G->getTarget().getIntrinsicInfo())
       return TII->getName(IID);
     llvm_unreachable("Invalid intrinsic ID");
@@ -171,25 +177,44 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   // Unary operators
   case ISD::FABS:                       return "fabs";
   case ISD::FMINNUM:                    return "fminnum";
+  case ISD::STRICT_FMINNUM:             return "strict_fminnum";
   case ISD::FMAXNUM:                    return "fmaxnum";
-  case ISD::FMINNAN:                    return "fminnan";
-  case ISD::FMAXNAN:                    return "fmaxnan";
+  case ISD::STRICT_FMAXNUM:             return "strict_fmaxnum";
+  case ISD::FMINNUM_IEEE:               return "fminnum_ieee";
+  case ISD::FMAXNUM_IEEE:               return "fmaxnum_ieee";
+  case ISD::FMINIMUM:                   return "fminimum";
+  case ISD::FMAXIMUM:                   return "fmaximum";
   case ISD::FNEG:                       return "fneg";
   case ISD::FSQRT:                      return "fsqrt";
+  case ISD::STRICT_FSQRT:               return "strict_fsqrt";
+  case ISD::FCBRT:                      return "fcbrt";
   case ISD::FSIN:                       return "fsin";
+  case ISD::STRICT_FSIN:                return "strict_fsin";
   case ISD::FCOS:                       return "fcos";
+  case ISD::STRICT_FCOS:                return "strict_fcos";
   case ISD::FSINCOS:                    return "fsincos";
   case ISD::FTRUNC:                     return "ftrunc";
+  case ISD::STRICT_FTRUNC:              return "strict_ftrunc";
   case ISD::FFLOOR:                     return "ffloor";
+  case ISD::STRICT_FFLOOR:              return "strict_ffloor";
   case ISD::FCEIL:                      return "fceil";
+  case ISD::STRICT_FCEIL:               return "strict_fceil";
   case ISD::FRINT:                      return "frint";
+  case ISD::STRICT_FRINT:               return "strict_frint";
   case ISD::FNEARBYINT:                 return "fnearbyint";
+  case ISD::STRICT_FNEARBYINT:          return "strict_fnearbyint";
   case ISD::FROUND:                     return "fround";
+  case ISD::STRICT_FROUND:              return "strict_fround";
   case ISD::FEXP:                       return "fexp";
+  case ISD::STRICT_FEXP:                return "strict_fexp";
   case ISD::FEXP2:                      return "fexp2";
+  case ISD::STRICT_FEXP2:               return "strict_fexp2";
   case ISD::FLOG:                       return "flog";
+  case ISD::STRICT_FLOG:                return "strict_flog";
   case ISD::FLOG2:                      return "flog2";
+  case ISD::STRICT_FLOG2:               return "strict_flog2";
   case ISD::FLOG10:                     return "flog10";
+  case ISD::STRICT_FLOG10:              return "strict_flog10";
 
   // Binary operators
   case ISD::ADD:                        return "add";
@@ -213,25 +238,34 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::SRL:                        return "srl";
   case ISD::ROTL:                       return "rotl";
   case ISD::ROTR:                       return "rotr";
+  case ISD::FSHL:                       return "fshl";
+  case ISD::FSHR:                       return "fshr";
   case ISD::FADD:                       return "fadd";
+  case ISD::STRICT_FADD:                return "strict_fadd";
   case ISD::FSUB:                       return "fsub";
+  case ISD::STRICT_FSUB:                return "strict_fsub";
   case ISD::FMUL:                       return "fmul";
+  case ISD::STRICT_FMUL:                return "strict_fmul";
   case ISD::FDIV:                       return "fdiv";
+  case ISD::STRICT_FDIV:                return "strict_fdiv";
   case ISD::FMA:                        return "fma";
+  case ISD::STRICT_FMA:                 return "strict_fma";
   case ISD::FMAD:                       return "fmad";
   case ISD::FREM:                       return "frem";
+  case ISD::STRICT_FREM:                return "strict_frem";
   case ISD::FCOPYSIGN:                  return "fcopysign";
   case ISD::FGETSIGN:                   return "fgetsign";
   case ISD::FCANONICALIZE:              return "fcanonicalize";
   case ISD::FPOW:                       return "fpow";
+  case ISD::STRICT_FPOW:                return "strict_fpow";
   case ISD::SMIN:                       return "smin";
   case ISD::SMAX:                       return "smax";
   case ISD::UMIN:                       return "umin";
   case ISD::UMAX:                       return "umax";
 
   case ISD::FPOWI:                      return "fpowi";
+  case ISD::STRICT_FPOWI:               return "strict_fpowi";
   case ISD::SETCC:                      return "setcc";
-  case ISD::SETCCE:                     return "setcce";
   case ISD::SETCCCARRY:                 return "setcccarry";
   case ISD::SELECT:                     return "select";
   case ISD::VSELECT:                    return "vselect";
@@ -259,6 +293,12 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::SHL_PARTS:                  return "shl_parts";
   case ISD::SRA_PARTS:                  return "sra_parts";
   case ISD::SRL_PARTS:                  return "srl_parts";
+
+  case ISD::SADDSAT:                    return "saddsat";
+  case ISD::UADDSAT:                    return "uaddsat";
+  case ISD::SSUBSAT:                    return "ssubsat";
+  case ISD::USUBSAT:                    return "usubsat";
+  case ISD::SMULFIX:                    return "smulfix";
 
   // Conversion operators.
   case ISD::SIGN_EXTEND:                return "sign_extend";
@@ -366,7 +406,9 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
     case ISD::SETFALSE2:                return "setfalse2";
     }
   case ISD::VECREDUCE_FADD:             return "vecreduce_fadd";
+  case ISD::VECREDUCE_STRICT_FADD:      return "vecreduce_strict_fadd";
   case ISD::VECREDUCE_FMUL:             return "vecreduce_fmul";
+  case ISD::VECREDUCE_STRICT_FMUL:      return "vecreduce_strict_fmul";
   case ISD::VECREDUCE_ADD:              return "vecreduce_add";
   case ISD::VECREDUCE_MUL:              return "vecreduce_mul";
   case ISD::VECREDUCE_AND:              return "vecreduce_and";
@@ -401,6 +443,32 @@ static Printable PrintNodeId(const SDNode &Node) {
   });
 }
 
+// Print the MMO with more information from the SelectionDAG.
+static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
+                            const MachineFunction *MF, const Module *M,
+                            const MachineFrameInfo *MFI,
+                            const TargetInstrInfo *TII, LLVMContext &Ctx) {
+  ModuleSlotTracker MST(M);
+  if (MF)
+    MST.incorporateFunction(MF->getFunction());
+  SmallVector<StringRef, 0> SSNs;
+  MMO.print(OS, MST, SSNs, Ctx, MFI, TII);
+}
+
+static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
+                            const SelectionDAG *G) {
+  if (G) {
+    const MachineFunction *MF = &G->getMachineFunction();
+    return printMemOperand(OS, MMO, MF, MF->getFunction().getParent(),
+                           &MF->getFrameInfo(), G->getSubtarget().getInstrInfo(),
+                           *G->getContext());
+  } else {
+    LLVMContext Ctx;
+    return printMemOperand(OS, MMO, /*MF=*/nullptr, /*M=*/nullptr,
+                           /*MFI=*/nullptr, /*TII=*/nullptr, Ctx);
+  }
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void SDNode::dump() const { dump(nullptr); }
 
@@ -430,9 +498,6 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
   if (getFlags().hasExact())
     OS << " exact";
 
-  if (getFlags().hasUnsafeAlgebra())
-    OS << " unsafe";
-
   if (getFlags().hasNoNaNs())
     OS << " nnan";
 
@@ -448,6 +513,12 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
   if (getFlags().hasAllowContract())
     OS << " contract";
 
+  if (getFlags().hasApproximateFuncs())
+    OS << " afn";
+
+  if (getFlags().hasAllowReassociation())
+    OS << " reassoc";
+
   if (getFlags().hasVectorReduction())
     OS << " vector-reduction";
 
@@ -457,7 +528,7 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
       OS << "Mem:";
       for (MachineSDNode::mmo_iterator i = MN->memoperands_begin(),
            e = MN->memoperands_end(); i != e; ++i) {
-        OS << **i;
+        printMemOperand(OS, **i, G);
         if (std::next(i) != e)
           OS << " ";
       }
@@ -528,7 +599,7 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
       OS << LBB->getName() << " ";
     OS << (const void*)BBDN->getBasicBlock() << ">";
   } else if (const RegisterSDNode *R = dyn_cast<RegisterSDNode>(this)) {
-    OS << ' ' << PrintReg(R->getReg(),
+    OS << ' ' << printReg(R->getReg(),
                           G ? G->getSubtarget().getRegisterInfo() : nullptr);
   } else if (const ExternalSymbolSDNode *ES =
              dyn_cast<ExternalSymbolSDNode>(this)) {
@@ -549,7 +620,9 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     OS << ":" << N->getVT().getEVTString();
   }
   else if (const LoadSDNode *LD = dyn_cast<LoadSDNode>(this)) {
-    OS << "<" << *LD->getMemOperand();
+    OS << "<";
+
+    printMemOperand(OS, *LD->getMemOperand(), G);
 
     bool doExt = true;
     switch (LD->getExtensionType()) {
@@ -567,7 +640,8 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
 
     OS << ">";
   } else if (const StoreSDNode *ST = dyn_cast<StoreSDNode>(this)) {
-    OS << "<" << *ST->getMemOperand();
+    OS << "<";
+    printMemOperand(OS, *ST->getMemOperand(), G);
 
     if (ST->isTruncatingStore())
       OS << ", trunc to " << ST->getMemoryVT().getEVTString();
@@ -578,7 +652,9 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
 
     OS << ">";
   } else if (const MemSDNode* M = dyn_cast<MemSDNode>(this)) {
-    OS << "<" << *M->getMemOperand() << ">";
+    OS << "<";
+    printMemOperand(OS, *M->getMemOperand(), G);
+    OS << ">";
   } else if (const BlockAddressSDNode *BA =
                dyn_cast<BlockAddressSDNode>(this)) {
     int64_t offset = BA->getOffset();
@@ -608,27 +684,64 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
 
     if (getNodeId() != -1)
       OS << " [ID=" << getNodeId() << ']';
+    if (!(isa<ConstantSDNode>(this) || (isa<ConstantFPSDNode>(this))))
+      OS << " # D:" << isDivergent();
 
-    if (!G)
-      return;
-
-    DILocation *L = getDebugLoc();
-    if (!L)
-      return;
-
-    if (auto *Scope = L->getScope())
-      OS << Scope->getFilename();
-    else
-      OS << "<unknown>";
-    OS << ':' << L->getLine();
-    if (unsigned C = L->getColumn())
-      OS << ':' << C;
+    if (G && !G->GetDbgValues(this).empty()) {
+      OS << " [NoOfDbgValues=" << G->GetDbgValues(this).size() << ']';
+      for (SDDbgValue *Dbg : G->GetDbgValues(this))
+        if (!Dbg->isInvalidated())
+          Dbg->print(OS);
+    } else if (getHasDebugValue())
+      OS << " [NoOfDbgValues>0]";
   }
 }
 
+LLVM_DUMP_METHOD void SDDbgValue::print(raw_ostream &OS) const {
+  OS << " DbgVal(Order=" << getOrder() << ')';
+  if (isInvalidated()) OS << "(Invalidated)";
+  if (isEmitted()) OS << "(Emitted)";
+  switch (getKind()) {
+  case SDNODE:
+    if (getSDNode())
+      OS << "(SDNODE=" << PrintNodeId(*getSDNode()) << ':' <<  getResNo() << ')';
+    else
+      OS << "(SDNODE)";
+    break;
+  case CONST:
+    OS << "(CONST)";
+    break;
+  case FRAMEIX:
+    OS << "(FRAMEIX=" << getFrameIx() << ')';
+    break;
+  case VREG:
+    OS << "(VREG=" << getVReg() << ')';
+    break;
+  }
+  if (isIndirect()) OS << "(Indirect)";
+  OS << ":\"" << Var->getName() << '"';
+#ifndef NDEBUG
+  if (Expr->getNumElements())
+    Expr->dump();
+#endif
+}
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void SDDbgValue::dump() const {
+  if (isInvalidated())
+    return;
+  print(dbgs());
+  dbgs() << "\n";
+}
+#endif
+
 /// Return true if this node is so simple that we should just print it inline
 /// if it appears as an operand.
-static bool shouldPrintInline(const SDNode &Node) {
+static bool shouldPrintInline(const SDNode &Node, const SelectionDAG *G) {
+  // Avoid lots of cluttering when inline printing nodes with associated
+  // DbgValues in verbose mode.
+  if (VerboseDAGDumping && G && !G->GetDbgValues(&Node).empty())
+    return false;
   if (Node.getOpcode() == ISD::EntryToken)
     return false;
   return Node.getNumOperands() == 0;
@@ -637,7 +750,7 @@ static bool shouldPrintInline(const SDNode &Node) {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 static void DumpNodes(const SDNode *N, unsigned indent, const SelectionDAG *G) {
   for (const SDValue &Op : N->op_values()) {
-    if (shouldPrintInline(*Op.getNode()))
+    if (shouldPrintInline(*Op.getNode(), G))
       continue;
     if (Op.getNode()->hasOneUse())
       DumpNodes(Op.getNode(), indent+2, G);
@@ -654,12 +767,24 @@ LLVM_DUMP_METHOD void SelectionDAG::dump() const {
        I != E; ++I) {
     const SDNode *N = &*I;
     if (!N->hasOneUse() && N != getRoot().getNode() &&
-        (!shouldPrintInline(*N) || N->use_empty()))
+        (!shouldPrintInline(*N, this) || N->use_empty()))
       DumpNodes(N, 2, this);
   }
 
   if (getRoot().getNode()) DumpNodes(getRoot().getNode(), 2, this);
-  dbgs() << "\n\n";
+  dbgs() << "\n";
+
+  if (VerboseDAGDumping) {
+    if (DbgBegin() != DbgEnd())
+      dbgs() << "SDDbgValues:\n";
+    for (auto *Dbg : make_range(DbgBegin(), DbgEnd()))
+      Dbg->dump();
+    if (ByvalParmDbgBegin() != ByvalParmDbgEnd())
+      dbgs() << "Byval SDDbgValues:\n";
+    for (auto *Dbg : make_range(ByvalParmDbgBegin(), ByvalParmDbgEnd()))
+      Dbg->dump();
+  }
+  dbgs() << "\n";
 }
 #endif
 
@@ -675,7 +800,7 @@ static bool printOperand(raw_ostream &OS, const SelectionDAG *G,
   if (!Value.getNode()) {
     OS << "<null>";
     return false;
-  } else if (shouldPrintInline(*Value.getNode())) {
+  } else if (shouldPrintInline(*Value.getNode(), G)) {
     OS << Value->getOperationName(G) << ':';
     Value->print_types(OS, G);
     Value->print_details(OS, G);
@@ -778,5 +903,9 @@ void SDNode::print(raw_ostream &OS, const SelectionDAG *G) const {
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     if (i) OS << ", "; else OS << " ";
     printOperand(OS, G, getOperand(i));
+  }
+  if (DebugLoc DL = getDebugLoc()) {
+    OS << ", ";
+    DL.print(OS);
   }
 }

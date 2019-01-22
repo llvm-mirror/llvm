@@ -1,9 +1,8 @@
 //===- SourceCoverageViewHTML.h - A html code coverage view ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -22,7 +21,7 @@ using namespace coverage;
 
 struct FileCoverageSummary;
 
-/// \brief A coverage printer for html output.
+/// A coverage printer for html output.
 class CoveragePrinterHTML : public CoveragePrinter {
 public:
   Expected<OwnedStream> createViewFile(StringRef Path,
@@ -45,7 +44,7 @@ private:
                               const FileCoverageSummary &FCS) const;
 };
 
-/// \brief A code coverage view which supports html-based rendering.
+/// A code coverage view which supports html-based rendering.
 class SourceCoverageViewHTML : public SourceCoverageView {
   void renderViewHeader(raw_ostream &OS) override;
 

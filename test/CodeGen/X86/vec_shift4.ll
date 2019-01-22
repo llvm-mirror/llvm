@@ -4,7 +4,7 @@
 
 define <2 x i64> @shl1(<4 x i32> %r, <4 x i32> %a) nounwind readnone ssp {
 ; X32-LABEL: shl1:
-; X32:       # BB#0: # %entry
+; X32:       # %bb.0: # %entry
 ; X32-NEXT:    pslld $23, %xmm1
 ; X32-NEXT:    paddd {{\.LCPI.*}}, %xmm1
 ; X32-NEXT:    cvttps2dq %xmm1, %xmm1
@@ -12,7 +12,7 @@ define <2 x i64> @shl1(<4 x i32> %r, <4 x i32> %a) nounwind readnone ssp {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: shl1:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    pslld $23, %xmm1
 ; X64-NEXT:    paddd {{.*}}(%rip), %xmm1
 ; X64-NEXT:    cvttps2dq %xmm1, %xmm1
@@ -32,10 +32,10 @@ entry:
 
 define <2 x i64> @shl2(<16 x i8> %r, <16 x i8> %a) nounwind readnone ssp {
 ; X32-LABEL: shl2:
-; X32:       # BB#0: # %entry
+; X32:       # %bb.0: # %entry
 ; X32-NEXT:    movdqa %xmm0, %xmm2
 ; X32-NEXT:    psllw $5, %xmm1
-; X32-NEXT:    movdqa %xmm2, %xmm3
+; X32-NEXT:    movdqa %xmm0, %xmm3
 ; X32-NEXT:    psllw $4, %xmm3
 ; X32-NEXT:    pand {{\.LCPI.*}}, %xmm3
 ; X32-NEXT:    movdqa %xmm1, %xmm0
@@ -47,7 +47,7 @@ define <2 x i64> @shl2(<16 x i8> %r, <16 x i8> %a) nounwind readnone ssp {
 ; X32-NEXT:    movdqa %xmm1, %xmm0
 ; X32-NEXT:    pblendvb %xmm0, %xmm3, %xmm2
 ; X32-NEXT:    movdqa %xmm2, %xmm3
-; X32-NEXT:    paddb %xmm3, %xmm3
+; X32-NEXT:    paddb %xmm2, %xmm3
 ; X32-NEXT:    paddb %xmm1, %xmm1
 ; X32-NEXT:    movdqa %xmm1, %xmm0
 ; X32-NEXT:    pblendvb %xmm0, %xmm3, %xmm2
@@ -55,10 +55,10 @@ define <2 x i64> @shl2(<16 x i8> %r, <16 x i8> %a) nounwind readnone ssp {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: shl2:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movdqa %xmm0, %xmm2
 ; X64-NEXT:    psllw $5, %xmm1
-; X64-NEXT:    movdqa %xmm2, %xmm3
+; X64-NEXT:    movdqa %xmm0, %xmm3
 ; X64-NEXT:    psllw $4, %xmm3
 ; X64-NEXT:    pand {{.*}}(%rip), %xmm3
 ; X64-NEXT:    movdqa %xmm1, %xmm0
@@ -70,7 +70,7 @@ define <2 x i64> @shl2(<16 x i8> %r, <16 x i8> %a) nounwind readnone ssp {
 ; X64-NEXT:    movdqa %xmm1, %xmm0
 ; X64-NEXT:    pblendvb %xmm0, %xmm3, %xmm2
 ; X64-NEXT:    movdqa %xmm2, %xmm3
-; X64-NEXT:    paddb %xmm3, %xmm3
+; X64-NEXT:    paddb %xmm2, %xmm3
 ; X64-NEXT:    paddb %xmm1, %xmm1
 ; X64-NEXT:    movdqa %xmm1, %xmm0
 ; X64-NEXT:    pblendvb %xmm0, %xmm3, %xmm2

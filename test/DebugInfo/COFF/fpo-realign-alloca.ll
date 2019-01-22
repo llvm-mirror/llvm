@@ -17,9 +17,8 @@
 ; CHECK:         .cv_fpo_setframe        %ebp
 ; CHECK:         pushl   %esi
 ; CHECK:         .cv_fpo_pushreg %esi
-;       We don't seem to need to describe this AND because at this point CSRs
-;       are stored relative to EBP, but it's suspicious.
 ; CHECK:         andl    $-16, %esp
+; CHECK:         .cv_fpo_stackalign      16
 ; CHECK:         subl    $32, %esp
 ; CHECK:         .cv_fpo_stackalloc      32
 ; CHECK:         .cv_fpo_endprologue
@@ -86,7 +85,7 @@ attributes #4 = { nounwind }
 !5 = !{i32 2, !"Debug Info Version", i32 3}
 !6 = !{i32 1, !"wchar_size", i32 2}
 !7 = !{!"clang version 6.0.0 "}
-!8 = distinct !DISubprogram(name: "realign_and_alloca", scope: !1, file: !1, line: 2, type: !9, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !12)
+!8 = distinct !DISubprogram(name: "realign_and_alloca", scope: !1, file: !1, line: 2, type: !9, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !12)
 !9 = !DISubroutineType(types: !10)
 !10 = !{!11, !11}
 !11 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)

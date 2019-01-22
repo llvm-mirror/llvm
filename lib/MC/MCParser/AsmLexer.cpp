@@ -1,9 +1,8 @@
 //===- AsmLexer.cpp - Lexer for Assembly Files ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -210,6 +209,8 @@ AsmToken AsmLexer::LexLineComment() {
   int CurChar = getNextChar();
   while (CurChar != '\n' && CurChar != '\r' && CurChar != EOF)
     CurChar = getNextChar();
+  if (CurChar == '\r' && CurPtr != CurBuf.end() && *CurPtr == '\n')
+    ++CurPtr;
 
   // If we have a CommentConsumer, notify it about the comment.
   if (CommentConsumer) {
@@ -241,22 +242,26 @@ static void SkipIgnoredIntegerSuffix(const char *&CurPtr) {
 
 // Look ahead to search for first non-hex digit, if it's [hH], then we treat the
 // integer as a hexadecimal, possibly with leading zeroes.
-static unsigned doLookAhead(const char *&CurPtr, unsigned DefaultRadix) {
-  const char *FirstHex = nullptr;
+static unsigned doHexLookAhead(const char *&CurPtr, unsigned DefaultRadix,
+                               bool LexHex) {
+  const char *FirstNonDec = nullptr;
   const char *LookAhead = CurPtr;
   while (true) {
     if (isDigit(*LookAhead)) {
       ++LookAhead;
-    } else if (isHexDigit(*LookAhead)) {
-      if (!FirstHex)
-        FirstHex = LookAhead;
-      ++LookAhead;
     } else {
-      break;
+      if (!FirstNonDec)
+        FirstNonDec = LookAhead;
+
+      // Keep going if we are looking for a 'h' suffix.
+      if (LexHex && isHexDigit(*LookAhead))
+        ++LookAhead;
+      else
+        break;
     }
   }
-  bool isHex = *LookAhead == 'h' || *LookAhead == 'H';
-  CurPtr = isHex || !FirstHex ? LookAhead : FirstHex;
+  bool isHex = LexHex && (*LookAhead == 'h' || *LookAhead == 'H');
+  CurPtr = isHex || !FirstNonDec ? LookAhead : FirstNonDec;
   if (isHex)
     return 16;
   return DefaultRadix;
@@ -279,7 +284,7 @@ static AsmToken intToken(StringRef Ref, APInt &Value)
 AsmToken AsmLexer::LexDigit() {
   // MASM-flavor binary integer: [01]+[bB]
   // MASM-flavor hexadecimal integer: [0-9][0-9a-fA-F]*[hH]
-  if (IsParsingMSInlineAsm && isdigit(CurPtr[-1])) {
+  if (LexMasmIntegers && isdigit(CurPtr[-1])) {
     const char *FirstNonBinary = (CurPtr[-1] != '0' && CurPtr[-1] != '1') ?
                                    CurPtr - 1 : nullptr;
     const char *OldCurPtr = CurPtr;
@@ -318,7 +323,7 @@ AsmToken AsmLexer::LexDigit() {
 
   // Decimal integer: [1-9][0-9]*
   if (CurPtr[-1] != '0' || CurPtr[0] == '.') {
-    unsigned Radix = doLookAhead(CurPtr, 10);
+    unsigned Radix = doHexLookAhead(CurPtr, 10, LexMasmIntegers);
     bool isHex = Radix == 16;
     // Check for floating point literals.
     if (!isHex && (*CurPtr == '.' || *CurPtr == 'e')) {
@@ -333,8 +338,8 @@ AsmToken AsmLexer::LexDigit() {
       return ReturnError(TokStart, !isHex ? "invalid decimal number" :
                            "invalid hexdecimal number");
 
-    // Consume the [bB][hH].
-    if (Radix == 2 || Radix == 16)
+    // Consume the [hH].
+    if (LexMasmIntegers && Radix == 16)
       ++CurPtr;
 
     // The darwin/x86 (and x86-64) assembler accepts and ignores type
@@ -344,7 +349,7 @@ AsmToken AsmLexer::LexDigit() {
     return intToken(Result, Value);
   }
 
-  if (!IsParsingMSInlineAsm && ((*CurPtr == 'b') || (*CurPtr == 'B'))) {
+  if (!LexMasmIntegers && ((*CurPtr == 'b') || (*CurPtr == 'B'))) {
     ++CurPtr;
     // See if we actually have "0b" as part of something like "jmp 0b\n"
     if (!isDigit(CurPtr[0])) {
@@ -393,7 +398,7 @@ AsmToken AsmLexer::LexDigit() {
       return ReturnError(TokStart, "invalid hexadecimal number");
 
     // Consume the optional [hH].
-    if (!IsParsingMSInlineAsm && (*CurPtr == 'h' || *CurPtr == 'H'))
+    if (LexMasmIntegers && (*CurPtr == 'h' || *CurPtr == 'H'))
       ++CurPtr;
 
     // The darwin/x86 (and x86-64) assembler accepts and ignores ULL and LL
@@ -405,7 +410,7 @@ AsmToken AsmLexer::LexDigit() {
 
   // Either octal or hexadecimal.
   APInt Value(128, 0, true);
-  unsigned Radix = doLookAhead(CurPtr, 8);
+  unsigned Radix = doHexLookAhead(CurPtr, 8, LexMasmIntegers);
   bool isHex = Radix == 16;
   StringRef Result(TokStart, CurPtr - TokStart);
   if (Result.getAsInteger(Radix, Value))
@@ -621,7 +626,6 @@ AsmToken AsmLexer::LexToken() {
     return AsmToken(AsmToken::EndOfStatement, StringRef(TokStart, 1));
   case ':': return AsmToken(AsmToken::Colon, StringRef(TokStart, 1));
   case '+': return AsmToken(AsmToken::Plus, StringRef(TokStart, 1));
-  case '-': return AsmToken(AsmToken::Minus, StringRef(TokStart, 1));
   case '~': return AsmToken(AsmToken::Tilde, StringRef(TokStart, 1));
   case '(': return AsmToken(AsmToken::LParen, StringRef(TokStart, 1));
   case ')': return AsmToken(AsmToken::RParen, StringRef(TokStart, 1));
@@ -640,6 +644,12 @@ AsmToken AsmLexer::LexToken() {
       return AsmToken(AsmToken::EqualEqual, StringRef(TokStart, 2));
     }
     return AsmToken(AsmToken::Equal, StringRef(TokStart, 1));
+  case '-':
+    if (*CurPtr == '>') {
+      ++CurPtr;
+      return AsmToken(AsmToken::MinusGreater, StringRef(TokStart, 2));
+    }
+    return AsmToken(AsmToken::Minus, StringRef(TokStart, 1));
   case '|':
     if (*CurPtr == '|') {
       ++CurPtr;

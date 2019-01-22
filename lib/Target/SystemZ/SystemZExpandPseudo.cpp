@@ -1,9 +1,8 @@
 //==-- SystemZExpandPseudo.cpp - Expand pseudo instructions -------*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -55,7 +54,7 @@ char SystemZExpandPseudo::ID = 0;
 INITIALIZE_PASS(SystemZExpandPseudo, "systemz-expand-pseudo",
                 SYSTEMZ_EXPAND_PSEUDO_NAME, false, false)
 
-/// \brief Returns an instance of the pseudo instruction expansion pass.
+/// Returns an instance of the pseudo instruction expansion pass.
 FunctionPass *llvm::createSystemZExpandPseudoPass(SystemZTargetMachine &TM) {
   return new SystemZExpandPseudo();
 }
@@ -112,7 +111,7 @@ bool SystemZExpandPseudo::expandLOCRMux(MachineBasicBlock &MBB,
   return true;
 }
 
-/// \brief If MBBI references a pseudo instruction that should be expanded here,
+/// If MBBI references a pseudo instruction that should be expanded here,
 /// do the expansion and return true.  Otherwise return false.
 bool SystemZExpandPseudo::expandMI(MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator MBBI,
@@ -127,7 +126,7 @@ bool SystemZExpandPseudo::expandMI(MachineBasicBlock &MBB,
   return false;
 }
 
-/// \brief Iterate over the instructions in basic block MBB and expand any
+/// Iterate over the instructions in basic block MBB and expand any
 /// pseudo instructions.  Return true if anything was modified.
 bool SystemZExpandPseudo::expandMBB(MachineBasicBlock &MBB) {
   bool Modified = false;

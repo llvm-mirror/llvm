@@ -1,9 +1,8 @@
 //===- ToolOutputFile.h - Output files for compiler-like tools -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -35,7 +34,7 @@ class ToolOutputFile {
     /// The flag which indicates whether we should not delete the file.
     bool Keep;
 
-    explicit CleanupInstaller(StringRef ilename);
+    explicit CleanupInstaller(StringRef Filename);
     ~CleanupInstaller();
   } Installer;
 
@@ -43,7 +42,7 @@ class ToolOutputFile {
   raw_fd_ostream OS;
 
 public:
-  /// This constructor's arguments are passed to to raw_fd_ostream's
+  /// This constructor's arguments are passed to raw_fd_ostream's
   /// constructor.
   ToolOutputFile(StringRef Filename, std::error_code &EC,
                  sys::fs::OpenFlags Flags);

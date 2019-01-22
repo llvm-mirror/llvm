@@ -8,7 +8,7 @@
 ; (with only half of the swap tree valid).
   define i32 @test1(i32 %x) nounwind {
 ; CHECK-LABEL: test1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl %eax, %ecx
 ; CHECK-NEXT:    andl $16711680, %ecx # imm = 0xFF0000
@@ -23,18 +23,18 @@
 ; CHECK-NEXT:    retl
 ;
 ; CHECK64-LABEL: test1:
-; CHECK64:       # BB#0:
+; CHECK64:       # %bb.0:
 ; CHECK64-NEXT:    movl %edi, %eax
-; CHECK64-NEXT:    andl $16711680, %eax # imm = 0xFF0000
 ; CHECK64-NEXT:    movl %edi, %ecx
-; CHECK64-NEXT:    orl $-16777216, %ecx # imm = 0xFF000000
-; CHECK64-NEXT:    shll $8, %eax
-; CHECK64-NEXT:    shrl $8, %ecx
-; CHECK64-NEXT:    orl %eax, %ecx
-; CHECK64-NEXT:    bswapl %edi
-; CHECK64-NEXT:    shrl $16, %edi
-; CHECK64-NEXT:    orl %ecx, %edi
-; CHECK64-NEXT:    movl %edi, %eax
+; CHECK64-NEXT:    andl $16711680, %ecx # imm = 0xFF0000
+; CHECK64-NEXT:    movl %edi, %edx
+; CHECK64-NEXT:    orl $-16777216, %edx # imm = 0xFF000000
+; CHECK64-NEXT:    shll $8, %ecx
+; CHECK64-NEXT:    shrl $8, %edx
+; CHECK64-NEXT:    orl %ecx, %edx
+; CHECK64-NEXT:    bswapl %eax
+; CHECK64-NEXT:    shrl $16, %eax
+; CHECK64-NEXT:    orl %edx, %eax
 ; CHECK64-NEXT:    retq
   %byte0 = and i32 %x, 255        ; 0x000000ff
   %byte1 = and i32 %x, 65280      ; 0x0000ff00
@@ -58,7 +58,7 @@
 ; ((x >> 8) & 0x00ff0000)
 define i32 @test2(i32 %x) nounwind {
 ; CHECK-LABEL: test2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; CHECK-NEXT:    movl %ecx, %eax
 ; CHECK-NEXT:    shrl $8, %eax
@@ -72,7 +72,7 @@ define i32 @test2(i32 %x) nounwind {
 ; CHECK-NEXT:    retl
 ;
 ; CHECK64-LABEL: test2:
-; CHECK64:       # BB#0:
+; CHECK64:       # %bb.0:
 ; CHECK64-NEXT:    movl %edi, %eax
 ; CHECK64-NEXT:    shrl $8, %eax
 ; CHECK64-NEXT:    shll $8, %edi
@@ -100,7 +100,7 @@ define i32 @test2(i32 %x) nounwind {
 ; Invalid pattern involving a unary op
 define i32 @test3(float %x) nounwind {
 ; CHECK-LABEL: test3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    subl $8, %esp
 ; CHECK-NEXT:    flds {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fnstcw {{[0-9]+}}(%esp)
@@ -124,7 +124,7 @@ define i32 @test3(float %x) nounwind {
 ; CHECK-NEXT:    retl
 ;
 ; CHECK64-LABEL: test3:
-; CHECK64:       # BB#0:
+; CHECK64:       # %bb.0:
 ; CHECK64-NEXT:    cvttss2si %xmm0, %ecx
 ; CHECK64-NEXT:    movl %ecx, %edx
 ; CHECK64-NEXT:    shll $8, %edx

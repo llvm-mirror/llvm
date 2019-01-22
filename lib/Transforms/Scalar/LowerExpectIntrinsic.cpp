@@ -1,9 +1,8 @@
 //===- LowerExpectIntrinsic.cpp - Lower expect intrinsic ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -357,7 +356,7 @@ PreservedAnalyses LowerExpectIntrinsicPass::run(Function &F,
 }
 
 namespace {
-/// \brief Legacy pass for lowering expect intrinsics out of the IR.
+/// Legacy pass for lowering expect intrinsics out of the IR.
 ///
 /// When this pass is run over a function it uses expect intrinsics which feed
 /// branches and switches to provide branch weight metadata for those

@@ -40,11 +40,12 @@ target triple = "i386-apple-macosx10.5"
 ; The for.end block is split to accomadate the different selects.
 ; We are interested in the one with the call, so skip until the branch.
 ; CHECK: [[FOREND_LABEL]]:
-; CHECK-NEXT: movb _d, [[D:%[a-z]+]]
-; [...]
-; CHECK: jne [[CALL_LABEL:LBB[0-9_]+]]
+; CHECK-NEXT: xorl
+; CHECK-NEXT: cmpb $0, _d
+; CHECK-NEXT: movl $0, %edx
+; CHECK-NEXT: jne [[CALL_LABEL:LBB[0-9_]+]]
 ;
-; CHECK: movb $6, [[D]]
+; CHECK: movb $6, %dl
 ;
 ; CHECK: [[CALL_LABEL]]
 ;
@@ -54,8 +55,8 @@ target triple = "i386-apple-macosx10.5"
 ; ENABLE-NEXT: leal -20(%esp), %esp
 ;
 ; CHECK-NEXT: L_e$non_lazy_ptr, [[E:%[a-z]+]]
-; CHECK-NEXT: movb [[D]], ([[E]])
-; CHECK-NEXT: movsbl ([[E]]), [[CONV:%[a-z]+]]
+; CHECK-NEXT: movb %dl, ([[E]])
+; CHECK-NEXT: movzbl %dl, [[CONV:%[a-z]+]]
 ; CHECK-NEXT: movl $6, [[CONV:%[a-z]+]]
 ; The eflags is used in the next instruction.
 ; If that instruction disappear, we are not exercising the bug

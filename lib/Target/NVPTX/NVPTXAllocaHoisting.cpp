@@ -1,9 +1,8 @@
 //===-- AllocaHoisting.cpp - Hoist allocas to the entry block --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,7 +40,7 @@ public:
 bool NVPTXAllocaHoisting::runOnFunction(Function &function) {
   bool functionModified = false;
   Function::iterator I = function.begin();
-  TerminatorInst *firstTerminatorInst = (I++)->getTerminator();
+  Instruction *firstTerminatorInst = (I++)->getTerminator();
 
   for (Function::iterator E = function.end(); I != E; ++I) {
     for (BasicBlock::iterator BI = I->begin(), BE = I->end(); BI != BE;) {

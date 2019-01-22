@@ -1,9 +1,8 @@
 //===- DCE.cpp - Code to perform dead code elimination --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,17 +19,20 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/DebugCounter.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "dce"
 
 STATISTIC(DIEEliminated, "Number of insts removed by DIE pass");
 STATISTIC(DCEEliminated, "Number of insts removed");
+DEBUG_COUNTER(DCECounter, "dce-transform",
+              "Controls which instructions are eliminated");
 
 namespace {
   //===--------------------------------------------------------------------===//
@@ -50,6 +52,9 @@ namespace {
       for (BasicBlock::iterator DI = BB.begin(); DI != BB.end(); ) {
         Instruction *Inst = &*DI++;
         if (isInstructionTriviallyDead(Inst, TLI)) {
+          if (!DebugCounter::shouldExecute(DCECounter))
+            continue;
+          salvageDebugInfo(*Inst);
           Inst->eraseFromParent();
           Changed = true;
           ++DIEEliminated;
@@ -76,6 +81,11 @@ static bool DCEInstruction(Instruction *I,
                            SmallSetVector<Instruction *, 16> &WorkList,
                            const TargetLibraryInfo *TLI) {
   if (isInstructionTriviallyDead(I, TLI)) {
+    if (!DebugCounter::shouldExecute(DCECounter))
+      return false;
+
+    salvageDebugInfo(*I);
+
     // Null out all of the instruction's operands to see if any operand becomes
     // dead as we go.
     for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i) {

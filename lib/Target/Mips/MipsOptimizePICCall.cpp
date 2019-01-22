@@ -1,9 +1,8 @@
 //===- MipsOptimizePICCall.cpp - Optimize PIC Calls -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,15 +26,15 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/RecyclingAllocator.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <utility>
 #include <vector>
@@ -90,10 +89,10 @@ public:
   }
 
 private:
-  /// \brief Visit MBB.
+  /// Visit MBB.
   bool visitNode(MBBInfo &MBBI);
 
-  /// \brief Test if MI jumps to a function via a register.
+  /// Test if MI jumps to a function via a register.
   ///
   /// Also, return the virtual register containing the target function's address
   /// and the underlying object in Reg and Val respectively, if the function's
@@ -101,15 +100,15 @@ private:
   bool isCallViaRegister(MachineInstr &MI, unsigned &Reg,
                          ValueType &Val) const;
 
-  /// \brief Return the number of instructions that dominate the current
+  /// Return the number of instructions that dominate the current
   /// instruction and load the function address from object Entry.
   unsigned getCount(ValueType Entry);
 
-  /// \brief Return the destination virtual register of the last instruction
+  /// Return the destination virtual register of the last instruction
   /// that loads from object Entry.
   unsigned getReg(ValueType Entry);
 
-  /// \brief Update ScopedHT.
+  /// Update ScopedHT.
   void incCntAndSetReg(ValueType Entry, unsigned Reg);
 
   ScopedHTType ScopedHT;

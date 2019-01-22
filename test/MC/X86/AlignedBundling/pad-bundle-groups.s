@@ -1,6 +1,6 @@
-# RUN: llvm-mc -filetype=obj -triple x86_64-pc-linux-gnu %s -o - \
+# RUN: llvm-mc -filetype=obj -triple x86_64-pc-linux-gnu -mcpu=pentiumpro %s -o - \
 # RUN:   | llvm-objdump -disassemble -no-show-raw-insn - | FileCheck %s
-# RUN: llvm-mc -filetype=obj -triple x86_64-pc-linux-gnu -mc-relax-all %s -o - \
+# RUN: llvm-mc -filetype=obj -triple x86_64-pc-linux-gnu -mcpu=pentiumpro -mc-relax-all %s -o - \
 # RUN:   | llvm-objdump -disassemble -no-show-raw-insn - | FileCheck %s
 
 # Test some variations of padding for bundle-locked groups.
@@ -38,9 +38,10 @@ foo:
   callq   bar
   callq   bar
   .bundle_unlock
-# And here we'll need a 11-byte NOP
+# And here we'll need a 10-byte NOP + 1-byte NOP
 # CHECK:        30: callq
 # CHECK:        35: nop
+# CHECK:        3f: nop
 # CHECK-NEXT:   40: callq
 # CHECK-NEXT:   45: callq
 

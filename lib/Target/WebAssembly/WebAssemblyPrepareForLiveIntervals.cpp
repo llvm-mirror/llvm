@@ -1,14 +1,13 @@
 //===- WebAssemblyPrepareForLiveIntervals.cpp - Prepare for LiveIntervals -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief Fix up code to meet LiveInterval's requirements.
+/// Fix up code to meet LiveInterval's requirements.
 ///
 /// Some CodeGen passes don't preserve LiveInterval's requirements, because
 /// they run after register allocation and it isn't important. However,
@@ -55,6 +54,9 @@ private:
 } // end anonymous namespace
 
 char WebAssemblyPrepareForLiveIntervals::ID = 0;
+INITIALIZE_PASS(WebAssemblyPrepareForLiveIntervals, DEBUG_TYPE,
+                "Fix up code for LiveIntervals", false, false)
+
 FunctionPass *llvm::createWebAssemblyPrepareForLiveIntervals() {
   return new WebAssemblyPrepareForLiveIntervals();
 }
@@ -67,8 +69,9 @@ static bool HasArgumentDef(unsigned Reg, const MachineRegisterInfo &MRI) {
   return false;
 }
 
-bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG({
+bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(
+    MachineFunction &MF) {
+  LLVM_DEBUG({
     dbgs() << "********** Prepare For LiveIntervals **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
@@ -109,7 +112,7 @@ bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(MachineFunction &M
 
   // Move ARGUMENT_* instructions to the top of the entry block, so that their
   // liveness reflects the fact that these really are live-in values.
-  for (auto MII = Entry.begin(), MIE = Entry.end(); MII != MIE; ) {
+  for (auto MII = Entry.begin(), MIE = Entry.end(); MII != MIE;) {
     MachineInstr &MI = *MII++;
     if (WebAssembly::isArgument(MI)) {
       MI.removeFromParent();
@@ -117,7 +120,7 @@ bool WebAssemblyPrepareForLiveIntervals::runOnMachineFunction(MachineFunction &M
     }
   }
 
-  // Ok, we're now ready to run LiveIntervalAnalysis again.
+  // Ok, we're now ready to run the LiveIntervals analysis again.
   MF.getProperties().set(MachineFunctionProperties::Property::TracksLiveness);
 
   return Changed;

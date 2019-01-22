@@ -1,4 +1,5 @@
 ; RUN: opt < %s -rewrite-statepoints-for-gc -S | FileCheck  %s
+; RUN: opt < %s -passes=rewrite-statepoints-for-gc -S | FileCheck  %s
 
 
 define i64 addrspace(1)* @test(<2 x i64 addrspace(1)*> %vec, i32 %idx) gc "statepoint-example" {
@@ -258,5 +259,21 @@ entry:
   %vec2 = getelementptr i64, <4 x i64 addrspace(1)*> %vec1, i32 1024
   call void @do_safepoint() [ "deopt"(i32 0, i32 -1, i32 0, i32 0, i32 0) ]
   call void @use_vec(<4 x i64 addrspace(1) *> %vec2)
+  ret void
+}
+
+declare <4 x i64 addrspace(1)*> @def_vec() "gc-leaf-function"
+
+define void @test12(<4 x i64 addrspace(1)*> %vec1) gc "statepoint-example" {
+; CHECK-LABEL: @test12(
+; CHECK: @llvm.experimental.gc.statepoint.p0f_isVoidf{{.*}}<4 x i64 addrspace(1)*> %vec)
+; CHECK-NEXT: %vec.relocated = call coldcc <4 x i8 addrspace(1)*> @llvm.experimental.gc.relocate.v4p1i8(
+; CHECK-NEXT: %vec.relocated.casted = bitcast <4 x i8 addrspace(1)*> %vec.relocated to <4 x i64 addrspace(1)*>
+; CHECK-NEXT: call void @use_vec(<4 x i64 addrspace(1)*> %vec.relocated.casted)
+; CHECK-NEXT: ret void
+entry:
+  %vec = call <4 x i64 addrspace(1)*> @def_vec()
+  call void @do_safepoint() [ "deopt"() ]
+  call void @use_vec(<4 x i64 addrspace(1)*> %vec)
   ret void
 }

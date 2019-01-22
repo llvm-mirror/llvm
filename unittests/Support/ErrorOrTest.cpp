@@ -1,9 +1,8 @@
 //===- unittests/ErrorOrTest.cpp - ErrorOr.h tests ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -128,13 +127,13 @@ static_assert(
 // ErrorOr<int*> x(nullptr);
 // ErrorOr<std::unique_ptr<int>> y;
 // y = x; // invalid conversion
-static_assert(!std::is_assignable<ErrorOr<std::unique_ptr<int>>,
+static_assert(!std::is_assignable<ErrorOr<std::unique_ptr<int>>&,
                                   const ErrorOr<int *> &>::value,
               "do not invoke explicit ctors in assignment");
 
 // ErrorOr<std::unique_ptr<int>> x;
 // x = ErrorOr<int*>(nullptr); // invalid conversion
-static_assert(!std::is_assignable<ErrorOr<std::unique_ptr<int>>,
+static_assert(!std::is_assignable<ErrorOr<std::unique_ptr<int>>&,
                                   ErrorOr<int *> &&>::value,
               "do not invoke explicit ctors in assignment");
 } // end anon namespace

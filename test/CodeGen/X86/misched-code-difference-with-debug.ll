@@ -28,7 +28,7 @@ source_filename = "test/CodeGen/X86/misched-code-difference-with-debug.ll"
 declare i32 @test_function(%class.C*, i8 signext, i8 signext, i8 signext, ...)
 ; CHECK-LABEL: test_without_debug
 ; CHECK: movl [[A:%[a-z]+]], [[B:%[a-z]+]]
-; CHECK-NEXT: movl [[A]], [[C:%[a-z]+]]
+; CHECK: movl [[A]], [[C:%[a-z]+]]
 
 define void @test_without_debug() {
 entry:
@@ -42,7 +42,7 @@ entry:
 }
 ; CHECK-LABEL: test_with_debug
 ; CHECK: movl [[A]], [[B]]
-; CHECK-NEXT: movl [[A]], [[C]]
+; CHECK: movl [[A]], [[C]]
 
 define void @test_with_debug() !dbg !17 {
 entry:
@@ -84,7 +84,7 @@ attributes #0 = { nounwind readnone }
 !14 = !{!0}
 !15 = !{i32 2, !"Dwarf Version", i32 4}
 !16 = !{i32 2, !"Debug Info Version", i32 3}
-!17 = distinct !DISubprogram(name: "test_with_debug", linkageName: "test_with_debug", scope: !2, file: !2, line: 6, type: !18, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !4, variables: !20)
+!17 = distinct !DISubprogram(name: "test_with_debug", linkageName: "test_with_debug", scope: !2, file: !2, line: 6, type: !18, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !4, retainedNodes: !20)
 !18 = !DISubroutineType(types: !19)
 !19 = !{null}
 !20 = !{!21, !22}

@@ -1,9 +1,8 @@
 //===- ir.go - Bindings for ir --------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@ package llvm
 
 /*
 #include "llvm-c/Core.h"
+#include "llvm-c/Comdat.h"
 #include "IRBindings.h"
 #include <stdlib.h>
 */
@@ -36,6 +36,9 @@ type (
 	}
 	Value struct {
 		C C.LLVMValueRef
+	}
+	Comdat struct {
+		C C.LLVMComdatRef
 	}
 	BasicBlock struct {
 		C C.LLVMBasicBlockRef
@@ -61,14 +64,16 @@ type (
 	Attribute struct {
 		C C.LLVMAttributeRef
 	}
-	Opcode           C.LLVMOpcode
-	TypeKind         C.LLVMTypeKind
-	Linkage          C.LLVMLinkage
-	Visibility       C.LLVMVisibility
-	CallConv         C.LLVMCallConv
-	IntPredicate     C.LLVMIntPredicate
-	FloatPredicate   C.LLVMRealPredicate
-	LandingPadClause C.LLVMLandingPadClauseTy
+	Opcode              C.LLVMOpcode
+	TypeKind            C.LLVMTypeKind
+	Linkage             C.LLVMLinkage
+	Visibility          C.LLVMVisibility
+	CallConv            C.LLVMCallConv
+	ComdatSelectionKind C.LLVMComdatSelectionKind
+	IntPredicate        C.LLVMIntPredicate
+	FloatPredicate      C.LLVMRealPredicate
+	LandingPadClause    C.LLVMLandingPadClauseTy
+	InlineAsmDialect    C.LLVMInlineAsmDialect
 )
 
 func (c Context) IsNil() bool        { return c.C == nil }
@@ -206,6 +211,7 @@ const (
 	PointerTypeKind   TypeKind = C.LLVMPointerTypeKind
 	VectorTypeKind    TypeKind = C.LLVMVectorTypeKind
 	MetadataTypeKind  TypeKind = C.LLVMMetadataTypeKind
+	TokenTypeKind     TypeKind = C.LLVMTokenTypeKind
 )
 
 //-------------------------------------------------------------------------
@@ -246,6 +252,18 @@ const (
 	ColdCallConv        CallConv = C.LLVMColdCallConv
 	X86StdcallCallConv  CallConv = C.LLVMX86StdcallCallConv
 	X86FastcallCallConv CallConv = C.LLVMX86FastcallCallConv
+)
+
+//-------------------------------------------------------------------------
+// llvm.ComdatSelectionKind
+//-------------------------------------------------------------------------
+
+const (
+	AnyComdatSelectionKind          ComdatSelectionKind = C.LLVMAnyComdatSelectionKind
+	ExactMatchComdatSelectionKind   ComdatSelectionKind = C.LLVMExactMatchComdatSelectionKind
+	LargestComdatSelectionKind      ComdatSelectionKind = C.LLVMLargestComdatSelectionKind
+	NoDuplicatesComdatSelectionKind ComdatSelectionKind = C.LLVMNoDuplicatesComdatSelectionKind
+	SameSizeComdatSelectionKind     ComdatSelectionKind = C.LLVMSameSizeComdatSelectionKind
 )
 
 //-------------------------------------------------------------------------
@@ -295,6 +313,15 @@ const (
 const (
 	LandingPadCatch  LandingPadClause = C.LLVMLandingPadCatch
 	LandingPadFilter LandingPadClause = C.LLVMLandingPadFilter
+)
+
+//-------------------------------------------------------------------------
+// llvm.InlineAsmDialect
+//-------------------------------------------------------------------------
+
+const (
+	InlineAsmDialectATT   InlineAsmDialect = C.LLVMInlineAsmDialectATT
+	InlineAsmDialectIntel InlineAsmDialect = C.LLVMInlineAsmDialectIntel
 )
 
 //-------------------------------------------------------------------------
@@ -638,6 +665,7 @@ func (t Type) VectorSize() int          { return int(C.LLVMGetVectorSize(t.C)) }
 // Operations on other types
 func (c Context) VoidType() (t Type)  { t.C = C.LLVMVoidTypeInContext(c.C); return }
 func (c Context) LabelType() (t Type) { t.C = C.LLVMLabelTypeInContext(c.C); return }
+func (c Context) TokenType() (t Type) { t.C = C.LLVMTokenTypeInContext(c.C); return }
 
 func VoidType() (t Type)  { t.C = C.LLVMVoidType(); return }
 func LabelType() (t Type) { t.C = C.LLVMLabelType(); return }
@@ -710,7 +738,6 @@ func (v Value) IsAPHINode() (rv Value)             { rv.C = C.LLVMIsAPHINode(v.C
 func (v Value) IsASelectInst() (rv Value)          { rv.C = C.LLVMIsASelectInst(v.C); return }
 func (v Value) IsAShuffleVectorInst() (rv Value)   { rv.C = C.LLVMIsAShuffleVectorInst(v.C); return }
 func (v Value) IsAStoreInst() (rv Value)           { rv.C = C.LLVMIsAStoreInst(v.C); return }
-func (v Value) IsATerminatorInst() (rv Value)      { rv.C = C.LLVMIsATerminatorInst(v.C); return }
 func (v Value) IsABranchInst() (rv Value)          { rv.C = C.LLVMIsABranchInst(v.C); return }
 func (v Value) IsAInvokeInst() (rv Value)          { rv.C = C.LLVMIsAInvokeInst(v.C); return }
 func (v Value) IsAReturnInst() (rv Value)          { rv.C = C.LLVMIsAReturnInst(v.C); return }
@@ -765,11 +792,6 @@ func (c Context) MDString(str string) (md Metadata) {
 func (c Context) MDNode(mds []Metadata) (md Metadata) {
 	ptr, nvals := llvmMetadataRefs(mds)
 	md.C = C.LLVMMDNode2(c.C, ptr, nvals)
-	return
-}
-func (c Context) TemporaryMDNode(mds []Metadata) (md Metadata) {
-	ptr, nvals := llvmMetadataRefs(mds)
-	md.C = C.LLVMTemporaryMDNode(c.C, ptr, nvals)
 	return
 }
 func (v Value) ConstantAsMetadata() (md Metadata) {
@@ -1020,6 +1042,8 @@ func (v Value) IsThreadLocal() bool       { return C.LLVMIsThreadLocal(v.C) != 0
 func (v Value) SetThreadLocal(tl bool)    { C.LLVMSetThreadLocal(v.C, boolToLLVMBool(tl)) }
 func (v Value) IsGlobalConstant() bool    { return C.LLVMIsGlobalConstant(v.C) != 0 }
 func (v Value) SetGlobalConstant(gc bool) { C.LLVMSetGlobalConstant(v.C, boolToLLVMBool(gc)) }
+func (v Value) IsVolatile() bool          { return C.LLVMGetVolatile(v.C) != 0 }
+func (v Value) SetVolatile(volatile bool) { C.LLVMSetVolatile(v.C, boolToLLVMBool(volatile)) }
 
 // Operations on aliases
 func AddAlias(m Module, t Type, aliasee Value, name string) (v Value) {
@@ -1027,6 +1051,25 @@ func AddAlias(m Module, t Type, aliasee Value, name string) (v Value) {
 	defer C.free(unsafe.Pointer(cname))
 	v.C = C.LLVMAddAlias(m.C, t.C, aliasee.C, cname)
 	return
+}
+
+// Operations on comdat
+func (m Module) Comdat(name string) (c Comdat) {
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	c.C = C.LLVMGetOrInsertComdat(m.C, cname)
+	return
+}
+
+func (v Value) Comdat() (c Comdat) { c.C = C.LLVMGetComdat(v.C); return }
+func (v Value) SetComdat(c Comdat) { C.LLVMSetComdat(v.C, c.C) }
+
+func (c Comdat) SelectionKind() ComdatSelectionKind {
+	return ComdatSelectionKind(C.LLVMGetComdatSelectionKind(c.C))
+}
+
+func (c Comdat) SetSelectionKind(k ComdatSelectionKind) {
+	C.LLVMSetComdatSelectionKind(c.C, (C.LLVMComdatSelectionKind)(k))
 }
 
 // Operations on functions
@@ -1101,9 +1144,6 @@ func (v Value) AddTargetDependentFunctionAttr(attr, value string) {
 }
 func (v Value) SetPersonality(p Value) {
 	C.LLVMSetPersonalityFn(v.C, p.C)
-}
-func (v Value) SetSubprogram(sp Metadata) {
-	C.LLVMSetSubprogram(v.C, sp.C)
 }
 
 // Operations on parameters
@@ -1205,6 +1245,29 @@ func (v Value) IncomingValue(i int) (rv Value) {
 func (v Value) IncomingBlock(i int) (bb BasicBlock) {
 	bb.C = C.LLVMGetIncomingBlock(v.C, C.unsigned(i))
 	return
+}
+
+// Operations on inline assembly
+func InlineAsm(t Type, asmString, constraints string, hasSideEffects, isAlignStack bool, dialect InlineAsmDialect) (rv Value) {
+	casm := C.CString(asmString)
+	defer C.free(unsafe.Pointer(casm))
+	cconstraints := C.CString(constraints)
+	defer C.free(unsafe.Pointer(cconstraints))
+	rv.C = C.LLVMGetInlineAsm(t.C, casm, C.size_t(len(asmString)), cconstraints, C.size_t(len(constraints)), boolToLLVMBool(hasSideEffects), boolToLLVMBool(isAlignStack), C.LLVMInlineAsmDialect(dialect))
+	return
+}
+
+// Operations on aggregates
+func (v Value) Indices() []uint32 {
+	num := C.LLVMGetNumIndices(v.C)
+	indicesPtr := C.LLVMGetIndices(v.C)
+	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	rawIndices := (*[1 << 30]C.uint)(unsafe.Pointer(indicesPtr))[:num:num]
+	indices := make([]uint32, num)
+	for i := range indices {
+		indices[i] = uint32(rawIndices[i])
+	}
+	return indices
 }
 
 //-------------------------------------------------------------------------
@@ -1872,7 +1935,7 @@ func (pm PassManager) InitializeFunc() bool { return C.LLVMInitializeFunctionPas
 // See llvm::FunctionPassManager::run(Function&).
 func (pm PassManager) RunFunc(f Value) bool { return C.LLVMRunFunctionPassManager(pm.C, f.C) != 0 }
 
-// Finalizes all of the function passes scheduled in in the function pass
+// Finalizes all of the function passes scheduled in the function pass
 // manager. Returns 1 if any of the passes modified the module, 0 otherwise.
 // See llvm::FunctionPassManager::doFinalization.
 func (pm PassManager) FinalizeFunc() bool { return C.LLVMFinalizeFunctionPassManager(pm.C) != 0 }
@@ -1881,11 +1944,3 @@ func (pm PassManager) FinalizeFunc() bool { return C.LLVMFinalizeFunctionPassMan
 // the module provider.
 // See llvm::PassManagerBase::~PassManagerBase.
 func (pm PassManager) Dispose() { C.LLVMDisposePassManager(pm.C) }
-
-//-------------------------------------------------------------------------
-// llvm.Metadata
-//-------------------------------------------------------------------------
-
-func (md Metadata) ReplaceAllUsesWith(new Metadata) {
-	C.LLVMMetadataReplaceAllUsesWith(md.C, new.C)
-}

@@ -10,7 +10,7 @@
 ; IR-LABEL: @reduced_nested_loop_conditions(
 
 ; IR: bb5:
-; IR-NEXT: %phi.broken = phi i64 [ %loop.phi, %bb10 ], [ 0, %bb ]
+; IR-NEXT: %phi.broken = phi i64 [ %3, %bb10 ], [ 0, %bb ]
 ; IR-NEXT: %tmp6 = phi i32 [ 0, %bb ], [ %tmp11, %bb10 ]
 ; IR-NEXT: %tmp7 = icmp eq i32 %tmp6, 1
 ; IR-NEXT: %0 = call { i1, i64 } @llvm.amdgcn.if(i1 %tmp7)
@@ -19,25 +19,23 @@
 ; IR-NEXT: br i1 %1, label %bb8, label %Flow
 
 ; IR: bb8:
-; IR-NEXT: %3 = call i64 @llvm.amdgcn.break(i64 %phi.broken)
 ; IR-NEXT: br label %bb13
 
 ; IR: bb10:
-; IR-NEXT: %loop.phi = phi i64 [ %6, %Flow ]
-; IR-NEXT: %tmp11 = phi i32 [ %5, %Flow ]
-; IR-NEXT: %4 = call i1 @llvm.amdgcn.loop(i64 %loop.phi)
+; IR-NEXT: %tmp11 = phi i32 [ %6, %Flow ]
+; IR-NEXT: %tmp12 = phi i1 [ %5, %Flow ]
+; IR-NEXT: %3 = call i64 @llvm.amdgcn.if.break(i1 %tmp12, i64 %phi.broken)
+; IR-NEXT: %4 = call i1 @llvm.amdgcn.loop(i64 %3)
 ; IR-NEXT: br i1 %4, label %bb23, label %bb5
 
 ; IR: Flow:
-; IR-NEXT: %loop.phi1 = phi i64 [ %loop.phi2, %bb4 ], [ %phi.broken, %bb5 ]
-; IR-NEXT: %5 = phi i32 [ %tmp21, %bb4 ], [ undef, %bb5 ]
-; IR-NEXT: %6 = call i64 @llvm.amdgcn.else.break(i64 %2, i64 %loop.phi1)
+; IR-NEXT: %5 = phi i1 [ %tmp22, %bb4 ], [ true, %bb5 ]
+; IR-NEXT: %6 = phi i32 [ %tmp21, %bb4 ], [ undef, %bb5 ]
 ; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %2)
 ; IR-NEXT: br label %bb10
 
 ; IR: bb13:
-; IR-NEXT: %loop.phi3 = phi i64 [ %loop.phi4, %bb3 ], [ %3, %bb8 ]
-; IR-NEXT: %tmp14 = phi i1 [ false, %bb3 ], [ true, %bb8 ]
+; IR-NEXT: %tmp14 = phi i1 [ %tmp22, %bb3 ], [ true, %bb8 ]
 ; IR-NEXT: %tmp15 = bitcast i64 %tmp2 to <2 x i32>
 ; IR-NEXT: br i1 %tmp14, label %bb16, label %bb20
 
@@ -48,30 +46,28 @@
 ; IR-NEXT: br label %bb20
 
 ; IR: bb20:
-; IR-NEXT: %loop.phi4 = phi i64 [ %phi.broken, %bb16 ], [ %phi.broken, %bb13 ]
-; IR-NEXT: %loop.phi2 = phi i64 [ %phi.broken, %bb16 ], [ %loop.phi3, %bb13 ]
 ; IR-NEXT: %tmp21 = phi i32 [ %tmp19, %bb16 ], [ 0, %bb13 ]
+; IR-NEXT: %tmp22 = phi i1 [ false, %bb16 ], [ %tmp14, %bb13 ]
 ; IR-NEXT: br label %bb9
 
 ; IR: bb23:
-; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %loop.phi)
+; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %3)
 ; IR-NEXT: ret void
 
 ; GCN-LABEL: {{^}}reduced_nested_loop_conditions:
 
-; GCN: s_cmp_eq_u32 s{{[0-9]+}}, 1
-; GCN-NEXT: s_cbranch_scc1
+; GCN: s_cmp_lg_u32 s{{[0-9]+}}, 1
+; GCN-NEXT: s_cbranch_scc0
 
 ; FIXME: Should fold to unconditional branch?
-; GCN: s_mov_b64 vcc, -1
-; GCN-NEXT: ; implicit-def
-; GCN: s_cbranch_vccz
+; GCN: ; implicit-def
+; GCN: s_cbranch_vccnz
 
 ; GCN: ds_read_b32
 
 ; GCN: [[BB9:BB[0-9]+_[0-9]+]]: ; %bb9
 ; GCN-NEXT: ; =>This Inner Loop Header: Depth=1
-; GCN-NEXT: s_branch [[BB9]]
+; GCN-NEXT: s_cbranch_vccnz [[BB9]]
 define amdgpu_kernel void @reduced_nested_loop_conditions(i64 addrspace(3)* nocapture %arg) #0 {
 bb:
   %tmp = tail call i32 @llvm.amdgcn.workitem.id.x() #1
@@ -124,50 +120,51 @@ bb23:                                             ; preds = %bb10
 ; Earlier version of above, before a run of the structurizer.
 ; IR-LABEL: @nested_loop_conditions(
 
-; IR: Flow7:
-; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %17)
-; IR-NEXT: %0 = call { i1, i64 } @llvm.amdgcn.if(i1 %15)
+; IR: Flow3:
+; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %21)
+; IR-NEXT: %0 = call { i1, i64 } @llvm.amdgcn.if(i1 %14)
 ; IR-NEXT: %1 = extractvalue { i1, i64 } %0, 0
 ; IR-NEXT: %2 = extractvalue { i1, i64 } %0, 1
-; IR-NEXT: br i1 %1, label %bb4.bb13_crit_edge, label %Flow8
+; IR-NEXT: br i1 %1, label %bb4.bb13_crit_edge, label %Flow4
+
+; IR: Flow4:
+; IR-NEXT: %3 = phi i1 [ true, %bb4.bb13_crit_edge ], [ false, %Flow3 ]
+; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %2)
+; IR-NEXT: br label %Flow
+
+; IR: Flow:
+; IR-NEXT:  %4 = phi i1 [ %3, %Flow4 ], [ true, %bb ]
+; IR-NEXT:  %5 = call { i1, i64 } @llvm.amdgcn.if(i1 %4)
+; IR-NEXT:  %6 = extractvalue { i1, i64 } %5, 0
+; IR-NEXT:  %7 = extractvalue { i1, i64 } %5, 1
+; IR-NEXT:  br i1 %6, label %bb13, label %bb31
+
+; IR: bb14:
+; IR: %tmp15 = icmp eq i32 %tmp1037, 1
+; IR-NEXT: %8 = call { i1, i64 } @llvm.amdgcn.if(i1 %tmp15)
 
 ; IR: Flow1:
-; IR-NEXT: %loop.phi = phi i64 [ %loop.phi9, %Flow6 ], [ %phi.broken, %bb14 ]
-; IR-NEXT: %13 = phi <4 x i32> [ %29, %Flow6 ], [ undef, %bb14 ]
-; IR-NEXT: %14 = phi i32 [ %30, %Flow6 ], [ undef, %bb14 ]
-; IR-NEXT: %15 = phi i1 [ %31, %Flow6 ], [ false, %bb14 ]
-; IR-NEXT: %16 = phi i1 [ false, %Flow6 ], [ %8, %bb14 ]
-; IR-NEXT: %17 = call i64 @llvm.amdgcn.else.break(i64 %11, i64 %loop.phi)
-; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %11)
-; IR-NEXT: %18 = call i1 @llvm.amdgcn.loop(i64 %17)
-; IR-NEXT: br i1 %18, label %Flow7, label %bb14
-
-; IR: Flow2:
-; IR-NEXT: %loop.phi10 = phi i64 [ %loop.phi11, %Flow5 ], [ %12, %bb16 ]
-; IR-NEXT: %19 = phi <4 x i32> [ %29, %Flow5 ], [ undef, %bb16 ]
-; IR-NEXT: %20 = phi i32 [ %30, %Flow5 ], [ undef, %bb16 ]
-; IR-NEXT: %21 = phi i1 [ %31, %Flow5 ], [ false, %bb16 ]
-; IR-NEXT: %22 = phi i1 [ false, %Flow5 ], [ false, %bb16 ]
-; IR-NEXT: %23 = phi i1 [ false, %Flow5 ], [ %8, %bb16 ]
-; IR-NEXT: %24 = call { i1, i64 } @llvm.amdgcn.if(i1 %23)
-; IR-NEXT: %25 = extractvalue { i1, i64 } %24, 0
-; IR-NEXT: %26 = extractvalue { i1, i64 } %24, 1
-; IR-NEXT: br i1 %25, label %bb21, label %Flow3
+; IR-NEXT: %11 = phi <4 x i32> [ %tmp9, %bb21 ], [ undef, %bb14 ]
+; IR-NEXT: %12 = phi i32 [ %tmp10, %bb21 ], [ undef, %bb14 ]
+; IR-NEXT: %13 = phi i1 [ %18, %bb21 ], [ true, %bb14 ]
+; IR-NEXT: %14 = phi i1 [ %18, %bb21 ], [ false, %bb14 ]
+; IR-NEXT: %15 = phi i1 [ false, %bb21 ], [ true, %bb14 ]
+; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %10)
+; IR-NEXT: %16 = call i64 @llvm.amdgcn.if.break(i1 %13, i64 %phi.broken)
+; IR-NEXT: %17 = call i1 @llvm.amdgcn.loop(i64 %16)
+; IR-NEXT: br i1 %17, label %Flow2, label %bb14
 
 ; IR: bb21:
 ; IR: %tmp12 = icmp slt i32 %tmp11, 9
-; IR-NEXT: %27 = xor i1 %tmp12, true
-; IR-NEXT: %28 = call i64 @llvm.amdgcn.if.break(i1 %27, i64 %phi.broken)
-; IR-NEXT: br label %Flow3
+; IR-NEXT: %18 = xor i1 %tmp12, true
+; IR-NEXT: br label %Flow1
 
-; IR: Flow3:
-; IR-NEXT: %loop.phi11 = phi i64 [ %phi.broken, %bb21 ], [ %phi.broken, %Flow2 ]
-; IR-NEXT: %loop.phi9 = phi i64 [ %28, %bb21 ], [ %loop.phi10, %Flow2 ]
-; IR-NEXT: %29 = phi <4 x i32> [ %tmp9, %bb21 ], [ %19, %Flow2 ]
-; IR-NEXT: %30 = phi i32 [ %tmp10, %bb21 ], [ %20, %Flow2 ]
-; IR-NEXT: %31 = phi i1 [ %27, %bb21 ], [ %21, %Flow2 ]
-; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %26)
-; IR-NEXT: br i1 %22, label %bb31.loopexit, label %Flow4
+; IR: Flow2:
+; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %16)
+; IR-NEXT: %19 = call { i1, i64 } @llvm.amdgcn.if(i1 %15)
+; IR-NEXT: %20 = extractvalue { i1, i64 } %19, 0
+; IR-NEXT: %21 = extractvalue { i1, i64 } %19, 1
+; IR-NEXT: br i1 %20, label %bb31.loopexit, label %Flow3
 
 ; IR: bb31:
 ; IR-NEXT: call void @llvm.amdgcn.end.cf(i64 %7)

@@ -1,9 +1,8 @@
 //===- llvm-link.cpp - Low-level LLVM linker ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,13 +25,12 @@
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/SystemUtils.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Transforms/IPO/FunctionImport.h"
 #include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
@@ -120,7 +118,8 @@ static std::unique_ptr<Module> loadFile(const char *argv0,
                                         LLVMContext &Context,
                                         bool MaterializeMetadata = true) {
   SMDiagnostic Err;
-  if (Verbose) errs() << "Loading '" << FN << "'\n";
+  if (Verbose)
+    errs() << "Loading '" << FN << "'\n";
   std::unique_ptr<Module> Result;
   if (DisableLazyLoad)
     Result = parseIRFile(FN, Err, Context);
@@ -188,12 +187,12 @@ struct LLVMLinkDiagnosticHandler : public DiagnosticHandler {
     unsigned Severity = DI.getSeverity();
     switch (Severity) {
     case DS_Error:
-      errs() << "ERROR: ";
+      WithColor::error();
       break;
     case DS_Warning:
       if (SuppressWarnings)
         return true;
-      errs() << "WARNING: ";
+      WithColor::warning();
       break;
     case DS_Remark:
     case DS_Note:
@@ -238,8 +237,8 @@ static bool importFunctions(const char *argv0, Module &DestModule) {
     auto &SrcModule = ModuleLoaderCache(argv0, FileName);
 
     if (verifyModule(SrcModule, &errs())) {
-      errs() << argv0 << ": " << FileName
-             << ": error: input module is broken!\n";
+      errs() << argv0 << ": " << FileName;
+      WithColor::error() << "input module is broken!\n";
       return false;
     }
 
@@ -262,7 +261,7 @@ static bool importFunctions(const char *argv0, Module &DestModule) {
       errs() << "Importing " << FunctionName << " from " << FileName << "\n";
 
     auto &Entry = ImportList[FileName];
-    Entry.insert(std::make_pair(F->getGUID(), /* (Unused) threshold */ 1.0));
+    Entry.insert(F->getGUID());
   }
   auto CachedModuleLoader = [&](StringRef Identifier) {
     return ModuleLoaderCache.takeModule(Identifier);
@@ -283,7 +282,8 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
   for (const auto &File : Files) {
     std::unique_ptr<Module> M = loadFile(argv0, File, Context);
     if (!M.get()) {
-      errs() << argv0 << ": error loading file '" << File << "'\n";
+      errs() << argv0 << ": ";
+      WithColor::error() << " loading file '" << File << "'\n";
       return false;
     }
 
@@ -291,7 +291,8 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
     // doing that debug metadata in the src module might already be pointing to
     // the destination.
     if (DisableDITypeMap && verifyModule(*M, &errs())) {
-      errs() << argv0 << ": " << File << ": error: input module is broken!\n";
+      errs() << argv0 << ": " << File << ": ";
+      WithColor::error() << "input module is broken!\n";
       return false;
     }
 
@@ -345,16 +346,12 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-
+  InitLLVM X(argc, argv);
   ExitOnErr.setBanner(std::string(argv[0]) + ": ");
 
   LLVMContext Context;
   Context.setDiagnosticHandler(
     llvm::make_unique<LLVMLinkDiagnosticHandler>(), true);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm linker\n");
 
   if (!DisableDITypeMap)
@@ -380,25 +377,28 @@ int main(int argc, char **argv) {
   if (!importFunctions(argv[0], *Composite))
     return 1;
 
-  if (DumpAsm) errs() << "Here's the assembly:\n" << *Composite;
+  if (DumpAsm)
+    errs() << "Here's the assembly:\n" << *Composite;
 
   std::error_code EC;
   ToolOutputFile Out(OutputFilename, EC, sys::fs::F_None);
   if (EC) {
-    errs() << EC.message() << '\n';
+    WithColor::error() << EC.message() << '\n';
     return 1;
   }
 
   if (verifyModule(*Composite, &errs())) {
-    errs() << argv[0] << ": error: linked module is broken!\n";
+    errs() << argv[0] << ": ";
+    WithColor::error() << "linked module is broken!\n";
     return 1;
   }
 
-  if (Verbose) errs() << "Writing bitcode...\n";
+  if (Verbose)
+    errs() << "Writing bitcode...\n";
   if (OutputAssembly) {
     Composite->print(Out.os(), nullptr, PreserveAssemblyUseListOrder);
   } else if (Force || !CheckBitcodeOutputToConsole(Out.os(), true))
-    WriteBitcodeToFile(Composite.get(), Out.os(), PreserveBitcodeUseListOrder);
+    WriteBitcodeToFile(*Composite, Out.os(), PreserveBitcodeUseListOrder);
 
   // Declare success.
   Out.keep();

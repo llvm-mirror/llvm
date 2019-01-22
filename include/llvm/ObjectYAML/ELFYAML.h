@@ -1,14 +1,13 @@
 //===- ELFYAML.h - ELF YAMLIO implementation --------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file declares classes for handling the YAML representation
+/// This file declares classes for handling the YAML representation
 /// of ELF.
 ///
 //===----------------------------------------------------------------------===//
@@ -68,6 +67,7 @@ struct FileHeader {
   ELF_ELFCLASS Class;
   ELF_ELFDATA Data;
   ELF_ELFOSABI OSABI;
+  llvm::yaml::Hex8 ABIVersion;
   ELF_ET Type;
   ELF_EM Machine;
   ELF_EF Flags;
@@ -83,6 +83,7 @@ struct ProgramHeader {
   ELF_PF Flags;
   llvm::yaml::Hex64 VAddr;
   llvm::yaml::Hex64 PAddr;
+  Optional<llvm::yaml::Hex64> Align;
   std::vector<SectionName> Sections;
 };
 
@@ -122,6 +123,7 @@ struct Section {
   StringRef Link;
   StringRef Info;
   llvm::yaml::Hex64 AddressAlign;
+  Optional<llvm::yaml::Hex64> EntSize;
 
   Section(SectionKind Kind) : Kind(Kind) {}
   virtual ~Section();
@@ -206,6 +208,7 @@ struct Object {
   // top-level key, which automatically ensures that invariants like there
   // being a single SHT_SYMTAB section are upheld.
   LocalGlobalWeakSymbols Symbols;
+  LocalGlobalWeakSymbols DynamicSymbols;
 };
 
 } // end namespace ELFYAML

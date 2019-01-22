@@ -1,9 +1,8 @@
 //===-- llvm/ADT/Triple.h - Target triple helper class ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -55,12 +54,11 @@ public:
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
     hexagon,        // Hexagon: hexagon
-    mips,           // MIPS: mips, mipsallegrex
-    mipsel,         // MIPSEL: mipsel, mipsallegrexel
-    mips64,         // MIPS64: mips64
-    mips64el,       // MIPS64EL: mips64el
+    mips,           // MIPS: mips, mipsallegrex, mipsr6
+    mipsel,         // MIPSEL: mipsel, mipsallegrexe, mipsr6el
+    mips64,         // MIPS64: mips64, mips64r6, mipsn32, mipsn32r6
+    mips64el,       // MIPS64EL: mips64el, mips64r6el, mipsn32el, mipsn32r6el
     msp430,         // MSP430: msp430
-    nios2,          // NIOSII: nios2
     ppc,            // PPC: powerpc
     ppc64,          // PPC64: powerpc64, ppu
     ppc64le,        // PPC64LE: powerpc64le
@@ -101,6 +99,8 @@ public:
   enum SubArchType {
     NoSubArch,
 
+    ARMSubArch_v8_5a,
+    ARMSubArch_v8_4a,
     ARMSubArch_v8_3a,
     ARMSubArch_v8_2a,
     ARMSubArch_v8_1a,
@@ -124,7 +124,9 @@ public:
 
     KalimbaSubArch_v3,
     KalimbaSubArch_v4,
-    KalimbaSubArch_v5
+    KalimbaSubArch_v5,
+
+    MipsSubArch_r6
   };
   enum VendorType {
     UnknownVendor,
@@ -144,7 +146,8 @@ public:
     AMD,
     Mesa,
     SUSE,
-    LastVendorType = SUSE
+    OpenEmbedded,
+    LastVendorType = OpenEmbedded
   };
   enum OSType {
     UnknownOS,
@@ -180,7 +183,10 @@ public:
     Mesa3D,
     Contiki,
     AMDPAL,     // AMD PAL Runtime
-    LastOSType = AMDPAL
+    HermitCore, // HermitCore Unikernel/Multikernel
+    Hurd,       // GNU/Hurd
+    WASI,       // Experimental WebAssembly OS
+    LastOSType = WASI
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -202,9 +208,7 @@ public:
     MSVC,
     Itanium,
     Cygnus,
-    AMDOpenCL,
     CoreCLR,
-    OpenCL,
     Simulator,  // Simulator variants of other systems, e.g., Apple's iOS
     LastEnvironmentType = Simulator
   };
@@ -578,9 +582,20 @@ public:
     return getOS() == Triple::KFreeBSD;
   }
 
+  /// Tests whether the OS is Hurd.
+  bool isOSHurd() const {
+    return getOS() == Triple::Hurd;
+  }
+
+  /// Tests whether the OS is WASI.
+  bool isOSWASI() const {
+    return getOS() == Triple::WASI;
+  }
+
   /// Tests whether the OS uses glibc.
   bool isOSGlibc() const {
-    return (getOS() == Triple::Linux || getOS() == Triple::KFreeBSD) &&
+    return (getOS() == Triple::Linux || getOS() == Triple::KFreeBSD ||
+            getOS() == Triple::Hurd) &&
            !isAndroid();
   }
 
@@ -660,8 +675,30 @@ public:
     return getArch() == Triple::aarch64 || getArch() == Triple::aarch64_be;
   }
 
-  /// Tests wether the target supports comdat
-  bool supportsCOMDAT() const { return !isOSBinFormatMachO(); }
+  /// Tests whether the target is MIPS 32-bit (little and big endian).
+  bool isMIPS32() const {
+    return getArch() == Triple::mips || getArch() == Triple::mipsel;
+  }
+
+  /// Tests whether the target is MIPS 64-bit (little and big endian).
+  bool isMIPS64() const {
+    return getArch() == Triple::mips64 || getArch() == Triple::mips64el;
+  }
+
+  /// Tests whether the target is MIPS (little and big endian, 32- or 64-bit).
+  bool isMIPS() const {
+    return isMIPS32() || isMIPS64();
+  }
+
+  /// Tests whether the target supports comdat
+  bool supportsCOMDAT() const {
+    return !isOSBinFormatMachO();
+  }
+
+  /// Tests whether the target uses emulated TLS as default.
+  bool hasDefaultEmulatedTLS() const {
+    return isAndroid() || isOSOpenBSD() || isWindowsCygwinEnvironment();
+  }
 
   /// @}
   /// @name Mutators

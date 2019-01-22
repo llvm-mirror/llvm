@@ -1,9 +1,8 @@
 //===-- WasmDumper.cpp - Wasm-specific object file dumper -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,29 +22,21 @@ using namespace object;
 namespace {
 
 static const EnumEntry<unsigned> WasmSymbolTypes[] = {
-#define ENUM_ENTRY(X) { #X, static_cast<unsigned>(WasmSymbol::SymbolType::X) }
-  ENUM_ENTRY(FUNCTION_IMPORT),
-  ENUM_ENTRY(FUNCTION_EXPORT),
-  ENUM_ENTRY(GLOBAL_IMPORT),
-  ENUM_ENTRY(GLOBAL_EXPORT),
-  ENUM_ENTRY(DEBUG_FUNCTION_NAME),
+#define ENUM_ENTRY(X)                                                          \
+  { #X, wasm::WASM_SYMBOL_TYPE_##X }
+    ENUM_ENTRY(FUNCTION), ENUM_ENTRY(DATA),  ENUM_ENTRY(GLOBAL),
+    ENUM_ENTRY(SECTION),  ENUM_ENTRY(EVENT),
 #undef ENUM_ENTRY
 };
 
 static const EnumEntry<uint32_t> WasmSectionTypes[] = {
-#define ENUM_ENTRY(X) { #X, wasm::WASM_SEC_##X }
-  ENUM_ENTRY(CUSTOM),
-  ENUM_ENTRY(TYPE),
-  ENUM_ENTRY(IMPORT),
-  ENUM_ENTRY(FUNCTION),
-  ENUM_ENTRY(TABLE),
-  ENUM_ENTRY(MEMORY),
-  ENUM_ENTRY(GLOBAL),
-  ENUM_ENTRY(EXPORT),
-  ENUM_ENTRY(START),
-  ENUM_ENTRY(ELEM),
-  ENUM_ENTRY(CODE),
-  ENUM_ENTRY(DATA),
+#define ENUM_ENTRY(X)                                                          \
+  { #X, wasm::WASM_SEC_##X }
+    ENUM_ENTRY(CUSTOM),   ENUM_ENTRY(TYPE),  ENUM_ENTRY(IMPORT),
+    ENUM_ENTRY(FUNCTION), ENUM_ENTRY(TABLE), ENUM_ENTRY(MEMORY),
+    ENUM_ENTRY(GLOBAL),   ENUM_ENTRY(EVENT), ENUM_ENTRY(EXPORT),
+    ENUM_ENTRY(START),    ENUM_ENTRY(ELEM),  ENUM_ENTRY(CODE),
+    ENUM_ENTRY(DATA),
 #undef ENUM_ENTRY
 };
 
@@ -55,7 +46,7 @@ public:
       : ObjDumper(Writer), Obj(Obj) {}
 
   void printFileHeaders() override;
-  void printSections() override;
+  void printSectionHeaders() override;
   void printRelocations() override;
   void printSymbols() override;
   void printDynamicSymbols() override { llvm_unreachable("unimplemented"); }
@@ -81,11 +72,18 @@ void WasmDumper::printRelocation(const SectionRef &Section,
   Reloc.getTypeName(RelocTypeName);
   const wasm::WasmRelocation &WasmReloc = Obj->getWasmRelocation(Reloc);
 
+  StringRef SymName;
+  symbol_iterator SI = Reloc.getSymbol();
+  if (SI != Obj->symbol_end())
+    SymName = error(SI->getName());
+
   bool HasAddend = false;
   switch (RelocType) {
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_LEB:
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB:
   case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
+  case wasm::R_WEBASSEMBLY_FUNCTION_OFFSET_I32:
+  case wasm::R_WEBASSEMBLY_SECTION_OFFSET_I32:
     HasAddend = true;
     break;
   default:
@@ -95,13 +93,19 @@ void WasmDumper::printRelocation(const SectionRef &Section,
     DictScope Group(W, "Relocation");
     W.printNumber("Type", RelocTypeName, RelocType);
     W.printHex("Offset", Reloc.getOffset());
-    W.printHex("Index", WasmReloc.Index);
+    if (!SymName.empty())
+      W.printString("Symbol", SymName);
+    else
+      W.printHex("Index", WasmReloc.Index);
     if (HasAddend)
       W.printNumber("Addend", WasmReloc.Addend);
   } else {
-    raw_ostream& OS = W.startLine();
-    OS << W.hex(Reloc.getOffset())
-       << " " << RelocTypeName << "[" << WasmReloc.Index << "]";
+    raw_ostream &OS = W.startLine();
+    OS << W.hex(Reloc.getOffset()) << " " << RelocTypeName << " ";
+    if (!SymName.empty())
+      OS << SymName;
+    else
+      OS << WasmReloc.Index;
     if (HasAddend)
       OS << " " << WasmReloc.Addend;
     OS << "\n";
@@ -142,7 +146,7 @@ void WasmDumper::printSymbols() {
     printSymbol(Symbol);
 }
 
-void WasmDumper::printSections() {
+void WasmDumper::printSectionHeaders() {
   ListScope Group(W, "Sections");
   for (const SectionRef &Section : Obj->sections()) {
     const WasmSection &WasmSec = Obj->getWasmSection(Section);
@@ -155,13 +159,17 @@ void WasmDumper::printSections() {
       W.printString("Name", WasmSec.Name);
       if (WasmSec.Name == "linking") {
         const wasm::WasmLinkingData &LinkingData = Obj->linkingData();
-        W.printNumber("DataSize", LinkingData.DataSize);
+        if (!LinkingData.InitFunctions.empty()) {
+          ListScope Group(W, "InitFunctions");
+          for (const wasm::WasmInitFunc &F : LinkingData.InitFunctions)
+            W.startLine() << F.Symbol << " (priority=" << F.Priority << ")\n";
+        }
       }
       break;
     case wasm::WASM_SEC_DATA: {
       ListScope Group(W, "Segments");
       for (const WasmSegment &Segment : Obj->dataSegments()) {
-        const wasm::WasmDataSegment& Seg = Segment.Data;
+        const wasm::WasmDataSegment &Seg = Segment.Data;
         DictScope Group(W, "Segment");
         if (!Seg.Name.empty())
           W.printString("Name", Seg.Name);
@@ -198,12 +206,12 @@ void WasmDumper::printSections() {
 void WasmDumper::printSymbol(const SymbolRef &Sym) {
   DictScope D(W, "Symbol");
   WasmSymbol Symbol = Obj->getWasmSymbol(Sym.getRawDataRefImpl());
-  W.printString("Name", Symbol.Name);
-  W.printEnum("Type", static_cast<unsigned>(Symbol.Type), makeArrayRef(WasmSymbolTypes));
-  W.printHex("Flags", Symbol.Flags);
+  W.printString("Name", Symbol.Info.Name);
+  W.printEnum("Type", Symbol.Info.Kind, makeArrayRef(WasmSymbolTypes));
+  W.printHex("Flags", Symbol.Info.Flags);
 }
 
-}
+} // namespace
 
 namespace llvm {
 

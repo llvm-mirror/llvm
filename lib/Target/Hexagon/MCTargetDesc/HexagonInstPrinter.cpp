@@ -1,9 +1,8 @@
 //===- HexagonInstPrinter.cpp - Convert Hexagon MCInst to assembly syntax -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,26 +27,8 @@ using namespace llvm;
 #define GET_INSTRUCTION_NAME
 #include "HexagonGenAsmWriter.inc"
 
-HexagonInstPrinter::HexagonInstPrinter(MCAsmInfo const &MAI,
-                                       MCInstrInfo const &MII,
-                                       MCRegisterInfo const &MRI)
-    : MCInstPrinter(MAI, MII, MRI), MII(MII), HasExtender(false) {
-}
-
-StringRef HexagonInstPrinter::getOpcodeName(unsigned Opcode) const {
-  return MII.getName(Opcode);
-}
-
 void HexagonInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {
-  O << getRegName(RegNo);
-}
-
-StringRef HexagonInstPrinter::getRegName(unsigned RegNo) const {
-  return getRegisterName(RegNo);
-}
-
-void HexagonInstPrinter::setExtender(MCInst const &MCI) {
-  HasExtender = HexagonMCInstrInfo::isImmext(MCI);
+  O << getRegisterName(RegNo);
 }
 
 void HexagonInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
@@ -65,23 +46,16 @@ void HexagonInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
       printInstruction(MCI.getOperand(0).getInst(), OS);
     } else
       printInstruction(&MCI, OS);
-    setExtender(MCI);
+    HasExtender = HexagonMCInstrInfo::isImmext(MCI);
     OS << "\n";
   }
 
-  auto Separator = "";
-  if (HexagonMCInstrInfo::isInnerLoop(*MI)) {
-    OS << Separator;
-    Separator = " ";
-    MCInst ME;
-    ME.setOpcode(Hexagon::ENDLOOP0);
-    printInstruction(&ME, OS);
-  }
-  if (HexagonMCInstrInfo::isOuterLoop(*MI)) {
-    OS << Separator;
-    MCInst ME;
-    ME.setOpcode(Hexagon::ENDLOOP1);
-    printInstruction(&ME, OS);
+  bool IsLoop0 = HexagonMCInstrInfo::isInnerLoop(*MI);
+  bool IsLoop1 = HexagonMCInstrInfo::isOuterLoop(*MI);
+  if (IsLoop0) {
+    OS << (IsLoop1 ? " :endloop01" : " :endloop0");
+  } else if (IsLoop1) {
+    OS << " :endloop1";
   }
 }
 
@@ -102,72 +76,6 @@ void HexagonInstPrinter::printOperand(MCInst const *MI, unsigned OpNo,
   } else {
     llvm_unreachable("Unknown operand");
   }
-}
-
-void HexagonInstPrinter::printExtOperand(MCInst const *MI, unsigned OpNo,
-                                         raw_ostream &O) const {
-  printOperand(MI, OpNo, O);
-}
-
-void HexagonInstPrinter::printUnsignedImmOperand(MCInst const *MI,
-                                                 unsigned OpNo,
-                                                 raw_ostream &O) const {
-  O << MI->getOperand(OpNo).getImm();
-}
-
-void HexagonInstPrinter::printNegImmOperand(MCInst const *MI, unsigned OpNo,
-                                            raw_ostream &O) const {
-  O << -MI->getOperand(OpNo).getImm();
-}
-
-void HexagonInstPrinter::printNOneImmOperand(MCInst const *MI, unsigned OpNo,
-                                             raw_ostream &O) const {
-  O << -1;
-}
-
-void HexagonInstPrinter::printGlobalOperand(MCInst const *MI, unsigned OpNo,
-                                            raw_ostream &O) const {
-  printOperand(MI, OpNo, O);
-}
-
-void HexagonInstPrinter::printJumpTable(MCInst const *MI, unsigned OpNo,
-                                        raw_ostream &O) const {
-  assert(MI->getOperand(OpNo).isExpr() && "Expecting expression");
-
-  printOperand(MI, OpNo, O);
-}
-
-void HexagonInstPrinter::printConstantPool(MCInst const *MI, unsigned OpNo,
-                                           raw_ostream &O) const {
-  assert(MI->getOperand(OpNo).isExpr() && "Expecting expression");
-
-  printOperand(MI, OpNo, O);
-}
-
-void HexagonInstPrinter::printBranchOperand(MCInst const *MI, unsigned OpNo,
-                                            raw_ostream &O) const {
-  // Branches can take an immediate operand.  This is used by the branch
-  // selection pass to print $+8, an eight byte displacement from the PC.
-  llvm_unreachable("Unknown branch operand.");
-}
-
-void HexagonInstPrinter::printCallOperand(MCInst const *MI, unsigned OpNo,
-                                          raw_ostream &O) const {}
-
-void HexagonInstPrinter::printAbsAddrOperand(MCInst const *MI, unsigned OpNo,
-                                             raw_ostream &O) const {}
-
-void HexagonInstPrinter::printPredicateOperand(MCInst const *MI, unsigned OpNo,
-                                               raw_ostream &O) const {}
-
-void HexagonInstPrinter::printSymbol(MCInst const *MI, unsigned OpNo,
-                                     raw_ostream &O, bool hi) const {
-  assert(MI->getOperand(OpNo).isImm() && "Unknown symbol operand");
-
-  O << '#' << (hi ? "HI" : "LO") << '(';
-  O << '#';
-  printOperand(MI, OpNo, O);
-  O << ')';
 }
 
 void HexagonInstPrinter::printBrtarget(MCInst const *MI, unsigned OpNo,

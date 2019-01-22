@@ -1,15 +1,13 @@
 //===- ProfileSummaryInfoTest.cpp - ProfileSummaryInfo unit tests ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
-#include "llvm/Analysis/BlockFrequencyInfoImpl.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/AsmParser/Parser.h"
@@ -119,8 +117,8 @@ TEST_F(ProfileSummaryInfoTest, TestNoProfile) {
   BasicBlock *BB1 = BB0.getTerminator()->getSuccessor(0);
 
   BlockFrequencyInfo BFI = buildBFI(*F);
-  EXPECT_FALSE(PSI.isHotBB(&BB0, &BFI));
-  EXPECT_FALSE(PSI.isColdBB(&BB0, &BFI));
+  EXPECT_FALSE(PSI.isHotBlock(&BB0, &BFI));
+  EXPECT_FALSE(PSI.isColdBlock(&BB0, &BFI));
 
   CallSite CS1(BB1->getFirstNonPHI());
   EXPECT_FALSE(PSI.isHotCallSite(CS1, &BFI));
@@ -157,10 +155,10 @@ TEST_F(ProfileSummaryInfoTest, InstrProf) {
   BasicBlock *BB3 = BB1->getSingleSuccessor();
 
   BlockFrequencyInfo BFI = buildBFI(*F);
-  EXPECT_TRUE(PSI.isHotBB(&BB0, &BFI));
-  EXPECT_TRUE(PSI.isHotBB(BB1, &BFI));
-  EXPECT_FALSE(PSI.isHotBB(BB2, &BFI));
-  EXPECT_TRUE(PSI.isHotBB(BB3, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(&BB0, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(BB1, &BFI));
+  EXPECT_FALSE(PSI.isHotBlock(BB2, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(BB3, &BFI));
 
   CallSite CS1(BB1->getFirstNonPHI());
   auto *CI2 = BB2->getFirstNonPHI();
@@ -189,10 +187,10 @@ TEST_F(ProfileSummaryInfoTest, SampleProf) {
   BasicBlock *BB3 = BB1->getSingleSuccessor();
 
   BlockFrequencyInfo BFI = buildBFI(*F);
-  EXPECT_TRUE(PSI.isHotBB(&BB0, &BFI));
-  EXPECT_TRUE(PSI.isHotBB(BB1, &BFI));
-  EXPECT_FALSE(PSI.isHotBB(BB2, &BFI));
-  EXPECT_TRUE(PSI.isHotBB(BB3, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(&BB0, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(BB1, &BFI));
+  EXPECT_FALSE(PSI.isHotBlock(BB2, &BFI));
+  EXPECT_TRUE(PSI.isHotBlock(BB3, &BFI));
 
   CallSite CS1(BB1->getFirstNonPHI());
   auto *CI2 = BB2->getFirstNonPHI();

@@ -1,9 +1,8 @@
 //===--------------- PPCVSXFMAMutate.cpp - VSX FMA Mutation ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,7 +19,7 @@
 #include "PPCTargetMachine.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -90,21 +89,21 @@ protected:
         // This pass is run after register coalescing, and so we're looking for
         // a situation like this:
         //   ...
-        //   %vreg5<def> = COPY %vreg9; VSLRC:%vreg5,%vreg9
-        //   %vreg5<def,tied1> = XSMADDADP %vreg5<tied0>, %vreg17, %vreg16,
-        //                         %RM<imp-use>; VSLRC:%vreg5,%vreg17,%vreg16
+        //   %5 = COPY %9; VSLRC:%5,%9
+        //   %5<def,tied1> = XSMADDADP %5<tied0>, %17, %16,
+        //                         implicit %rm; VSLRC:%5,%17,%16
         //   ...
-        //   %vreg9<def,tied1> = XSMADDADP %vreg9<tied0>, %vreg17, %vreg19,
-        //                         %RM<imp-use>; VSLRC:%vreg9,%vreg17,%vreg19
+        //   %9<def,tied1> = XSMADDADP %9<tied0>, %17, %19,
+        //                         implicit %rm; VSLRC:%9,%17,%19
         //   ...
         // Where we can eliminate the copy by changing from the A-type to the
         // M-type instruction. Specifically, for this example, this means:
-        //   %vreg5<def,tied1> = XSMADDADP %vreg5<tied0>, %vreg17, %vreg16,
-        //                         %RM<imp-use>; VSLRC:%vreg5,%vreg17,%vreg16
+        //   %5<def,tied1> = XSMADDADP %5<tied0>, %17, %16,
+        //                         implicit %rm; VSLRC:%5,%17,%16
         // is replaced by:
-        //   %vreg16<def,tied1> = XSMADDMDP %vreg16<tied0>, %vreg18, %vreg9,
-        //                         %RM<imp-use>; VSLRC:%vreg16,%vreg18,%vreg9
-        // and we remove: %vreg5<def> = COPY %vreg9; VSLRC:%vreg5,%vreg9
+        //   %16<def,tied1> = XSMADDMDP %16<tied0>, %18, %9,
+        //                         implicit %rm; VSLRC:%16,%18,%9
+        // and we remove: %5 = COPY %9; VSLRC:%5,%9
 
         SlotIndex FMAIdx = LIS->getInstructionIndex(MI);
 
@@ -150,13 +149,13 @@ protected:
         // walking the MIs we may as well test liveness here.
         //
         // FIXME: There is a case that occurs in practice, like this:
-        //   %vreg9<def> = COPY %F1; VSSRC:%vreg9
+        //   %9 = COPY %f1; VSSRC:%9
         //   ...
-        //   %vreg6<def> = COPY %vreg9; VSSRC:%vreg6,%vreg9
-        //   %vreg7<def> = COPY %vreg9; VSSRC:%vreg7,%vreg9
-        //   %vreg9<def,tied1> = XSMADDASP %vreg9<tied0>, %vreg1, %vreg4; VSSRC:
-        //   %vreg6<def,tied1> = XSMADDASP %vreg6<tied0>, %vreg1, %vreg2; VSSRC:
-        //   %vreg7<def,tied1> = XSMADDASP %vreg7<tied0>, %vreg1, %vreg3; VSSRC:
+        //   %6 = COPY %9; VSSRC:%6,%9
+        //   %7 = COPY %9; VSSRC:%7,%9
+        //   %9<def,tied1> = XSMADDASP %9<tied0>, %1, %4; VSSRC:
+        //   %6<def,tied1> = XSMADDASP %6<tied0>, %1, %2; VSSRC:
+        //   %7<def,tied1> = XSMADDASP %7<tied0>, %1, %3; VSSRC:
         // which prevents an otherwise-profitable transformation.
         bool OtherUsers = false, KillsAddendSrc = false;
         for (auto J = std::prev(I), JE = MachineBasicBlock::iterator(AddendMI);
@@ -177,11 +176,11 @@ protected:
 
 
         // The transformation doesn't work well with things like:
-        //    %vreg5 = A-form-op %vreg5, %vreg11, %vreg5;
-        // unless vreg11 is also a kill, so skip when it is not,
+        //    %5 = A-form-op %5, %11, %5;
+        // unless %11 is also a kill, so skip when it is not,
         // and check operand 3 to see it is also a kill to handle the case:
-        //   %vreg5 = A-form-op %vreg5, %vreg5, %vreg11;
-        // where vreg5 and vreg11 are both kills. This case would be skipped
+        //   %5 = A-form-op %5, %5, %11;
+        // where %5 and %11 are both kills. This case would be skipped
         // otherwise.
         unsigned OldFMAReg = MI.getOperand(0).getReg();
 
@@ -241,7 +240,7 @@ protected:
         assert(OldFMAReg == AddendMI->getOperand(0).getReg() &&
                "Addend copy not tied to old FMA output!");
 
-        DEBUG(dbgs() << "VSX FMA Mutation:\n    " << MI);
+        LLVM_DEBUG(dbgs() << "VSX FMA Mutation:\n    " << MI);
 
         MI.getOperand(0).setReg(KilledProdReg);
         MI.getOperand(1).setReg(KilledProdReg);
@@ -273,7 +272,7 @@ protected:
           MI.getOperand(2).setIsUndef(OtherProdRegUndef);
         }
 
-        DEBUG(dbgs() << " -> " << MI);
+        LLVM_DEBUG(dbgs() << " -> " << MI);
 
         // The killed product operand was killed here, so we can reuse it now
         // for the result of the fma.
@@ -310,7 +309,7 @@ protected:
           NewFMAInt.addSegment(LiveInterval::Segment(AI->start, AI->end,
                                                      NewFMAValNo));
         }
-        DEBUG(dbgs() << "  extended: " << NewFMAInt << '\n');
+        LLVM_DEBUG(dbgs() << "  extended: " << NewFMAInt << '\n');
 
         // Extend the live interval of the addend source (it might end at the
         // copy to be removed, or somewhere in between there and here). This
@@ -323,15 +322,15 @@ protected:
             LiveRange &AddendSrcRange = LIS->getRegUnit(Unit);
             AddendSrcRange.extendInBlock(LIS->getMBBStartIdx(&MBB),
                                          FMAIdx.getRegSlot());
-            DEBUG(dbgs() << "  extended: " << AddendSrcRange << '\n');
+            LLVM_DEBUG(dbgs() << "  extended: " << AddendSrcRange << '\n');
           }
 
         FMAInt.removeValNo(FMAValNo);
-        DEBUG(dbgs() << "  trimmed:  " << FMAInt << '\n');
+        LLVM_DEBUG(dbgs() << "  trimmed:  " << FMAInt << '\n');
 
         // Remove the (now unused) copy.
 
-        DEBUG(dbgs() << "  removing: " << *AddendMI << '\n');
+        LLVM_DEBUG(dbgs() << "  removing: " << *AddendMI << '\n');
         LIS->RemoveMachineInstrFromMaps(*AddendMI);
         AddendMI->eraseFromParent();
 
@@ -343,7 +342,7 @@ protected:
 
 public:
     bool runOnMachineFunction(MachineFunction &MF) override {
-      if (skipFunction(*MF.getFunction()))
+      if (skipFunction(MF.getFunction()))
         return false;
 
       // If we don't have VSX then go ahead and return without doing

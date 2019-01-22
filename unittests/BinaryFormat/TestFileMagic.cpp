@@ -1,9 +1,8 @@
 //===- llvm/unittest/BinaryFormat/TestFileMagic.cpp - File magic tests ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -81,6 +80,8 @@ const char windows_resource[] =
 const char macho_dynamically_linked_shared_lib_stub[] =
     "\xfe\xed\xfa\xce........\x00\x00\x00\x09............";
 const char ms_dos_stub_broken[] = "\x4d\x5a\x20\x20";
+const char pdb[] = "Microsoft C/C++ MSF 7.00\r\n\x1a"
+                   "DS\x00\x00\x00";
 
 TEST_F(MagicTest, Magic) {
   struct type {
@@ -110,6 +111,7 @@ TEST_F(MagicTest, Magic) {
       DEFINE(macho_dsym_companion),
       DEFINE(macho_kext_bundle),
       DEFINE(windows_resource),
+      DEFINE(pdb),
       {"ms_dos_stub_broken", ms_dos_stub_broken, sizeof(ms_dos_stub_broken),
        file_magic::unknown},
 #undef DEFINE

@@ -1,20 +1,20 @@
 //===-- SIFixVGPRCopies.cpp - Fix VGPR Copies after regalloc --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief Add implicit use of exec to vector register copies.
+/// Add implicit use of exec to vector register copies.
 ///
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 
 using namespace llvm;
@@ -46,7 +46,7 @@ char SIFixVGPRCopies::ID = 0;
 char &llvm::SIFixVGPRCopiesID = SIFixVGPRCopies::ID;
 
 bool SIFixVGPRCopies::runOnMachineFunction(MachineFunction &MF) {
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIRegisterInfo *TRI = ST.getRegisterInfo();
   const SIInstrInfo *TII = ST.getInstrInfo();
   bool Changed = false;
@@ -58,7 +58,7 @@ bool SIFixVGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         if (TII->isVGPRCopy(MI) && !MI.readsRegister(AMDGPU::EXEC, TRI)) {
           MI.addOperand(MF,
                         MachineOperand::CreateReg(AMDGPU::EXEC, false, true));
-          DEBUG(dbgs() << "Add exec use to " << MI);
+          LLVM_DEBUG(dbgs() << "Add exec use to " << MI);
           Changed = true;
         }
         break;

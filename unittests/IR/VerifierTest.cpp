@@ -1,9 +1,8 @@
 //===- llvm/unittest/IR/VerifierTest.cpp - Verifier unit tests --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -178,9 +177,10 @@ TEST(VerifierTest, DetectInvalidDebugInfo) {
         "f", FunctionType::get(Type::getVoidTy(C), false)));
     IRBuilder<> Builder(BasicBlock::Create(C, "", F));
     Builder.CreateUnreachable();
-    F->setSubprogram(DIB.createFunction(CU, "f", "f",
-                                        DIB.createFile("broken.c", "/"), 1,
-                                        nullptr, true, true, 1));
+    F->setSubprogram(DIB.createFunction(
+        CU, "f", "f", DIB.createFile("broken.c", "/"), 1, nullptr, 1,
+        DINode::FlagZero,
+        DISubprogram::SPFlagLocalToUnit | DISubprogram::SPFlagDefinition));
     DIB.finalize();
     EXPECT_FALSE(verifyModule(M));
 

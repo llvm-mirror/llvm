@@ -1,13 +1,15 @@
 //===- llvm/unittest/ADT/OptionalTest.cpp - Optional unit tests -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/raw_ostream.h"
+#include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -268,12 +270,12 @@ TEST_F(OptionalTest, MoveOnlyMoveConstruction) {
   Optional<MoveOnly> A(MoveOnly(3));
   MoveOnly::ResetCounts();
   Optional<MoveOnly> B(std::move(A));
-  EXPECT_FALSE((bool)A);
+  EXPECT_TRUE((bool)A);
   EXPECT_TRUE((bool)B);
   EXPECT_EQ(3, B->val);
   EXPECT_EQ(1u, MoveOnly::MoveConstructions);
   EXPECT_EQ(0u, MoveOnly::MoveAssignments);
-  EXPECT_EQ(1u, MoveOnly::Destructions);
+  EXPECT_EQ(0u, MoveOnly::Destructions);
 }
 
 TEST_F(OptionalTest, MoveOnlyAssignment) {
@@ -292,12 +294,12 @@ TEST_F(OptionalTest, MoveOnlyInitializingAssignment) {
   Optional<MoveOnly> B;
   MoveOnly::ResetCounts();
   B = std::move(A);
-  EXPECT_FALSE((bool)A);
+  EXPECT_TRUE((bool)A);
   EXPECT_TRUE((bool)B);
   EXPECT_EQ(3, B->val);
   EXPECT_EQ(1u, MoveOnly::MoveConstructions);
   EXPECT_EQ(0u, MoveOnly::MoveAssignments);
-  EXPECT_EQ(1u, MoveOnly::Destructions);
+  EXPECT_EQ(0u, MoveOnly::Destructions);
 }
 
 TEST_F(OptionalTest, MoveOnlyNullingAssignment) {
@@ -317,12 +319,12 @@ TEST_F(OptionalTest, MoveOnlyAssigningAssignment) {
   Optional<MoveOnly> B(MoveOnly(4));
   MoveOnly::ResetCounts();
   B = std::move(A);
-  EXPECT_FALSE((bool)A);
+  EXPECT_TRUE((bool)A);
   EXPECT_TRUE((bool)B);
   EXPECT_EQ(3, B->val);
   EXPECT_EQ(0u, MoveOnly::MoveConstructions);
   EXPECT_EQ(1u, MoveOnly::MoveAssignments);
-  EXPECT_EQ(1u, MoveOnly::Destructions);
+  EXPECT_EQ(0u, MoveOnly::Destructions);
 }
 
 struct Immovable {
@@ -518,5 +520,52 @@ TEST_F(OptionalTest, OperatorGreaterEqual) {
   CheckRelation<GreaterEqual>(InequalityLhs, InequalityRhs, !IsLess);
 }
 
-} // end anonymous namespace
+struct ComparableAndStreamable {
+  friend bool operator==(ComparableAndStreamable,
+                         ComparableAndStreamable) LLVM_ATTRIBUTE_USED {
+    return true;
+  }
 
+  friend raw_ostream &operator<<(raw_ostream &OS, ComparableAndStreamable) {
+    return OS << "ComparableAndStreamable";
+  }
+
+  static Optional<ComparableAndStreamable> get() {
+    return ComparableAndStreamable();
+  }
+};
+
+TEST_F(OptionalTest, StreamOperator) {
+  auto to_string = [](Optional<ComparableAndStreamable> O) {
+    SmallString<16> S;
+    raw_svector_ostream OS(S);
+    OS << O;
+    return S;
+  };
+  EXPECT_EQ("ComparableAndStreamable",
+            to_string(ComparableAndStreamable::get()));
+  EXPECT_EQ("None", to_string(None));
+}
+
+struct Comparable {
+  friend bool operator==(Comparable, Comparable) LLVM_ATTRIBUTE_USED {
+    return true;
+  }
+  static Optional<Comparable> get() { return Comparable(); }
+};
+
+TEST_F(OptionalTest, UseInUnitTests) {
+  // Test that we invoke the streaming operators when pretty-printing values in
+  // EXPECT macros.
+  EXPECT_NONFATAL_FAILURE(EXPECT_EQ(llvm::None, ComparableAndStreamable::get()),
+                          "Expected: llvm::None\n"
+                          "      Which is: None\n"
+                          "To be equal to: ComparableAndStreamable::get()\n"
+                          "      Which is: ComparableAndStreamable");
+
+  // Test that it is still possible to compare objects which do not have a
+  // custom streaming operator.
+  EXPECT_NONFATAL_FAILURE(EXPECT_EQ(llvm::None, Comparable::get()), "object");
+}
+
+} // end anonymous namespace

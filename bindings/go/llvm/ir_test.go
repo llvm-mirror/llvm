@@ -1,9 +1,8 @@
 //===- ir_test.go - Tests for ir ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -89,6 +88,7 @@ func TestAttributes(t *testing.T) {
 		"uwtable",
 		"zeroext",
 		"cold",
+		"nocf_check",
 	}
 
 	for _, name := range attrTests {
@@ -111,7 +111,11 @@ func TestDebugLoc(t *testing.T) {
 	}()
 	file := d.CreateFile("dummy_file", "dummy_dir")
 	voidInfo := d.CreateBasicType(DIBasicType{Name: "void"})
-	typeInfo := d.CreateSubroutineType(DISubroutineType{file, []Metadata{voidInfo}})
+	typeInfo := d.CreateSubroutineType(DISubroutineType{
+		File:       file,
+		Parameters: []Metadata{voidInfo},
+		Flags:      0,
+	})
 	scope := d.CreateFunction(file, DIFunction{
 		Name:         "foo",
 		LinkageName:  "foo",
@@ -142,7 +146,7 @@ func TestSubtypes(t *testing.T) {
 	int_pointer := PointerType(cont.Int32Type(), 0)
 	int_inner := int_pointer.Subtypes()
 	if len(int_inner) != 1 {
-		t.Errorf("Got size %d, though wanted 1")
+		t.Errorf("Got size %d, though wanted 1", len(int_inner))
 	}
 	if int_inner[0] != cont.Int32Type() {
 		t.Errorf("Expected int32 type")
@@ -151,7 +155,7 @@ func TestSubtypes(t *testing.T) {
 	st_pointer := cont.StructType([]Type{cont.Int32Type(), cont.Int8Type()}, false)
 	st_inner := st_pointer.Subtypes()
 	if len(st_inner) != 2 {
-		t.Errorf("Got size %d, though wanted 2")
+		t.Errorf("Got size %d, though wanted 2", len(int_inner))
 	}
 	if st_inner[0] != cont.Int32Type() {
 		t.Errorf("Expected first struct field to be int32")

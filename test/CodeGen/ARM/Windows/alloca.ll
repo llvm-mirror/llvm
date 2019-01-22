@@ -1,4 +1,6 @@
 ; RUN: llc -O0 -mtriple thumbv7-windows-itanium -filetype asm -o - %s | FileCheck %s
+; RUN: llc -O0 -mtriple thumbv7-windows-msvc -filetype asm -o - %s | FileCheck %s
+; RUN: llc -O0 -mtriple thumbv7-windows-mingw32 -filetype asm -o - %s | FileCheck %s
 
 declare arm_aapcs_vfpcc i32 @num_entries()
 
@@ -17,7 +19,7 @@ entry:
 ; because we do not have the kill flag on R0.
 ; CHECK: mov.w [[R1:lr]], #7
 ; CHECK: add.w [[R0:r[0-9]+]], [[R1]], [[R0]], lsl #2
-; CHECK: bic [[R0]], [[R0]], #7
+; CHECK: bic [[R0]], [[R0]], #4
 ; CHECK: lsrs r4, [[R0]], #2
 ; CHECK: bl __chkstk
 ; CHECK: sub.w sp, sp, r4

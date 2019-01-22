@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/MachinePassRegistry.h -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,22 +23,20 @@
 
 namespace llvm {
 
-using MachinePassCtor = void *(*)();
-
 //===----------------------------------------------------------------------===//
 ///
 /// MachinePassRegistryListener - Listener to adds and removals of nodes in
 /// registration list.
 ///
 //===----------------------------------------------------------------------===//
-class MachinePassRegistryListener {
-  virtual void anchor();
+template <class PassCtorTy> class MachinePassRegistryListener {
+  virtual void anchor() {}
 
 public:
   MachinePassRegistryListener() = default;
   virtual ~MachinePassRegistryListener() = default;
 
-  virtual void NotifyAdd(StringRef N, MachinePassCtor C, StringRef D) = 0;
+  virtual void NotifyAdd(StringRef N, PassCtorTy C, StringRef D) = 0;
   virtual void NotifyRemove(StringRef N) = 0;
 };
 
@@ -48,15 +45,15 @@ public:
 /// MachinePassRegistryNode - Machine pass node stored in registration list.
 ///
 //===----------------------------------------------------------------------===//
-class MachinePassRegistryNode {
+template <typename PassCtorTy> class MachinePassRegistryNode {
 private:
   MachinePassRegistryNode *Next = nullptr; // Next function pass in list.
   StringRef Name;                       // Name of function pass.
   StringRef Description;                // Description string.
-  MachinePassCtor Ctor;                 // Function pass creator.
+  PassCtorTy Ctor;                      // Pass creator.
 
 public:
-  MachinePassRegistryNode(const char *N, const char *D, MachinePassCtor C)
+  MachinePassRegistryNode(const char *N, const char *D, PassCtorTy C)
       : Name(N), Description(D), Ctor(C) {}
 
   // Accessors
@@ -64,7 +61,7 @@ public:
   MachinePassRegistryNode **getNextAddress()    { return &Next; }
   StringRef getName()                   const { return Name; }
   StringRef getDescription()            const { return Description; }
-  MachinePassCtor getCtor()               const { return Ctor; }
+  PassCtorTy getCtor() const { return Ctor; }
   void setNext(MachinePassRegistryNode *N)      { Next = N; }
 };
 
@@ -73,11 +70,12 @@ public:
 /// MachinePassRegistry - Track the registration of machine passes.
 ///
 //===----------------------------------------------------------------------===//
-class MachinePassRegistry {
+template <typename PassCtorTy> class MachinePassRegistry {
 private:
-  MachinePassRegistryNode *List;        // List of registry nodes.
-  MachinePassCtor Default;              // Default function pass creator.
-  MachinePassRegistryListener *Listener; // Listener for list adds are removes.
+  MachinePassRegistryNode<PassCtorTy> *List; // List of registry nodes.
+  PassCtorTy Default;                        // Default function pass creator.
+  MachinePassRegistryListener<PassCtorTy>
+      *Listener; // Listener for list adds are removes.
 
 public:
   // NO CONSTRUCTOR - we don't want static constructor ordering to mess
@@ -85,19 +83,47 @@ public:
 
   // Accessors.
   //
-  MachinePassRegistryNode *getList()                    { return List; }
-  MachinePassCtor getDefault()                          { return Default; }
-  void setDefault(MachinePassCtor C)                    { Default = C; }
-  void setDefault(StringRef Name);
-  void setListener(MachinePassRegistryListener *L)      { Listener = L; }
+  MachinePassRegistryNode<PassCtorTy> *getList() { return List; }
+  PassCtorTy getDefault() { return Default; }
+  void setDefault(PassCtorTy C) { Default = C; }
+  /// setDefault - Set the default constructor by name.
+  void setDefault(StringRef Name) {
+    PassCtorTy Ctor = nullptr;
+    for (MachinePassRegistryNode<PassCtorTy> *R = getList(); R;
+         R = R->getNext()) {
+      if (R->getName() == Name) {
+        Ctor = R->getCtor();
+        break;
+      }
+    }
+    assert(Ctor && "Unregistered pass name");
+    setDefault(Ctor);
+  }
+  void setListener(MachinePassRegistryListener<PassCtorTy> *L) { Listener = L; }
 
   /// Add - Adds a function pass to the registration list.
   ///
-  void Add(MachinePassRegistryNode *Node);
+  void Add(MachinePassRegistryNode<PassCtorTy> *Node) {
+    Node->setNext(List);
+    List = Node;
+    if (Listener)
+      Listener->NotifyAdd(Node->getName(), Node->getCtor(),
+                          Node->getDescription());
+  }
 
   /// Remove - Removes a function pass from the registration list.
   ///
-  void Remove(MachinePassRegistryNode *Node);
+  void Remove(MachinePassRegistryNode<PassCtorTy> *Node) {
+    for (MachinePassRegistryNode<PassCtorTy> **I = &List; *I;
+         I = (*I)->getNextAddress()) {
+      if (*I == Node) {
+        if (Listener)
+          Listener->NotifyRemove(Node->getName());
+        *I = (*I)->getNext();
+        break;
+      }
+    }
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -105,9 +131,11 @@ public:
 /// RegisterPassParser class - Handle the addition of new machine passes.
 ///
 //===----------------------------------------------------------------------===//
-template<class RegistryClass>
-class RegisterPassParser : public MachinePassRegistryListener,
-                   public cl::parser<typename RegistryClass::FunctionPassCtor> {
+template <class RegistryClass>
+class RegisterPassParser
+    : public MachinePassRegistryListener<
+          typename RegistryClass::FunctionPassCtor>,
+      public cl::parser<typename RegistryClass::FunctionPassCtor> {
 public:
   RegisterPassParser(cl::Option &O)
       : cl::parser<typename RegistryClass::FunctionPassCtor>(O) {}
@@ -129,8 +157,9 @@ public:
   }
 
   // Implement the MachinePassRegistryListener callbacks.
-  void NotifyAdd(StringRef N, MachinePassCtor C, StringRef D) override {
-    this->addLiteralOption(N, (typename RegistryClass::FunctionPassCtor)C, D);
+  void NotifyAdd(StringRef N, typename RegistryClass::FunctionPassCtor C,
+                 StringRef D) override {
+    this->addLiteralOption(N, C, D);
   }
   void NotifyRemove(StringRef N) override {
     this->removeLiteralOption(N);

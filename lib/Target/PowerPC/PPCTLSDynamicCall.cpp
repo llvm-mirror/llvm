@@ -1,9 +1,8 @@
 //===---------- PPCTLSDynamicCall.cpp - TLS Dynamic Call Fixup ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,7 +24,7 @@
 #include "PPCInstrBuilder.h"
 #include "PPCInstrInfo.h"
 #include "PPCTargetMachine.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/Debug.h"
@@ -77,7 +76,7 @@ protected:
           continue;
         }
 
-        DEBUG(dbgs() << "TLS Dynamic Call Fixup:\n    " << MI);
+        LLVM_DEBUG(dbgs() << "TLS Dynamic Call Fixup:\n    " << MI);
 
         unsigned OutReg = MI.getOperand(0).getReg();
         unsigned InReg = MI.getOperand(1).getReg();
@@ -108,7 +107,7 @@ protected:
         }
 
         // We create ADJCALLSTACKUP and ADJCALLSTACKDOWN around _tls_get_addr
-        // as schduling fence to avoid it is scheduled before
+        // as scheduling fence to avoid it is scheduled before
         // mflr in the prologue and the address in LR is clobbered (PR25839).
         // We don't really need to save data to the stack - the clobbered
         // registers are already saved when the SDNode (e.g. PPCaddiTlsgdLAddr)

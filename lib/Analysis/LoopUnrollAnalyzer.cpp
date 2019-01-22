@@ -1,9 +1,8 @@
 //===- LoopUnrollAnalyzer.cpp - Unrolling Effect Estimation -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,11 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LoopUnrollAnalyzer.h"
-#include "llvm/IR/Dominators.h"
 
 using namespace llvm;
 
-/// \brief Try to simplify instruction \param I using its SCEV expression.
+/// Try to simplify instruction \param I using its SCEV expression.
 ///
 /// The idea is that some AddRec expressions become constants, which then
 /// could trigger folding of other instructions. However, that only happens

@@ -1,9 +1,8 @@
 //===- TableGenBackends.h - Declarations for LLVM TableGen Backends -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -62,7 +61,10 @@ namespace llvm {
 class raw_ostream;
 class RecordKeeper;
 
-void EmitIntrinsics(RecordKeeper &RK, raw_ostream &OS, bool TargetOnly = false);
+void EmitIntrinsicEnums(RecordKeeper &RK, raw_ostream &OS,
+                        bool TargetOnly = false);
+void EmitIntrinsicImpl(RecordKeeper &RK, raw_ostream &OS,
+                       bool TargetOnly = false);
 void EmitAsmMatcher(RecordKeeper &RK, raw_ostream &OS);
 void EmitAsmWriter(RecordKeeper &RK, raw_ostream &OS);
 void EmitCallingConv(RecordKeeper &RK, raw_ostream &OS);
@@ -72,7 +74,9 @@ void EmitDFAPacketizer(RecordKeeper &RK, raw_ostream &OS);
 void EmitDisassembler(RecordKeeper &RK, raw_ostream &OS);
 void EmitFastISel(RecordKeeper &RK, raw_ostream &OS);
 void EmitInstrInfo(RecordKeeper &RK, raw_ostream &OS);
+void EmitInstrDocs(RecordKeeper &RK, raw_ostream &OS);
 void EmitPseudoLowering(RecordKeeper &RK, raw_ostream &OS);
+void EmitCompressInst(RecordKeeper &RK, raw_ostream &OS);
 void EmitRegisterInfo(RecordKeeper &RK, raw_ostream &OS);
 void EmitSubtarget(RecordKeeper &RK, raw_ostream &OS);
 void EmitMapTable(RecordKeeper &RK, raw_ostream &OS);
@@ -84,6 +88,7 @@ void EmitGlobalISel(RecordKeeper &RK, raw_ostream &OS);
 void EmitX86EVEX2VEXTables(RecordKeeper &RK, raw_ostream &OS);
 void EmitX86FoldTables(RecordKeeper &RK, raw_ostream &OS);
 void EmitRegisterBank(RecordKeeper &RK, raw_ostream &OS);
+void EmitExegesis(RecordKeeper &RK, raw_ostream &OS);
 
 } // End llvm namespace
 

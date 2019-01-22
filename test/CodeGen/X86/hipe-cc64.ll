@@ -1,14 +1,13 @@
-; RUN: llc < %s -stack-symbol-ordering=0 -tailcallopt -code-model=medium -stack-alignment=8 -mtriple=x86_64-linux-gnu -mcpu=opteron | FileCheck %s
+; RUN: llc < %s -stack-symbol-ordering=0 -tailcallopt -relocation-model=static -code-model=medium -stack-alignment=8 -mtriple=x86_64-linux-gnu -mcpu=opteron | FileCheck %s
 
 ; Check the HiPE calling convention works (x86-64)
 
 define void @zap(i64 %a, i64 %b) nounwind {
 entry:
-  ; CHECK:      movq %rsi, %rax
+  ; CHECK:      movq %rsi, %rdx
   ; CHECK-NEXT: movl $8, %ecx
   ; CHECK-NEXT: movl $9, %r8d
   ; CHECK-NEXT: movq %rdi, %rsi
-  ; CHECK-NEXT: movq %rax, %rdx
   ; CHECK-NEXT: callq addfour
   %0 = call cc 11 {i64, i64, i64} @addfour(i64 undef, i64 undef, i64 %a, i64 %b, i64 8, i64 9)
   %res = extractvalue {i64, i64, i64} %0, 2
@@ -87,6 +86,7 @@ define cc 11 { i64, i64, i64 } @tailcaller(i64 %hp, i64 %p) #0 {
   ; CHECK-NEXT: movl	$47, %ecx
   ; CHECK-NEXT: movl	$63, %r8d
   ; CHECK-NEXT: popq	%rax
+  ; CHECK-NEXT: .cfi_def_cfa_offset 16
   ; CHECK-NEXT: jmp	tailcallee
   %ret = tail call cc11 { i64, i64, i64 } @tailcallee(i64 %hp, i64 %p, i64 15,
      i64 31, i64 47, i64 63, i64 79) #1

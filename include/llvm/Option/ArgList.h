@@ -1,9 +1,8 @@
 //===- ArgList.h - Argument List Management ---------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -84,9 +83,6 @@ public:
       this->Ids[I] = Ids[I];
     SkipToNextArg();
   }
-
-  // FIXME: This conversion function makes no sense.
-  operator const Arg*() { return *Current; }
 
   reference operator*() const { return *Current; }
   pointer operator->() const { return Current; }
@@ -356,7 +352,7 @@ public:
     return MakeArgStringRef(Str.toStringRef(Buf));
   }
 
-  /// \brief Create an arg string for (\p LHS + \p RHS), reusing the
+  /// Create an arg string for (\p LHS + \p RHS), reusing the
   /// string at \p Index if possible.
   const char *GetOrMakeJoinedArgString(unsigned Index, StringRef LHS,
                                         StringRef RHS) const;
@@ -390,6 +386,8 @@ private:
   void releaseMemory();
 
 public:
+  InputArgList() : NumInputArgStrings(0) {}
+
   InputArgList(const char* const *ArgBegin, const char* const *ArgEnd);
 
   InputArgList(InputArgList &&RHS)

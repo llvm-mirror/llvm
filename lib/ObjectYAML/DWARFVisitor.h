@@ -1,9 +1,8 @@
 //===--- DWARFVisitor.h -----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,7 +25,7 @@ struct Entry;
 struct FormValue;
 struct AttributeAbbrev;
 
-/// \brief A class to visits DWARFYAML Compile Units and DIEs in preorder.
+/// A class to visits DWARFYAML Compile Units and DIEs in preorder.
 ///
 /// Extensions of this class can either maintain const or non-const references
 /// to the DWARFYAML::Data object.

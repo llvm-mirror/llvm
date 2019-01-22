@@ -1,9 +1,8 @@
 //===- Symbolize.h ----------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -90,11 +89,11 @@ private:
                                     const ObjectFile *Obj,
                                     const std::string &ArchName);
 
-  /// \brief Returns pair of pointers to object and debug object.
+  /// Returns pair of pointers to object and debug object.
   Expected<ObjectPair> getOrCreateObjectPair(const std::string &Path,
                                             const std::string &ArchName);
 
-  /// \brief Return a pointer to object file at specified path, for a specified
+  /// Return a pointer to object file at specified path, for a specified
   /// architecture (e.g. if path refers to a Mach-O universal binary, only one
   /// object file from it will be returned).
   Expected<ObjectFile *> getOrCreateObject(const std::string &Path,
@@ -102,14 +101,14 @@ private:
 
   std::map<std::string, std::unique_ptr<SymbolizableModule>> Modules;
 
-  /// \brief Contains cached results of getOrCreateObjectPair().
+  /// Contains cached results of getOrCreateObjectPair().
   std::map<std::pair<std::string, std::string>, ObjectPair>
       ObjectPairForPathArch;
 
-  /// \brief Contains parsed binary for each path, or parsing error.
+  /// Contains parsed binary for each path, or parsing error.
   std::map<std::string, OwningBinary<Binary>> BinaryForPath;
 
-  /// \brief Parsed object file for path/architecture pair, where "path" refers
+  /// Parsed object file for path/architecture pair, where "path" refers
   /// to Mach-O universal binary.
   std::map<std::pair<std::string, std::string>, std::unique_ptr<ObjectFile>>
       ObjectForUBPathAndArch;

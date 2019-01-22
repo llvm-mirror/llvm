@@ -1,9 +1,8 @@
 (*===-- llvm_scalar_opts.mli - LLVM OCaml Interface -----------*- OCaml -*-===*
  *
- *                     The LLVM Compiler Infrastructure
- *
- * This file is distributed under the University of Illinois Open Source
- * License. See LICENSE.TXT for details.
+ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ * See https://llvm.org/LICENSE.txt for license information.
+ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  *
  *===----------------------------------------------------------------------===*)
 
@@ -107,6 +106,11 @@ external add_partially_inline_lib_calls
   : [< Llvm.PassManager.any ] Llvm.PassManager.t -> unit
   = "llvm_add_partially_inline_lib_calls"
 
+(** See the [llvm::createLowerAtomicPass] function. *)
+external add_lower_atomic
+  : [< Llvm.PassManager.any ] Llvm.PassManager.t -> unit
+  = "llvm_add_lower_atomic"
+
 (** See the [llvm::createLowerSwitchPass] function. *)
 external add_lower_switch
   : [< Llvm.PassManager.any ] Llvm.PassManager.t -> unit
@@ -196,3 +200,8 @@ external add_scoped_no_alias_alias_analysis
 external add_basic_alias_analysis
   : [< Llvm.PassManager.any ] Llvm.PassManager.t -> unit
   = "llvm_add_basic_alias_analysis"
+
+(** See the [llvm::createUnifyFunctionExitNodesPass] function. *)
+external add_unify_function_exit_nodes
+  : [< Llvm.PassManager.any ] Llvm.PassManager.t -> unit
+  = "llvm_add_unify_function_exit_nodes"

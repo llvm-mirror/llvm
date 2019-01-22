@@ -1,9 +1,8 @@
 //===--- RDFDeadCode.cpp --------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -58,7 +57,8 @@ private:
 bool DeadCodeElimination::isLiveInstr(const MachineInstr *MI) const {
   if (MI->mayStore() || MI->isBranch() || MI->isCall() || MI->isReturn())
     return true;
-  if (MI->hasOrderedMemoryRef() || MI->hasUnmodeledSideEffects())
+  if (MI->hasOrderedMemoryRef() || MI->hasUnmodeledSideEffects() ||
+      MI->isPosition())
     return true;
   if (MI->isPHI())
     return false;
@@ -213,7 +213,7 @@ bool DeadCodeElimination::erase(const SetVector<NodeId> &Nodes) {
       return false;
     return A.Id < B.Id;
   };
-  std::sort(DRNs.begin(), DRNs.end(), UsesFirst);
+  llvm::sort(DRNs, UsesFirst);
 
   if (trace())
     dbgs() << "Removing dead ref nodes:\n";

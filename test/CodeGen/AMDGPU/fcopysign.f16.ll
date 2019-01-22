@@ -1,6 +1,6 @@
 ; RUN: llc -amdgpu-scalarize-global-loads=false -march=amdgcn -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=SI %s
 ; RUN: llc -amdgpu-scalarize-global-loads=false -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=GFX8 %s
-; RUN: llc -amdgpu-scalarize-global-loads=false -march=amdgcn -mcpu=gfx901 -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=GFX9 %s
+; RUN: llc -amdgpu-scalarize-global-loads=false -march=amdgcn -mcpu=gfx900 -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=GFX89 -check-prefix=GFX9 %s
 
 declare half @llvm.copysign.f16(half, half)
 declare float @llvm.copysign.f32(float, float)
@@ -30,8 +30,8 @@ define amdgpu_kernel void @test_copysign_f16(
   half addrspace(1)* %arg_mag,
   half addrspace(1)* %arg_sign) {
 entry:
-  %mag = load half, half addrspace(1)* %arg_mag
-  %sign = load half, half addrspace(1)* %arg_sign
+  %mag = load volatile half, half addrspace(1)* %arg_mag
+  %sign = load volatile half, half addrspace(1)* %arg_sign
   %out = call half @llvm.copysign.f16(half %mag, half %sign)
   store half %out, half addrspace(1)* %arg_out
   ret void

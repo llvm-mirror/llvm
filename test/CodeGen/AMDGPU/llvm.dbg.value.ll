@@ -1,22 +1,35 @@
-; RUN: llc -O0 -march=amdgcn -mtriple=amdgcn-unknown-amdhsa -verify-machineinstrs -mattr=-flat-for-global < %s | FileCheck %s
+; RUN: llc -O0 -march=amdgcn -mtriple=amdgcn-unknown-amdhsa -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,NOOPT %s
+; RUN: llc -march=amdgcn -mtriple=amdgcn-unknown-amdhsa -verify-machineinstrs < %s | FileCheck -check-prefixes=GCN,OPT %s
 
-; CHECK-LABEL: {{^}}test_debug_value:
-; CHECK: s_load_dwordx2 s[4:5]
+; GCN-LABEL: {{^}}test_debug_value:
+; NOOPT: .loc	1 1 42 prologue_end     ; /tmp/test_debug_value.cl:1:42
+; NOOPT-NEXT: s_load_dwordx2 s[4:5], s[4:5], 0x0
+; NOOPT-NEXT: ;DEBUG_VALUE: test_debug_value:globalptr_arg <- $sgpr4_sgpr5
 
-; FIXME: Why is the SGPR4_SGPR5 reference being removed from DBG_VALUE?
-; CHECK: ; kill: %SGPR4_SGPR5<def> %SGPR4_SGPR5<kill>
-; CHECK-NEXT: ;DEBUG_VALUE: test_debug_value:globalptr_arg <- undef
-
-; CHECK: buffer_store_dword
-; CHECK: s_endpgm
+; GCN: flat_store_dword
+; GCN: s_endpgm
 define amdgpu_kernel void @test_debug_value(i32 addrspace(1)* nocapture %globalptr_arg) #0 !dbg !4 {
 entry:
-  tail call void @llvm.dbg.value(metadata i32 addrspace(1)* %globalptr_arg, i64 0, metadata !10, metadata !13), !dbg !14
+  tail call void @llvm.dbg.value(metadata i32 addrspace(1)* %globalptr_arg, metadata !10, metadata !13), !dbg !14
   store i32 123, i32 addrspace(1)* %globalptr_arg, align 4
   ret void
 }
 
-declare void @llvm.dbg.value(metadata, i64, metadata, metadata) #1
+; Check for infinite loop in some cases with dbg_value in
+; SIOptimizeExecMaskingPreRA (somehow related to undef argument).
+
+; GCN-LABEL: {{^}}only_undef_dbg_value:
+; NOOPT: ;DEBUG_VALUE: test_debug_value:globalptr_arg <- [DW_OP_constu 1, DW_OP_swap, DW_OP_xderef] undef
+; NOOPT-NEXT: s_endpgm
+
+; OPT: s_endpgm
+define amdgpu_kernel void @only_undef_dbg_value() #1 {
+bb:
+  call void @llvm.dbg.value(metadata <4 x float> undef, metadata !10, metadata !DIExpression(DW_OP_constu, 1, DW_OP_swap, DW_OP_xderef)) #2, !dbg !14
+  ret void
+}
+
+declare void @llvm.dbg.value(metadata, metadata, metadata) #1
 
 attributes #0 = { nounwind  }
 attributes #1 = { nounwind readnone }
@@ -27,7 +40,7 @@ attributes #1 = { nounwind readnone }
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 3.8.0 (trunk 244715) (llvm/trunk 244718)", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
 !1 = !DIFile(filename: "/tmp/test_debug_value.cl", directory: "/Users/matt/src/llvm/build_debug")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "test_debug_value", scope: !1, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !9)
+!4 = distinct !DISubprogram(name: "test_debug_value", scope: !1, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !9)
 !5 = !DISubroutineType(types: !6)
 !6 = !{null, !7}
 !7 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !8, size: 64, align: 32)

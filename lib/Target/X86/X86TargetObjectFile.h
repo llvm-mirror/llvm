@@ -1,9 +1,8 @@
 //===-- X86TargetObjectFile.h - X86 Object Info -----------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -37,7 +36,7 @@ namespace llvm {
                                             MCStreamer &Streamer) const override;
   };
 
-  /// \brief This implemenatation is used for X86 ELF targets that don't
+  /// This implemenatation is used for X86 ELF targets that don't
   /// have a further specialization.
   class X86ELFTargetObjectFile : public TargetLoweringObjectFileELF {
   public:
@@ -45,7 +44,7 @@ namespace llvm {
       PLTRelativeVariantKind = MCSymbolRefExpr::VK_PLT;
     }
 
-    /// \brief Describe a TLS variable address within debug info.
+    /// Describe a TLS variable address within debug info.
     const MCExpr *getDebugThreadLocalSymbol(const MCSymbol *Sym) const override;
   };
 
@@ -55,7 +54,7 @@ namespace llvm {
     void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
   };
 
-  /// \brief This implementation is used for Fuchsia on x86-64.
+  /// This implementation is used for Fuchsia on x86-64.
   class X86FuchsiaTargetObjectFile : public X86ELFTargetObjectFile {
     void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
   };
@@ -66,22 +65,9 @@ namespace llvm {
     void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
   };
 
-  /// \brief This implementation is used for Solaris on x86/x86-64.
+  /// This implementation is used for Solaris on x86/x86-64.
   class X86SolarisTargetObjectFile : public X86ELFTargetObjectFile {
     void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
-  };
-
-  /// \brief This implementation is used for Windows targets on x86 and x86-64.
-  class X86WindowsTargetObjectFile : public TargetLoweringObjectFileCOFF {
-    const MCExpr *
-    lowerRelativeReference(const GlobalValue *LHS, const GlobalValue *RHS,
-                           const TargetMachine &TM) const override;
-
-    /// \brief Given a mergeable constant with the specified size and relocation
-    /// information, return a section that it should be placed in.
-    MCSection *getSectionForConstant(const DataLayout &DL, SectionKind Kind,
-                                     const Constant *C,
-                                     unsigned &Align) const override;
   };
 
 } // end namespace llvm

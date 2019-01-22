@@ -1,9 +1,8 @@
 //===-- CoalesceBranches.cpp - Coalesce blocks with the same condition ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -21,10 +20,10 @@
 #include "llvm/CodeGen/MachinePostDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -59,68 +58,68 @@ namespace llvm {
 ///
 /// expands to the following machine code:
 ///
-/// BB#0: derived from LLVM BB %entry
-///    Live Ins: %F1 %F3 %X6
+/// %bb.0: derived from LLVM BB %entry
+///    liveins: %f1 %f3 %x6
 ///        <SNIP1>
-///        %vreg0<def> = COPY %F1; F8RC:%vreg0
-///        %vreg5<def> = CMPLWI %vreg4<kill>, 0; CRRC:%vreg5 GPRC:%vreg4
-///        %vreg8<def> = LXSDX %ZERO8, %vreg7<kill>, %RM<imp-use>;
-///                    mem:LD8[ConstantPool] F8RC:%vreg8 G8RC:%vreg7
-///        BCC 76, %vreg5, <BB#2>; CRRC:%vreg5
-///    Successors according to CFG: BB#1(?%) BB#2(?%)
+///        %0 = COPY %f1; F8RC:%0
+///        %5 = CMPLWI killed %4, 0; CRRC:%5 GPRC:%4
+///        %8 = LXSDX %zero8, killed %7, implicit %rm;
+///                    mem:LD8[ConstantPool] F8RC:%8 G8RC:%7
+///        BCC 76, %5, <%bb.2>; CRRC:%5
+///    Successors according to CFG: %bb.1(?%) %bb.2(?%)
 ///
-/// BB#1: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#0
-///    Successors according to CFG: BB#2(?%)
+/// %bb.1: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.0
+///    Successors according to CFG: %bb.2(?%)
 ///
-/// BB#2: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#0 BB#1
-///        %vreg9<def> = PHI %vreg8, <BB#1>, %vreg0, <BB#0>;
-///                    F8RC:%vreg9,%vreg8,%vreg0
+/// %bb.2: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.0 %bb.1
+///        %9 = PHI %8, <%bb.1>, %0, <%bb.0>;
+///                    F8RC:%9,%8,%0
 ///        <SNIP2>
-///        BCC 76, %vreg5, <BB#4>; CRRC:%vreg5
-///    Successors according to CFG: BB#3(?%) BB#4(?%)
+///        BCC 76, %5, <%bb.4>; CRRC:%5
+///    Successors according to CFG: %bb.3(?%) %bb.4(?%)
 ///
-/// BB#3: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#2
-///    Successors according to CFG: BB#4(?%)
+/// %bb.3: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.2
+///    Successors according to CFG: %bb.4(?%)
 ///
-/// BB#4: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#2 BB#3
-///        %vreg13<def> = PHI %vreg12, <BB#3>, %vreg2, <BB#2>;
-///                     F8RC:%vreg13,%vreg12,%vreg2
+/// %bb.4: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.2 %bb.3
+///        %13 = PHI %12, <%bb.3>, %2, <%bb.2>;
+///                     F8RC:%13,%12,%2
 ///        <SNIP3>
-///        BLR8 %LR8<imp-use>, %RM<imp-use>, %F1<imp-use>
+///        BLR8 implicit %lr8, implicit %rm, implicit %f1
 ///
 /// When this pattern is detected, branch coalescing will try to collapse
-/// it by moving code in BB#2 to BB#0 and/or BB#4 and removing BB#3.
+/// it by moving code in %bb.2 to %bb.0 and/or %bb.4 and removing %bb.3.
 ///
 /// If all conditions are meet, IR should collapse to:
 ///
-/// BB#0: derived from LLVM BB %entry
-///    Live Ins: %F1 %F3 %X6
+/// %bb.0: derived from LLVM BB %entry
+///    liveins: %f1 %f3 %x6
 ///        <SNIP1>
-///        %vreg0<def> = COPY %F1; F8RC:%vreg0
-///        %vreg5<def> = CMPLWI %vreg4<kill>, 0; CRRC:%vreg5 GPRC:%vreg4
-///        %vreg8<def> = LXSDX %ZERO8, %vreg7<kill>, %RM<imp-use>;
-///                     mem:LD8[ConstantPool] F8RC:%vreg8 G8RC:%vreg7
+///        %0 = COPY %f1; F8RC:%0
+///        %5 = CMPLWI killed %4, 0; CRRC:%5 GPRC:%4
+///        %8 = LXSDX %zero8, killed %7, implicit %rm;
+///                     mem:LD8[ConstantPool] F8RC:%8 G8RC:%7
 ///        <SNIP2>
-///        BCC 76, %vreg5, <BB#4>; CRRC:%vreg5
-///    Successors according to CFG: BB#1(0x2aaaaaaa / 0x80000000 = 33.33%)
-///      BB#4(0x55555554 / 0x80000000 = 66.67%)
+///        BCC 76, %5, <%bb.4>; CRRC:%5
+///    Successors according to CFG: %bb.1(0x2aaaaaaa / 0x80000000 = 33.33%)
+///      %bb.4(0x55555554 / 0x80000000 = 66.67%)
 ///
-/// BB#1: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#0
-///    Successors according to CFG: BB#4(0x40000000 / 0x80000000 = 50.00%)
+/// %bb.1: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.0
+///    Successors according to CFG: %bb.4(0x40000000 / 0x80000000 = 50.00%)
 ///
-/// BB#4: derived from LLVM BB %entry
-///    Predecessors according to CFG: BB#0 BB#1
-///        %vreg9<def> = PHI %vreg8, <BB#1>, %vreg0, <BB#0>;
-///                    F8RC:%vreg9,%vreg8,%vreg0
-///        %vreg13<def> = PHI %vreg12, <BB#1>, %vreg2, <BB#0>;
-///                     F8RC:%vreg13,%vreg12,%vreg2
+/// %bb.4: derived from LLVM BB %entry
+///    Predecessors according to CFG: %bb.0 %bb.1
+///        %9 = PHI %8, <%bb.1>, %0, <%bb.0>;
+///                    F8RC:%9,%8,%0
+///        %13 = PHI %12, <%bb.1>, %2, <%bb.0>;
+///                     F8RC:%13,%12,%2
 ///        <SNIP3>
-///        BLR8 %LR8<imp-use>, %RM<imp-use>, %F1<imp-use>
+///        BLR8 implicit %lr8, implicit %rm, implicit %f1
 ///
 /// Branch Coalescing does not split blocks, it moves everything in the same
 /// direction ensuring it does not break use/definition semantics.
@@ -236,18 +235,18 @@ void PPCBranchCoalescing::initialize(MachineFunction &MF) {
 ///\return true if and only if the branch can be coalesced, false otherwise
 ///
 bool PPCBranchCoalescing::canCoalesceBranch(CoalescingCandidateInfo &Cand) {
-  DEBUG(dbgs() << "Determine if branch block " << Cand.BranchBlock->getNumber()
-               << " can be coalesced:");
+  LLVM_DEBUG(dbgs() << "Determine if branch block "
+                    << Cand.BranchBlock->getNumber() << " can be coalesced:");
   MachineBasicBlock *FalseMBB = nullptr;
 
   if (TII->analyzeBranch(*Cand.BranchBlock, Cand.BranchTargetBlock, FalseMBB,
                          Cand.Cond)) {
-    DEBUG(dbgs() << "TII unable to Analyze Branch - skip\n");
+    LLVM_DEBUG(dbgs() << "TII unable to Analyze Branch - skip\n");
     return false;
   }
 
   for (auto &I : Cand.BranchBlock->terminators()) {
-    DEBUG(dbgs() << "Looking at terminator : " << I << "\n");
+    LLVM_DEBUG(dbgs() << "Looking at terminator : " << I << "\n");
     if (!I.isBranch())
       continue;
 
@@ -265,14 +264,14 @@ bool PPCBranchCoalescing::canCoalesceBranch(CoalescingCandidateInfo &Cand) {
     // must then be extended to prove that none of the implicit operands are
     // changed in the blocks that are combined during coalescing.
     if (I.getNumOperands() != I.getNumExplicitOperands()) {
-      DEBUG(dbgs() << "Terminator contains implicit operands - skip : " << I
-                   << "\n");
+      LLVM_DEBUG(dbgs() << "Terminator contains implicit operands - skip : "
+                        << I << "\n");
       return false;
     }
   }
 
   if (Cand.BranchBlock->isEHPad() || Cand.BranchBlock->hasEHPadSuccessor()) {
-    DEBUG(dbgs() << "EH Pad - skip\n");
+    LLVM_DEBUG(dbgs() << "EH Pad - skip\n");
     return false;
   }
 
@@ -280,13 +279,13 @@ bool PPCBranchCoalescing::canCoalesceBranch(CoalescingCandidateInfo &Cand) {
   // FalseMBB is null, and BranchTargetBlock is a successor to BranchBlock)
   if (!Cand.BranchTargetBlock || FalseMBB ||
       !Cand.BranchBlock->isSuccessor(Cand.BranchTargetBlock)) {
-    DEBUG(dbgs() << "Does not form a triangle - skip\n");
+    LLVM_DEBUG(dbgs() << "Does not form a triangle - skip\n");
     return false;
   }
 
   // Ensure there are only two successors
   if (Cand.BranchBlock->succ_size() != 2) {
-    DEBUG(dbgs() << "Does not have 2 successors - skip\n");
+    LLVM_DEBUG(dbgs() << "Does not have 2 successors - skip\n");
     return false;
   }
 
@@ -305,18 +304,19 @@ bool PPCBranchCoalescing::canCoalesceBranch(CoalescingCandidateInfo &Cand) {
   assert(Succ && "Expecting a valid fall-through block\n");
 
   if (!Succ->empty()) {
-      DEBUG(dbgs() << "Fall-through block contains code -- skip\n");
-      return false;
+    LLVM_DEBUG(dbgs() << "Fall-through block contains code -- skip\n");
+    return false;
   }
 
   if (!Succ->isSuccessor(Cand.BranchTargetBlock)) {
-      DEBUG(dbgs()
-            << "Successor of fall through block is not branch taken block\n");
-      return false;
+    LLVM_DEBUG(
+        dbgs()
+        << "Successor of fall through block is not branch taken block\n");
+    return false;
   }
 
   Cand.FallThroughBlock = Succ;
-  DEBUG(dbgs() << "Valid Candidate\n");
+  LLVM_DEBUG(dbgs() << "Valid Candidate\n");
   return true;
 }
 
@@ -331,7 +331,7 @@ bool PPCBranchCoalescing::identicalOperands(
     ArrayRef<MachineOperand> OpList1, ArrayRef<MachineOperand> OpList2) const {
 
   if (OpList1.size() != OpList2.size()) {
-    DEBUG(dbgs() << "Operand list is different size\n");
+    LLVM_DEBUG(dbgs() << "Operand list is different size\n");
     return false;
   }
 
@@ -339,8 +339,8 @@ bool PPCBranchCoalescing::identicalOperands(
     const MachineOperand &Op1 = OpList1[i];
     const MachineOperand &Op2 = OpList2[i];
 
-    DEBUG(dbgs() << "Op1: " << Op1 << "\n"
-                 << "Op2: " << Op2 << "\n");
+    LLVM_DEBUG(dbgs() << "Op1: " << Op1 << "\n"
+                      << "Op2: " << Op2 << "\n");
 
     if (Op1.isIdenticalTo(Op2)) {
       // filter out instructions with physical-register uses
@@ -348,10 +348,10 @@ bool PPCBranchCoalescing::identicalOperands(
         // If the physical register is constant then we can assume the value
         // has not changed between uses.
           && !(Op1.isUse() && MRI->isConstantPhysReg(Op1.getReg()))) {
-        DEBUG(dbgs() << "The operands are not provably identical.\n");
+        LLVM_DEBUG(dbgs() << "The operands are not provably identical.\n");
         return false;
       }
-      DEBUG(dbgs() << "Op1 and Op2 are identical!\n");
+      LLVM_DEBUG(dbgs() << "Op1 and Op2 are identical!\n");
       continue;
     }
 
@@ -364,14 +364,14 @@ bool PPCBranchCoalescing::identicalOperands(
       MachineInstr *Op1Def = MRI->getVRegDef(Op1.getReg());
       MachineInstr *Op2Def = MRI->getVRegDef(Op2.getReg());
       if (TII->produceSameValue(*Op1Def, *Op2Def, MRI)) {
-        DEBUG(dbgs() << "Op1Def: " << *Op1Def << " and " << *Op2Def
-                     << " produce the same value!\n");
+        LLVM_DEBUG(dbgs() << "Op1Def: " << *Op1Def << " and " << *Op2Def
+                          << " produce the same value!\n");
       } else {
-        DEBUG(dbgs() << "Operands produce different values\n");
+        LLVM_DEBUG(dbgs() << "Operands produce different values\n");
         return false;
       }
     } else {
-      DEBUG(dbgs() << "The operands are not provably identical.\n");
+      LLVM_DEBUG(dbgs() << "The operands are not provably identical.\n");
       return false;
     }
   }
@@ -395,7 +395,7 @@ void PPCBranchCoalescing::moveAndUpdatePHIs(MachineBasicBlock *SourceMBB,
   MachineBasicBlock::iterator ME = SourceMBB->getFirstNonPHI();
 
   if (MI == ME) {
-    DEBUG(dbgs() << "SourceMBB contains no PHI instructions.\n");
+    LLVM_DEBUG(dbgs() << "SourceMBB contains no PHI instructions.\n");
     return;
   }
 
@@ -425,19 +425,19 @@ bool PPCBranchCoalescing::canMoveToBeginning(const MachineInstr &MI,
                                           const MachineBasicBlock &TargetMBB
                                           ) const {
 
-  DEBUG(dbgs() << "Checking if " << MI << " can move to beginning of "
-        << TargetMBB.getNumber() << "\n");
+  LLVM_DEBUG(dbgs() << "Checking if " << MI << " can move to beginning of "
+                    << TargetMBB.getNumber() << "\n");
 
   for (auto &Def : MI.defs()) { // Looking at Def
     for (auto &Use : MRI->use_instructions(Def.getReg())) {
       if (Use.isPHI() && Use.getParent() == &TargetMBB) {
-        DEBUG(dbgs() << "    *** used in a PHI -- cannot move ***\n");
-       return false;
+        LLVM_DEBUG(dbgs() << "    *** used in a PHI -- cannot move ***\n");
+        return false;
       }
     }
   }
 
-  DEBUG(dbgs() << "  Safe to move to the beginning.\n");
+  LLVM_DEBUG(dbgs() << "  Safe to move to the beginning.\n");
   return true;
 }
 
@@ -456,22 +456,23 @@ bool PPCBranchCoalescing::canMoveToEnd(const MachineInstr &MI,
                                     const MachineBasicBlock &TargetMBB
                                     ) const {
 
-  DEBUG(dbgs() << "Checking if " << MI << " can move to end of "
-        << TargetMBB.getNumber() << "\n");
+  LLVM_DEBUG(dbgs() << "Checking if " << MI << " can move to end of "
+                    << TargetMBB.getNumber() << "\n");
 
   for (auto &Use : MI.uses()) {
     if (Use.isReg() && TargetRegisterInfo::isVirtualRegister(Use.getReg())) {
       MachineInstr *DefInst = MRI->getVRegDef(Use.getReg());
       if (DefInst->isPHI() && DefInst->getParent() == MI.getParent()) {
-        DEBUG(dbgs() << "    *** Cannot move this instruction ***\n");
+        LLVM_DEBUG(dbgs() << "    *** Cannot move this instruction ***\n");
         return false;
       } else {
-        DEBUG(dbgs() << "    *** def is in another block -- safe to move!\n");
+        LLVM_DEBUG(
+            dbgs() << "    *** def is in another block -- safe to move!\n");
       }
     }
   }
 
-  DEBUG(dbgs() << "  Safe to move to the end.\n");
+  LLVM_DEBUG(dbgs() << "  Safe to move to the end.\n");
   return true;
 }
 
@@ -541,15 +542,17 @@ bool PPCBranchCoalescing::canMerge(CoalescingCandidateInfo &SourceRegion,
     for (auto &Def : I->defs())
       for (auto &Use : MRI->use_instructions(Def.getReg())) {
         if (Use.isPHI() && Use.getParent() == SourceRegion.BranchTargetBlock) {
-          DEBUG(dbgs() << "PHI " << *I << " defines register used in another "
-                          "PHI within branch target block -- can't merge\n");
+          LLVM_DEBUG(dbgs()
+                     << "PHI " << *I
+                     << " defines register used in another "
+                        "PHI within branch target block -- can't merge\n");
           NumPHINotMoved++;
           return false;
         }
         if (Use.getParent() == SourceRegion.BranchBlock) {
-          DEBUG(dbgs() << "PHI " << *I
-                       << " defines register used in this "
-                          "block -- all must move down\n");
+          LLVM_DEBUG(dbgs() << "PHI " << *I
+                            << " defines register used in this "
+                               "block -- all must move down\n");
           SourceRegion.MustMoveDown = true;
         }
       }
@@ -562,13 +565,13 @@ bool PPCBranchCoalescing::canMerge(CoalescingCandidateInfo &SourceRegion,
            E = SourceRegion.BranchBlock->end();
        I != E; ++I) {
     if (!canMoveToBeginning(*I, *SourceRegion.BranchTargetBlock)) {
-      DEBUG(dbgs() << "Instruction " << *I
-                   << " cannot move down - must move up!\n");
+      LLVM_DEBUG(dbgs() << "Instruction " << *I
+                        << " cannot move down - must move up!\n");
       SourceRegion.MustMoveUp = true;
     }
     if (!canMoveToEnd(*I, *TargetRegion.BranchBlock)) {
-      DEBUG(dbgs() << "Instruction " << *I
-                   << " cannot move up - must move down!\n");
+      LLVM_DEBUG(dbgs() << "Instruction " << *I
+                        << " cannot move up - must move down!\n");
       SourceRegion.MustMoveDown = true;
     }
   }
@@ -714,15 +717,15 @@ bool PPCBranchCoalescing::mergeCandidates(CoalescingCandidateInfo &SourceRegion,
 
 bool PPCBranchCoalescing::runOnMachineFunction(MachineFunction &MF) {
 
-  if (skipFunction(*MF.getFunction()) || MF.empty())
+  if (skipFunction(MF.getFunction()) || MF.empty())
     return false;
 
   bool didSomething = false;
 
-  DEBUG(dbgs() << "******** Branch Coalescing ********\n");
+  LLVM_DEBUG(dbgs() << "******** Branch Coalescing ********\n");
   initialize(MF);
 
-  DEBUG(dbgs() << "Function: "; MF.dump(); dbgs() << "\n");
+  LLVM_DEBUG(dbgs() << "Function: "; MF.dump(); dbgs() << "\n");
 
   CoalescingCandidateInfo Cand1, Cand2;
   // Walk over blocks and find candidates to merge
@@ -752,24 +755,27 @@ bool PPCBranchCoalescing::runOnMachineFunction(MachineFunction &MF) {
              "Branch-taken block should post-dominate first candidate");
 
       if (!identicalOperands(Cand1.Cond, Cand2.Cond)) {
-        DEBUG(dbgs() << "Blocks " << Cand1.BranchBlock->getNumber() << " and "
-                     << Cand2.BranchBlock->getNumber()
-                     << " have different branches\n");
+        LLVM_DEBUG(dbgs() << "Blocks " << Cand1.BranchBlock->getNumber()
+                          << " and " << Cand2.BranchBlock->getNumber()
+                          << " have different branches\n");
         break;
       }
       if (!canMerge(Cand2, Cand1)) {
-        DEBUG(dbgs() << "Cannot merge blocks " << Cand1.BranchBlock->getNumber()
-                     << " and " << Cand2.BranchBlock->getNumber() << "\n");
+        LLVM_DEBUG(dbgs() << "Cannot merge blocks "
+                          << Cand1.BranchBlock->getNumber() << " and "
+                          << Cand2.BranchBlock->getNumber() << "\n");
         NumBlocksNotCoalesced++;
         continue;
       }
-      DEBUG(dbgs() << "Merging blocks " << Cand1.BranchBlock->getNumber()
-                   << " and " << Cand1.BranchTargetBlock->getNumber() << "\n");
+      LLVM_DEBUG(dbgs() << "Merging blocks " << Cand1.BranchBlock->getNumber()
+                        << " and " << Cand1.BranchTargetBlock->getNumber()
+                        << "\n");
       MergedCandidates = mergeCandidates(Cand2, Cand1);
       if (MergedCandidates)
         didSomething = true;
 
-      DEBUG(dbgs() << "Function after merging: "; MF.dump(); dbgs() << "\n");
+      LLVM_DEBUG(dbgs() << "Function after merging: "; MF.dump();
+                 dbgs() << "\n");
     } while (MergedCandidates);
   }
 
@@ -779,6 +785,6 @@ bool PPCBranchCoalescing::runOnMachineFunction(MachineFunction &MF) {
     MF.verify(nullptr, "Error in code produced by branch coalescing");
 #endif // NDEBUG
 
-  DEBUG(dbgs() << "Finished Branch Coalescing\n");
+  LLVM_DEBUG(dbgs() << "Finished Branch Coalescing\n");
   return didSomething;
 }

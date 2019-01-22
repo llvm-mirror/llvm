@@ -1,9 +1,8 @@
 //===-- SystemZMCAsmBackend.cpp - SystemZ assembler backend ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,6 +13,7 @@
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -43,7 +43,7 @@ class SystemZMCAsmBackend : public MCAsmBackend {
   uint8_t OSABI;
 public:
   SystemZMCAsmBackend(uint8_t osABI)
-    : OSABI(osABI) {}
+      : MCAsmBackend(support::big), OSABI(osABI) {}
 
   // Override MCAsmBackend
   unsigned getNumFixupKinds() const override {
@@ -52,8 +52,10 @@ public:
   const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override;
   void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                   const MCValue &Target, MutableArrayRef<char> Data,
-                  uint64_t Value, bool IsResolved) const override;
-  bool mayNeedRelaxation(const MCInst &Inst) const override {
+                  uint64_t Value, bool IsResolved,
+                  const MCSubtargetInfo *STI) const override;
+  bool mayNeedRelaxation(const MCInst &Inst,
+                         const MCSubtargetInfo &STI) const override {
     return false;
   }
   bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
@@ -65,10 +67,10 @@ public:
                         MCInst &Res) const override {
     llvm_unreachable("SystemZ does do not have assembler relaxation");
   }
-  bool writeNopData(uint64_t Count, MCObjectWriter *OW) const override;
-  std::unique_ptr<MCObjectWriter>
-  createObjectWriter(raw_pwrite_stream &OS) const override {
-    return createSystemZObjectWriter(OS, OSABI);
+  bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+  std::unique_ptr<MCObjectTargetWriter>
+  createObjectTargetWriter() const override {
+    return createSystemZObjectWriter(OSABI);
   }
 };
 } // end anonymous namespace
@@ -95,7 +97,8 @@ void SystemZMCAsmBackend::applyFixup(const MCAssembler &Asm,
                                      const MCFixup &Fixup,
                                      const MCValue &Target,
                                      MutableArrayRef<char> Data, uint64_t Value,
-                                     bool IsResolved) const {
+                                     bool IsResolved,
+                                     const MCSubtargetInfo *STI) const {
   MCFixupKind Kind = Fixup.getKind();
   unsigned Offset = Fixup.getOffset();
   unsigned BitSize = getFixupKindInfo(Kind).TargetSize;
@@ -114,17 +117,17 @@ void SystemZMCAsmBackend::applyFixup(const MCAssembler &Asm,
   }
 }
 
-bool SystemZMCAsmBackend::writeNopData(uint64_t Count,
-                                       MCObjectWriter *OW) const {
+bool SystemZMCAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
   for (uint64_t I = 0; I != Count; ++I)
-    OW->write8(7);
+    OS << '\x7';
   return true;
 }
 
 MCAsmBackend *llvm::createSystemZMCAsmBackend(const Target &T,
+                                              const MCSubtargetInfo &STI,
                                               const MCRegisterInfo &MRI,
-                                              const Triple &TT, StringRef CPU,
                                               const MCTargetOptions &Options) {
-  uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TT.getOS());
+  uint8_t OSABI =
+      MCELFObjectTargetWriter::getOSABI(STI.getTargetTriple().getOS());
   return new SystemZMCAsmBackend(OSABI);
 }

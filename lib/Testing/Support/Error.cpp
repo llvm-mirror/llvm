@@ -1,9 +1,8 @@
 //===- llvm/Testing/Support/Error.cpp -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,9 +13,10 @@
 using namespace llvm;
 
 llvm::detail::ErrorHolder llvm::detail::TakeError(llvm::Error Err) {
-  bool Succeeded = !static_cast<bool>(Err);
-  std::string Message;
-  if (!Succeeded)
-    Message = toString(std::move(Err));
-  return {Succeeded, Message};
+  std::vector<std::shared_ptr<ErrorInfoBase>> Infos;
+  handleAllErrors(std::move(Err),
+                  [&Infos](std::unique_ptr<ErrorInfoBase> Info) {
+                    Infos.emplace_back(std::move(Info));
+                  });
+  return {std::move(Infos)};
 }

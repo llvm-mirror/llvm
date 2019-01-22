@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/PseudoSourceValue.cpp ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,7 +13,7 @@
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -25,7 +24,7 @@ static const char *const PSVNames[] = {
     "Stack", "GOT", "JumpTable", "ConstantPool", "FixedStack",
     "GlobalValueCallEntry", "ExternalSymbolCallEntry"};
 
-PseudoSourceValue::PseudoSourceValue(PSVKind Kind, const TargetInstrInfo &TII)
+PseudoSourceValue::PseudoSourceValue(unsigned Kind, const TargetInstrInfo &TII)
     : Kind(Kind) {
   AddressSpace = TII.getAddressSpaceForPseudoSourceKind(Kind);
 }
@@ -81,7 +80,7 @@ void FixedStackPseudoSourceValue::printCustom(raw_ostream &OS) const {
 }
 
 CallEntryPseudoSourceValue::CallEntryPseudoSourceValue(
-    PSVKind Kind, const TargetInstrInfo &TII)
+    unsigned Kind, const TargetInstrInfo &TII)
     : PseudoSourceValue(Kind, TII) {}
 
 bool CallEntryPseudoSourceValue::isConstant(const MachineFrameInfo *) const {

@@ -1,6 +1,6 @@
-; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
-; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
-; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck -allow-deprecated-dag-overlap -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -allow-deprecated-dag-overlap -check-prefix=CI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -allow-deprecated-dag-overlap -check-prefix=CI -check-prefix=FUNC %s
 
 declare double @llvm.ceil.f64(double) nounwind readnone
 declare <2 x double> @llvm.ceil.v2f64(<2 x double>) nounwind readnone
@@ -17,8 +17,7 @@ declare <16 x double> @llvm.ceil.v16f64(<16 x double>) nounwind readnone
 ;        are not always followed.
 ; SI-DAG: s_add_i32 [[SEXP0:s[0-9]+]], [[SEXP]], 0xfffffc01
 ; SI-DAG: s_lshr_b64 s[{{[0-9]+:[0-9]+}}], s[{{[0-9]+:[0-9]+}}], [[SEXP0]]
-; SI-DAG: s_not_b64
-; SI-DAG: s_and_b64
+; SI-DAG: s_andn2_b64
 ; SI-DAG: cmp_gt_i32
 ; SI-DAG: cndmask_b32
 ; SI-DAG: cndmask_b32

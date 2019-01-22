@@ -13,7 +13,7 @@
 	.globl	_test0
 _test0:                                  ## @test0
 	.cfi_startproc
-## BB#0:                                ## %entry
+## %bb.0:                               ## %entry
 	pushq	%rbp
 Ltmp0:
 	.cfi_def_cfa_offset 16
@@ -43,7 +43,7 @@ Ltmp4:
 	.globl	_test1
 _test1:                                  ## @test1
 	.cfi_startproc
-## BB#0:                                ## %entry
+## %bb.0:                               ## %entry
 	pushq	%rbp
 Ltmp10:
 	.cfi_def_cfa_offset 16
@@ -61,6 +61,24 @@ Ltmp14:
 	addq	$408, %rsp              ## imm = 0x198
 	popq	%rbx
 	popq	%rbp
+	retq
+	.cfi_endproc
+
+# Check that a adjustment through a push %rax is the same as a sub.
+
+# CHECK:   Entry at offset 0x40:
+# CHECK-NEXT:     start:                0x2a _testrax
+# CHECK-NEXT:     length:               0x5
+# CHECK-NEXT:     compact encoding:     0x02020000
+	.globl	_testrax
+_testrax:                               ## @testrax
+	.cfi_startproc
+## %bb.0:                               ## %entry
+	pushq	%rax
+Ltmp15:
+	.cfi_def_cfa_offset 16
+	xorl	%eax, %eax
+	popq	%rax
 	retq
 	.cfi_endproc
 

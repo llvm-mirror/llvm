@@ -433,7 +433,7 @@ data structure, but there are only 20 lines of meaningful code.)
 
 .. code-block:: c++
 
-  /// @brief The map for a single function's stack frame.  One of these is
+  /// The map for a single function's stack frame.  One of these is
   ///        compiled as constant data into the executable for each function.
   ///
   /// Storage of metadata values is elided if the %metadata parameter to
@@ -444,7 +444,7 @@ data structure, but there are only 20 lines of meaningful code.)
     const void *Meta[0]; //< Metadata for each root.
   };
 
-  /// @brief A link in the dynamic shadow stack.  One of these is embedded in
+  /// A link in the dynamic shadow stack.  One of these is embedded in
   ///        the stack frame of each function on the call stack.
   struct StackEntry {
     StackEntry *Next;    //< Link to next stack entry (the caller's).
@@ -452,13 +452,13 @@ data structure, but there are only 20 lines of meaningful code.)
     void *Roots[0];      //< Stack roots (in-place array).
   };
 
-  /// @brief The head of the singly-linked list of StackEntries.  Functions push
+  /// The head of the singly-linked list of StackEntries.  Functions push
   ///        and pop onto this in their prologue and epilogue.
   ///
   /// Since there is only a global list, this technique is not threadsafe.
   StackEntry *llvm_gc_root_chain;
 
-  /// @brief Calls Visitor(root, meta) for each GC root on the stack.
+  /// Calls Visitor(root, meta) for each GC root on the stack.
   ///        root and meta are exactly the values passed to
   ///        @llvm.gcroot.
   ///
@@ -835,45 +835,23 @@ for collector plugins which implement reference counting or a shadow stack.
 
 .. _init-roots:
 
-Initializing roots to null: ``InitRoots``
------------------------------------------
+Initializing roots to null
+---------------------------
 
-.. code-block:: c++
+It is recommended that frontends initialize roots explicitly to avoid
+potentially confusing the optimizer.  This prevents the GC from visiting
+uninitialized pointers, which will almost certainly cause it to crash.
 
-  MyGC::MyGC() {
-    InitRoots = true;
-  }
+As a fallback, LLVM will automatically initialize each root to ``null``
+upon entry to the function.  Support for this mode in code generation is
+largely a legacy detail to keep old collector implementations working.
 
-When set, LLVM will automatically initialize each root to ``null`` upon entry to
-the function.  This prevents the GC's sweep phase from visiting uninitialized
-pointers, which will almost certainly cause it to crash.  This initialization
-occurs before custom lowering, so the two may be used together.
+Custom lowering of intrinsics
+------------------------------
 
-Since LLVM does not yet compute liveness information, there is no means of
-distinguishing an uninitialized stack root from an initialized one.  Therefore,
-this feature should be used by all GC plugins.  It is enabled by default.
-
-Custom lowering of intrinsics: ``CustomRoots``, ``CustomReadBarriers``, and ``CustomWriteBarriers``
----------------------------------------------------------------------------------------------------
-
-For GCs which use barriers or unusual treatment of stack roots, these 
-flags allow the collector to perform arbitrary transformations of the
-LLVM IR:
-
-.. code-block:: c++
-
-  class MyGC : public GCStrategy {
-  public:
-    MyGC() {
-      CustomRoots = true;
-      CustomReadBarriers = true;
-      CustomWriteBarriers = true;
-    }
-  };
-
-If any of these flags are set, LLVM suppresses its default lowering for
-the corresponding intrinsics.  Instead, you must provide a custom Pass
-which lowers the intrinsics as desired.  If you have opted in to custom
+For GCs which use barriers or unusual treatment of stack roots, the
+implementor is responsibly for providing a custom pass to lower the
+intrinsics with the desired semantics.  If you have opted in to custom
 lowering of a particular intrinsic your pass **must** eliminate all 
 instances of the corresponding intrinsic in functions which opt in to
 your GC.  The best example of such a pass is the ShadowStackGC and it's 
@@ -884,62 +862,14 @@ without building a custom copy of LLVM.
 
 .. _safe-points:
 
-Generating safe points: ``NeededSafePoints``
---------------------------------------------
+Generating safe points
+-----------------------
 
-LLVM can compute four kinds of safe points:
-
-.. code-block:: c++
-
-  namespace GC {
-    /// PointKind - The type of a collector-safe point.
-    ///
-    enum PointKind {
-      Loop,    //< Instr is a loop (backwards branch).
-      Return,  //< Instr is a return instruction.
-      PreCall, //< Instr is a call instruction.
-      PostCall //< Instr is the return address of a call.
-    };
-  }
-
-A collector can request any combination of the four by setting the
-``NeededSafePoints`` mask:
-
-.. code-block:: c++
-
-  MyGC::MyGC()  {
-    NeededSafePoints = 1 << GC::Loop
-                     | 1 << GC::Return
-                     | 1 << GC::PreCall
-                     | 1 << GC::PostCall;
-  }
-
-It can then use the following routines to access safe points.
-
-.. code-block:: c++
-
-  for (iterator I = begin(), E = end(); I != E; ++I) {
-    GCFunctionInfo *MD = *I;
-    size_t PointCount = MD->size();
-
-    for (GCFunctionInfo::iterator PI = MD->begin(),
-                                  PE = MD->end(); PI != PE; ++PI) {
-      GC::PointKind PointKind = PI->Kind;
-      unsigned PointNum = PI->Num;
-    }
-  }
-
-Almost every collector requires ``PostCall`` safe points, since these correspond
-to the moments when the function is suspended during a call to a subroutine.
-
-Threaded programs generally require ``Loop`` safe points to guarantee that the
-application will reach a safe point within a bounded amount of time, even if it
-is executing a long-running loop which contains no function calls.
-
-Threaded collectors may also require ``Return`` and ``PreCall`` safe points to
-implement "stop the world" techniques using self-modifying code, where it is
-important that the program not exit the function without reaching a safe point
-(because only the topmost function has been patched).
+LLVM provides support for associating stackmaps with the return address of
+a call.  Any loop or return safepoints required by a given collector design
+can be modeled via calls to runtime routines, or potentially patchable call
+sequences.  Using gcroot, all call instructions are inferred to be possible
+safepoints and will thus have an associated stackmap.
 
 .. _assembly:
 
@@ -1032,7 +962,7 @@ a realistic example:
 
       // Emit PointCount.
       OS.AddComment("safe point count");
-      AP.EmitInt32(MD.size());
+      AP.emitInt32(MD.size());
 
       // And each safe point...
       for (GCFunctionInfo::iterator PI = MD.begin(),
@@ -1049,18 +979,18 @@ a realistic example:
 
       // Emit the stack frame size.
       OS.AddComment("stack frame size (in words)");
-      AP.EmitInt32(MD.getFrameSize() / IntPtrSize);
+      AP.emitInt32(MD.getFrameSize() / IntPtrSize);
 
       // Emit stack arity, i.e. the number of stacked arguments.
       unsigned RegisteredArgs = IntPtrSize == 4 ? 5 : 6;
       unsigned StackArity = MD.getFunction().arg_size() > RegisteredArgs ?
                             MD.getFunction().arg_size() - RegisteredArgs : 0;
       OS.AddComment("stack arity");
-      AP.EmitInt32(StackArity);
+      AP.emitInt32(StackArity);
 
       // Emit the number of live roots in the function.
       OS.AddComment("live root count");
-      AP.EmitInt32(MD.live_size(PI));
+      AP.emitInt32(MD.live_size(PI));
 
       // And for each live root...
       for (GCFunctionInfo::live_iterator LI = MD.live_begin(PI),
@@ -1068,7 +998,7 @@ a realistic example:
                                          LI != LE; ++LI) {
         // Emit live root's offset within the stack frame.
         OS.AddComment("stack index (offset / wordsize)");
-        AP.EmitInt32(LI->StackOffset);
+        AP.emitInt32(LI->StackOffset);
       }
     }
   }

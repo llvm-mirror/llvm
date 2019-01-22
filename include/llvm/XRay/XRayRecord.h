@@ -1,9 +1,8 @@
 //===- XRayRecord.h - XRay Trace Record -----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,8 @@
 #define LLVM_XRAY_XRAY_RECORD_H
 
 #include <cstdint>
+#include <vector>
+#include <string>
 
 namespace llvm {
 namespace xray {
@@ -53,10 +54,23 @@ struct XRayFileHeader {
 /// This may or may not correspond to actual record types in the raw trace (as
 /// the loader implementation may synthesize this information in the process of
 /// of loading).
-enum class RecordTypes { ENTER, EXIT, TAIL_EXIT, ENTER_ARG };
+enum class RecordTypes {
+  ENTER,
+  EXIT,
+  TAIL_EXIT,
+  ENTER_ARG,
+  CUSTOM_EVENT,
+  TYPED_EVENT
+};
 
+/// An XRayRecord is the denormalized view of data associated in a trace. These
+/// records may not correspond to actual entries in the raw traces, but they are
+/// the logical representation of records in a higher-level event log.
 struct XRayRecord {
-  /// The type of record.
+  /// RecordType values are used as "sub-types" which have meaning in the
+  /// context of the `Type` below. For function call and custom event records,
+  /// the RecordType is always 0, while for typed events we store the type in
+  /// the RecordType field.
   uint16_t RecordType;
 
   /// The CPU where the thread is running. We assume number of CPUs <= 65536.
@@ -65,7 +79,7 @@ struct XRayRecord {
   /// Identifies the type of record.
   RecordTypes Type;
 
-  /// The function ID for the record.
+  /// The function ID for the record, if this is a function call record.
   int32_t FuncId;
 
   /// Get the full 8 bytes of the TSC when we get the log record.
@@ -74,8 +88,14 @@ struct XRayRecord {
   /// The thread ID for the currently running thread.
   uint32_t TId;
 
+  /// The process ID for the currently running process.
+  uint32_t PId;
+
   /// The function call arguments.
   std::vector<uint64_t> CallArgs;
+
+  /// For custom and typed events, we provide the raw data from the trace.
+  std::string Data;
 };
 
 } // namespace xray

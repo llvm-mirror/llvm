@@ -3,7 +3,7 @@
 
 define <8 x i8> @vuzpi8(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpi8:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d16, [r1]
 ; CHECK-NEXT:    vldr d17, [r0]
 ; CHECK-NEXT:    vuzp.8 d17, d16
@@ -20,7 +20,7 @@ define <8 x i8> @vuzpi8(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 
 define <16 x i8> @vuzpi8_Qres(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpi8_Qres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vuzp.8 d16, d17
@@ -35,7 +35,7 @@ define <16 x i8> @vuzpi8_Qres(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 
 define <4 x i16> @vuzpi16(<4 x i16>* %A, <4 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpi16:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d16, [r1]
 ; CHECK-NEXT:    vldr d17, [r0]
 ; CHECK-NEXT:    vuzp.16 d17, d16
@@ -52,7 +52,7 @@ define <4 x i16> @vuzpi16(<4 x i16>* %A, <4 x i16>* %B) nounwind {
 
 define <8 x i16> @vuzpi16_Qres(<4 x i16>* %A, <4 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpi16_Qres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vuzp.16 d16, d17
@@ -69,7 +69,7 @@ define <8 x i16> @vuzpi16_Qres(<4 x i16>* %A, <4 x i16>* %B) nounwind {
 
 define <16 x i8> @vuzpQi8(<16 x i8>* %A, <16 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi8:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r1]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r0]
 ; CHECK-NEXT:    vuzp.8 q9, q8
@@ -87,7 +87,7 @@ define <16 x i8> @vuzpQi8(<16 x i8>* %A, <16 x i8>* %B) nounwind {
 
 define <32 x i8> @vuzpQi8_QQres(<16 x i8>* %A, <16 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi8_QQres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r2]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r1]
 ; CHECK-NEXT:    vuzp.8 q9, q8
@@ -102,7 +102,7 @@ define <32 x i8> @vuzpQi8_QQres(<16 x i8>* %A, <16 x i8>* %B) nounwind {
 
 define <8 x i16> @vuzpQi16(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi16:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r1]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r0]
 ; CHECK-NEXT:    vuzp.16 q9, q8
@@ -120,7 +120,7 @@ define <8 x i16> @vuzpQi16(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 
 define <16 x i16> @vuzpQi16_QQres(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi16_QQres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r2]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r1]
 ; CHECK-NEXT:    vuzp.16 q9, q8
@@ -135,7 +135,7 @@ define <16 x i16> @vuzpQi16_QQres(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 
 define <4 x i32> @vuzpQi32(<4 x i32>* %A, <4 x i32>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi32:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r1]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r0]
 ; CHECK-NEXT:    vuzp.32 q9, q8
@@ -153,7 +153,7 @@ define <4 x i32> @vuzpQi32(<4 x i32>* %A, <4 x i32>* %B) nounwind {
 
 define <8 x i32> @vuzpQi32_QQres(<4 x i32>* %A, <4 x i32>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi32_QQres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r2]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r1]
 ; CHECK-NEXT:    vuzp.32 q9, q8
@@ -168,7 +168,7 @@ define <8 x i32> @vuzpQi32_QQres(<4 x i32>* %A, <4 x i32>* %B) nounwind {
 
 define <4 x float> @vuzpQf(<4 x float>* %A, <4 x float>* %B) nounwind {
 ; CHECK-LABEL: vuzpQf:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r1]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r0]
 ; CHECK-NEXT:    vuzp.32 q9, q8
@@ -186,7 +186,7 @@ define <4 x float> @vuzpQf(<4 x float>* %A, <4 x float>* %B) nounwind {
 
 define <8 x float> @vuzpQf_QQres(<4 x float>* %A, <4 x float>* %B) nounwind {
 ; CHECK-LABEL: vuzpQf_QQres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r2]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r1]
 ; CHECK-NEXT:    vuzp.32 q9, q8
@@ -203,7 +203,7 @@ define <8 x float> @vuzpQf_QQres(<4 x float>* %A, <4 x float>* %B) nounwind {
 
 define <8 x i8> @vuzpi8_undef(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpi8_undef:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d16, [r1]
 ; CHECK-NEXT:    vldr d17, [r0]
 ; CHECK-NEXT:    vuzp.8 d17, d16
@@ -220,7 +220,7 @@ define <8 x i8> @vuzpi8_undef(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 
 define <16 x i8> @vuzpi8_undef_Qres(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ; CHECK-LABEL: vuzpi8_undef_Qres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vuzp.8 d16, d17
@@ -235,7 +235,7 @@ define <16 x i8> @vuzpi8_undef_Qres(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 
 define <8 x i16> @vuzpQi16_undef(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi16_undef:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r1]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r0]
 ; CHECK-NEXT:    vuzp.16 q9, q8
@@ -253,7 +253,7 @@ define <8 x i16> @vuzpQi16_undef(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 
 define <16 x i16> @vuzpQi16_undef_QQres(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 ; CHECK-LABEL: vuzpQi16_undef_QQres:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vld1.64 {d16, d17}, [r2]
 ; CHECK-NEXT:    vld1.64 {d18, d19}, [r1]
 ; CHECK-NEXT:    vuzp.16 q9, q8
@@ -268,7 +268,7 @@ define <16 x i16> @vuzpQi16_undef_QQres(<8 x i16>* %A, <8 x i16>* %B) nounwind {
 
 define <8 x i16> @vuzp_lower_shufflemask_undef(<4 x i16>* %A, <4 x i16>* %B) {
 ; CHECK-LABEL: vuzp_lower_shufflemask_undef:
-; CHECK:       @ BB#0: @ %entry
+; CHECK:       @ %bb.0: @ %entry
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vorr q9, q8, q8
@@ -285,7 +285,7 @@ entry:
 
 define <4 x i32> @vuzp_lower_shufflemask_zeroed(<2 x i32>* %A, <2 x i32>* %B) {
 ; CHECK-LABEL: vuzp_lower_shufflemask_zeroed:
-; CHECK:       @ BB#0: @ %entry
+; CHECK:       @ %bb.0: @ %entry
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vdup.32 q9, d16[0]
@@ -303,7 +303,7 @@ entry:
 
 define void @vuzp_rev_shufflemask_vtrn(<2 x i32>* %A, <2 x i32>* %B, <4 x i32>* %C) {
 ; CHECK-LABEL: vuzp_rev_shufflemask_vtrn:
-; CHECK:       @ BB#0: @ %entry
+; CHECK:       @ %bb.0: @ %entry
 ; CHECK-NEXT:    vldr d17, [r1]
 ; CHECK-NEXT:    vldr d16, [r0]
 ; CHECK-NEXT:    vrev64.32 q9, q8
@@ -323,24 +323,24 @@ define <8 x i8> @cmpsel_trunc(<8 x i8> %in0, <8 x i8> %in1, <8 x i32> %cmp0, <8 
 ; This results in a build_vector with mismatched types. We will generate two vmovn.i32 instructions to
 ; truncate from i32 to i16 and one vmovn.i16 to perform the final truncation for i8.
 ; CHECK-LABEL: cmpsel_trunc:
-; CHECK:       @ BB#0:
-; CHECK-NEXT:	add	r12, sp, #16
-; CHECK-NEXT: 	vld1.64	{d16, d17}, [r12]
-; CHECK-NEXT:	mov	r12, sp
-; CHECK-NEXT:	vld1.64	{d18, d19}, [r12]
-; CHECK-NEXT:	add	r12, sp, #48
-; CHECK-NEXT:	vld1.64	{d20, d21}, [r12]
-; CHECK-NEXT:	add	r12, sp, #32
-; CHECK-NEXT:	vcgt.u32	q8, q10, q8
-; CHECK-NEXT:	vld1.64	{d20, d21}, [r12]
-; CHECK-NEXT:	vcgt.u32	q9, q10, q9
-; CHECK-NEXT:	vmov	d20, r2, r3
-; CHECK-NEXT:	vmovn.i32	d17, q8
-; CHECK-NEXT:	vmovn.i32	d16, q9
-; CHECK-NEXT:	vmov	d18, r0, r1
-; CHECK-NEXT:	vmovn.i16	d16, q8
-; CHECK-NEXT:	vbsl	d16, d18, d20
-; CHECK-NEXT:	vmov	r0, r1, d16
+; CHECK:       @ %bb.0:
+; CHECK-NEXT:    add r12, sp, #16
+; CHECK-NEXT:    vld1.64 {d16, d17}, [r12]
+; CHECK-NEXT:    mov r12, sp
+; CHECK-NEXT:    vld1.64 {d18, d19}, [r12]
+; CHECK-NEXT:    add r12, sp, #48
+; CHECK-NEXT:    vld1.64 {d20, d21}, [r12]
+; CHECK-NEXT:    add r12, sp, #32
+; CHECK-NEXT:    vcgt.u32 q8, q10, q8
+; CHECK-NEXT:    vld1.64 {d20, d21}, [r12]
+; CHECK-NEXT:    vcgt.u32 q9, q10, q9
+; CHECK-NEXT:    vmov d20, r2, r3
+; CHECK-NEXT:    vmovn.i32 d17, q8
+; CHECK-NEXT:    vmovn.i32 d16, q9
+; CHECK-NEXT:    vmov d18, r0, r1
+; CHECK-NEXT:    vmovn.i16 d16, q8
+; CHECK-NEXT:    vbsl d16, d18, d20
+; CHECK-NEXT:    vmov r0, r1, d16
 ; CHECK-NEXT:    mov pc, lr
   %c = icmp ult <8 x i32> %cmp0, %cmp1
   %res = select <8 x i1> %c, <8 x i8> %in0, <8 x i8> %in1
@@ -352,29 +352,29 @@ define <8 x i8> @cmpsel_trunc(<8 x i8> %in0, <8 x i8> %in1, <8 x i32> %cmp0, <8 
 ; to perform the vuzp and get the vbsl mask.
 define <8 x i8> @vuzp_trunc_and_shuffle(<8 x i8> %tr0, <8 x i8> %tr1,
 ; CHECK-LABEL: vuzp_trunc_and_shuffle:
-; CHECK:       @ BB#0:
-; CHECK-NEXT:	.save	{r11, lr}
-; CHECK-NEXT:	push	{r11, lr}
-; CHECK-NEXT:	add	r12, sp, #8
-; CHECK-NEXT:	add	lr, sp, #24
-; CHECK-NEXT:	vld1.64	{d16, d17}, [r12]
-; CHECK-NEXT:	ldr	r12, [sp, #40]
-; CHECK-NEXT:	vld1.64	{d18, d19}, [lr]
-; CHECK-NEXT:	vcgt.u32	q8, q9, q8
-; CHECK-NEXT:	vld1.32	{d18[0]}, [r12:32]
-; CHECK-NEXT:	vmov.i8	d19, #0x7
-; CHECK-NEXT:	vmovl.u8	q10, d18
-; CHECK-NEXT:	vmovn.i32	d16, q8
-; CHECK-NEXT:	vneg.s8	d17, d19
-; CHECK-NEXT:	vmov	d18, r2, r3
-; CHECK-NEXT:	vuzp.8	d16, d20
-; CHECK-NEXT:	vshl.i8	d16, d16, #7
-; CHECK-NEXT:	vshl.s8	d16, d16, d17
-; CHECK-NEXT:	vmov	d17, r0, r1
-; CHECK-NEXT:	vbsl	d16, d17, d18
-; CHECK-NEXT:	vmov	r0, r1, d16
-; CHECK-NEXT:	pop	{r11, lr}
-; CHECK-NEXT:	mov	pc, lr
+; CHECK:       @ %bb.0:
+; CHECK-NEXT:    .save {r11, lr}
+; CHECK-NEXT:    push {r11, lr}
+; CHECK-NEXT:    add r12, sp, #8
+; CHECK-NEXT:    add lr, sp, #24
+; CHECK-NEXT:    vld1.64 {d16, d17}, [r12]
+; CHECK-NEXT:    ldr r12, [sp, #40]
+; CHECK-NEXT:    vld1.64 {d18, d19}, [lr]
+; CHECK-NEXT:    vcgt.u32 q8, q9, q8
+; CHECK-NEXT:    vld1.32 {d18[0]}, [r12:32]
+; CHECK-NEXT:    vmov.i8 d19, #0x7
+; CHECK-NEXT:    vmovl.u8 q10, d18
+; CHECK-NEXT:    vmovn.i32 d16, q8
+; CHECK-NEXT:    vneg.s8 d17, d19
+; CHECK-NEXT:    vmov d18, r2, r3
+; CHECK-NEXT:    vuzp.8 d16, d20
+; CHECK-NEXT:    vshl.i8 d16, d16, #7
+; CHECK-NEXT:    vshl.s8 d16, d16, d17
+; CHECK-NEXT:    vmov d17, r0, r1
+; CHECK-NEXT:    vbsl d16, d17, d18
+; CHECK-NEXT:    vmov r0, r1, d16
+; CHECK-NEXT:    pop {r11, lr}
+; CHECK-NEXT:    mov pc, lr
                          <4 x i32> %cmp0, <4 x i32> %cmp1, <4 x i8> *%cmp2_ptr) {
   %cmp2_load = load <4 x i8>, <4 x i8> * %cmp2_ptr, align 4
   %cmp2 = trunc <4 x i8> %cmp2_load to <4 x i1>
@@ -388,23 +388,23 @@ define <8 x i8> @vuzp_trunc_and_shuffle(<8 x i8> %tr0, <8 x i8> %tr1,
 ; This produces a build_vector with some of the operands undefs.
 define <8 x i8> @vuzp_trunc_and_shuffle_undef_right(<8 x i8> %tr0, <8 x i8> %tr1,
 ; CHECK-LABEL: vuzp_trunc_and_shuffle_undef_right:
-; CHECK:       @ BB#0:
-; CHECK-NEXT:	mov	r12, sp
-; CHECK-NEXT:	vld1.64	{d16, d17}, [r12]
-; CHECK-NEXT:	add	r12, sp, #16
-; CHECK-NEXT:	vld1.64	{d18, d19}, [r12]
-; CHECK-NEXT:	vcgt.u32	q8, q9, q8
-; CHECK-NEXT:	vmov.i8	d18, #0x7
-; CHECK-NEXT:	vmovn.i32	d16, q8
-; CHECK-NEXT:	vuzp.8	d16, d17
-; CHECK-NEXT:	vneg.s8	d17, d18
-; CHECK-NEXT:	vshl.i8	d16, d16, #7
-; CHECK-NEXT:	vmov	d18, r2, r3
-; CHECK-NEXT:	vshl.s8	d16, d16, d17
-; CHECK-NEXT:	vmov	d17, r0, r1
-; CHECK-NEXT:	vbsl	d16, d17, d18
-; CHECK-NEXT:	vmov	r0, r1, d16
-; CHECK-NEXT:	mov	pc, lr
+; CHECK:       @ %bb.0:
+; CHECK-NEXT:    mov r12, sp
+; CHECK-NEXT:    vld1.64 {d16, d17}, [r12]
+; CHECK-NEXT:    add r12, sp, #16
+; CHECK-NEXT:    vld1.64 {d18, d19}, [r12]
+; CHECK-NEXT:    vcgt.u32 q8, q9, q8
+; CHECK-NEXT:    vmov.i8 d18, #0x7
+; CHECK-NEXT:    vmovn.i32 d16, q8
+; CHECK-NEXT:    vuzp.8 d16, d17
+; CHECK-NEXT:    vneg.s8 d17, d18
+; CHECK-NEXT:    vshl.i8 d16, d16, #7
+; CHECK-NEXT:    vmov d18, r2, r3
+; CHECK-NEXT:    vshl.s8 d16, d16, d17
+; CHECK-NEXT:    vmov d17, r0, r1
+; CHECK-NEXT:    vbsl d16, d17, d18
+; CHECK-NEXT:    vmov r0, r1, d16
+; CHECK-NEXT:    mov pc, lr
                          <4 x i32> %cmp0, <4 x i32> %cmp1, <4 x i8> *%cmp2_ptr) {
   %cmp2_load = load <4 x i8>, <4 x i8> * %cmp2_ptr, align 4
   %cmp2 = trunc <4 x i8> %cmp2_load to <4 x i1>
@@ -416,26 +416,26 @@ define <8 x i8> @vuzp_trunc_and_shuffle_undef_right(<8 x i8> %tr0, <8 x i8> %tr1
 
 define <8 x i8> @vuzp_trunc_and_shuffle_undef_left(<8 x i8> %tr0, <8 x i8> %tr1,
 ; CHECK-LABEL: vuzp_trunc_and_shuffle_undef_left:
-; CHECK:       @ BB#0:
-; CHECK-NEXT:	mov	r12, sp
-; CHECK-NEXT:	vld1.64	{d16, d17}, [r12]
-; CHECK-NEXT:	add	r12, sp, #16
-; CHECK-NEXT:	vld1.64	{d18, d19}, [r12]
-; CHECK-NEXT:	vcgt.u32	q8, q9, q8
-; CHECK-NEXT:	vldr	d18, .LCPI22_0
-; CHECK-NEXT:	vmov.i8	d19, #0x7
-; CHECK-NEXT:	vmovn.i32	d16, q8
-; CHECK-NEXT:	vtbl.8	d16, {d16}, d18
-; CHECK-NEXT:	vneg.s8	d17, d19
-; CHECK-NEXT:	vmov	d18, r2, r3
-; CHECK-NEXT:	vshl.i8	d16, d16, #7
-; CHECK-NEXT:	vshl.s8	d16, d16, d17
-; CHECK-NEXT:	vmov	d17, r0, r1
-; CHECK-NEXT:	vbsl	d16, d17, d18
-; CHECK-NEXT:	vmov	r0, r1, d16
-; CHECK-NEXT:	mov	pc, lr
+; CHECK:       @ %bb.0:
+; CHECK-NEXT:    mov r12, sp
+; CHECK-NEXT:    vld1.64 {d16, d17}, [r12]
+; CHECK-NEXT:    add r12, sp, #16
+; CHECK-NEXT:    vld1.64 {d18, d19}, [r12]
+; CHECK-NEXT:    vcgt.u32 q8, q9, q8
+; CHECK-NEXT:    vldr d18, .LCPI22_0
+; CHECK-NEXT:    vmov.i8 d19, #0x7
+; CHECK-NEXT:    vmovn.i32 d16, q8
+; CHECK-NEXT:    vtbl.8 d16, {d16}, d18
+; CHECK-NEXT:    vneg.s8 d17, d19
+; CHECK-NEXT:    vmov d18, r2, r3
+; CHECK-NEXT:    vshl.i8 d16, d16, #7
+; CHECK-NEXT:    vshl.s8 d16, d16, d17
+; CHECK-NEXT:    vmov d17, r0, r1
+; CHECK-NEXT:    vbsl d16, d17, d18
+; CHECK-NEXT:    vmov r0, r1, d16
+; CHECK-NEXT:    mov pc, lr
 ; CHECK-NEXT:    .p2align 3
-; CHECK-NEXT:  @ BB#1:
+; CHECK-NEXT:  @ %bb.1:
 ; CHECK-NEXT:  .LCPI22_0:
 ; CHECK-NEXT:    .byte 255 @ 0xff
 ; CHECK-NEXT:    .byte 255 @ 0xff
@@ -458,66 +458,58 @@ define <8 x i8> @vuzp_trunc_and_shuffle_undef_left(<8 x i8> %tr0, <8 x i8> %tr1,
 ; get some vector size that we can represent.
 define <10 x i8> @vuzp_wide_type(<10 x i8> %tr0, <10 x i8> %tr1,
 ; CHECK-LABEL: vuzp_wide_type:
-; CHECK:       @ BB#0:
-; CHECK-NEXT:	.save	{r4, r10, r11, lr}
-; CHECK-NEXT:	push	{r4, r10, r11, lr}
-; CHECK-NEXT:	.setfp	r11, sp, #8
-; CHECK-NEXT:	add	r11, sp, #8
-; CHECK-NEXT:	bic	sp, sp, #15
-; CHECK-NEXT:	add	r12, r11, #32
-; CHECK-NEXT:	add	lr, r11, #60
-; CHECK-NEXT:	vld1.32	{d17[0]}, [r12:32]
-; CHECK-NEXT:	add	r12, r11, #24
-; CHECK-NEXT:	vld1.32	{d22[0]}, [lr:32]
-; CHECK-NEXT:	add	lr, r11, #36
-; CHECK-NEXT:	vld1.32	{d16[0]}, [r12:32]
-; CHECK-NEXT:	add	r12, r11, #52
-; CHECK-NEXT:	vld1.32	{d19[0]}, [r12:32]
-; CHECK-NEXT:	add	r12, r11, #44
-; CHECK-NEXT:	vld1.32	{d17[1]}, [lr:32]
-; CHECK-NEXT:	vld1.32	{d18[0]}, [r12:32]
-; CHECK-NEXT:	add	r12, r11, #40
-; CHECK-NEXT:	vld1.32	{d20[0]}, [r12:32]
-; CHECK-NEXT:	ldr	r12, [r11, #64]
-; CHECK-NEXT:	vcgt.u32	q10, q11, q10
-; CHECK-NEXT:	ldr	r4, [r12]
-; CHECK-NEXT:	vmov.32	d25[0], r4
-; CHECK-NEXT:	add	r4, r11, #28
-; CHECK-NEXT:	vld1.32	{d16[1]}, [r4:32]
-; CHECK-NEXT:	add	r4, r11, #56
-; CHECK-NEXT:	vld1.32	{d19[1]}, [r4:32]
-; CHECK-NEXT:	add	r4, r11, #48
-; CHECK-NEXT:	vmov.u8	lr, d25[3]
-; CHECK-NEXT:	vld1.32	{d18[1]}, [r4:32]
-; CHECK-NEXT:	add	r4, r12, #4
-; CHECK-NEXT:	vcgt.u32	q8, q9, q8
-; CHECK-NEXT:	vmovn.i32	d19, q10
-; CHECK-NEXT:	vldr	d20, .LCPI23_0
-; CHECK-NEXT:	vmov.i8	d18, #0x7
-; CHECK-NEXT:	vmovn.i32	d16, q8
-; CHECK-NEXT:	vneg.s8	d17, d18
-; CHECK-NEXT:	vuzp.8	d16, d19
-; CHECK-NEXT:	vmov.i8	q9, #0x7
-; CHECK-NEXT:	vshl.i8	d16, d16, #7
-; CHECK-NEXT:	vneg.s8	q9, q9
-; CHECK-NEXT:	vshl.s8	d24, d16, d17
-; CHECK-NEXT:	vmov.8	d17[0], lr
-; CHECK-NEXT:	vtbl.8	d16, {d24, d25}, d20
-; CHECK-NEXT:	vld1.8	{d17[1]}, [r4]
-; CHECK-NEXT:	add	r4, r11, #8
-; CHECK-NEXT:	vshl.i8	q8, q8, #7
-; CHECK-NEXT:	vld1.64	{d20, d21}, [r4]
-; CHECK-NEXT:	vshl.s8	q8, q8, q9
-; CHECK-NEXT:	vmov	d19, r2, r3
-; CHECK-NEXT:	vmov	d18, r0, r1
-; CHECK-NEXT:	vbsl	q8, q9, q10
-; CHECK-NEXT:	vmov	r0, r1, d16
-; CHECK-NEXT:	vmov	r2, r3, d17
-; CHECK-NEXT:	sub	sp, r11, #8
-; CHECK-NEXT:	pop	{r4, r10, r11, lr}
-; CHECK-NEXT:	mov	pc, lr
+; CHECK:       @ %bb.0:
+; CHECK-NEXT:    .save {r4, lr}
+; CHECK-NEXT:    push {r4, lr}
+; CHECK-NEXT:    add r12, sp, #32
+; CHECK-NEXT:    add lr, sp, #48
+; CHECK-NEXT:    vld1.32 {d17[0]}, [r12:32]
+; CHECK-NEXT:    add r12, sp, #24
+; CHECK-NEXT:    vld1.32 {d16[0]}, [r12:32]
+; CHECK-NEXT:    add r12, sp, #56
+; CHECK-NEXT:    vld1.32 {d19[0]}, [r12:32]
+; CHECK-NEXT:    vld1.32 {d18[0]}, [lr:32]
+; CHECK-NEXT:    add lr, sp, #40
+; CHECK-NEXT:    vld1.32 {d20[0]}, [lr:32]
+; CHECK-NEXT:    ldr r12, [sp, #68]
+; CHECK-NEXT:    ldr r4, [r12]
+; CHECK-NEXT:    vmov.32 d23[0], r4
+; CHECK-NEXT:    add r4, sp, #64
+; CHECK-NEXT:    vld1.32 {d24[0]}, [r4:32]
+; CHECK-NEXT:    add r4, sp, #36
+; CHECK-NEXT:    vcgt.u32 q10, q12, q10
+; CHECK-NEXT:    vld1.32 {d17[1]}, [r4:32]
+; CHECK-NEXT:    add r4, sp, #28
+; CHECK-NEXT:    vld1.32 {d16[1]}, [r4:32]
+; CHECK-NEXT:    add r4, sp, #60
+; CHECK-NEXT:    vld1.32 {d19[1]}, [r4:32]
+; CHECK-NEXT:    add r4, sp, #52
+; CHECK-NEXT:    vld1.32 {d18[1]}, [r4:32]
+; CHECK-NEXT:    add r4, r12, #4
+; CHECK-NEXT:    vcgt.u32 q8, q9, q8
+; CHECK-NEXT:    vmovn.i32 d19, q10
+; CHECK-NEXT:    vmov.u8 lr, d23[3]
+; CHECK-NEXT:    vldr d20, .LCPI23_0
+; CHECK-NEXT:    vmovn.i32 d18, q8
+; CHECK-NEXT:    vmovn.i16 d22, q9
+; CHECK-NEXT:    vmov.i8 q9, #0x7
+; CHECK-NEXT:    vneg.s8 q9, q9
+; CHECK-NEXT:    vmov.8 d17[0], lr
+; CHECK-NEXT:    vtbl.8 d16, {d22, d23}, d20
+; CHECK-NEXT:    vld1.8 {d17[1]}, [r4]
+; CHECK-NEXT:    add r4, sp, #8
+; CHECK-NEXT:    vshl.i8 q8, q8, #7
+; CHECK-NEXT:    vld1.64 {d20, d21}, [r4]
+; CHECK-NEXT:    vshl.s8 q8, q8, q9
+; CHECK-NEXT:    vmov d19, r2, r3
+; CHECK-NEXT:    vmov d18, r0, r1
+; CHECK-NEXT:    vbsl q8, q9, q10
+; CHECK-NEXT:    vmov r0, r1, d16
+; CHECK-NEXT:    vmov r2, r3, d17
+; CHECK-NEXT:    pop {r4, lr}
+; CHECK-NEXT:    mov pc, lr
 ; CHECK-NEXT:    .p2align 3
-; CHECK-NEXT:  @ BB#1:
+; CHECK-NEXT:  @ %bb.1:
 ; CHECK-NEXT:  .LCPI23_0:
 ; CHECK-NEXT:    .byte 0 @ 0x0
 ; CHECK-NEXT:    .byte 1 @ 0x1
@@ -539,7 +531,7 @@ define <10 x i8> @vuzp_wide_type(<10 x i8> %tr0, <10 x i8> %tr1,
 %struct.uint8x8x2_t = type { [2 x <8 x i8>] }
 define %struct.uint8x8x2_t @vuzp_extract_subvector(<16 x i8> %t) #0 {
 ; CHECK-LABEL: vuzp_extract_subvector:
-; CHECK:       @ BB#0:
+; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    vmov d17, r2, r3
 ; CHECK-NEXT:    vmov d16, r0, r1
 ; CHECK-NEXT:    vorr d18, d17, d17

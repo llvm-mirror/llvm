@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=x86_64-linux-gnu %s -o - -jump-table-density=40 -verify-machineinstrs | FileCheck %s
+; RUN: llc -mtriple=x86_64-linux-gnu %s -o - -jump-table-density=40 -switch-peel-threshold=101 -verify-machineinstrs | FileCheck %s
 ; RUN: llc -mtriple=x86_64-linux-gnu %s -o - -O0 -jump-table-density=40 -verify-machineinstrs | FileCheck --check-prefix=NOOPT %s
 
 declare void @g(i32)
@@ -318,15 +318,15 @@ return: ret void
 ; NOOPT-LABEL: optimal_jump_table1
 ; NOOPT: testl %edi, %edi
 ; NOOPT: je
-; NOOPT: subl $5, %eax
+; NOOPT: subl $5, [[REG:%e[abcd][xi]]]
 ; NOOPT: je
-; NOOPT: subl $6, %eax
+; NOOPT: subl $6, [[REG]]
 ; NOOPT: je
-; NOOPT: subl $12, %eax
+; NOOPT: subl $12, [[REG]]
 ; NOOPT: je
-; NOOPT: subl $13, %eax
+; NOOPT: subl $13, [[REG]]
 ; NOOPT: je
-; NOOPT: subl $15, %eax
+; NOOPT: subl $15, [[REG]]
 ; NOOPT: je
 }
 
@@ -432,9 +432,9 @@ sw:
 ; Branch directly to the default.
 ; (In optimized builds the switch is removed earlier.)
 ; NOOPT-LABEL: default_only
-; NOOPT: .[[L:[A-Z0-9_]+]]:
+; NOOPT: .LBB[[L:[A-Z0-9_]+]]:
 ; NOOPT-NEXT: retq
-; NOOPT: jmp .[[L]]
+; NOOPT: jmp .LBB[[L]]
 }
 
 

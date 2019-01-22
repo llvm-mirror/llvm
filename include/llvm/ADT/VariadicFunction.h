@@ -1,9 +1,8 @@
 //===--- VariadicFunctions.h - Variadic Functions ---------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -53,7 +52,7 @@ namespace llvm {
 #define LLVM_COMMA_JOIN31(x) LLVM_COMMA_JOIN30(x), x ## 30
 #define LLVM_COMMA_JOIN32(x) LLVM_COMMA_JOIN31(x), x ## 31
 
-/// \brief Class which can simulate a type-safe variadic function.
+/// Class which can simulate a type-safe variadic function.
 ///
 /// The VariadicFunction class template makes it easy to define
 /// type-safe variadic functions where all arguments have the same

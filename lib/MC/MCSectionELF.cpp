@@ -1,9 +1,8 @@
 //===- lib/MC/MCSectionELF.cpp - ELF Code Section Representation ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -116,6 +115,9 @@ void MCSectionELF::PrintSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
   } else if (T.isARM() || T.isThumb()) {
     if (Flags & ELF::SHF_ARM_PURECODE)
       OS << 'y';
+  } else if (Arch == Triple::hexagon) {
+    if (Flags & ELF::SHF_HEX_GPREL)
+      OS << 's';
   }
 
   OS << '"';
@@ -148,6 +150,10 @@ void MCSectionELF::PrintSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
     OS << "0x7000001e";
   else if (Type == ELF::SHT_LLVM_ODRTAB)
     OS << "llvm_odrtab";
+  else if (Type == ELF::SHT_LLVM_LINKER_OPTIONS)
+    OS << "llvm_linker_options";
+  else if (Type == ELF::SHT_LLVM_CALL_GRAPH_PROFILE)
+    OS << "llvm_call_graph_profile";
   else
     report_fatal_error("unsupported type 0x" + Twine::utohexstr(Type) +
                        " for section " + getSectionName());

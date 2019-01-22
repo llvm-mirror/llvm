@@ -1,9 +1,8 @@
 //===- ScoreboardHazardRecognizer.cpp - Scheduler Support -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,12 +14,13 @@
 
 #include "llvm/CodeGen/ScoreboardHazardRecognizer.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include <cassert>
 
 using namespace llvm;
@@ -68,12 +68,12 @@ ScoreboardHazardRecognizer::ScoreboardHazardRecognizer(
 
   // If MaxLookAhead is not set above, then we are not enabled.
   if (!isEnabled())
-    DEBUG(dbgs() << "Disabled scoreboard hazard recognizer\n");
+    LLVM_DEBUG(dbgs() << "Disabled scoreboard hazard recognizer\n");
   else {
     // A nonempty itinerary must have a SchedModel.
     IssueWidth = ItinData->SchedModel.IssueWidth;
-    DEBUG(dbgs() << "Using scoreboard hazard recognizer: Depth = "
-          << ScoreboardDepth << '\n');
+    LLVM_DEBUG(dbgs() << "Using scoreboard hazard recognizer: Depth = "
+                      << ScoreboardDepth << '\n');
   }
 }
 
@@ -155,9 +155,8 @@ ScoreboardHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
       }
 
       if (!freeUnits) {
-        DEBUG(dbgs() << "*** Hazard in cycle +" << StageCycle << ", ");
-        DEBUG(dbgs() << "SU(" << SU->NodeNum << "): ");
-        DEBUG(DAG->dumpNode(SU));
+        LLVM_DEBUG(dbgs() << "*** Hazard in cycle +" << StageCycle << ", ");
+        LLVM_DEBUG(DAG->dumpNode(*SU));
         return Hazard;
       }
     }
@@ -223,8 +222,8 @@ void ScoreboardHazardRecognizer::EmitInstruction(SUnit *SU) {
     cycle += IS->getNextCycles();
   }
 
-  DEBUG(ReservedScoreboard.dump());
-  DEBUG(RequiredScoreboard.dump());
+  LLVM_DEBUG(ReservedScoreboard.dump());
+  LLVM_DEBUG(RequiredScoreboard.dump());
 }
 
 void ScoreboardHazardRecognizer::AdvanceCycle() {

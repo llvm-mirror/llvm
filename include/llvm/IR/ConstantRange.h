@@ -1,9 +1,8 @@
 //===- ConstantRange.h - Represent a range ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -54,7 +53,7 @@ public:
   /// Initialize a range to hold the single specified value.
   ConstantRange(APInt Value);
 
-  /// @brief Initialize a range of values explicitly. This will assert out if
+  /// Initialize a range of values explicitly. This will assert out if
   /// Lower==Upper and Lower != Min or Max value for its type. It will also
   /// assert out if the two APInt's are not the same bit width.
   ConstantRange(APInt Lower, APInt Upper);
@@ -96,9 +95,9 @@ public:
   ///
   /// NB! The returned set does *not* contain **all** possible values of X for
   /// which "X BinOpC Y" does not wrap -- some viable values of X may be
-  /// missing, so you cannot use this to constrain X's range.  E.g. in the last
-  /// example, "(-2) + 1" is both nsw and nuw (so the "X" could be -2), but (-2)
-  /// is not in the set returned.
+  /// missing, so you cannot use this to constrain X's range.  E.g. in the
+  /// fourth example, "(-2) + 1" is both nsw and nuw (so the "X" could be -2),
+  /// but (-2) is not in the set returned.
   ///
   /// Examples:
   ///  typedef OverflowingBinaryOperator OBO;
@@ -109,6 +108,10 @@ public:
   ///  MGNR(Add, [i8 1, 2), OBO::NoUnsignedWrap | OBO::NoSignedWrap)
   ///    == [0,INT_MAX)
   ///  MGNR(Add, [i8 -1, 6), OBO::NoSignedWrap) == [INT_MIN+1, INT_MAX-4)
+  ///  MGNR(Sub, [i8 1, 2), OBO::NoSignedWrap) == [-127, 128)
+  ///  MGNR(Sub, [i8 1, 2), OBO::NoUnsignedWrap) == [1, 0)
+  ///  MGNR(Sub, [i8 1, 2), OBO::NoUnsignedWrap | OBO::NoSignedWrap)
+  ///    == [1,INT_MAX)
   static ConstantRange makeGuaranteedNoWrapRegion(Instruction::BinaryOps BinOp,
                                                   const ConstantRange &Other,
                                                   unsigned NoWrapKind);
@@ -312,6 +315,10 @@ public:
   /// Return a new range representing the possible values resulting from a
   /// logical right shift of a value in this range and a value in \p Other.
   ConstantRange lshr(const ConstantRange &Other) const;
+
+  /// Return a new range representing the possible values resulting from a
+  /// arithmetic right shift of a value in this range and a value in \p Other.
+  ConstantRange ashr(const ConstantRange &Other) const;
 
   /// Return a new range that is the logical not of the current set.
   ConstantRange inverse() const;

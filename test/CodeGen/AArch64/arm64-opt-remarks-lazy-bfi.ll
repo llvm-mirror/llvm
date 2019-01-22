@@ -1,9 +1,11 @@
 ; RUN: llc < %s -mtriple=arm64-apple-ios7.0 -pass-remarks-analysis=asm-printer \
+; RUN:       -verify-machineinstrs \
 ; RUN:       -pass-remarks-with-hotness=1 -asm-verbose=0 \
 ; RUN:       -debug-only=lazy-machine-block-freq,block-freq \
 ; RUN:       -debug-pass=Executions 2>&1 | FileCheck %s -check-prefix=HOTNESS
 
 ; RUN: llc < %s -mtriple=arm64-apple-ios7.0 -pass-remarks-analysis=asm-printer \
+; RUN:       -verify-machineinstrs \
 ; RUN:       -pass-remarks-with-hotness=0 -asm-verbose=0 \
 ; RUN:       -debug-only=lazy-machine-block-freq,block-freq \
 ; RUN:       -debug-pass=Executions 2>&1 | FileCheck %s -check-prefix=NO_HOTNESS
@@ -26,8 +28,10 @@
 ; requested.  (This hard-codes the previous pass to the Assembly Printer,
 ; please adjust accordingly.)
 
-; HOTNESS:      Executing Pass 'Implement the 'patchable-function' attribute'
-; HOTNESS-NEXT:  Freeing Pass 'Implement the 'patchable-function' attribute'
+; HOTNESS:      Freeing Pass 'Machine Outliner'
+; HOTNESS-NEXT:  Executing Pass 'Function Pass Manager'
+; HOTNESS-NEXT: Executing Pass 'Verify generated machine code'
+; HOTNESS-NEXT: Freeing Pass 'Verify generated machine code'
 ; HOTNESS-NEXT: Executing Pass 'Lazy Machine Block Frequency Analysis'
 ; HOTNESS-NEXT: Executing Pass 'Machine Optimization Remark Emitter'
 ; HOTNESS-NEXT: Building MachineBlockFrequencyInfo on the fly
@@ -36,19 +40,17 @@
 ; HOTNESS-NOT: Executing Pass
 ; HOTNESS: block-frequency: empty_func
 ; HOTNESS-NOT: Executing Pass
-; HOTNESS: Executing Pass 'MachineDominator Tree Construction'
-; HOTNESS-NEXT: Executing Pass 'Machine Natural Loop Construction'
-; HOTNESS-NEXT: Executing Pass 'AArch64 Assembly Printer'
+; HOTNESS: Executing Pass 'AArch64 Assembly Printer'
 
 ; HOTNESS: arm64-summary-remarks.ll:5:0: 1 instructions in function (hotness: 33)
 
 
-; NO_HOTNESS:      Executing Pass 'Implement the 'patchable-function' attribute'
-; NO_HOTNESS-NEXT:  Freeing Pass 'Implement the 'patchable-function' attribute'
+; NO_HOTNESS:      Freeing Pass 'Machine Outliner'
+; NO_HOTNESS-NEXT:  Executing Pass 'Function Pass Manager'
+; NO_HOTNESS-NEXT: Executing Pass 'Verify generated machine code'
+; NO_HOTNESS-NEXT: Freeing Pass 'Verify generated machine code'
 ; NO_HOTNESS-NEXT: Executing Pass 'Lazy Machine Block Frequency Analysis'
 ; NO_HOTNESS-NEXT: Executing Pass 'Machine Optimization Remark Emitter'
-; NO_HOTNESS-NEXT: Executing Pass 'MachineDominator Tree Construction'
-; NO_HOTNESS-NEXT: Executing Pass 'Machine Natural Loop Construction'
 ; NO_HOTNESS-NEXT: Executing Pass 'AArch64 Assembly Printer'
 
 ; NO_HOTNESS: arm64-summary-remarks.ll:5:0: 1 instructions in function{{$}}

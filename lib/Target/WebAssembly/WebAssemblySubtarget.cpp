@@ -1,14 +1,13 @@
 //===-- WebAssemblySubtarget.cpp - WebAssembly Subtarget Information ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file implements the WebAssembly-specific subclass of
+/// This file implements the WebAssembly-specific subclass of
 /// TargetSubtarget.
 ///
 //===----------------------------------------------------------------------===//
@@ -40,8 +39,8 @@ WebAssemblySubtarget::WebAssemblySubtarget(const Triple &TT,
                                            const std::string &CPU,
                                            const std::string &FS,
                                            const TargetMachine &TM)
-    : WebAssemblyGenSubtargetInfo(TT, CPU, FS), HasSIMD128(false),
-      HasAtomics(false), CPUString(CPU), TargetTriple(TT), FrameLowering(),
+    : WebAssemblyGenSubtargetInfo(TT, CPU, FS), CPUString(CPU),
+      TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS)), TSInfo(),
       TLInfo(TM, *this) {}
 

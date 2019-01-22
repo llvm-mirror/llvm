@@ -1,14 +1,13 @@
 //===- XCoreDisassembler.cpp - Disassembler for XCore -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file is part of the XCore Disassembler.
+/// This file is part of the XCore Disassembler.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -29,7 +28,7 @@ typedef MCDisassembler::DecodeStatus DecodeStatus;
 
 namespace {
 
-/// \brief A disassembler class for XCore.
+/// A disassembler class for XCore.
 class XCoreDisassembler : public MCDisassembler {
 public:
   XCoreDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx) :

@@ -1,9 +1,8 @@
 //===- WindowsSupport.h - Common Windows Include File -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,6 +40,7 @@
 #include "llvm/Config/config.h" // Get build system configuration settings
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/VersionTuple.h"
 #include <cassert>
 #include <string>
 #include <system_error>
@@ -49,54 +49,29 @@
 // Must be included after windows.h
 #include <wincrypt.h>
 
+namespace llvm {
+
 /// Determines if the program is running on Windows 8 or newer. This
 /// reimplements one of the helpers in the Windows 8.1 SDK, which are intended
 /// to supercede raw calls to GetVersionEx. Old SDKs, Cygwin, and MinGW don't
 /// yet have VersionHelpers.h, so we have our own helper.
-inline bool RunningWindows8OrGreater() {
-  // Windows 8 is version 6.2, service pack 0.
-  OSVERSIONINFOEXW osvi = {};
-  osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-  osvi.dwMajorVersion = 6;
-  osvi.dwMinorVersion = 2;
-  osvi.wServicePackMajor = 0;
+bool RunningWindows8OrGreater();
 
-  DWORDLONG Mask = 0;
-  Mask = VerSetConditionMask(Mask, VER_MAJORVERSION, VER_GREATER_EQUAL);
-  Mask = VerSetConditionMask(Mask, VER_MINORVERSION, VER_GREATER_EQUAL);
-  Mask = VerSetConditionMask(Mask, VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL);
+/// Returns the Windows version as Major.Minor.0.BuildNumber. Uses
+/// RtlGetVersion or GetVersionEx under the hood depending on what is available.
+/// GetVersionEx is deprecated, but this API exposes the build number which can
+/// be useful for working around certain kernel bugs.
+llvm::VersionTuple GetWindowsOSVersion();
 
-  return VerifyVersionInfoW(&osvi, VER_MAJORVERSION | VER_MINORVERSION |
-                                       VER_SERVICEPACKMAJOR,
-                            Mask) != FALSE;
-}
-
-inline bool MakeErrMsg(std::string *ErrMsg, const std::string &prefix) {
-  if (!ErrMsg)
-    return true;
-  char *buffer = NULL;
-  DWORD LastError = GetLastError();
-  DWORD R = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                               FORMAT_MESSAGE_FROM_SYSTEM |
-                               FORMAT_MESSAGE_MAX_WIDTH_MASK,
-                           NULL, LastError, 0, (LPSTR)&buffer, 1, NULL);
-  if (R)
-    *ErrMsg = prefix + ": " + buffer;
-  else
-    *ErrMsg = prefix + ": Unknown error";
-  *ErrMsg += " (0x" + llvm::utohexstr(LastError) + ")";
-
-  LocalFree(buffer);
-  return R != 0;
-}
+bool MakeErrMsg(std::string *ErrMsg, const std::string &prefix);
 
 template <typename HandleTraits>
 class ScopedHandle {
   typedef typename HandleTraits::handle_type handle_type;
   handle_type Handle;
 
-  ScopedHandle(const ScopedHandle &other); // = delete;
-  void operator=(const ScopedHandle &other); // = delete;
+  ScopedHandle(const ScopedHandle &other) = delete;
+  void operator=(const ScopedHandle &other) = delete;
 public:
   ScopedHandle()
     : Handle(HandleTraits::GetInvalid()) {}
@@ -201,7 +176,6 @@ typedef ScopedHandle<RegTraits>          ScopedRegHandle;
 typedef ScopedHandle<FindHandleTraits>   ScopedFindHandle;
 typedef ScopedHandle<JobHandleTraits>    ScopedJobHandle;
 
-namespace llvm {
 template <class T>
 class SmallVectorImpl;
 
@@ -247,18 +221,12 @@ inline FILETIME toFILETIME(TimePoint<> TP) {
   return Time;
 }
 
-namespace path {
-std::error_code widenPath(const Twine &Path8,
-                          SmallVectorImpl<wchar_t> &Path16);
-} // end namespace path
-
 namespace windows {
-std::error_code UTF8ToUTF16(StringRef utf8, SmallVectorImpl<wchar_t> &utf16);
-std::error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
-                            SmallVectorImpl<char> &utf8);
-/// Convert from UTF16 to the current code page used in the system
-std::error_code UTF16ToCurCP(const wchar_t *utf16, size_t utf16_len,
-                             SmallVectorImpl<char> &utf8);
+// Returns command line arguments. Unlike arguments given to main(),
+// this function guarantees that the returned arguments are encoded in
+// UTF-8 regardless of the current code page setting.
+std::error_code GetCommandLineArguments(SmallVectorImpl<const char *> &Args,
+                                        BumpPtrAllocator &Alloc);
 } // end namespace windows
 } // end namespace sys
 } // end namespace llvm.

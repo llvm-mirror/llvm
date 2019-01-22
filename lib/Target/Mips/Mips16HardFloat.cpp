@@ -1,9 +1,8 @@
 //===- Mips16HardFloat.cpp for Mips16 Hard Float --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -74,16 +73,18 @@ static FPReturnVariant whichFPReturnVariant(Type *T) {
     return FRet;
   case Type::DoubleTyID:
     return DRet;
-  case Type::StructTyID:
-    if (T->getStructNumElements() != 2)
+  case Type::StructTyID: {
+    StructType *ST = cast<StructType>(T);
+    if (ST->getNumElements() != 2)
       break;
-    if ((T->getContainedType(0)->isFloatTy()) &&
-        (T->getContainedType(1)->isFloatTy()))
+    if ((ST->getElementType(0)->isFloatTy()) &&
+        (ST->getElementType(1)->isFloatTy()))
       return CFRet;
-    if ((T->getContainedType(0)->isDoubleTy()) &&
-        (T->getContainedType(1)->isDoubleTy()))
+    if ((ST->getElementType(0)->isDoubleTy()) &&
+        (ST->getElementType(1)->isDoubleTy()))
       return CDRet;
     break;
+  }
   default:
     break;
   }
@@ -482,11 +483,11 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
 // remove the use-soft-float attribute
 static void removeUseSoftFloat(Function &F) {
   AttrBuilder B;
-  DEBUG(errs() << "removing -use-soft-float\n");
+  LLVM_DEBUG(errs() << "removing -use-soft-float\n");
   B.addAttribute("use-soft-float", "false");
   F.removeAttributes(AttributeList::FunctionIndex, B);
   if (F.hasFnAttribute("use-soft-float")) {
-    DEBUG(errs() << "still has -use-soft-float\n");
+    LLVM_DEBUG(errs() << "still has -use-soft-float\n");
   }
   F.addAttributes(AttributeList::FunctionIndex, B);
 }
@@ -510,7 +511,7 @@ static void removeUseSoftFloat(Function &F) {
 bool Mips16HardFloat::runOnModule(Module &M) {
   auto &TM = static_cast<const MipsTargetMachine &>(
       getAnalysis<TargetPassConfig>().getTM<TargetMachine>());
-  DEBUG(errs() << "Run on Module Mips16HardFloat\n");
+  LLVM_DEBUG(errs() << "Run on Module Mips16HardFloat\n");
   bool Modified = false;
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
     if (F->hasFnAttribute("nomips16") &&

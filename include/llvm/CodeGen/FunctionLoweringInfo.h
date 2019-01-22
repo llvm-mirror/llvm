@@ -1,9 +1,8 @@
-//===- FunctionLoweringInfo.h - Lower functions from LLVM IR to CodeGen ---===//
+//===- FunctionLoweringInfo.h - Lower functions from LLVM IR ---*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,11 +22,11 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/KnownBits.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <utility>
 #include <vector>
@@ -118,6 +117,17 @@ public:
   /// cross-basic-block values.
   DenseMap<const Value *, unsigned> ValueMap;
 
+  /// VirtReg2Value map is needed by the Divergence Analysis driven
+  /// instruction selection. It is reverted ValueMap. It is computed
+  /// in lazy style - on demand. It is used to get the Value corresponding
+  /// to the live in virtual register and is called from the
+  /// TargetLowerinInfo::isSDNodeSourceOfDivergence.
+  DenseMap<unsigned, const Value*> VirtReg2Value;
+
+  /// This method is called from TargetLowerinInfo::isSDNodeSourceOfDivergence
+  /// to get the Value corresponding to the live-in virtual register.
+  const Value * getValueFromVirtualReg(unsigned Vreg);
+
   /// Track virtual registers created for exception pointers.
   DenseMap<const Value *, unsigned> CatchPadExceptionPointers;
 
@@ -166,6 +176,8 @@ public:
 
   /// RegFixups - Registers which need to be replaced after isel is done.
   DenseMap<unsigned, unsigned> RegFixups;
+
+  DenseSet<unsigned> RegsWithFixups;
 
   /// StatepointStackSlots - A list of temporary stack slots (frame indices)
   /// used to spill values at a statepoint.  We store them here to enable
@@ -233,6 +245,7 @@ public:
       return 0;
     unsigned &R = ValueMap[V];
     assert(R == 0 && "Already initialized this value register!");
+    assert(VirtReg2Value.empty());
     return R = CreateRegs(V->getType());
   }
 

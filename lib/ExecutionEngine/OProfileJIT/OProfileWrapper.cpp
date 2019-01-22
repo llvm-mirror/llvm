@@ -1,9 +1,8 @@
 //===-- OProfileWrapper.cpp - OProfile JIT API Wrapper implementation -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -64,15 +63,16 @@ bool OProfileWrapper::initialize() {
 
   // If the oprofile daemon is not running, don't load the opagent library
   if (!isOProfileRunning()) {
-    DEBUG(dbgs() << "OProfile daemon is not detected.\n");
+    LLVM_DEBUG(dbgs() << "OProfile daemon is not detected.\n");
     return false;
   }
 
   std::string error;
   if(!DynamicLibrary::LoadLibraryPermanently("libopagent.so", &error)) {
-    DEBUG(dbgs()
-            << "OProfile connector library libopagent.so could not be loaded: "
-            << error << "\n");
+    LLVM_DEBUG(
+        dbgs()
+        << "OProfile connector library libopagent.so could not be loaded: "
+        << error << "\n");
   }
 
   // Get the addresses of the opagent functions

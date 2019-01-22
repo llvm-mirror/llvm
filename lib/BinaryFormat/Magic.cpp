@@ -1,9 +1,8 @@
 //===- llvm/BinaryFormat/Magic.cpp - File magic identification --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,6 +13,7 @@
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <unistd.h>
@@ -30,7 +30,7 @@ static bool startswith(StringRef Magic, const char (&S)[N]) {
   return Magic.startswith(StringRef(S, N - 1));
 }
 
-/// @brief Identify the magic in magic.
+/// Identify the magic in magic.
 file_magic llvm::identify_magic(StringRef Magic) {
   if (Magic.size() < 4)
     return file_magic::unknown;
@@ -181,7 +181,7 @@ file_magic llvm::identify_magic(StringRef Magic) {
       return file_magic::coff_object;
     break;
 
-  case 'M': // Possible MS-DOS stub on Windows PE file
+  case 'M': // Possible MS-DOS stub on Windows PE file or MSF/PDB file.
     if (startswith(Magic, "MZ") && Magic.size() >= 0x3c + 4) {
       uint32_t off = read32le(Magic.data() + 0x3c);
       // PE/COFF file, either EXE or DLL.
@@ -189,6 +189,8 @@ file_magic llvm::identify_magic(StringRef Magic) {
               StringRef(COFF::PEMagic, sizeof(COFF::PEMagic))))
         return file_magic::pecoff_executable;
     }
+    if (Magic.startswith("Microsoft C/C++ MSF 7.00\r\n"))
+      return file_magic::pdb;
     break;
 
   case 0x64: // x86-64 or ARM64 Windows.
@@ -203,15 +205,12 @@ file_magic llvm::identify_magic(StringRef Magic) {
 }
 
 std::error_code llvm::identify_magic(const Twine &Path, file_magic &Result) {
-  int FD;
-  if (std::error_code EC = openFileForRead(Path, FD))
-    return EC;
+  auto FileOrError = MemoryBuffer::getFile(Path, -1LL, false);
+  if (!FileOrError)
+    return FileOrError.getError();
 
-  char Buffer[32];
-  int Length = read(FD, Buffer, sizeof(Buffer));
-  if (close(FD) != 0 || Length < 0)
-    return std::error_code(errno, std::generic_category());
+  std::unique_ptr<MemoryBuffer> FileBuffer = std::move(*FileOrError);
+  Result = identify_magic(FileBuffer->getBuffer());
 
-  Result = identify_magic(StringRef(Buffer, Length));
   return std::error_code();
 }

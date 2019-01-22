@@ -1,16 +1,15 @@
 //===- unittests/TimerTest.cpp - Timer tests ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Timer.h"
 #include "gtest/gtest.h"
 
-#if LLVM_ON_WIN32
+#if _WIN32
 #include <windows.h>
 #else
 #include <time.h>
@@ -22,7 +21,7 @@ namespace {
 
 // FIXME: Put this somewhere in Support, it's also used in LockFileManager.
 void SleepMS() {
-#if LLVM_ON_WIN32
+#if _WIN32
   Sleep(1);
 #else
   struct timespec Interval;

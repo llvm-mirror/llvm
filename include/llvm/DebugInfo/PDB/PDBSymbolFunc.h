@@ -1,15 +1,15 @@
 //===- PDBSymbolFunc.h - class representing a function instance -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_DEBUGINFO_PDB_PDBSYMBOLFUNC_H
 #define LLVM_DEBUGINFO_PDB_PDBSYMBOLFUNC_H
 
+#include "IPDBLineNumber.h"
 #include "PDBSymbol.h"
 #include "PDBSymbolTypeFunctionSig.h"
 #include "PDBTypes.h"
@@ -21,24 +21,22 @@ class raw_ostream;
 namespace pdb {
 
 class PDBSymbolFunc : public PDBSymbol {
+  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Function)
 public:
-  PDBSymbolFunc(const IPDBSession &PDBSession,
-                std::unique_ptr<IPDBRawSymbol> FuncSymbol);
-
   void dump(PDBSymDumper &Dumper) const override;
 
   bool isDestructor() const;
 
   std::unique_ptr<IPDBEnumChildren<PDBSymbolData>> getArguments() const;
 
-  DECLARE_PDB_SYMBOL_CONCRETE_TYPE(PDB_SymType::Function)
-
   FORWARD_SYMBOL_METHOD(getAccess)
   FORWARD_SYMBOL_METHOD(getAddressOffset)
   FORWARD_SYMBOL_METHOD(getAddressSection)
   FORWARD_SYMBOL_ID_METHOD(getClassParent)
   FORWARD_SYMBOL_METHOD(isCompilerGenerated)
+  FORWARD_SYMBOL_METHOD(isConstructorVirtualBase)
   FORWARD_SYMBOL_METHOD(isConstType)
+  FORWARD_SYMBOL_METHOD(isCxxReturnUdt)
   FORWARD_SYMBOL_METHOD(hasCustomCallingConvention)
   FORWARD_SYMBOL_METHOD(hasFarReturn)
   FORWARD_SYMBOL_METHOD(hasAlloca)
@@ -76,6 +74,9 @@ public:
   FORWARD_SYMBOL_METHOD(getVirtualAddress)
   FORWARD_SYMBOL_METHOD(getVirtualBaseOffset)
   FORWARD_SYMBOL_METHOD(isVolatileType)
+
+  std::unique_ptr<IPDBEnumLineNumbers> getLineNumbers() const;
+  uint32_t getCompilandId() const;
 };
 
 } // namespace llvm

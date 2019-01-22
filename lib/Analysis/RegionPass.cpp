@@ -1,9 +1,8 @@
 //===- RegionPass.cpp - Region Pass and Region Pass Manager ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 #include "llvm/Analysis/RegionPass.h"
-#include "llvm/Analysis/RegionIterator.h"
 #include "llvm/IR/OptBisect.h"
+#include "llvm/IR/PassTimingInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -159,12 +158,9 @@ bool RGPassManager::runOnFunction(Function &F) {
   }
 
   // Print the region tree after all pass.
-  DEBUG(
-    dbgs() << "\nRegion tree of function " << F.getName()
-           << " after all region Pass:\n";
-    RI->dump();
-    dbgs() << "\n";
-    );
+  LLVM_DEBUG(dbgs() << "\nRegion tree of function " << F.getName()
+                    << " after all region Pass:\n";
+             RI->dump(); dbgs() << "\n";);
 
   return Changed;
 }
@@ -284,14 +280,14 @@ Pass *RegionPass::createPrinterPass(raw_ostream &O,
 
 bool RegionPass::skipRegion(Region &R) const {
   Function &F = *R.getEntry()->getParent();
-  if (!F.getContext().getOptBisect().shouldRunPass(this, R))
+  if (!F.getContext().getOptPassGate().shouldRunPass(this, R))
     return true;
 
   if (F.hasFnAttribute(Attribute::OptimizeNone)) {
     // Report this only once per function.
     if (R.getEntry() == &F.getEntryBlock())
-      DEBUG(dbgs() << "Skipping pass '" << getPassName()
-            << "' on function " << F.getName() << "\n");
+      LLVM_DEBUG(dbgs() << "Skipping pass '" << getPassName()
+                        << "' on function " << F.getName() << "\n");
     return true;
   }
   return false;

@@ -1,9 +1,8 @@
 //===- MCMachOStreamer.cpp - MachO Streamer -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,6 +23,7 @@
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectStreamer.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
@@ -63,9 +63,11 @@ private:
 
 public:
   MCMachOStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> MAB,
-                  raw_pwrite_stream &OS, std::unique_ptr<MCCodeEmitter> Emitter,
+                  std::unique_ptr<MCObjectWriter> OW,
+                  std::unique_ptr<MCCodeEmitter> Emitter,
                   bool DWARFMustBeAtTheEnd, bool label)
-      : MCObjectStreamer(Context, std::move(MAB), OS, std::move(Emitter)),
+      : MCObjectStreamer(Context, std::move(MAB), std::move(OW),
+                         std::move(Emitter)),
         LabelSections(label), DWARFMustBeAtTheEnd(DWARFMustBeAtTheEnd),
         CreatedADWARFSection(false) {}
 
@@ -86,8 +88,10 @@ public:
   void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
   void EmitLinkerOptions(ArrayRef<std::string> Options) override;
   void EmitDataRegion(MCDataRegionType Kind) override;
-  void EmitVersionMin(MCVersionMinType Kind, unsigned Major,
-                      unsigned Minor, unsigned Update) override;
+  void EmitVersionMin(MCVersionMinType Kind, unsigned Major, unsigned Minor,
+                      unsigned Update, VersionTuple SDKVersion) override;
+  void EmitBuildVersion(unsigned Platform, unsigned Major, unsigned Minor,
+                        unsigned Update, VersionTuple SDKVersion) override;
   void EmitThumbFunc(MCSymbol *Func) override;
   bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
   void EmitSymbolDesc(MCSymbol *Symbol, unsigned DescValue) override;
@@ -97,7 +101,8 @@ public:
   void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                              unsigned ByteAlignment) override;
   void EmitZerofill(MCSection *Section, MCSymbol *Symbol = nullptr,
-                    uint64_t Size = 0, unsigned ByteAlignment = 0) override;
+                    uint64_t Size = 0, unsigned ByteAlignment = 0,
+                    SMLoc Loc = SMLoc()) override;
   void EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol, uint64_t Size,
                       unsigned ByteAlignment = 0) override;
 
@@ -264,8 +269,16 @@ void MCMachOStreamer::EmitDataRegion(MCDataRegionType Kind) {
 }
 
 void MCMachOStreamer::EmitVersionMin(MCVersionMinType Kind, unsigned Major,
-                                     unsigned Minor, unsigned Update) {
-  getAssembler().setVersionMinInfo(Kind, Major, Minor, Update);
+                                     unsigned Minor, unsigned Update,
+                                     VersionTuple SDKVersion) {
+  getAssembler().setVersionMin(Kind, Major, Minor, Update, SDKVersion);
+}
+
+void MCMachOStreamer::EmitBuildVersion(unsigned Platform, unsigned Major,
+                                       unsigned Minor, unsigned Update,
+                                       VersionTuple SDKVersion) {
+  getAssembler().setBuildVersion((MachO::PlatformType)Platform, Major, Minor,
+                                 Update, SDKVersion);
 }
 
 void MCMachOStreamer::EmitThumbFunc(MCSymbol *Symbol) {
@@ -402,30 +415,29 @@ void MCMachOStreamer::EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
 }
 
 void MCMachOStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
-                                   uint64_t Size, unsigned ByteAlignment) {
-  getAssembler().registerSection(*Section);
+                                   uint64_t Size, unsigned ByteAlignment,
+                                   SMLoc Loc) {
+  // On darwin all virtual sections have zerofill type. Disallow the usage of
+  // .zerofill in non-virtual functions. If something similar is needed, use
+  // .space or .zero.
+  if (!Section->isVirtualSection()) {
+    getContext().reportError(
+        Loc, "The usage of .zerofill is restricted to sections of "
+             "ZEROFILL type. Use .zero or .space instead.");
+    return; // Early returning here shouldn't harm. EmitZeros should work on any
+            // section.
+  }
+
+  PushSection();
+  SwitchSection(Section);
 
   // The symbol may not be present, which only creates the section.
-  if (!Symbol)
-    return;
-
-  // On darwin all virtual sections have zerofill type.
-  assert(Section->isVirtualSection() && "Section does not have zerofill type!");
-
-  assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
-
-  getAssembler().registerSymbol(*Symbol);
-
-  // Emit an align fragment if necessary.
-  if (ByteAlignment != 1)
-    new MCAlignFragment(ByteAlignment, 0, 0, ByteAlignment, Section);
-
-  MCFragment *F = new MCFillFragment(0, Size, Section);
-  Symbol->setFragment(F);
-
-  // Update the maximum alignment on the zero fill section if necessary.
-  if (ByteAlignment > Section->getAlignment())
-    Section->setAlignment(ByteAlignment);
+  if (Symbol) {
+    EmitValueToAlignment(ByteAlignment, 0, 1, 0);
+    EmitLabel(Symbol);
+    EmitZeros(Size);
+  }
+  PopSection();
 }
 
 // This should always be called with the thread local bss section.  Like the
@@ -449,6 +461,7 @@ void MCMachOStreamer::EmitInstToData(const MCInst &Inst,
     Fixup.setOffset(Fixup.getOffset() + DF->getContents().size());
     DF->getFixups().push_back(Fixup);
   }
+  DF->setHasInstructions(STI);
   DF->getContents().append(Code.begin(), Code.end());
 }
 
@@ -487,33 +500,15 @@ void MCMachOStreamer::FinishImpl() {
 
 MCStreamer *llvm::createMachOStreamer(MCContext &Context,
                                       std::unique_ptr<MCAsmBackend> &&MAB,
-                                      raw_pwrite_stream &OS,
+                                      std::unique_ptr<MCObjectWriter> &&OW,
                                       std::unique_ptr<MCCodeEmitter> &&CE,
                                       bool RelaxAll, bool DWARFMustBeAtTheEnd,
                                       bool LabelSections) {
   MCMachOStreamer *S =
-      new MCMachOStreamer(Context, std::move(MAB), OS, std::move(CE),
+      new MCMachOStreamer(Context, std::move(MAB), std::move(OW), std::move(CE),
                           DWARFMustBeAtTheEnd, LabelSections);
-  const Triple &TT = Context.getObjectFileInfo()->getTargetTriple();
-  if (TT.isOSDarwin()) {
-    unsigned Major, Minor, Update;
-    TT.getOSVersion(Major, Minor, Update);
-    // If there is a version specified, Major will be non-zero.
-    if (Major) {
-      MCVersionMinType VersionType;
-      if (TT.isWatchOS())
-        VersionType = MCVM_WatchOSVersionMin;
-      else if (TT.isTvOS())
-        VersionType = MCVM_TvOSVersionMin;
-      else if (TT.isMacOSX())
-        VersionType = MCVM_OSXVersionMin;
-      else {
-        assert(TT.isiOS() && "Must only be iOS platform left");
-        VersionType = MCVM_IOSVersionMin;
-      }
-      S->EmitVersionMin(VersionType, Major, Minor, Update);
-    }
-  }
+  const Triple &Target = Context.getObjectFileInfo()->getTargetTriple();
+  S->EmitVersionForTarget(Target, Context.getObjectFileInfo()->getSDKVersion());
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   return S;

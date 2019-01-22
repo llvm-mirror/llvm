@@ -1,9 +1,8 @@
 //===- StraightLineStrengthReduce.cpp - -----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -61,6 +60,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -80,7 +80,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -640,12 +639,12 @@ void StraightLineStrengthReduce::rewriteCandidateWithBasis(
   Value *Reduced = nullptr; // equivalent to but weaker than C.Ins
   switch (C.CandidateKind) {
   case Candidate::Add:
-  case Candidate::Mul:
+  case Candidate::Mul: {
     // C = Basis + Bump
-    if (BinaryOperator::isNeg(Bump)) {
+    Value *NegBump;
+    if (match(Bump, m_Neg(m_Value(NegBump)))) {
       // If Bump is a neg instruction, emit C = Basis - (-Bump).
-      Reduced =
-          Builder.CreateSub(Basis.Ins, BinaryOperator::getNegArgument(Bump));
+      Reduced = Builder.CreateSub(Basis.Ins, NegBump);
       // We only use the negative argument of Bump, and Bump itself may be
       // trivially dead.
       RecursivelyDeleteTriviallyDeadInstructions(Bump);
@@ -662,6 +661,7 @@ void StraightLineStrengthReduce::rewriteCandidateWithBasis(
       Reduced = Builder.CreateAdd(Basis.Ins, Bump);
     }
     break;
+  }
   case Candidate::GEP:
     {
       Type *IntPtrTy = DL->getIntPtrType(C.Ins->getType());

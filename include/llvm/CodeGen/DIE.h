@@ -1,9 +1,8 @@
 //===- lib/CodeGen/DIE.h - DWARF Info Entries -------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -136,7 +135,7 @@ class DIEAbbrevSet {
   /// The bump allocator to use when creating DIEAbbrev objects in the uniqued
   /// storage container.
   BumpPtrAllocator &Alloc;
-  /// \brief FoldingSet that uniques the abbreviations.
+  /// FoldingSet that uniques the abbreviations.
   FoldingSet<DIEAbbrev> AbbreviationsSet;
   /// A list of all the unique abbreviations in use.
   std::vector<DIEAbbrev *> Abbreviations;
@@ -190,7 +189,7 @@ public:
   uint64_t getValue() const { return Integer; }
   void setValue(uint64_t Val) { Integer = Val; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
   unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
@@ -800,7 +799,7 @@ class DIEUnit {
   const uint16_t Version; /// The Dwarf version number for this unit.
   const uint8_t AddrSize; /// The size in bytes of an address for this unit.
 protected:
-  ~DIEUnit() = default;
+  virtual ~DIEUnit() = default;
 
 public:
   DIEUnit(uint16_t Version, uint8_t AddrSize, dwarf::Tag UnitTag);
@@ -868,7 +867,7 @@ public:
     return dwarf::DW_FORM_block;
   }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
   unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
@@ -899,7 +898,7 @@ public:
     return dwarf::DW_FORM_block;
   }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
   unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;

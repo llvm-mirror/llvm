@@ -1,14 +1,13 @@
 ; RUN: opt < %s -wasm-lower-em-ehsjlj -S | FileCheck %s
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 %struct.__jmp_buf_tag = type { [6 x i32], i32, [32 x i32] }
 
 @global_var = hidden global i32 0, align 4
-; CHECK-DAG: @[[__THREW__:__THREW__.*]] = global i32 0
-; CHECK-DAG: @[[THREWVALUE:__threwValue.*]] = global i32 0
-; CHECK-DAG: @[[TEMPRET0:__tempRet0.*]] = global i32 0
+; CHECK-DAG: __THREW__ = external global i32
+; CHECK-DAG: __threwValue = external global i32
 
 ; Test a simple setjmp - longjmp sequence
 define hidden void @setjmp_longjmp() {
@@ -28,18 +27,18 @@ entry:
 ; CHECK-NEXT: %[[BUF:.*]] = alloca [1 x %struct.__jmp_buf_tag]
 ; CHECK-NEXT: %[[ARRAYDECAY:.*]] = getelementptr inbounds [1 x %struct.__jmp_buf_tag], [1 x %struct.__jmp_buf_tag]* %[[BUF]], i32 0, i32 0
 ; CHECK-NEXT: %[[SETJMP_TABLE1:.*]] = call i32* @saveSetjmp(%struct.__jmp_buf_tag* %[[ARRAYDECAY]], i32 1, i32* %[[SETJMP_TABLE]], i32 %[[SETJMP_TABLE_SIZE]])
-; CHECK-NEXT: %[[SETJMP_TABLE_SIZE1:.*]] = load i32, i32* @[[TEMPRET0]]
+; CHECK-NEXT: %[[SETJMP_TABLE_SIZE1:.*]] = call i32 @getTempRet0()
 ; CHECK-NEXT: br label %entry.split
 
 ; CHECK: entry.split:
 ; CHECK-NEXT: phi i32 [ 0, %entry ], [ %[[LONGJMP_RESULT:.*]], %if.end ]
 ; CHECK-NEXT: %[[ARRAYDECAY1:.*]] = getelementptr inbounds [1 x %struct.__jmp_buf_tag], [1 x %struct.__jmp_buf_tag]* %[[BUF]], i32 0, i32 0
-; CHECK-NEXT: store i32 0, i32* @[[__THREW__]]
+; CHECK-NEXT: store i32 0, i32* @__THREW__
 ; CHECK-NEXT: call void @"__invoke_void_%struct.__jmp_buf_tag*_i32"(void (%struct.__jmp_buf_tag*, i32)* @emscripten_longjmp_jmpbuf, %struct.__jmp_buf_tag* %[[ARRAYDECAY1]], i32 1)
-; CHECK-NEXT: %[[__THREW__VAL:.*]] = load i32, i32* @[[__THREW__]]
-; CHECK-NEXT: store i32 0, i32* @[[__THREW__]]
+; CHECK-NEXT: %[[__THREW__VAL:.*]] = load i32, i32* @__THREW__
+; CHECK-NEXT: store i32 0, i32* @__THREW__
 ; CHECK-NEXT: %[[CMP0:.*]] = icmp ne i32 %__THREW__.val, 0
-; CHECK-NEXT: %[[THREWVALUE_VAL:.*]] = load i32, i32* @[[THREWVALUE]]
+; CHECK-NEXT: %[[THREWVALUE_VAL:.*]] = load i32, i32* @__threwValue
 ; CHECK-NEXT: %[[CMP1:.*]] = icmp ne i32 %[[THREWVALUE_VAL]], 0
 ; CHECK-NEXT: %[[CMP:.*]] = and i1 %[[CMP0]], %[[CMP1]]
 ; CHECK-NEXT: br i1 %[[CMP]], label %if.then1, label %if.else1
@@ -59,7 +58,7 @@ entry:
 
 ; CHECK: if.end:
 ; CHECK-NEXT: %[[LABEL_PHI:.*]] = phi i32 [ %[[LABEL:.*]], %if.end2 ], [ -1, %if.else1 ]
-; CHECK-NEXT: %[[LONGJMP_RESULT]] = load i32, i32* @[[TEMPRET0]]
+; CHECK-NEXT: %[[LONGJMP_RESULT]] = call i32 @getTempRet0()
 ; CHECK-NEXT: switch i32 %[[LABEL_PHI]], label %entry.split.split [
 ; CHECK-NEXT:   i32 1, label %entry.split
 ; CHECK-NEXT: ]
@@ -69,7 +68,7 @@ entry:
 ; CHECK-NEXT: unreachable
 
 ; CHECK: if.end2:
-; CHECK-NEXT: store i32 %[[THREWVALUE_VAL]], i32* @[[TEMPRET0]]
+; CHECK-NEXT: call void  @setTempRet0(i32 %[[THREWVALUE_VAL]])
 ; CHECK-NEXT: br label %if.end
 }
 
@@ -105,12 +104,12 @@ entry:
           to label %try.cont unwind label %lpad
 
 ; CHECK: entry.split:
-; CHECK: store i32 0, i32* @[[__THREW__]]
+; CHECK: store i32 0, i32* @__THREW__
 ; CHECK-NEXT: call void @__invoke_void(void ()* @foo)
-; CHECK-NEXT: %[[__THREW__VAL:.*]] = load i32, i32* @[[__THREW__]]
-; CHECK-NEXT: store i32 0, i32* @[[__THREW__]]
+; CHECK-NEXT: %[[__THREW__VAL:.*]] = load i32, i32* @__THREW__
+; CHECK-NEXT: store i32 0, i32* @__THREW__
 ; CHECK-NEXT: %[[CMP0:.*]] = icmp ne i32 %[[__THREW__VAL]], 0
-; CHECK-NEXT: %[[THREWVALUE_VAL:.*]] = load i32, i32* @[[THREWVALUE]]
+; CHECK-NEXT: %[[THREWVALUE_VAL:.*]] = load i32, i32* @__threwValue
 ; CHECK-NEXT: %[[CMP1:.*]] = icmp ne i32 %[[THREWVALUE_VAL]], 0
 ; CHECK-NEXT: %[[CMP:.*]] = and i1 %[[CMP0]], %[[CMP1]]
 ; CHECK-NEXT: br i1 %[[CMP]], label %if.then1, label %if.else1
@@ -152,7 +151,7 @@ if.then:                                          ; preds = %entry
 ; CHECK: if.then:
 ; CHECK: %[[VAR0:.*]] = load i32, i32* @global_var, align 4
 ; CHECK: %[[SETJMP_TABLE1:.*]] = call i32* @saveSetjmp(
-; CHECK-NEXT: %[[SETJMP_TABLE_SIZE1:.*]] = load i32, i32* @[[TEMPRET0]]
+; CHECK-NEXT: %[[SETJMP_TABLE_SIZE1:.*]] = call i32 @getTempRet0()
 
 ; CHECK: if.then.split:
 ; CHECK: %[[VAR1:.*]] = phi i32 [ %[[VAR0]], %if.then ], [ %[[VAR2:.*]], %if.end3 ]
@@ -201,6 +200,8 @@ declare i8* @malloc(i32)
 declare void @free(i8*)
 
 ; JS glue functions and invoke wrappers declaration
+; CHECK-DAG: declare i32 @getTempRet0()
+; CHECK-DAG: declare void @setTempRet0(i32)
 ; CHECK-DAG: declare i32* @saveSetjmp(%struct.__jmp_buf_tag*, i32, i32*, i32)
 ; CHECK-DAG: declare i32 @testSetjmp(i32, i32*, i32)
 ; CHECK-DAG: declare void @emscripten_longjmp_jmpbuf(%struct.__jmp_buf_tag*, i32)

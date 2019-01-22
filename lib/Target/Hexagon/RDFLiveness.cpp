@@ -1,9 +1,8 @@
 //===- RDFLiveness.cpp ----------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -34,13 +33,13 @@
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -62,7 +61,7 @@ namespace rdf {
   raw_ostream &operator<< (raw_ostream &OS, const Print<Liveness::RefMap> &P) {
     OS << '{';
     for (auto &I : P.Obj) {
-      OS << ' ' << PrintReg(I.first, &P.G.getTRI()) << '{';
+      OS << ' ' << printReg(I.first, &P.G.getTRI()) << '{';
       for (auto J = I.second.begin(), E = I.second.end(); J != E; ) {
         OS << Print<NodeId>(J->first, P.G) << PrintLaneMaskOpt(J->second);
         if (++J != E)
@@ -207,7 +206,7 @@ NodeList Liveness::getAllReachingDefs(RegisterRef RefRR,
   };
 
   std::vector<NodeId> Tmp(Owners.begin(), Owners.end());
-  std::sort(Tmp.begin(), Tmp.end(), Less);
+  llvm::sort(Tmp, Less);
 
   // The vector is a list of instructions, so that defs coming from
   // the same instruction don't need to be artificially ordered.
@@ -628,7 +627,7 @@ void Liveness::computePhiInfo() {
 
         // Collect the set PropUp of uses that are reached by the current
         // phi PA, and are not covered by any intervening def between the
-        // currently visited use UA and the the upward phi P.
+        // currently visited use UA and the upward phi P.
 
         if (MidDefs.hasCoverOf(UR))
           continue;
@@ -813,8 +812,8 @@ void Liveness::computeLiveIns() {
       std::vector<RegisterRef> LV;
       for (auto I = B.livein_begin(), E = B.livein_end(); I != E; ++I)
         LV.push_back(RegisterRef(I->PhysReg, I->LaneMask));
-      std::sort(LV.begin(), LV.end());
-      dbgs() << "BB#" << B.getNumber() << "\t rec = {";
+      llvm::sort(LV);
+      dbgs() << printMBBReference(B) << "\t rec = {";
       for (auto I : LV)
         dbgs() << ' ' << Print<RegisterRef>(I, DFG);
       dbgs() << " }\n";
@@ -824,7 +823,7 @@ void Liveness::computeLiveIns() {
       const RegisterAggr &LG = LiveMap[&B];
       for (auto I = LG.rr_begin(), E = LG.rr_end(); I != E; ++I)
         LV.push_back(*I);
-      std::sort(LV.begin(), LV.end());
+      llvm::sort(LV);
       dbgs() << "\tcomp = {";
       for (auto I : LV)
         dbgs() << ' ' << Print<RegisterRef>(I, DFG);
@@ -880,7 +879,7 @@ void Liveness::resetKills(MachineBasicBlock *B) {
 
   for (auto I = B->rbegin(), E = B->rend(); I != E; ++I) {
     MachineInstr *MI = &*I;
-    if (MI->isDebugValue())
+    if (MI->isDebugInstr())
       continue;
 
     MI->clearKillInfo();
@@ -963,7 +962,7 @@ void Liveness::traverse(MachineBasicBlock *B, RefMap &LiveIn) {
   }
 
   if (Trace) {
-    dbgs() << "\n-- BB#" << B->getNumber() << ": " << __func__
+    dbgs() << "\n-- " << printMBBReference(*B) << ": " << __func__
            << " after recursion into: {";
     for (auto I : *N)
       dbgs() << ' ' << I->getBlock()->getNumber();

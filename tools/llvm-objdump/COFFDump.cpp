@@ -1,14 +1,13 @@
 //===-- COFFDump.cpp - COFF-specific dumper ---------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file implements the COFF-specific dumper for llvm-objdump.
+/// This file implements the COFF-specific dumper for llvm-objdump.
 /// It outputs the Win64 EH data structures as plain text.
 /// The encoding of the unwind codes is described in MSDN:
 /// http://msdn.microsoft.com/en-us/library/ck9asaa9.aspx
@@ -16,16 +15,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-objdump.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/COFFImportFile.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/Win64EH.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
-#include <cstring>
-#include <system_error>
 
 using namespace llvm;
 using namespace object;
@@ -457,7 +454,7 @@ static bool getPDataSection(const COFFObjectFile *Obj,
       Rels.push_back(Reloc);
 
     // Sort relocations by address.
-    std::sort(Rels.begin(), Rels.end(), RelocAddressLess);
+    llvm::sort(Rels, isRelocAddressLess);
 
     ArrayRef<uint8_t> Contents;
     error(Obj->getSectionContents(Pdata, Contents));
@@ -469,6 +466,19 @@ static bool getPDataSection(const COFFObjectFile *Obj,
     return true;
   }
   return false;
+}
+
+std::error_code
+llvm::getCOFFRelocationValueString(const COFFObjectFile *Obj,
+                                   const RelocationRef &Rel,
+                                   SmallVectorImpl<char> &Result) {
+  symbol_iterator SymI = Rel.getSymbol();
+  Expected<StringRef> SymNameOrErr = SymI->getName();
+  if (!SymNameOrErr)
+    return errorToErrorCode(SymNameOrErr.takeError());
+  StringRef SymName = *SymNameOrErr;
+  Result.append(SymName.begin(), SymName.end());
+  return std::error_code();
 }
 
 static void printWin64EHUnwindInfo(const Win64EH::UnwindInfo *UI) {
@@ -582,8 +592,9 @@ static void printRuntimeFunctionRels(const COFFObjectFile *Obj,
 
 void llvm::printCOFFUnwindInfo(const COFFObjectFile *Obj) {
   if (Obj->getMachine() != COFF::IMAGE_FILE_MACHINE_AMD64) {
-    errs() << "Unsupported image machine type "
-              "(currently only AMD64 is supported).\n";
+    WithColor::error(errs(), "llvm-objdump")
+        << "unsupported image machine type "
+           "(currently only AMD64 is supported).\n";
     return;
   }
 
@@ -650,10 +661,26 @@ void llvm::printCOFFSymbolTable(const COFFObjectFile *coff) {
            << "(sec " << format("%2d", int(Symbol->getSectionNumber())) << ")"
            << "(fl 0x00)" // Flag bits, which COFF doesn't have.
            << "(ty " << format("%3x", unsigned(Symbol->getType())) << ")"
-           << "(scl " << format("%3x", unsigned(Symbol->getStorageClass())) << ") "
+           << "(scl " << format("%3x", unsigned(Symbol->getStorageClass()))
+           << ") "
            << "(nx " << unsigned(Symbol->getNumberOfAuxSymbols()) << ") "
            << "0x" << format("%08x", unsigned(Symbol->getValue())) << " "
-           << Name << "\n";
+           << Name;
+    if (Demangle && Name.startswith("?")) {
+      char *DemangledSymbol = nullptr;
+      size_t Size = 0;
+      int Status = -1;
+      DemangledSymbol =
+          microsoftDemangle(Name.data(), DemangledSymbol, &Size, &Status);
+
+      if (Status == 0 && DemangledSymbol) {
+        outs() << " (" << StringRef(DemangledSymbol) << ")";
+        std::free(DemangledSymbol);
+      } else {
+        outs() << " (invalid mangled name)";
+      }
+    }
+    outs() << "\n";
 
     for (unsigned AI = 0, AE = Symbol->getNumberOfAuxSymbols(); AI < AE; ++AI, ++SI) {
       if (Symbol->isSectionDefinition()) {

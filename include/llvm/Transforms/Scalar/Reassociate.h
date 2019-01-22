@@ -1,9 +1,8 @@
 //===- Reassociate.h - Reassociate binary expressions -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,6 +28,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ValueHandle.h"
+#include <deque>
 
 namespace llvm {
 
@@ -54,7 +54,7 @@ inline bool operator<(const ValueEntry &LHS, const ValueEntry &RHS) {
   return LHS.Rank > RHS.Rank; // Sort so that highest rank goes to start.
 }
 
-/// \brief Utility class representing a base and exponent pair which form one
+/// Utility class representing a base and exponent pair which form one
 /// factor of some product.
 struct Factor {
   Value *Base;
@@ -69,9 +69,21 @@ class XorOpnd;
 
 /// Reassociate commutative expressions.
 class ReassociatePass : public PassInfoMixin<ReassociatePass> {
+public:
+  using OrderedSet =
+      SetVector<AssertingVH<Instruction>, std::deque<AssertingVH<Instruction>>>;
+
+protected:
   DenseMap<BasicBlock *, unsigned> RankMap;
   DenseMap<AssertingVH<Value>, unsigned> ValueRankMap;
-  SetVector<AssertingVH<Instruction>> RedoInsts;
+  OrderedSet RedoInsts;
+
+  // Arbitrary, but prevents quadratic behavior.
+  static const unsigned GlobalReassociateLimit = 10;
+  static const unsigned NumBinaryOps =
+      Instruction::BinaryOpsEnd - Instruction::BinaryOpsBegin;
+  DenseMap<std::pair<Value *, Value *>, unsigned> PairMap[NumBinaryOps];
+
   bool MadeChange;
 
 public:
@@ -101,10 +113,10 @@ private:
                      SmallVectorImpl<reassociate::ValueEntry> &Ops);
   Value *RemoveFactorFromExpression(Value *V, Value *Factor);
   void EraseInst(Instruction *I);
-  void RecursivelyEraseDeadInsts(Instruction *I,
-                                 SetVector<AssertingVH<Instruction>> &Insts);
+  void RecursivelyEraseDeadInsts(Instruction *I, OrderedSet &Insts);
   void OptimizeInst(Instruction *I);
   Instruction *canonicalizeNegConstExpr(Instruction *I);
+  void BuildPairMap(ReversePostOrderTraversal<Function *> &RPOT);
 };
 
 } // end namespace llvm

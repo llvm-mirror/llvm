@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/MachineRegisterInfo.h -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,6 +19,7 @@
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/LowLevelType.h"
@@ -27,9 +27,9 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/LaneBitmask.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -75,6 +75,13 @@ private:
              VirtReg2IndexFunctor>
       VRegInfo;
 
+  /// Map for recovering vreg name from vreg number.
+  /// This map is used by the MIR Printer.
+  IndexedMap<std::string, VirtReg2IndexFunctor> VReg2Name;
+
+  /// StringSet that is used to unique vreg names.
+  StringSet<> VRegNames;
+
   /// The flag is true upon \p UpdatedCSRs initialization
   /// and false otherwise.
   bool IsUpdatedCSRsInitialized;
@@ -84,14 +91,15 @@ private:
   /// all registers that were disabled are removed from the list.
   SmallVector<MCPhysReg, 16> UpdatedCSRs;
 
-  /// RegAllocHints - This vector records register allocation hints for virtual
-  /// registers. For each virtual register, it keeps a register and hint type
-  /// pair making up the allocation hint. Hint type is target specific except
-  /// for the value 0 which means the second value of the pair is the preferred
-  /// register for allocation. For example, if the hint is <0, 1024>, it means
-  /// the allocator should prefer the physical register allocated to the virtual
-  /// register of the hint.
-  IndexedMap<std::pair<unsigned, unsigned>, VirtReg2IndexFunctor> RegAllocHints;
+  /// RegAllocHints - This vector records register allocation hints for
+  /// virtual registers. For each virtual register, it keeps a pair of hint
+  /// type and hints vector making up the allocation hints. Only the first
+  /// hint may be target specific, and in that case this is reflected by the
+  /// first member of the pair being non-zero. If the hinted register is
+  /// virtual, it means the allocator should prefer the physical register
+  /// allocated to it if any.
+  IndexedMap<std::pair<unsigned, SmallVector<unsigned, 4>>,
+             VirtReg2IndexFunctor> RegAllocHints;
 
   /// PhysRegUseDefLists - This is an array of the head of the use/def list for
   /// physical registers.
@@ -127,9 +135,9 @@ private:
   /// started.
   BitVector ReservedRegs;
 
-  using VRegToTypeMap = DenseMap<unsigned, LLT>;
-  /// Map generic virtual registers to their actual size.
-  mutable std::unique_ptr<VRegToTypeMap> VRegToType;
+  using VRegToTypeMap = IndexedMap<LLT, VirtReg2IndexFunctor>;
+  /// Map generic virtual registers to their low-level type.
+  VRegToTypeMap VRegToType;
 
   /// Keep track of the physical registers that are live in to the function.
   /// Live in values are typically arguments in registers.  LiveIn values are
@@ -417,6 +425,20 @@ public:
   /// specified register (it may be live-in).
   bool def_empty(unsigned RegNo) const { return def_begin(RegNo) == def_end(); }
 
+  StringRef getVRegName(unsigned Reg) const {
+    return VReg2Name.inBounds(Reg) ? StringRef(VReg2Name[Reg]) : "";
+  }
+
+  void insertVRegByName(StringRef Name, unsigned Reg) {
+    assert((Name.empty() || VRegNames.find(Name) == VRegNames.end()) &&
+           "Named VRegs Must be Unique.");
+    if (!Name.empty()) {
+      VRegNames.insert(Name);
+      VReg2Name.grow(Reg);
+      VReg2Name[Reg] = Name.str();
+    }
+  }
+
   /// Return true if there is exactly one operand defining the specified
   /// register.
   bool hasOneDef(unsigned RegNo) const {
@@ -547,12 +569,16 @@ public:
   /// except that it also changes any definitions of the register as well.
   ///
   /// Note that it is usually necessary to first constrain ToReg's register
-  /// class to match the FromReg constraints using:
+  /// class and register bank to match the FromReg constraints using one of the
+  /// methods:
   ///
   ///   constrainRegClass(ToReg, getRegClass(FromReg))
+  ///   constrainRegAttrs(ToReg, FromReg)
+  ///   RegisterBankInfo::constrainGenericRegister(ToReg,
+  ///       *MRI.getRegClass(FromReg), MRI)
   ///
-  /// That function will return NULL if the virtual registers have incompatible
-  /// constraints.
+  /// These functions will return a falsy result if the virtual registers have
+  /// incompatible constraints.
   ///
   /// Note that if ToReg is a physical register the function will replace and
   /// apply sub registers to ToReg in order to obtain a final/proper physical
@@ -580,6 +606,10 @@ public:
   /// Returns true if PhysReg is unallocatable and constant throughout the
   /// function. Writing to a constant register has no effect.
   bool isConstantPhysReg(unsigned PhysReg) const;
+
+  /// Returns true if either isConstantPhysReg or TRI->isCallerPreservedPhysReg
+  /// returns true. This is a utility member function.
+  bool isCallerPreservedOrConstPhysReg(unsigned PhysReg) const;
 
   /// Get an iterator over the pressure sets affected by the given physical or
   /// virtual register. If RegUnit is physical, it must be a register unit (from
@@ -648,9 +678,28 @@ public:
   /// new register class, or NULL if no such class exists.
   /// This should only be used when the constraint is known to be trivial, like
   /// GR32 -> GR32_NOSP. Beware of increasing register pressure.
+  ///
+  /// \note Assumes that the register has a register class assigned.
+  /// Use RegisterBankInfo::constrainGenericRegister in GlobalISel's
+  /// InstructionSelect pass and constrainRegAttrs in every other pass,
+  /// including non-select passes of GlobalISel, instead.
   const TargetRegisterClass *constrainRegClass(unsigned Reg,
                                                const TargetRegisterClass *RC,
                                                unsigned MinNumRegs = 0);
+
+  /// Constrain the register class or the register bank of the virtual register
+  /// \p Reg (and low-level type) to be a common subclass or a common bank of
+  /// both registers provided respectively (and a common low-level type). Do
+  /// nothing if any of the attributes (classes, banks, or low-level types) of
+  /// the registers are deemed incompatible, or if the resulting register will
+  /// have a class smaller than before and of size less than \p MinNumRegs.
+  /// Return true if such register attributes exist, false otherwise.
+  ///
+  /// \note Use this method instead of constrainRegClass and
+  /// RegisterBankInfo::constrainGenericRegister everywhere but SelectionDAG
+  /// ISel / FastISel and GlobalISel's InstructionSelect pass respectively.
+  bool constrainRegAttrs(unsigned Reg, unsigned ConstrainingReg,
+                         unsigned MinNumRegs = 0);
 
   /// recomputeRegClass - Try to find a legal super-class of Reg's register
   /// class that still satisfies the constraints from the instructions using
@@ -663,26 +712,27 @@ public:
 
   /// createVirtualRegister - Create and return a new virtual register in the
   /// function with the specified register class.
-  unsigned createVirtualRegister(const TargetRegisterClass *RegClass);
+  unsigned createVirtualRegister(const TargetRegisterClass *RegClass,
+                                 StringRef Name = "");
 
-  /// Accessor for VRegToType. This accessor should only be used
-  /// by global-isel related work.
-  VRegToTypeMap &getVRegToType() const {
-    if (!VRegToType)
-      VRegToType.reset(new VRegToTypeMap);
-    return *VRegToType.get();
-  }
+  /// Create and return a new virtual register in the function with the same
+  /// attributes as the given register.
+  unsigned cloneVirtualRegister(unsigned VReg, StringRef Name = "");
 
-  /// Get the low-level type of \p VReg or LLT{} if VReg is not a generic
+  /// Get the low-level type of \p Reg or LLT{} if Reg is not a generic
   /// (target independent) virtual register.
-  LLT getType(unsigned VReg) const;
+  LLT getType(unsigned Reg) const {
+    if (TargetRegisterInfo::isVirtualRegister(Reg) && VRegToType.inBounds(Reg))
+      return VRegToType[Reg];
+    return LLT{};
+  }
 
   /// Set the low-level type of \p VReg to \p Ty.
   void setType(unsigned VReg, LLT Ty);
 
   /// Create and return a new generic virtual register with low-level
   /// type \p Ty.
-  unsigned createGenericVirtualRegister(LLT Ty);
+  unsigned createGenericVirtualRegister(LLT Ty, StringRef Name = "");
 
   /// Remove all types associated to virtual registers (after instruction
   /// selection and constraining of all generic virtual registers).
@@ -693,7 +743,7 @@ public:
   /// temporarily while constructing machine instructions. Most operations are
   /// undefined on an incomplete register until one of setRegClass(),
   /// setRegBank() or setSize() has been called on it.
-  unsigned createIncompleteVirtualRegister();
+  unsigned createIncompleteVirtualRegister(StringRef Name = "");
 
   /// getNumVirtRegs - Return the number of virtual registers created.
   unsigned getNumVirtRegs() const { return VRegInfo.size(); }
@@ -702,33 +752,59 @@ public:
   void clearVirtRegs();
 
   /// setRegAllocationHint - Specify a register allocation hint for the
-  /// specified virtual register.
+  /// specified virtual register. This is typically used by target, and in case
+  /// of an earlier hint it will be overwritten.
   void setRegAllocationHint(unsigned VReg, unsigned Type, unsigned PrefReg) {
     assert(TargetRegisterInfo::isVirtualRegister(VReg));
     RegAllocHints[VReg].first  = Type;
-    RegAllocHints[VReg].second = PrefReg;
+    RegAllocHints[VReg].second.clear();
+    RegAllocHints[VReg].second.push_back(PrefReg);
   }
 
-  /// Specify the preferred register allocation hint for the specified virtual
-  /// register.
+  /// addRegAllocationHint - Add a register allocation hint to the hints
+  /// vector for VReg.
+  void addRegAllocationHint(unsigned VReg, unsigned PrefReg) {
+    assert(TargetRegisterInfo::isVirtualRegister(VReg));
+    RegAllocHints[VReg].second.push_back(PrefReg);
+  }
+
+  /// Specify the preferred (target independent) register allocation hint for
+  /// the specified virtual register.
   void setSimpleHint(unsigned VReg, unsigned PrefReg) {
     setRegAllocationHint(VReg, /*Type=*/0, PrefReg);
   }
 
+  void clearSimpleHint(unsigned VReg) {
+    assert (RegAllocHints[VReg].first == 0 &&
+            "Expected to clear a non-target hint!");
+    RegAllocHints[VReg].second.clear();
+  }
+
   /// getRegAllocationHint - Return the register allocation hint for the
-  /// specified virtual register.
+  /// specified virtual register. If there are many hints, this returns the
+  /// one with the greatest weight.
   std::pair<unsigned, unsigned>
   getRegAllocationHint(unsigned VReg) const {
     assert(TargetRegisterInfo::isVirtualRegister(VReg));
-    return RegAllocHints[VReg];
+    unsigned BestHint = (RegAllocHints[VReg].second.size() ?
+                         RegAllocHints[VReg].second[0] : 0);
+    return std::pair<unsigned, unsigned>(RegAllocHints[VReg].first, BestHint);
   }
 
-  /// getSimpleHint - Return the preferred register allocation hint, or 0 if a
-  /// standard simple hint (Type == 0) is not set.
+  /// getSimpleHint - same as getRegAllocationHint except it will only return
+  /// a target independent hint.
   unsigned getSimpleHint(unsigned VReg) const {
     assert(TargetRegisterInfo::isVirtualRegister(VReg));
     std::pair<unsigned, unsigned> Hint = getRegAllocationHint(VReg);
     return Hint.first ? 0 : Hint.second;
+  }
+
+  /// getRegAllocationHints - Return a reference to the vector of all
+  /// register allocation hints for VReg.
+  const std::pair<unsigned, SmallVector<unsigned, 4>>
+  &getRegAllocationHints(unsigned VReg) const {
+    assert(TargetRegisterInfo::isVirtualRegister(VReg));
+    return RegAllocHints[VReg];
   }
 
   /// markUsesInDebugValueAsUndef - Mark every DBG_VALUE referencing the

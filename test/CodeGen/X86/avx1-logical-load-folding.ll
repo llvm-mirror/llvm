@@ -5,21 +5,19 @@
 ; Function Attrs: nounwind ssp uwtable
 define void @test1(float* %A, float* %C) #0 {
 ; X86-LABEL: test1:
-; X86:       ## BB#0:
+; X86:       ## %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    vmovaps (%ecx), %ymm0
-; X86-NEXT:    vandps LCPI0_0, %ymm0, %ymm0
+; X86-NEXT:    vmovaps (%ecx), %xmm0
+; X86-NEXT:    vandps LCPI0_0, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%eax)
-; X86-NEXT:    vzeroupper
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test1:
-; X64:       ## BB#0:
-; X64-NEXT:    vmovaps (%rdi), %ymm0
-; X64-NEXT:    vandps {{.*}}(%rip), %ymm0, %ymm0
+; X64:       ## %bb.0:
+; X64-NEXT:    vmovaps (%rdi), %xmm0
+; X64-NEXT:    vandps {{.*}}(%rip), %xmm0, %xmm0
 ; X64-NEXT:    vmovss %xmm0, (%rsi)
-; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
   %tmp1 = bitcast float* %A to <8 x float>*
   %tmp2 = load <8 x float>, <8 x float>* %tmp1, align 32
@@ -34,21 +32,19 @@ define void @test1(float* %A, float* %C) #0 {
 ; Function Attrs: nounwind ssp uwtable
 define void @test2(float* %A, float* %C) #0 {
 ; X86-LABEL: test2:
-; X86:       ## BB#0:
+; X86:       ## %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    vmovaps (%ecx), %ymm0
-; X86-NEXT:    vorps LCPI1_0, %ymm0, %ymm0
+; X86-NEXT:    vmovaps (%ecx), %xmm0
+; X86-NEXT:    vorps LCPI1_0, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%eax)
-; X86-NEXT:    vzeroupper
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test2:
-; X64:       ## BB#0:
-; X64-NEXT:    vmovaps (%rdi), %ymm0
-; X64-NEXT:    vorps {{.*}}(%rip), %ymm0, %ymm0
+; X64:       ## %bb.0:
+; X64-NEXT:    vmovaps (%rdi), %xmm0
+; X64-NEXT:    vorps {{.*}}(%rip), %xmm0, %xmm0
 ; X64-NEXT:    vmovss %xmm0, (%rsi)
-; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
   %tmp1 = bitcast float* %A to <8 x float>*
   %tmp2 = load <8 x float>, <8 x float>* %tmp1, align 32
@@ -63,21 +59,19 @@ define void @test2(float* %A, float* %C) #0 {
 ; Function Attrs: nounwind ssp uwtable
 define void @test3(float* %A, float* %C) #0 {
 ; X86-LABEL: test3:
-; X86:       ## BB#0:
+; X86:       ## %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    vmovaps (%ecx), %ymm0
-; X86-NEXT:    vxorps LCPI2_0, %ymm0, %ymm0
+; X86-NEXT:    vmovaps (%ecx), %xmm0
+; X86-NEXT:    vxorps LCPI2_0, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%eax)
-; X86-NEXT:    vzeroupper
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test3:
-; X64:       ## BB#0:
-; X64-NEXT:    vmovaps (%rdi), %ymm0
-; X64-NEXT:    vxorps {{.*}}(%rip), %ymm0, %ymm0
+; X64:       ## %bb.0:
+; X64-NEXT:    vmovaps (%rdi), %xmm0
+; X64-NEXT:    vxorps {{.*}}(%rip), %xmm0, %xmm0
 ; X64-NEXT:    vmovss %xmm0, (%rsi)
-; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
   %tmp1 = bitcast float* %A to <8 x float>*
   %tmp2 = load <8 x float>, <8 x float>* %tmp1, align 32
@@ -91,21 +85,19 @@ define void @test3(float* %A, float* %C) #0 {
 
 define void @test4(float* %A, float* %C) #0 {
 ; X86-LABEL: test4:
-; X86:       ## BB#0:
+; X86:       ## %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X86-NEXT:    vmovaps (%ecx), %ymm0
-; X86-NEXT:    vandnps LCPI3_0, %ymm0, %ymm0
+; X86-NEXT:    vmovaps (%ecx), %xmm0
+; X86-NEXT:    vandnps LCPI3_0, %xmm0, %xmm0
 ; X86-NEXT:    vmovss %xmm0, (%eax)
-; X86-NEXT:    vzeroupper
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: test4:
-; X64:       ## BB#0:
-; X64-NEXT:    vmovaps (%rdi), %ymm0
-; X64-NEXT:    vandnps {{.*}}(%rip), %ymm0, %ymm0
+; X64:       ## %bb.0:
+; X64-NEXT:    vmovaps (%rdi), %xmm0
+; X64-NEXT:    vandnps {{.*}}(%rip), %xmm0, %xmm0
 ; X64-NEXT:    vmovss %xmm0, (%rsi)
-; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
   %tmp1 = bitcast float* %A to <8 x float>*
   %tmp2 = load <8 x float>, <8 x float>* %tmp1, align 32

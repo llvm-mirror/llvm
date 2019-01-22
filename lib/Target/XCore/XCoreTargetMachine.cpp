@@ -1,9 +1,8 @@
 //===-- XCoreTargetMachine.cpp - Define TargetMachine for XCore -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -31,7 +30,8 @@ static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
   return *RM;
 }
 
-static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
+static CodeModel::Model
+getEffectiveXCoreCodeModel(Optional<CodeModel::Model> CM) {
   if (CM) {
     if (*CM != CodeModel::Small && *CM != CodeModel::Large)
       report_fatal_error("Target only supports CodeModel Small or Large");
@@ -51,7 +51,7 @@ XCoreTargetMachine::XCoreTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(
           T, "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32",
           TT, CPU, FS, Options, getEffectiveRelocModel(RM),
-          getEffectiveCodeModel(CM), OL),
+          getEffectiveXCoreCodeModel(CM), OL),
       TLOF(llvm::make_unique<XCoreTargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();
@@ -108,8 +108,7 @@ extern "C" void LLVMInitializeXCoreTarget() {
   RegisterTargetMachine<XCoreTargetMachine> X(getTheXCoreTarget());
 }
 
-TargetIRAnalysis XCoreTargetMachine::getTargetIRAnalysis() {
-  return TargetIRAnalysis([this](const Function &F) {
-    return TargetTransformInfo(XCoreTTIImpl(this, F));
-  });
+TargetTransformInfo
+XCoreTargetMachine::getTargetTransformInfo(const Function &F) {
+  return TargetTransformInfo(XCoreTTIImpl(this, F));
 }

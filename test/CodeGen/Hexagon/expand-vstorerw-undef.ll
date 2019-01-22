@@ -1,4 +1,4 @@
-; RUN: llc -march=hexagon < %s | FileCheck %s
+; RUN: llc -march=hexagon -hexagon-initial-cfg-cleanup=0 < %s | FileCheck %s
 
 ; After register allocation it is possible to have a spill of a register
 ; that is only partially defined. That in itself it fine, but creates a
@@ -12,7 +12,7 @@
 
 ; CHECK-LABEL: fred:
 ; CHECK: v[[REG:[0-9]+]] = vsplat
-; CHECK: vmem(r29+#6) = v[[REG]]
+; CHECK: vmem(r29+#{{[0-9]+}}) = v[[REG]]
 
 
 target triple = "hexagon"

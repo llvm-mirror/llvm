@@ -1,9 +1,8 @@
 //===--- StringMap.cpp - String Hash table map implementation -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/DJB.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
 
@@ -32,7 +32,7 @@ static unsigned getMinBucketToReserveForEntries(unsigned NumEntries) {
 
 StringMapImpl::StringMapImpl(unsigned InitSize, unsigned itemSize) {
   ItemSize = itemSize;
-  
+
   // If a size is specified, initialize the table with that many buckets.
   if (InitSize) {
     // The table will grow when the number of entries reach 3/4 of the number of
@@ -41,7 +41,7 @@ StringMapImpl::StringMapImpl(unsigned InitSize, unsigned itemSize) {
     init(getMinBucketToReserveForEntries(InitSize));
     return;
   }
-  
+
   // Otherwise, initialize it with zero buckets to avoid the allocation.
   TheTable = nullptr;
   NumBuckets = 0;
@@ -56,13 +56,10 @@ void StringMapImpl::init(unsigned InitSize) {
   unsigned NewNumBuckets = InitSize ? InitSize : 16;
   NumItems = 0;
   NumTombstones = 0;
-  
-  TheTable = (StringMapEntryBase **)calloc(NewNumBuckets+1,
-                                           sizeof(StringMapEntryBase **) +
-                                           sizeof(unsigned));
 
-  if (TheTable == nullptr)
-    report_bad_alloc_error("Allocation of StringMap table failed.");
+  TheTable = static_cast<StringMapEntryBase **>(
+      safe_calloc(NewNumBuckets+1,
+                  sizeof(StringMapEntryBase **) + sizeof(unsigned)));
 
   // Set the member only if TheTable was successfully allocated
   NumBuckets = NewNumBuckets;
@@ -83,7 +80,7 @@ unsigned StringMapImpl::LookupBucketFor(StringRef Name) {
     init(16);
     HTSize = NumBuckets;
   }
-  unsigned FullHashValue = HashString(Name);
+  unsigned FullHashValue = djbHash(Name, 0);
   unsigned BucketNo = FullHashValue & (HTSize-1);
   unsigned *HashTable = (unsigned *)(TheTable + NumBuckets + 1);
 
@@ -99,11 +96,11 @@ unsigned StringMapImpl::LookupBucketFor(StringRef Name) {
         HashTable[FirstTombstone] = FullHashValue;
         return FirstTombstone;
       }
-      
+
       HashTable[BucketNo] = FullHashValue;
       return BucketNo;
     }
-    
+
     if (BucketItem == getTombstoneVal()) {
       // Skip over tombstones.  However, remember the first one we see.
       if (FirstTombstone == -1) FirstTombstone = BucketNo;
@@ -112,7 +109,7 @@ unsigned StringMapImpl::LookupBucketFor(StringRef Name) {
       // case here is that we are only looking at the buckets (for item info
       // being non-null and for the full hash value) not at the items.  This
       // is important for cache locality.
-      
+
       // Do the comparison like this because Name isn't necessarily
       // null-terminated!
       char *ItemStr = (char*)BucketItem+ItemSize;
@@ -121,10 +118,10 @@ unsigned StringMapImpl::LookupBucketFor(StringRef Name) {
         return BucketNo;
       }
     }
-    
+
     // Okay, we didn't find the item.  Probe to the next bucket.
     BucketNo = (BucketNo+ProbeAmt) & (HTSize-1);
-    
+
     // Use quadratic probing, it has fewer clumping artifacts than linear
     // probing and has good cache behavior in the common case.
     ++ProbeAmt;
@@ -137,7 +134,7 @@ unsigned StringMapImpl::LookupBucketFor(StringRef Name) {
 int StringMapImpl::FindKey(StringRef Key) const {
   unsigned HTSize = NumBuckets;
   if (HTSize == 0) return -1;  // Really empty table?
-  unsigned FullHashValue = HashString(Key);
+  unsigned FullHashValue = djbHash(Key, 0);
   unsigned BucketNo = FullHashValue & (HTSize-1);
   unsigned *HashTable = (unsigned *)(TheTable + NumBuckets + 1);
 
@@ -147,7 +144,7 @@ int StringMapImpl::FindKey(StringRef Key) const {
     // If we found an empty bucket, this key isn't in the table yet, return.
     if (LLVM_LIKELY(!BucketItem))
       return -1;
-    
+
     if (BucketItem == getTombstoneVal()) {
       // Ignore tombstones.
     } else if (LLVM_LIKELY(HashTable[BucketNo] == FullHashValue)) {
@@ -155,7 +152,7 @@ int StringMapImpl::FindKey(StringRef Key) const {
       // case here is that we are only looking at the buckets (for item info
       // being non-null and for the full hash value) not at the items.  This
       // is important for cache locality.
-      
+
       // Do the comparison like this because NameStart isn't necessarily
       // null-terminated!
       char *ItemStr = (char*)BucketItem+ItemSize;
@@ -164,10 +161,10 @@ int StringMapImpl::FindKey(StringRef Key) const {
         return BucketNo;
       }
     }
-    
+
     // Okay, we didn't find the item.  Probe to the next bucket.
     BucketNo = (BucketNo+ProbeAmt) & (HTSize-1);
-    
+
     // Use quadratic probing, it has fewer clumping artifacts than linear
     // probing and has good cache behavior in the common case.
     ++ProbeAmt;
@@ -188,7 +185,7 @@ void StringMapImpl::RemoveKey(StringMapEntryBase *V) {
 StringMapEntryBase *StringMapImpl::RemoveKey(StringRef Key) {
   int Bucket = FindKey(Key);
   if (Bucket == -1) return nullptr;
-  
+
   StringMapEntryBase *Result = TheTable[Bucket];
   TheTable[Bucket] = getTombstoneVal();
   --NumItems;
@@ -219,12 +216,8 @@ unsigned StringMapImpl::RehashTable(unsigned BucketNo) {
   unsigned NewBucketNo = BucketNo;
   // Allocate one extra bucket which will always be non-empty.  This allows the
   // iterators to stop at end.
-  StringMapEntryBase **NewTableArray =
-    (StringMapEntryBase **)calloc(NewSize+1, sizeof(StringMapEntryBase *) +
-                                             sizeof(unsigned));
-
-  if (NewTableArray == nullptr)
-    report_bad_alloc_error("Allocation of StringMap hash table failed.");
+  auto NewTableArray = static_cast<StringMapEntryBase **>(
+      safe_calloc(NewSize+1, sizeof(StringMapEntryBase *) + sizeof(unsigned)));
 
   unsigned *NewHashArray = (unsigned *)(NewTableArray + NewSize + 1);
   NewTableArray[NewSize] = (StringMapEntryBase*)2;
@@ -244,13 +237,13 @@ unsigned StringMapImpl::RehashTable(unsigned BucketNo) {
           NewBucketNo = NewBucket;
         continue;
       }
-      
+
       // Otherwise probe for a spot.
       unsigned ProbeSize = 1;
       do {
         NewBucket = (NewBucket + ProbeSize++) & (NewSize-1);
       } while (NewTableArray[NewBucket]);
-      
+
       // Finally found a slot.  Fill it in.
       NewTableArray[NewBucket] = Bucket;
       NewHashArray[NewBucket] = FullHash;
@@ -258,9 +251,9 @@ unsigned StringMapImpl::RehashTable(unsigned BucketNo) {
         NewBucketNo = NewBucket;
     }
   }
-  
+
   free(TheTable);
-  
+
   TheTable = NewTableArray;
   NumBuckets = NewSize;
   NumTombstones = 0;

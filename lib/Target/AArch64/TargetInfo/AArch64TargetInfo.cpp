@@ -1,9 +1,8 @@
 //===-- AArch64TargetInfo.cpp - AArch64 Target Implementation -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -29,11 +28,11 @@ extern "C" void LLVMInitializeAArch64TargetInfo() {
   // Now register the "arm64" name for use with "-march". We don't want it to
   // take possession of the Triple::aarch64 tag though.
   TargetRegistry::RegisterTarget(getTheARM64Target(), "arm64",
-                                 "ARM64 (little endian)",
+                                 "ARM64 (little endian)", "AArch64",
                                  [](Triple::ArchType) { return false; }, true);
 
   RegisterTarget<Triple::aarch64, /*HasJIT=*/true> Z(
-      getTheAArch64leTarget(), "aarch64", "AArch64 (little endian)");
+      getTheAArch64leTarget(), "aarch64", "AArch64 (little endian)", "AArch64");
   RegisterTarget<Triple::aarch64_be, /*HasJIT=*/true> W(
-      getTheAArch64beTarget(), "aarch64_be", "AArch64 (big endian)");
+      getTheAArch64beTarget(), "aarch64_be", "AArch64 (big endian)", "AArch64");
 }

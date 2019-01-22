@@ -17,7 +17,7 @@ entry:
 
 ; CHECK-NOT: mtvsrwa
 ; CHECK-NOT: mtfprwa
-; CHECK: lxsiwax [[REG:[0-9]+]], {{.*}}
+; CHECK: lfiwax [[REG:[0-9]+]], {{.*}}
 ; CHECK-NOT: mtvsrwa
 ; CHECK-NOT: mtfprwa
 ; CHECK: xscvsxdsp {{.*}}, [[REG]]
@@ -40,7 +40,7 @@ entry:
 
 ; CHECK-NOT: mtvsrwa
 ; CHECK-NOT: mtfprwa
-; CHECK: lxsiwax [[REG:[0-9]+]], {{.*}}
+; CHECK: lfiwax [[REG:[0-9]+]], {{.*}}
 ; CHECK-NOT: mtvsrwa
 ; CHECK-NOT: mtfprwa
 ; CHECK: xscvsxdsp {{.*}}, [[REG]]
@@ -74,7 +74,7 @@ entry:
 
 }
 
-!0 = !{!"clang version 3.9.0 (http://llvm.org/git/clang.git b88a395e7ba26c0fb96cd99a2a004d76f4f41d0c) (http://llvm.org/git/llvm.git 1ac3fbac0f5b037c17c0b0f9d271c32c4d7ca1b5)"}
+!0 = !{!"clang version 3.9.0"}
 !1 = !{!2, !2, i64 0}
 !2 = !{!"int", !3, i64 0}
 !3 = !{!"omnipotent char", !4, i64 0}

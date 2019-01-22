@@ -1,9 +1,8 @@
 //===- LiveRegMatrix.h - Track register interference ----------*- C++ -*---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -106,6 +105,13 @@ public:
   /// When there is more than one kind of interference, the InterferenceKind
   /// with the highest enum value is returned.
   InterferenceKind checkInterference(LiveInterval &VirtReg, unsigned PhysReg);
+
+  /// Check for interference in the segment [Start, End) that may prevent
+  /// assignment to PhysReg. If this function returns true, there is
+  /// interference in the segment [Start, End) of some other interval already
+  /// assigned to PhysReg. If this function returns false, PhysReg is free at
+  /// the segment [Start, End).
+  bool checkInterference(SlotIndex Start, SlotIndex End, unsigned PhysReg);
 
   /// Assign VirtReg to PhysReg.
   /// This will mark VirtReg's live range as occupied in the LiveRegMatrix and

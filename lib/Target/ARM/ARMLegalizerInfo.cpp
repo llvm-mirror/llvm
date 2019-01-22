@@ -1,9 +1,8 @@
 //===- ARMLegalizerInfo.cpp --------------------------------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -17,12 +16,48 @@
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Target/TargetOpcodes.h"
 
 using namespace llvm;
+using namespace LegalizeActions;
+
+/// FIXME: The following static functions are SizeChangeStrategy functions
+/// that are meant to temporarily mimic the behaviour of the old legalization
+/// based on doubling/halving non-legal types as closely as possible. This is
+/// not entirly possible as only legalizing the types that are exactly a power
+/// of 2 times the size of the legal types would require specifying all those
+/// sizes explicitly.
+/// In practice, not specifying those isn't a problem, and the below functions
+/// should disappear quickly as we add support for legalizing non-power-of-2
+/// sized types further.
+static void
+addAndInterleaveWithUnsupported(LegalizerInfo::SizeAndActionsVec &result,
+                                const LegalizerInfo::SizeAndActionsVec &v) {
+  for (unsigned i = 0; i < v.size(); ++i) {
+    result.push_back(v[i]);
+    if (i + 1 < v[i].first && i + 1 < v.size() &&
+        v[i + 1].first != v[i].first + 1)
+      result.push_back({v[i].first + 1, Unsupported});
+  }
+}
+
+static LegalizerInfo::SizeAndActionsVec
+widen_8_16(const LegalizerInfo::SizeAndActionsVec &v) {
+  assert(v.size() >= 1);
+  assert(v[0].first > 17);
+  LegalizerInfo::SizeAndActionsVec result = {{1, Unsupported},
+                                             {8, WidenScalar},
+                                             {9, Unsupported},
+                                             {16, WidenScalar},
+                                             {17, Unsupported}};
+  addAndInterleaveWithUnsupported(result, v);
+  auto Largest = result.back().first;
+  result.push_back({Largest + 1, Unsupported});
+  return result;
+}
 
 static bool AEABI(const ARMSubtarget &ST) {
   return ST.isTargetAEABI() || ST.isTargetGNUAEABI() || ST.isTargetMuslAEABI();
@@ -39,33 +74,59 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
   const LLT s32 = LLT::scalar(32);
   const LLT s64 = LLT::scalar(64);
 
-  setAction({G_GLOBAL_VALUE, p0}, Legal);
-  setAction({G_FRAME_INDEX, p0}, Legal);
-
-  for (unsigned Op : {G_LOAD, G_STORE}) {
-    for (auto Ty : {s1, s8, s16, s32, p0})
-      setAction({Op, Ty}, Legal);
-    setAction({Op, 1, p0}, Legal);
+  if (ST.isThumb1Only()) {
+    // Thumb1 is not supported yet.
+    computeTables();
+    verify(*ST.getInstrInfo());
+    return;
   }
 
-  for (unsigned Op : {G_ADD, G_SUB, G_MUL, G_AND, G_OR, G_XOR}) {
-    for (auto Ty : {s1, s8, s16})
-      setAction({Op, Ty}, WidenScalar);
-    setAction({Op, s32}, Legal);
+  getActionDefinitionsBuilder({G_SEXT, G_ZEXT, G_ANYEXT})
+      .legalForCartesianProduct({s32}, {s1, s8, s16});
+
+  getActionDefinitionsBuilder({G_ADD, G_SUB, G_MUL, G_AND, G_OR, G_XOR})
+      .legalFor({s32})
+      .minScalar(0, s32);
+
+  getActionDefinitionsBuilder(G_INTTOPTR).legalFor({{p0, s32}});
+  getActionDefinitionsBuilder(G_PTRTOINT).legalFor({{s32, p0}});
+
+  getActionDefinitionsBuilder(G_CONSTANT)
+      .legalFor({s32, p0})
+      .clampScalar(0, s32, s32);
+
+  // We're keeping these builders around because we'll want to add support for
+  // floating point to them.
+  auto &LoadStoreBuilder =
+      getActionDefinitionsBuilder({G_LOAD, G_STORE})
+          .legalForTypesWithMemSize({
+              {s1, p0, 8},
+              {s8, p0, 8},
+              {s16, p0, 16},
+              {s32, p0, 32},
+              {p0, p0, 32}});
+
+  if (ST.isThumb()) {
+    // FIXME: merge with the code for non-Thumb.
+    computeTables();
+    verify(*ST.getInstrInfo());
+    return;
   }
 
-  for (unsigned Op : {G_SDIV, G_UDIV}) {
-    for (auto Ty : {s8, s16})
-      setAction({Op, Ty}, WidenScalar);
-    if (ST.hasDivideInARMMode())
-      setAction({Op, s32}, Legal);
-    else
-      setAction({Op, s32}, Libcall);
-  }
+  getActionDefinitionsBuilder(G_GLOBAL_VALUE).legalFor({p0});
+  getActionDefinitionsBuilder(G_FRAME_INDEX).legalFor({p0});
+
+  if (ST.hasDivideInARMMode())
+    getActionDefinitionsBuilder({G_SDIV, G_UDIV})
+        .legalFor({s32})
+        .clampScalar(0, s32, s32);
+  else
+    getActionDefinitionsBuilder({G_SDIV, G_UDIV})
+        .libcallFor({s32})
+        .clampScalar(0, s32, s32);
 
   for (unsigned Op : {G_SREM, G_UREM}) {
-    for (auto Ty : {s8, s16})
-      setAction({Op, Ty}, WidenScalar);
+    setLegalizeScalarToDifferentSizeStrategy(Op, 0, widen_8_16);
     if (ST.hasDivideInARMMode())
       setAction({Op, s32}, Lower);
     else if (AEABI(ST))
@@ -74,63 +135,98 @@ ARMLegalizerInfo::ARMLegalizerInfo(const ARMSubtarget &ST) {
       setAction({Op, s32}, Libcall);
   }
 
-  for (unsigned Op : {G_SEXT, G_ZEXT}) {
-    setAction({Op, s32}, Legal);
-    for (auto Ty : {s1, s8, s16})
-      setAction({Op, 1, Ty}, Legal);
+  getActionDefinitionsBuilder({G_ASHR, G_LSHR, G_SHL}).legalFor({s32});
+
+  if (ST.hasV5TOps()) {
+    getActionDefinitionsBuilder(G_CTLZ)
+        .legalFor({s32})
+        .clampScalar(0, s32, s32);
+    getActionDefinitionsBuilder(G_CTLZ_ZERO_UNDEF)
+        .lowerFor({s32})
+        .clampScalar(0, s32, s32);
+  } else {
+    getActionDefinitionsBuilder(G_CTLZ_ZERO_UNDEF)
+        .libcallFor({s32})
+        .clampScalar(0, s32, s32);
+    getActionDefinitionsBuilder(G_CTLZ)
+        .lowerFor({s32})
+        .clampScalar(0, s32, s32);
   }
 
-  for (unsigned Op : {G_ASHR, G_LSHR, G_SHL})
-    setAction({Op, s32}, Legal);
+  getActionDefinitionsBuilder(G_GEP).legalFor({{p0, s32}});
 
-  setAction({G_GEP, p0}, Legal);
-  setAction({G_GEP, 1, s32}, Legal);
+  getActionDefinitionsBuilder(G_SELECT).legalForCartesianProduct({s32, p0},
+                                                                 {s1});
 
-  setAction({G_SELECT, s32}, Legal);
-  setAction({G_SELECT, p0}, Legal);
-  setAction({G_SELECT, 1, s1}, Legal);
+  getActionDefinitionsBuilder(G_BRCOND).legalFor({s1});
 
-  setAction({G_BRCOND, s1}, Legal);
+  getActionDefinitionsBuilder(G_ICMP)
+      .legalForCartesianProduct({s1}, {s32, p0})
+      .minScalar(1, s32);
 
-  setAction({G_CONSTANT, s32}, Legal);
-  for (auto Ty : {s1, s8, s16})
-    setAction({G_CONSTANT, Ty}, WidenScalar);
-
-  setAction({G_ICMP, s1}, Legal);
-  for (auto Ty : {s8, s16})
-    setAction({G_ICMP, 1, Ty}, WidenScalar);
-  for (auto Ty : {s32, p0})
-    setAction({G_ICMP, 1, Ty}, Legal);
+  // We're keeping these builders around because we'll want to add support for
+  // floating point to them.
+  auto &PhiBuilder =
+      getActionDefinitionsBuilder(G_PHI).legalFor({s32, p0}).minScalar(0, s32);
 
   if (!ST.useSoftFloat() && ST.hasVFP2()) {
-    setAction({G_FADD, s32}, Legal);
-    setAction({G_FADD, s64}, Legal);
+    getActionDefinitionsBuilder(
+        {G_FADD, G_FSUB, G_FMUL, G_FDIV, G_FCONSTANT, G_FNEG})
+        .legalFor({s32, s64});
 
-    setAction({G_LOAD, s64}, Legal);
-    setAction({G_STORE, s64}, Legal);
+    LoadStoreBuilder.legalFor({{s64, p0}});
+    PhiBuilder.legalFor({s64});
 
-    setAction({G_FCMP, s1}, Legal);
-    setAction({G_FCMP, 1, s32}, Legal);
-    setAction({G_FCMP, 1, s64}, Legal);
+    getActionDefinitionsBuilder(G_FCMP).legalForCartesianProduct({s1},
+                                                                 {s32, s64});
+
+    getActionDefinitionsBuilder(G_MERGE_VALUES).legalFor({{s64, s32}});
+    getActionDefinitionsBuilder(G_UNMERGE_VALUES).legalFor({{s32, s64}});
+
+    getActionDefinitionsBuilder(G_FPEXT).legalFor({{s64, s32}});
+    getActionDefinitionsBuilder(G_FPTRUNC).legalFor({{s32, s64}});
+
+    getActionDefinitionsBuilder({G_FPTOSI, G_FPTOUI})
+        .legalForCartesianProduct({s32}, {s32, s64});
+    getActionDefinitionsBuilder({G_SITOFP, G_UITOFP})
+        .legalForCartesianProduct({s32, s64}, {s32});
   } else {
-    for (auto Ty : {s32, s64})
-      setAction({G_FADD, Ty}, Libcall);
+    getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
+        .libcallFor({s32, s64});
 
-    setAction({G_FCMP, s1}, Legal);
-    setAction({G_FCMP, 1, s32}, Custom);
-    setAction({G_FCMP, 1, s64}, Custom);
+    LoadStoreBuilder.maxScalar(0, s32);
+
+    for (auto Ty : {s32, s64})
+      setAction({G_FNEG, Ty}, Lower);
+
+    getActionDefinitionsBuilder(G_FCONSTANT).customFor({s32, s64});
+
+    getActionDefinitionsBuilder(G_FCMP).customForCartesianProduct({s1},
+                                                                  {s32, s64});
 
     if (AEABI(ST))
       setFCmpLibcallsAEABI();
     else
       setFCmpLibcallsGNU();
+
+    getActionDefinitionsBuilder(G_FPEXT).libcallFor({{s64, s32}});
+    getActionDefinitionsBuilder(G_FPTRUNC).libcallFor({{s32, s64}});
+
+    getActionDefinitionsBuilder({G_FPTOSI, G_FPTOUI})
+        .libcallForCartesianProduct({s32}, {s32, s64});
+    getActionDefinitionsBuilder({G_SITOFP, G_UITOFP})
+        .libcallForCartesianProduct({s32, s64}, {s32});
   }
 
-  for (unsigned Op : {G_FREM, G_FPOW})
-    for (auto Ty : {s32, s64})
-      setAction({Op, Ty}, Libcall);
+  if (!ST.useSoftFloat() && ST.hasVFP4())
+    getActionDefinitionsBuilder(G_FMA).legalFor({s32, s64});
+  else
+    getActionDefinitionsBuilder(G_FMA).libcallFor({s32, s64});
+
+  getActionDefinitionsBuilder({G_FREM, G_FPOW}).libcallFor({s32, s64});
 
   computeTables();
+  verify(*ST.getInstrInfo());
 }
 
 void ARMLegalizerInfo::setFCmpLibcallsAEABI() {
@@ -242,10 +338,12 @@ ARMLegalizerInfo::getFCmpLibcalls(CmpInst::Predicate Predicate,
 
 bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
                                       MachineRegisterInfo &MRI,
-                                      MachineIRBuilder &MIRBuilder) const {
+                                      MachineIRBuilder &MIRBuilder,
+                                      GISelChangeObserver &Observer) const {
   using namespace TargetOpcode;
 
   MIRBuilder.setInstr(MI);
+  LLVMContext &Ctx = MIRBuilder.getMF().getFunction().getContext();
 
   switch (MI.getOpcode()) {
   default:
@@ -262,7 +360,6 @@ bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
 
     // Our divmod libcalls return a struct containing the quotient and the
     // remainder. We need to create a virtual register for it.
-    auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
     Type *ArgTy = Type::getInt32Ty(Ctx);
     StructType *RetTy = StructType::get(Ctx, {ArgTy, ArgTy}, /* Packed */ true);
     auto RetVal = MRI.createGenericVirtualRegister(
@@ -303,7 +400,6 @@ bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
       return true;
     }
 
-    auto &Ctx = MIRBuilder.getMF().getFunction()->getContext();
     assert((OpSize == 32 || OpSize == 64) && "Unsupported operand size");
     auto *ArgTy = OpSize == 32 ? Type::getFloatTy(Ctx) : Type::getDoubleTy(Ctx);
     auto *RetTy = Type::getInt32Ty(Ctx);
@@ -346,6 +442,14 @@ bool ARMLegalizerInfo::legalizeCustom(MachineInstr &MI,
       assert(Results.size() == 2 && "Unexpected number of results");
       MIRBuilder.buildOr(OriginalResult, Results[0], Results[1]);
     }
+    break;
+  }
+  case G_FCONSTANT: {
+    // Convert to integer constants, while preserving the binary representation.
+    auto AsInteger =
+        MI.getOperand(1).getFPImm()->getValueAPF().bitcastToAPInt();
+    MIRBuilder.buildConstant(MI.getOperand(0).getReg(),
+                             *ConstantInt::get(Ctx, AsInteger));
     break;
   }
   }

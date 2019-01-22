@@ -1,9 +1,8 @@
 //===- ObjCARCAliasAnalysis.cpp - ObjC ARC Optimization -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -106,12 +105,12 @@ FunctionModRefBehavior ObjCARCAAResult::getModRefBehavior(const Function *F) {
   return AAResultBase::getModRefBehavior(F);
 }
 
-ModRefInfo ObjCARCAAResult::getModRefInfo(ImmutableCallSite CS,
+ModRefInfo ObjCARCAAResult::getModRefInfo(const CallBase *Call,
                                           const MemoryLocation &Loc) {
   if (!EnableARCOpts)
-    return AAResultBase::getModRefInfo(CS, Loc);
+    return AAResultBase::getModRefInfo(Call, Loc);
 
-  switch (GetBasicARCInstKind(CS.getInstruction())) {
+  switch (GetBasicARCInstKind(Call)) {
   case ARCInstKind::Retain:
   case ARCInstKind::RetainRV:
   case ARCInstKind::Autorelease:
@@ -123,12 +122,12 @@ ModRefInfo ObjCARCAAResult::getModRefInfo(ImmutableCallSite CS,
     // These functions don't access any memory visible to the compiler.
     // Note that this doesn't include objc_retainBlock, because it updates
     // pointers when it copies block data.
-    return MRI_NoModRef;
+    return ModRefInfo::NoModRef;
   default:
     break;
   }
 
-  return AAResultBase::getModRefInfo(CS, Loc);
+  return AAResultBase::getModRefInfo(Call, Loc);
 }
 
 ObjCARCAAResult ObjCARCAA::run(Function &F, FunctionAnalysisManager &AM) {

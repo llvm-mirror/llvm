@@ -1,9 +1,8 @@
 //===- DwarfEHPrepare - Prepare exception handling for code generation ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,8 +17,11 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -30,10 +32,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cstddef>
 
 using namespace llvm;
@@ -195,9 +194,9 @@ bool DwarfEHPrepare::InsertUnwindResumeCalls(Function &Fn) {
   if (Resumes.empty())
     return false;
 
-  // Check the personality, don't do anything if it's funclet-based.
+  // Check the personality, don't do anything if it's scope-based.
   EHPersonality Pers = classifyEHPersonality(Fn.getPersonalityFn());
-  if (isFuncletEHPersonality(Pers))
+  if (isScopedEHPersonality(Pers))
     return false;
 
   LLVMContext &Ctx = Fn.getContext();

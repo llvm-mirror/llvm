@@ -1,9 +1,8 @@
 //===- IntrinsicsNVVM.td - Defines NVVM intrinsics ---------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -682,11 +681,21 @@ let TargetPrefix = "nvvm" in {
   def int_nvvm_bitcast_d2ll : GCCBuiltin<"__nvvm_bitcast_d2ll">,
       Intrinsic<[llvm_i64_ty], [llvm_double_ty], [IntrNoMem]>;
 
+// FNS
 
-// Atomic not available as an llvm intrinsic.
+  def int_nvvm_fns : GCCBuiltin<"__nvvm_fns">,
+      Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                [IntrNoMem]>;
+
+// Atomics not available as llvm intrinsics.
   def int_nvvm_atomic_load_add_f32 : Intrinsic<[llvm_float_ty],
           [LLVMAnyPointerType<llvm_float_ty>, llvm_float_ty],
                                       [IntrArgMemOnly, NoCapture<0>]>;
+  // Atomic add of f64 requires sm_60.
+  def int_nvvm_atomic_load_add_f64 : Intrinsic<[llvm_double_ty],
+          [LLVMAnyPointerType<llvm_double_ty>, llvm_double_ty],
+                                      [IntrArgMemOnly, NoCapture<0>]>;
+
   def int_nvvm_atomic_load_inc_32 : Intrinsic<[llvm_i32_ty],
           [LLVMAnyPointerType<llvm_i32_ty>, llvm_i32_ty],
                                       [IntrArgMemOnly, NoCapture<0>]>;
@@ -3711,41 +3720,41 @@ def int_nvvm_read_ptx_sreg_warpsize : PTXReadSRegIntrinsic_r32<"warpsize">;
 // shfl.down.b32 dest, val, offset, mask_and_clamp
 def int_nvvm_shfl_down_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.down.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.down.i32">,
   GCCBuiltin<"__nvvm_shfl_down_i32">;
 def int_nvvm_shfl_down_f32 :
   Intrinsic<[llvm_float_ty], [llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.down.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.down.f32">,
   GCCBuiltin<"__nvvm_shfl_down_f32">;
 
 // shfl.up.b32 dest, val, offset, mask_and_clamp
 def int_nvvm_shfl_up_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.up.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.up.i32">,
   GCCBuiltin<"__nvvm_shfl_up_i32">;
 def int_nvvm_shfl_up_f32 :
   Intrinsic<[llvm_float_ty], [llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.up.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.up.f32">,
   GCCBuiltin<"__nvvm_shfl_up_f32">;
 
 // shfl.bfly.b32 dest, val, offset, mask_and_clamp
 def int_nvvm_shfl_bfly_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.bfly.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.bfly.i32">,
   GCCBuiltin<"__nvvm_shfl_bfly_i32">;
 def int_nvvm_shfl_bfly_f32 :
   Intrinsic<[llvm_float_ty], [llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.bfly.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.bfly.f32">,
   GCCBuiltin<"__nvvm_shfl_bfly_f32">;
 
 // shfl.idx.b32 dest, val, lane, mask_and_clamp
 def int_nvvm_shfl_idx_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.idx.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.idx.i32">,
   GCCBuiltin<"__nvvm_shfl_idx_i32">;
 def int_nvvm_shfl_idx_f32 :
   Intrinsic<[llvm_float_ty], [llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.idx.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.idx.f32">,
   GCCBuiltin<"__nvvm_shfl_idx_f32">;
 
 // Synchronizing shfl variants available in CUDA-9.
@@ -3755,41 +3764,41 @@ def int_nvvm_shfl_idx_f32 :
 // shfl.sync.down.b32 dest, threadmask, val, offset , mask_and_clamp
 def int_nvvm_shfl_sync_down_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.down.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.down.i32">,
   GCCBuiltin<"__nvvm_shfl_sync_down_i32">;
 def int_nvvm_shfl_sync_down_f32 :
   Intrinsic<[llvm_float_ty], [llvm_i32_ty, llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.down.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.down.f32">,
   GCCBuiltin<"__nvvm_shfl_sync_down_f32">;
 
 // shfl.sync.up.b32 dest, threadmask, val, offset, mask_and_clamp
 def int_nvvm_shfl_sync_up_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.up.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.up.i32">,
   GCCBuiltin<"__nvvm_shfl_sync_up_i32">;
 def int_nvvm_shfl_sync_up_f32 :
   Intrinsic<[llvm_float_ty], [llvm_i32_ty, llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.up.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.up.f32">,
   GCCBuiltin<"__nvvm_shfl_sync_up_f32">;
 
 // shfl.sync.bfly.b32 dest, threadmask, val, offset, mask_and_clamp
 def int_nvvm_shfl_sync_bfly_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.bfly.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.bfly.i32">,
   GCCBuiltin<"__nvvm_shfl_sync_bfly_i32">;
 def int_nvvm_shfl_sync_bfly_f32 :
   Intrinsic<[llvm_float_ty], [llvm_i32_ty, llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.bfly.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.bfly.f32">,
   GCCBuiltin<"__nvvm_shfl_sync_bfly_f32">;
 
 // shfl.sync.idx.b32 dest, threadmask, val, lane, mask_and_clamp
 def int_nvvm_shfl_sync_idx_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.idx.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.idx.i32">,
   GCCBuiltin<"__nvvm_shfl_sync_idx_i32">;
 def int_nvvm_shfl_sync_idx_f32 :
   Intrinsic<[llvm_float_ty], [llvm_i32_ty, llvm_float_ty, llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.shfl.sync.idx.f32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.shfl.sync.idx.f32">,
   GCCBuiltin<"__nvvm_shfl_sync_idx_f32">;
 
 //
@@ -3799,22 +3808,22 @@ def int_nvvm_shfl_sync_idx_f32 :
 // vote.all pred
 def int_nvvm_vote_all :
   Intrinsic<[llvm_i1_ty], [llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.all">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.all">,
   GCCBuiltin<"__nvvm_vote_all">;
 // vote.any pred
 def int_nvvm_vote_any :
   Intrinsic<[llvm_i1_ty], [llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.any">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.any">,
   GCCBuiltin<"__nvvm_vote_any">;
 // vote.uni pred
 def int_nvvm_vote_uni :
   Intrinsic<[llvm_i1_ty], [llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.uni">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.uni">,
   GCCBuiltin<"__nvvm_vote_uni">;
 // vote.ballot pred
 def int_nvvm_vote_ballot :
   Intrinsic<[llvm_i32_ty], [llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.ballot">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.ballot">,
   GCCBuiltin<"__nvvm_vote_ballot">;
 
 //
@@ -3824,22 +3833,22 @@ def int_nvvm_vote_ballot :
 // vote.sync.all mask, pred
 def int_nvvm_vote_all_sync :
   Intrinsic<[llvm_i1_ty], [llvm_i32_ty, llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.all.sync">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.all.sync">,
   GCCBuiltin<"__nvvm_vote_all_sync">;
 // vote.sync.any mask, pred
 def int_nvvm_vote_any_sync :
   Intrinsic<[llvm_i1_ty], [llvm_i32_ty, llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.any.sync">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.any.sync">,
   GCCBuiltin<"__nvvm_vote_any_sync">;
 // vote.sync.uni mask, pred
 def int_nvvm_vote_uni_sync :
   Intrinsic<[llvm_i1_ty], [llvm_i32_ty, llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.uni.sync">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.uni.sync">,
   GCCBuiltin<"__nvvm_vote_uni_sync">;
 // vote.sync.ballot mask, pred
 def int_nvvm_vote_ballot_sync :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i1_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.vote.ballot.sync">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.vote.ballot.sync">,
   GCCBuiltin<"__nvvm_vote_ballot_sync">;
 
 //
@@ -3848,12 +3857,12 @@ def int_nvvm_vote_ballot_sync :
 // match.any.sync.b32 mask, value
 def int_nvvm_match_any_sync_i32 :
   Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.match.any.sync.i32">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.match.any.sync.i32">,
   GCCBuiltin<"__nvvm_match_any_sync_i32">;
 // match.any.sync.b64 mask, value
 def int_nvvm_match_any_sync_i64 :
   Intrinsic<[llvm_i64_ty], [llvm_i32_ty, llvm_i64_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.match.any.sync.i64">,
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.match.any.sync.i64">,
   GCCBuiltin<"__nvvm_match_any_sync_i64">;
 
 // match.all instruction have two variants -- one returns a single value, another
@@ -3863,107 +3872,111 @@ def int_nvvm_match_any_sync_i64 :
 // match.all.sync.b32p mask, value
 def int_nvvm_match_all_sync_i32p :
   Intrinsic<[llvm_i32_ty, llvm_i1_ty], [llvm_i32_ty, llvm_i32_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.match.all.sync.i32p">;
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.match.all.sync.i32p">;
 // match.all.sync.b64p mask, value
 def int_nvvm_match_all_sync_i64p :
   Intrinsic<[llvm_i64_ty, llvm_i1_ty], [llvm_i32_ty, llvm_i64_ty],
-            [IntrNoMem, IntrConvergent], "llvm.nvvm.match.all.sync.i64p">;
+            [IntrInaccessibleMemOnly, IntrConvergent], "llvm.nvvm.match.all.sync.i64p">;
 
 //
 // WMMA instructions
 //
 
 // WMMA.LOAD
-class NVVM_WMMA_LD_ALSTS<string Abc, string Layout, string Space,
-                         string Type, LLVMType regty, int WithStride>
+class NVVM_WMMA_LD_GALSTS<string Geometry, string Abc, string Layout,
+                          string Type, LLVMType regty, int WithStride>
   : Intrinsic<!if(!eq(Abc#Type,"cf16"),
                   [regty, regty, regty, regty],
                   [regty, regty, regty, regty,
                    regty, regty, regty, regty]),
-              !if(WithStride, [llvm_ptr_ty, llvm_i32_ty], [llvm_ptr_ty]),
-              [], // Properties must be set during instantiation.
-              "llvm.nvvm.wmma.load."#Abc#".sync."#Layout#".m16n16k16"
-                #Space
-                #!if(WithStride,".stride","")
-                #"."#Type>;
+              !if(WithStride, [llvm_anyptr_ty, llvm_i32_ty], [llvm_anyptr_ty]),
+              [IntrReadMem, IntrArgMemOnly, ReadOnly<0>, NoCapture<0>],
+              "llvm.nvvm.wmma."
+                # Geometry
+                # ".load"
+                # "." # Abc
+                # "." # Layout
+                # !if(WithStride, ".stride", "")
+                # "." # Type>;
 
-multiclass NVVM_WMMA_LD_ALST<string Abc, string Layout, string Space,
+multiclass NVVM_WMMA_LD_GALT<string Geometry, string Abc, string Layout,
+                             string Type, LLVMType regty> {
+  def _stride: NVVM_WMMA_LD_GALSTS<Geometry, Abc, Layout, Type, regty, 1>;
+  def NAME   : NVVM_WMMA_LD_GALSTS<Geometry, Abc, Layout, Type, regty, 0>;
+}
+
+multiclass NVVM_WMMA_LD_GAT<string Geometry, string Abc,
                            string Type, LLVMType regty> {
-  def _stride: NVVM_WMMA_LD_ALSTS<Abc, Layout, Space, Type, regty, 1>;
-  def NAME   : NVVM_WMMA_LD_ALSTS<Abc, Layout, Space, Type, regty, 0>;
+  defm _row: NVVM_WMMA_LD_GALT<Geometry, Abc, "row", Type, regty>;
+  defm _col: NVVM_WMMA_LD_GALT<Geometry, Abc, "col", Type, regty>;
 }
 
-multiclass NVVM_WMMA_LD_ALT<string Abc, string Layout,
-                        string Type, LLVMType regty> {
-  defm _global: NVVM_WMMA_LD_ALST<Abc, Layout, ".global", Type, regty>;
-  defm _shared: NVVM_WMMA_LD_ALST<Abc, Layout, ".shared", Type, regty>;
-  defm NAME:    NVVM_WMMA_LD_ALST<Abc, Layout,        "", Type, regty>;
+multiclass NVVM_WMMA_LD_G<string Geometry> {
+  defm _a_f16: NVVM_WMMA_LD_GAT<Geometry, "a", "f16", llvm_v2f16_ty>;
+  defm _b_f16: NVVM_WMMA_LD_GAT<Geometry, "b", "f16", llvm_v2f16_ty>;
+  defm _c_f16: NVVM_WMMA_LD_GAT<Geometry, "c", "f16", llvm_v2f16_ty>;
+  defm _c_f32: NVVM_WMMA_LD_GAT<Geometry, "c", "f32", llvm_float_ty>;
 }
 
-multiclass NVVM_WMMA_LD_AT<string Abc, string Type, LLVMType regty> {
-  defm _row: NVVM_WMMA_LD_ALT<Abc, "row", Type, regty>;
-  defm _col: NVVM_WMMA_LD_ALT<Abc, "col", Type, regty>;
+multiclass NVVM_WMMA_LD {
+  defm _m32n8k16_load: NVVM_WMMA_LD_G<"m32n8k16">;
+  defm _m16n16k16_load: NVVM_WMMA_LD_G<"m16n16k16">;
+  defm _m8n32k16_load: NVVM_WMMA_LD_G<"m8n32k16">;
 }
 
-// For some reason ReadOnly<N> and NoCapture<N> confuses tblgen if they are
-// passed to Intrinsic<> form inside of a multiclass. Setting them globally
-// outside of the multiclass works.
-let IntrProperties = [IntrReadMem, IntrArgMemOnly,
-                      ReadOnly<0>, NoCapture<0>] in {
-  defm int_nvvm_wmma_load_a_f16: NVVM_WMMA_LD_AT<"a", "f16", llvm_v2f16_ty>;
-  defm int_nvvm_wmma_load_b_f16: NVVM_WMMA_LD_AT<"b", "f16", llvm_v2f16_ty>;
-  defm int_nvvm_wmma_load_c_f16: NVVM_WMMA_LD_AT<"c", "f16", llvm_v2f16_ty>;
-  defm int_nvvm_wmma_load_c_f32: NVVM_WMMA_LD_AT<"c", "f32", llvm_float_ty>;
-}
+defm int_nvvm_wmma: NVVM_WMMA_LD;
 
 // WMMA.STORE.D
-class NVVM_WMMA_STD_LSTS<string Layout, string Space,
-                         string Type, LLVMType regty, int WithStride,
-                         // This is only used to create a typed empty array we
-                         // need to pass to !if below.
-                         list<LLVMType>Empty=[]>
+class NVVM_WMMA_STD_GLSTS<string Geometry, string Layout,
+                          string Type, LLVMType regty, int WithStride,
+                          // This is only used to create a typed empty array we
+                          // need to pass to !if below.
+                          list<LLVMType>Empty=[]>
   : Intrinsic<[],
               !listconcat(
-                [llvm_ptr_ty],
+                [llvm_anyptr_ty],
                 !if(!eq(Type,"f16"),
                     [regty, regty, regty, regty],
                     [regty, regty, regty, regty,
                      regty, regty, regty, regty]),
                 !if(WithStride, [llvm_i32_ty], Empty)),
-              [], // Properties must be set during instantiation.
-              "llvm.nvvm.wmma.store.d.sync."#Layout
-                   #".m16n16k16"#Space
-                   #!if(WithStride,".stride","")
-                   #"."#Type>;
+              [IntrWriteMem, IntrArgMemOnly, WriteOnly<0>, NoCapture<0>],
+              "llvm.nvvm.wmma."
+                   # Geometry
+                   # ".store.d"
+                   # "." # Layout
+                   # !if(WithStride, ".stride", "")
+                   # "." # Type>;
 
-multiclass NVVM_WMMA_STD_LST<string Layout, string Space,
-                            string Type, LLVMType regty> {
-  def _stride: NVVM_WMMA_STD_LSTS<Layout, Space, Type, regty, 1>;
-  def NAME:    NVVM_WMMA_STD_LSTS<Layout, Space, Type, regty, 0>;
+multiclass NVVM_WMMA_STD_GLT<string Geometry, string Layout,
+                             string Type, LLVMType regty> {
+  def _stride: NVVM_WMMA_STD_GLSTS<Geometry, Layout, Type, regty, 1>;
+  def NAME:    NVVM_WMMA_STD_GLSTS<Geometry, Layout, Type, regty, 0>;
 }
 
-multiclass NVVM_WMMA_STD_LT<string Layout, string Type, LLVMType regty> {
-  defm _global: NVVM_WMMA_STD_LST<Layout, ".global", Type, regty>;
-  defm _shared: NVVM_WMMA_STD_LST<Layout, ".shared", Type, regty>;
-  defm    NAME: NVVM_WMMA_STD_LST<Layout,        "", Type, regty>;
+multiclass NVVM_WMMA_STD_GT<string Geometry, string Type, LLVMType regty> {
+  defm _row: NVVM_WMMA_STD_GLT<Geometry, "row", Type, regty>;
+  defm _col: NVVM_WMMA_STD_GLT<Geometry, "col", Type, regty>;
+}
+multiclass NVVM_WMMA_STD_G<string Geometry> {
+  defm _d_f16: NVVM_WMMA_STD_GT<Geometry, "f16", llvm_v2f16_ty>;
+  defm _d_f32: NVVM_WMMA_STD_GT<Geometry, "f32", llvm_float_ty>;
 }
 
-multiclass NVVM_WMMA_STD_T<string Type, LLVMType regty> {
-  defm _row: NVVM_WMMA_STD_LT<"row", Type, regty>;
-  defm _col: NVVM_WMMA_STD_LT<"col", Type, regty>;
+multiclass NVVM_WMMA_STD {
+  defm _m32n8k16_store:  NVVM_WMMA_STD_G<"m32n8k16">;
+  defm _m16n16k16_store: NVVM_WMMA_STD_G<"m16n16k16">;
+  defm _m8n32k16_store:  NVVM_WMMA_STD_G<"m8n32k16">;
 }
 
-let IntrProperties = [IntrWriteMem, IntrArgMemOnly,
-                      WriteOnly<0>, NoCapture<0>] in {
-  defm int_nvvm_wmma_store_d_f16: NVVM_WMMA_STD_T<"f16", llvm_v2f16_ty>;
-  defm int_nvvm_wmma_store_d_f32: NVVM_WMMA_STD_T<"f32", llvm_float_ty>;
-}
+defm int_nvvm_wmma: NVVM_WMMA_STD;
 
 // WMMA.MMA
-class NVVM_WMMA_MMA_ABDCS<string ALayout, string BLayout,
-                          string DType, LLVMType d_regty,
-                          string CType, LLVMType c_regty,
-                          string Satfinite = "">
+class NVVM_WMMA_MMA_GABDCS<string Geometry,
+                           string ALayout, string BLayout,
+                           string DType, LLVMType d_regty,
+                           string CType, LLVMType c_regty,
+                           string Satfinite = "">
   : Intrinsic<!if(!eq(DType,"f16"),
                       [d_regty, d_regty, d_regty, d_regty],
                       [d_regty, d_regty, d_regty, d_regty,
@@ -3980,39 +3993,54 @@ class NVVM_WMMA_MMA_ABDCS<string ALayout, string BLayout,
                       [c_regty, c_regty, c_regty, c_regty,
                        c_regty, c_regty, c_regty, c_regty])),
               [IntrNoMem],
-              "llvm.nvvm.wmma.mma.sync."#ALayout#"."#BLayout
-                 #".m16n16k16."#DType#"."#CType#Satfinite>;
-
-multiclass NVVM_WMMA_MMA_ABDC<string ALayout, string BLayout,
-                              string DType, LLVMType d_regty,
-                              string CType, LLVMType c_regty> {
-  def NAME : NVVM_WMMA_MMA_ABDCS<ALayout, BLayout,
-                                 DType, d_regty,
-                                 CType, c_regty>;
-  def _satfinite: NVVM_WMMA_MMA_ABDCS<ALayout, BLayout,
-                                      DType, d_regty,
-                                      CType, c_regty,".satfinite">;
+              "llvm.nvvm.wmma."
+                # Geometry
+                # ".mma"
+                # "." # ALayout
+                # "." # BLayout
+                # "." # DType
+                # "." # CType
+                # Satfinite> {
 }
 
-multiclass NVVM_WMMA_MMA_ABD<string ALayout, string BLayout,
+multiclass NVVM_WMMA_MMA_GABDC<string Geometry, string ALayout, string BLayout,
+                               string DType, LLVMType d_regty,
+                               string CType, LLVMType c_regty> {
+  def NAME : NVVM_WMMA_MMA_GABDCS<Geometry, ALayout, BLayout,
+                                  DType, d_regty, CType, c_regty>;
+  def _satfinite: NVVM_WMMA_MMA_GABDCS<Geometry, ALayout, BLayout,
+                                       DType, d_regty, CType, c_regty,".satfinite">;
+}
+
+multiclass NVVM_WMMA_MMA_GABD<string Geometry, string ALayout, string BLayout,
                               string DType, LLVMType d_regty> {
-  defm _f16: NVVM_WMMA_MMA_ABDC<ALayout, BLayout, DType, d_regty,
+  defm _f16: NVVM_WMMA_MMA_GABDC<Geometry, ALayout, BLayout, DType, d_regty,
                                 "f16", llvm_v2f16_ty>;
-  defm _f32: NVVM_WMMA_MMA_ABDC<ALayout, BLayout, DType, d_regty,
+  defm _f32: NVVM_WMMA_MMA_GABDC<Geometry, ALayout, BLayout, DType, d_regty,
                                 "f32", llvm_float_ty>;
 }
 
-multiclass NVVM_WMMA_MMA_AB<string ALayout, string BLayout> {
-  defm _f16: NVVM_WMMA_MMA_ABD<ALayout, BLayout, "f16", llvm_v2f16_ty>;
-  defm _f32: NVVM_WMMA_MMA_ABD<ALayout, BLayout, "f32", llvm_float_ty>;
+multiclass NVVM_WMMA_MMA_GAB<string Geometry, string ALayout, string BLayout> {
+  defm _f16: NVVM_WMMA_MMA_GABD<Geometry, ALayout, BLayout, "f16", llvm_v2f16_ty>;
+  defm _f32: NVVM_WMMA_MMA_GABD<Geometry, ALayout, BLayout, "f32", llvm_float_ty>;
 }
 
-multiclass NVVM_WMMA_MMA_A<string ALayout> {
-  defm _col: NVVM_WMMA_MMA_AB<ALayout, "col">;
-  defm _row: NVVM_WMMA_MMA_AB<ALayout, "row">;
+multiclass NVVM_WMMA_MMA_GA<string Geometry, string ALayout> {
+  defm _col: NVVM_WMMA_MMA_GAB<Geometry, ALayout, "col">;
+  defm _row: NVVM_WMMA_MMA_GAB<Geometry, ALayout, "row">;
 }
 
-defm int_nvvm_wmma_mma_sync_col: NVVM_WMMA_MMA_A<"col">;
-defm int_nvvm_wmma_mma_sync_row: NVVM_WMMA_MMA_A<"row">;
+multiclass NVVM_WMMA_MMA_G<string Geometry> {
+  defm _col: NVVM_WMMA_MMA_GA<Geometry, "col">;
+  defm _row: NVVM_WMMA_MMA_GA<Geometry, "row">;
+}
+
+multiclass NVVM_WMMA_MMA {
+  defm _m32n8k16_mma : NVVM_WMMA_MMA_G<"m32n8k16">;
+  defm _m16n16k16_mma : NVVM_WMMA_MMA_G<"m16n16k16">;
+  defm _m8n32k16_mma : NVVM_WMMA_MMA_G<"m8n32k16">;
+}
+
+defm int_nvvm_wmma : NVVM_WMMA_MMA;
 
 } // let TargetPrefix = "nvvm"

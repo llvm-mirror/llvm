@@ -1,9 +1,8 @@
 //===-- llvm-config.cpp - LLVM project configuration utility --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,15 +16,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
 #include <set>
@@ -62,7 +62,7 @@ enum LinkMode {
   LinkModeStatic = 2,
 };
 
-/// \brief Traverse a single component adding to the topological ordering in
+/// Traverse a single component adding to the topological ordering in
 /// \arg RequiredLibs.
 ///
 /// \param Name - The component to traverse.
@@ -129,7 +129,7 @@ static void VisitComponent(const std::string &Name,
   }
 }
 
-/// \brief Compute the list of required libraries for a given list of
+/// Compute the list of required libraries for a given list of
 /// components, in an order suitable for passing to a linker (that is, libraries
 /// appear prior to their dependencies).
 ///
@@ -223,7 +223,7 @@ Typical components:\n\
   exit(1);
 }
 
-/// \brief Compute the path to the main executable.
+/// Compute the path to the main executable.
 std::string GetExecutablePath(const char *Argv0) {
   // This just needs to be some symbol in the binary; C++ doesn't
   // allow taking the address of ::main however.
@@ -231,7 +231,7 @@ std::string GetExecutablePath(const char *Argv0) {
   return llvm::sys::fs::getMainExecutable(Argv0, P);
 }
 
-/// \brief Expand the semi-colon delimited LLVM_DYLIB_COMPONENTS into
+/// Expand the semi-colon delimited LLVM_DYLIB_COMPONENTS into
 /// the full list of components.
 std::vector<std::string> GetAllDyLibComponents(const bool IsInDevelopmentTree,
                                                const bool GetComponentNames,
@@ -522,7 +522,7 @@ int main(int argc, char **argv) {
             if (DyLibExists && !sys::fs::exists(path)) {
               Components =
                   GetAllDyLibComponents(IsInDevelopmentTree, true, DirSep);
-              std::sort(Components.begin(), Components.end());
+              llvm::sort(Components);
               break;
             }
           }
@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
     usage();
 
   if (LinkMode == LinkModeShared && !DyLibExists && !BuiltSharedLibs) {
-    errs() << "llvm-config: error: " << DyLibName << " is missing\n";
+    WithColor::error(errs(), "llvm-config") << DyLibName << " is missing\n";
     return 1;
   }
 
@@ -612,19 +612,19 @@ int main(int argc, char **argv) {
           break;
         // Using component shared libraries.
         for (auto &Lib : MissingLibs)
-          errs() << "llvm-config: error: missing: " << Lib << "\n";
+          WithColor::error(errs(), "llvm-config") << "missing: " << Lib << "\n";
         return 1;
       case LinkModeAuto:
         if (DyLibExists) {
           LinkMode = LinkModeShared;
           break;
         }
-        errs()
-            << "llvm-config: error: component libraries and shared library\n\n";
+        WithColor::error(errs(), "llvm-config")
+            << "component libraries and shared library\n\n";
         LLVM_FALLTHROUGH;
       case LinkModeStatic:
         for (auto &Lib : MissingLibs)
-          errs() << "llvm-config: error: missing: " << Lib << "\n";
+          WithColor::error(errs(), "llvm-config") << "missing: " << Lib << "\n";
         return 1;
       }
     } else if (LinkMode == LinkModeAuto) {
@@ -707,7 +707,8 @@ int main(int argc, char **argv) {
       OS << (LinkMode == LinkModeStatic ? LLVM_SYSTEM_LIBS : "") << '\n';
     }
   } else if (!Components.empty()) {
-    errs() << "llvm-config: error: components given, but unused\n\n";
+    WithColor::error(errs(), "llvm-config")
+        << "components given, but unused\n\n";
     usage();
   }
 

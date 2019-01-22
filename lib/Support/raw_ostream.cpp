@@ -1,9 +1,8 @@
 //===--- raw_ostream.cpp - Implement the raw_ostream classes --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,9 +40,6 @@
 #if defined(HAVE_UNISTD_H)
 # include <unistd.h>
 #endif
-#if defined(HAVE_SYS_UIO_H) && defined(HAVE_WRITEV)
-#  include <sys/uio.h>
-#endif
 
 #if defined(__CYGWIN__)
 #include <io.h>
@@ -62,7 +58,8 @@
 #endif
 #endif
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
+#include "llvm/Support/ConvertUTF.h"
 #include "Windows/WindowsSupport.h"
 #endif
 
@@ -77,9 +74,6 @@ raw_ostream::~raw_ostream() {
   if (BufferMode == InternalBuffer)
     delete [] OutBufStart;
 }
-
-// An out of line virtual method to provide a home for the class vtable.
-void raw_ostream::handle() {}
 
 size_t raw_ostream::preferred_buffer_size() const {
   // BUFSIZ is intended to be a reasonable default.
@@ -166,7 +160,7 @@ raw_ostream &raw_ostream::write_escaped(StringRef Str,
       *this << '\\' << '"';
       break;
     default:
-      if (std::isprint(c)) {
+      if (isPrint(c)) {
         *this << c;
         break;
       }
@@ -442,7 +436,7 @@ raw_ostream &raw_ostream::operator<<(const FormattedBytes &FB) {
 
       // Print the ASCII char values for each byte on this line
       for (uint8_t Byte : Line) {
-        if (isprint(Byte))
+        if (isPrint(Byte))
           *this << static_cast<char>(Byte);
         else
           *this << '.';
@@ -458,24 +452,38 @@ raw_ostream &raw_ostream::operator<<(const FormattedBytes &FB) {
   return *this;
 }
 
-/// indent - Insert 'NumSpaces' spaces.
-raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
-  static const char Spaces[] = "                                "
-                               "                                "
-                               "                ";
+template <char C>
+static raw_ostream &write_padding(raw_ostream &OS, unsigned NumChars) {
+  static const char Chars[] = {C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C,
+                               C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C};
 
   // Usually the indentation is small, handle it with a fastpath.
-  if (NumSpaces < array_lengthof(Spaces))
-    return write(Spaces, NumSpaces);
+  if (NumChars < array_lengthof(Chars))
+    return OS.write(Chars, NumChars);
 
-  while (NumSpaces) {
-    unsigned NumToWrite = std::min(NumSpaces,
-                                   (unsigned)array_lengthof(Spaces)-1);
-    write(Spaces, NumToWrite);
-    NumSpaces -= NumToWrite;
+  while (NumChars) {
+    unsigned NumToWrite = std::min(NumChars,
+                                   (unsigned)array_lengthof(Chars)-1);
+    OS.write(Chars, NumToWrite);
+    NumChars -= NumToWrite;
   }
-  return *this;
+  return OS;
 }
+
+/// indent - Insert 'NumSpaces' spaces.
+raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
+  return write_padding<' '>(*this, NumSpaces);
+}
+
+/// write_zeros - Insert 'NumZeros' nulls.
+raw_ostream &raw_ostream::write_zeros(unsigned NumZeros) {
+  return write_padding<'\0'>(*this, NumZeros);
+}
+
+void raw_ostream::anchor() {}
 
 //===----------------------------------------------------------------------===//
 //  Formatted Output
@@ -490,29 +498,56 @@ void format_object_base::home() {
 //===----------------------------------------------------------------------===//
 
 static int getFD(StringRef Filename, std::error_code &EC,
+                 sys::fs::CreationDisposition Disp, sys::fs::FileAccess Access,
                  sys::fs::OpenFlags Flags) {
+  assert((Access & sys::fs::FA_Write) &&
+         "Cannot make a raw_ostream from a read-only descriptor!");
+
   // Handle "-" as stdout. Note that when we do this, we consider ourself
   // the owner of stdout and may set the "binary" flag globally based on Flags.
   if (Filename == "-") {
     EC = std::error_code();
     // If user requested binary then put stdout into binary mode if
     // possible.
-    if (!(Flags & sys::fs::F_Text))
+    if (!(Flags & sys::fs::OF_Text))
       sys::ChangeStdoutToBinary();
     return STDOUT_FILENO;
   }
 
   int FD;
-  EC = sys::fs::openFileForWrite(Filename, FD, Flags);
+  if (Access & sys::fs::FA_Read)
+    EC = sys::fs::openFileForReadWrite(Filename, FD, Disp, Flags);
+  else
+    EC = sys::fs::openFileForWrite(Filename, FD, Disp, Flags);
   if (EC)
     return -1;
 
   return FD;
 }
 
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC)
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, sys::fs::FA_Write,
+                     sys::fs::OF_None) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::CreationDisposition Disp)
+    : raw_fd_ostream(Filename, EC, Disp, sys::fs::FA_Write, sys::fs::OF_None) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::FileAccess Access)
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, Access,
+                     sys::fs::OF_None) {}
+
 raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
                                sys::fs::OpenFlags Flags)
-    : raw_fd_ostream(getFD(Filename, EC, Flags), true) {}
+    : raw_fd_ostream(Filename, EC, sys::fs::CD_CreateAlways, sys::fs::FA_Write,
+                     Flags) {}
+
+raw_fd_ostream::raw_fd_ostream(StringRef Filename, std::error_code &EC,
+                               sys::fs::CreationDisposition Disp,
+                               sys::fs::FileAccess Access,
+                               sys::fs::OpenFlags Flags)
+    : raw_fd_ostream(getFD(Filename, EC, Disp, Access, Flags), true) {}
 
 /// FD is the file descriptor that this writes to.  If ShouldClose is true, this
 /// closes the file when the stream is destroyed.
@@ -532,9 +567,15 @@ raw_fd_ostream::raw_fd_ostream(int fd, bool shouldClose, bool unbuffered)
   if (FD <= STDERR_FILENO)
     ShouldClose = false;
 
+#ifdef _WIN32
+  // Check if this is a console device. This is not equivalent to isatty.
+  IsWindowsConsole =
+      ::GetFileType((HANDLE)::_get_osfhandle(fd)) == FILE_TYPE_CHAR;
+#endif
+
   // Get the starting position.
   off_t loc = ::lseek(FD, 0, SEEK_CUR);
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   // MSVCRT's _lseek(SEEK_CUR) doesn't return -1 for pipes.
   sys::fs::file_status Status;
   std::error_code EC = status(FD, Status);
@@ -574,28 +615,81 @@ raw_fd_ostream::~raw_fd_ostream() {
                        /*GenCrashDiag=*/false);
 }
 
+#if defined(_WIN32)
+// The most reliable way to print unicode in a Windows console is with
+// WriteConsoleW. To use that, first transcode from UTF-8 to UTF-16. This
+// assumes that LLVM programs always print valid UTF-8 to the console. The data
+// might not be UTF-8 for two major reasons:
+// 1. The program is printing binary (-filetype=obj -o -), in which case it
+// would have been gibberish anyway.
+// 2. The program is printing text in a semi-ascii compatible codepage like
+// shift-jis or cp1252.
+//
+// Most LLVM programs don't produce non-ascii text unless they are quoting
+// user source input. A well-behaved LLVM program should either validate that
+// the input is UTF-8 or transcode from the local codepage to UTF-8 before
+// quoting it. If they don't, this may mess up the encoding, but this is still
+// probably the best compromise we can make.
+static bool write_console_impl(int FD, StringRef Data) {
+  SmallVector<wchar_t, 256> WideText;
+
+  // Fall back to ::write if it wasn't valid UTF-8.
+  if (auto EC = sys::windows::UTF8ToUTF16(Data, WideText))
+    return false;
+
+  // On Windows 7 and earlier, WriteConsoleW has a low maximum amount of data
+  // that can be written to the console at a time.
+  size_t MaxWriteSize = WideText.size();
+  if (!RunningWindows8OrGreater())
+    MaxWriteSize = 32767;
+
+  size_t WCharsWritten = 0;
+  do {
+    size_t WCharsToWrite =
+        std::min(MaxWriteSize, WideText.size() - WCharsWritten);
+    DWORD ActuallyWritten;
+    bool Success =
+        ::WriteConsoleW((HANDLE)::_get_osfhandle(FD), &WideText[WCharsWritten],
+                        WCharsToWrite, &ActuallyWritten,
+                        /*Reserved=*/nullptr);
+
+    // The most likely reason for WriteConsoleW to fail is that FD no longer
+    // points to a console. Fall back to ::write. If this isn't the first loop
+    // iteration, something is truly wrong.
+    if (!Success)
+      return false;
+
+    WCharsWritten += ActuallyWritten;
+  } while (WCharsWritten != WideText.size());
+  return true;
+}
+#endif
+
 void raw_fd_ostream::write_impl(const char *Ptr, size_t Size) {
   assert(FD >= 0 && "File already closed.");
   pos += Size;
 
-#ifndef LLVM_ON_WIN32
-#if defined(__linux__)
-  bool ShouldWriteInChunks = true;
-#else
-  bool ShouldWriteInChunks = false;
+#if defined(_WIN32)
+  // If this is a Windows console device, try re-encoding from UTF-8 to UTF-16
+  // and using WriteConsoleW. If that fails, fall back to plain write().
+  if (IsWindowsConsole)
+    if (write_console_impl(FD, StringRef(Ptr, Size)))
+      return;
 #endif
-#else
-  // Writing a large size of output to Windows console returns ENOMEM. It seems
-  // that, prior to Windows 8, WriteFile() is redirecting to WriteConsole(), and
-  // the latter has a size limit (66000 bytes or less, depending on heap usage).
-  bool ShouldWriteInChunks = !!::_isatty(FD) && !RunningWindows8OrGreater();
+
+  // The maximum write size is limited to INT32_MAX. A write
+  // greater than SSIZE_MAX is implementation-defined in POSIX,
+  // and Windows _write requires 32 bit input.
+  size_t MaxWriteSize = INT32_MAX;
+
+#if defined(__linux__)
+  // It is observed that Linux returns EINVAL for a very large write (>2G).
+  // Make it a reasonably small value.
+  MaxWriteSize = 1024 * 1024 * 1024;
 #endif
 
   do {
-    size_t ChunkSize = Size;
-    if (ChunkSize > 32767 && ShouldWriteInChunks)
-        ChunkSize = 32767;
-
+    size_t ChunkSize = std::min(Size, MaxWriteSize);
     ssize_t ret = ::write(FD, Ptr, ChunkSize);
 
     if (ret < 0) {
@@ -639,7 +733,7 @@ void raw_fd_ostream::close() {
 uint64_t raw_fd_ostream::seek(uint64_t off) {
   assert(SupportsSeeking && "Stream does not support seeking!");
   flush();
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   pos = ::_lseeki64(FD, off, SEEK_SET);
 #elif defined(HAVE_LSEEK64)
   pos = ::lseek64(FD, off, SEEK_SET);
@@ -660,8 +754,17 @@ void raw_fd_ostream::pwrite_impl(const char *Ptr, size_t Size,
 }
 
 size_t raw_fd_ostream::preferred_buffer_size() const {
-#if !defined(_MSC_VER) && !defined(__MINGW32__) && !defined(__minix)
-  // Windows and Minix have no st_blksize.
+#if defined(_WIN32)
+  // Disable buffering for console devices. Console output is re-encoded from
+  // UTF-8 to UTF-16 on Windows, and buffering it would require us to split the
+  // buffer on a valid UTF-8 codepoint boundary. Terminal buffering is disabled
+  // below on most other OSs, so do the same thing on Windows and avoid that
+  // complexity.
+  if (IsWindowsConsole)
+    return 0;
+  return raw_ostream::preferred_buffer_size();
+#elif !defined(__minix)
+  // Minix has no st_blksize.
   assert(FD >= 0 && "File not yet open!");
   struct stat statbuf;
   if (fstat(FD, &statbuf) != 0)
@@ -728,6 +831,8 @@ bool raw_fd_ostream::is_displayed() const {
 bool raw_fd_ostream::has_colors() const {
   return sys::Process::FileDescriptorHasColors(FD);
 }
+
+void raw_fd_ostream::anchor() {}
 
 //===----------------------------------------------------------------------===//
 //  outs(), errs(), nulls()
@@ -806,3 +911,7 @@ uint64_t raw_null_ostream::current_pos() const {
 
 void raw_null_ostream::pwrite_impl(const char *Ptr, size_t Size,
                                    uint64_t Offset) {}
+
+void raw_pwrite_stream::anchor() {}
+
+void buffer_ostream::anchor() {}

@@ -1,9 +1,8 @@
 //===- BypassSlowDivision.cpp - Bypass slow division ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,6 +20,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -34,7 +34,6 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/KnownBits.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 
@@ -173,7 +172,7 @@ Value *FastDivInsertionTask::getReplacement(DivCacheTy &Cache) {
   return isDivisionOp() ? Value.Quotient : Value.Remainder;
 }
 
-/// \brief Check if a value looks like a hash.
+/// Check if a value looks like a hash.
 ///
 /// The routine is expected to detect values computed using the most common hash
 /// algorithms. Typically, hash computations end with one of the following
@@ -352,11 +351,6 @@ Optional<QuotRemPair> FastDivInsertionTask::insertFastDivAndRem() {
   Value *Dividend = SlowDivOrRem->getOperand(0);
   Value *Divisor = SlowDivOrRem->getOperand(1);
 
-  if (isa<ConstantInt>(Divisor)) {
-    // Keep division by a constant for DAGCombiner.
-    return None;
-  }
-
   VisitedSetTy SetL;
   ValueRange DividendRange = getValueRange(Dividend, SetL);
   if (DividendRange == VALRNG_LIKELY_LONG)
@@ -372,7 +366,9 @@ Optional<QuotRemPair> FastDivInsertionTask::insertFastDivAndRem() {
 
   if (DividendShort && DivisorShort) {
     // If both operands are known to be short then just replace the long
-    // division with a short one in-place.
+    // division with a short one in-place.  Since we're not introducing control
+    // flow in this case, narrowing the division is always a win, even if the
+    // divisor is a constant (and will later get replaced by a multiplication).
 
     IRBuilder<> Builder(SlowDivOrRem);
     Value *TruncDividend = Builder.CreateTrunc(Dividend, BypassType);
@@ -382,7 +378,25 @@ Optional<QuotRemPair> FastDivInsertionTask::insertFastDivAndRem() {
     Value *ExtDiv = Builder.CreateZExt(TruncDiv, getSlowType());
     Value *ExtRem = Builder.CreateZExt(TruncRem, getSlowType());
     return QuotRemPair(ExtDiv, ExtRem);
-  } else if (DividendShort && !isSignedOp()) {
+  }
+
+  if (isa<ConstantInt>(Divisor)) {
+    // If the divisor is not a constant, DAGCombiner will convert it to a
+    // multiplication by a magic constant.  It isn't clear if it is worth
+    // introducing control flow to get a narrower multiply.
+    return None;
+  }
+
+  // After Constant Hoisting pass, long constants may be represented as
+  // bitcast instructions. As a result, some constants may look like an
+  // instruction at first, and an additional check is necessary to find out if
+  // an operand is actually a constant.
+  if (auto *BCI = dyn_cast<BitCastInst>(Divisor))
+    if (BCI->getParent() == SlowDivOrRem->getParent() &&
+        isa<ConstantInt>(BCI->getOperand(0)))
+      return None;
+
+  if (DividendShort && !isSignedOp()) {
     // If the division is unsigned and Dividend is known to be short, then
     // either
     // 1) Divisor is less or equal to Dividend, and the result can be computed

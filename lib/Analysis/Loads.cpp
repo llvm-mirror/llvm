@@ -1,9 +1,8 @@
 //===- Loads.cpp - Local load analysis ------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -80,7 +79,7 @@ static bool isDereferenceableAndAlignedPointer(
   if (const GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
     const Value *Base = GEP->getPointerOperand();
 
-    APInt Offset(DL.getPointerTypeSizeInBits(GEP->getType()), 0);
+    APInt Offset(DL.getIndexTypeSizeInBits(GEP->getType()), 0);
     if (!GEP->accumulateConstantOffset(DL, Offset) || Offset.isNegative() ||
         !Offset.urem(APInt(Offset.getBitWidth(), Align)).isMinValue())
       return false;
@@ -107,9 +106,9 @@ static bool isDereferenceableAndAlignedPointer(
     return isDereferenceableAndAlignedPointer(ASC->getOperand(0), Align, Size,
                                               DL, CtxI, DT, Visited);
 
-  if (auto CS = ImmutableCallSite(V))
-    if (const Value *RV = CS.getReturnedArgOperand())
-      return isDereferenceableAndAlignedPointer(RV, Align, Size, DL, CtxI, DT,
+  if (const auto *Call = dyn_cast<CallBase>(V))
+    if (auto *RP = getArgumentAliasingToReturnedPointer(Call))
+      return isDereferenceableAndAlignedPointer(RP, Align, Size, DL, CtxI, DT,
                                                 Visited);
 
   // If we don't know, assume the worst.
@@ -146,7 +145,7 @@ bool llvm::isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
 
   SmallPtrSet<const Value *, 32> Visited;
   return ::isDereferenceableAndAlignedPointer(
-      V, Align, APInt(DL.getTypeSizeInBits(VTy), DL.getTypeStoreSize(Ty)), DL,
+      V, Align, APInt(DL.getIndexTypeSizeInBits(VTy), DL.getTypeStoreSize(Ty)), DL,
       CtxI, DT, Visited);
 }
 
@@ -156,7 +155,7 @@ bool llvm::isDereferenceablePointer(const Value *V, const DataLayout &DL,
   return isDereferenceableAndAlignedPointer(V, 1, DL, CtxI, DT);
 }
 
-/// \brief Test if A and B will obviously have the same value.
+/// Test if A and B will obviously have the same value.
 ///
 /// This includes recognizing that %t0 and %t1 will have the same
 /// value in code like this:
@@ -187,7 +186,7 @@ static bool AreEquivalentAddressValues(const Value *A, const Value *B) {
   return false;
 }
 
-/// \brief Check if executing a load of this pointer value cannot trap.
+/// Check if executing a load of this pointer value cannot trap.
 ///
 /// If DT and ScanFrom are specified this method performs context-sensitive
 /// analysis and returns true if it is safe to load immediately before ScanFrom.
@@ -345,7 +344,7 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
   const DataLayout &DL = ScanBB->getModule()->getDataLayout();
 
   // Try to get the store size for the type.
-  uint64_t AccessSize = DL.getTypeStoreSize(AccessTy);
+  auto AccessSize = LocationSize::precise(DL.getTypeStoreSize(AccessTy));
 
   Value *StrippedPtr = Ptr->stripPointerCasts();
 
@@ -414,7 +413,7 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
 
       // If we have alias analysis and it says the store won't modify the loaded
       // value, ignore the store.
-      if (AA && (AA->getModRefInfo(SI, StrippedPtr, AccessSize) & MRI_Mod) == 0)
+      if (AA && !isModSet(AA->getModRefInfo(SI, StrippedPtr, AccessSize)))
         continue;
 
       // Otherwise the store that may or may not alias the pointer, bail out.
@@ -426,8 +425,7 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
     if (Inst->mayWriteToMemory()) {
       // If alias analysis claims that it really won't modify the load,
       // ignore it.
-      if (AA &&
-          (AA->getModRefInfo(Inst, StrippedPtr, AccessSize) & MRI_Mod) == 0)
+      if (AA && !isModSet(AA->getModRefInfo(Inst, StrippedPtr, AccessSize)))
         continue;
 
       // May modify the pointer, bail out.

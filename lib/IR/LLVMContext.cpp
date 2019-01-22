@@ -1,9 +1,8 @@
 //===-- LLVMContext.cpp - Implement LLVMContext ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -60,6 +59,9 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
     {MD_absolute_symbol, "absolute_symbol"},
     {MD_associated, "associated"},
     {MD_callees, "callees"},
+    {MD_irr_loop, "irr_loop"},
+    {MD_access_group, "llvm.access.group"},
+    {MD_callback, "callback"},
   };
 
   for (auto &MDKind : MDKinds) {
@@ -331,8 +333,12 @@ void LLVMContext::setDiscardValueNames(bool Discard) {
   pImpl->DiscardValueNames = Discard;
 }
 
-OptBisect &LLVMContext::getOptBisect() {
-  return pImpl->getOptBisect();
+OptPassGate &LLVMContext::getOptPassGate() const {
+  return pImpl->getOptPassGate();
+}
+
+void LLVMContext::setOptPassGate(OptPassGate& OPG) {
+  pImpl->setOptPassGate(OPG);
 }
 
 const DiagnosticHandler *LLVMContext::getDiagHandlerPtr() const {

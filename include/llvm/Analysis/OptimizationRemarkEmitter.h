@@ -1,9 +1,8 @@
 //===- OptimizationRemarkEmitter.h - Optimization Diagnostic ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,7 +39,7 @@ public:
   OptimizationRemarkEmitter(const Function *F, BlockFrequencyInfo *BFI)
       : F(F), BFI(BFI) {}
 
-  /// \brief This variant can be used to generate ORE on demand (without the
+  /// This variant can be used to generate ORE on demand (without the
   /// analysis pass).
   ///
   /// Note that this ctor has a very different cost depending on whether
@@ -66,11 +65,11 @@ public:
   bool invalidate(Function &F, const PreservedAnalyses &PA,
                   FunctionAnalysisManager::Invalidator &Inv);
 
-  /// \brief Output the remark via the diagnostic handler and to the
+  /// Output the remark via the diagnostic handler and to the
   /// optimization record file.
   void emit(DiagnosticInfoOptimizationBase &OptDiag);
 
-  /// \brief Take a lambda that returns a remark which will be emitted.  Second
+  /// Take a lambda that returns a remark which will be emitted.  Second
   /// argument is only used to restrict this to functions.
   template <typename T>
   void emit(T RemarkBuilder, decltype(RemarkBuilder()) * = nullptr) {
@@ -85,7 +84,7 @@ public:
     }
   }
 
-  /// \brief Whether we allow for extra compile-time budget to perform more
+  /// Whether we allow for extra compile-time budget to perform more
   /// analysis to produce fewer false positives.
   ///
   /// This is useful when reporting missed optimizations.  In this case we can
@@ -112,7 +111,7 @@ private:
   /// Similar but use value from \p OptDiag and update hotness there.
   void computeHotness(DiagnosticInfoIROptimization &OptDiag);
 
-  /// \brief Only allow verbose messages if we know we're filtering by hotness
+  /// Only allow verbose messages if we know we're filtering by hotness
   /// (BFI is only set in this case).
   bool shouldEmitVerbose() { return BFI != nullptr; }
 
@@ -120,7 +119,7 @@ private:
   void operator=(const OptimizationRemarkEmitter &) = delete;
 };
 
-/// \brief Add a small namespace to avoid name clashes with the classes used in
+/// Add a small namespace to avoid name clashes with the classes used in
 /// the streaming interface.  We want these to be short for better
 /// write/readability.
 namespace ore {
@@ -158,10 +157,10 @@ class OptimizationRemarkEmitterAnalysis
   static AnalysisKey Key;
 
 public:
-  /// \brief Provide the result typedef for this analysis pass.
+  /// Provide the result typedef for this analysis pass.
   typedef OptimizationRemarkEmitter Result;
 
-  /// \brief Run the analysis pass over a function and produce BFI.
+  /// Run the analysis pass over a function and produce BFI.
   Result run(Function &F, FunctionAnalysisManager &AM);
 };
 }

@@ -1,9 +1,8 @@
 //===- StripGCRelocates.cpp - Remove gc.relocates inserted by RewriteStatePoints===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,7 +20,6 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
 
 using namespace llvm;
 
@@ -75,6 +73,3 @@ bool StripGCRelocates::runOnFunction(Function &F) {
 INITIALIZE_PASS(StripGCRelocates, "strip-gc-relocates",
                 "Strip gc.relocates inserted through RewriteStatepointsForGC",
                 true, false)
-FunctionPass *llvm::createStripGCRelocatesPass() {
-  return new StripGCRelocates();
-}

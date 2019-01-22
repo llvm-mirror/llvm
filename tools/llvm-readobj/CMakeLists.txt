@@ -1,5 +1,7 @@
 set(LLVM_LINK_COMPONENTS
   DebugInfoCodeView
+  DebugInfoDWARF
+  Demangle
   Object
   BinaryFormat
   Support
@@ -23,3 +25,7 @@ add_llvm_tool(llvm-readobj
   )
 
 add_llvm_tool_symlink(llvm-readelf llvm-readobj)
+
+if(LLVM_INSTALL_BINUTILS_SYMLINKS)
+  add_llvm_tool_symlink(readelf llvm-readobj)
+endif()

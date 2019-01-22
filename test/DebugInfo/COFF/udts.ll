@@ -79,13 +79,13 @@
 ; PDBUTIL:                           Symbols
 ; PDBUTIL-NEXT: ============================================================
 ; PDBUTIL-NOT:   S_UDT {{.*}} `A::C`
-; PDBUTIL:       S_UDT [size = 15] `f::FOO`
-; PDBUTIL:       S_UDT [size = 15] `g::pun`
-; PDBUTIL:       S_UDT [size = 10] `S`
-; PDBUTIL:       S_UDT [size = 10] `A`
-; PDBUTIL:       S_UDT [size = 13] `A::D`
-; PDBUTIL:       S_UDT [size = 10] `U`
-; PDBUTIL:       S_UDT [size = 10] `U`
+; PDBUTIL:       S_UDT [size = 16] `f::FOO`
+; PDBUTIL:       S_UDT [size = 16] `g::pun`
+; PDBUTIL:       S_UDT [size = 12] `S`
+; PDBUTIL:       S_UDT [size = 12] `A`
+; PDBUTIL:       S_UDT [size = 16] `A::D`
+; PDBUTIL:       S_UDT [size = 12] `U`
+; PDBUTIL:       S_UDT [size = 12] `U`
 
 source_filename = "test/DebugInfo/COFF/udts.ll"
 target datalayout = "e-m:w-i64:64-f80:128-n8:16:32:64-S128"
@@ -165,14 +165,14 @@ attributes #1 = { nounwind readnone speculatable }
 !28 = !{i32 1, !"wchar_size", i32 2}
 !29 = !{i32 7, !"PIC Level", i32 2}
 !30 = !{!"clang version 6.0.0 "}
-!31 = distinct !DISubprogram(name: "f", linkageName: "\01?f@@YAXXZ", scope: !3, file: !3, line: 1, type: !32, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!31 = distinct !DISubprogram(name: "f", linkageName: "\01?f@@YAXXZ", scope: !3, file: !3, line: 1, type: !32, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !32 = !DISubroutineType(types: !33)
 !33 = !{null}
 !34 = !DILocalVariable(name: "f", scope: !31, file: !3, line: 3, type: !35)
 !35 = !DIDerivedType(tag: DW_TAG_typedef, name: "FOO", scope: !31, file: !3, line: 2, baseType: !12)
 !36 = !DILocation(line: 3, column: 7, scope: !31)
 !37 = !DILocation(line: 4, column: 1, scope: !31)
-!38 = distinct !DISubprogram(name: "g", linkageName: "\01?g@@YAMPEAUS@@@Z", scope: !3, file: !3, line: 7, type: !39, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!38 = distinct !DISubprogram(name: "g", linkageName: "\01?g@@YAMPEAUS@@@Z", scope: !3, file: !3, line: 7, type: !39, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !39 = !DISubroutineType(types: !40)
 !40 = !{!41, !42}
 !41 = !DIBasicType(name: "float", size: 32, encoding: DW_ATE_float)

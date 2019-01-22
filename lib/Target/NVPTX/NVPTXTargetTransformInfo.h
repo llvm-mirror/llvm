@@ -1,9 +1,8 @@
 //===-- NVPTXTargetTransformInfo.h - NVPTX specific TTI ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -21,7 +20,7 @@
 #include "NVPTXTargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
 
@@ -47,6 +46,39 @@ public:
 
   unsigned getFlatAddressSpace() const {
     return AddressSpace::ADDRESS_SPACE_GENERIC;
+  }
+
+  // Loads and stores can be vectorized if the alignment is at least as big as
+  // the load/store we want to vectorize.
+  bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                   unsigned Alignment,
+                                   unsigned AddrSpace) const {
+    return Alignment >= ChainSizeInBytes;
+  }
+  bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                    unsigned Alignment,
+                                    unsigned AddrSpace) const {
+    return isLegalToVectorizeLoadChain(ChainSizeInBytes, Alignment, AddrSpace);
+  }
+
+  // NVPTX has infinite registers of all kinds, but the actual machine doesn't.
+  // We conservatively return 1 here which is just enough to enable the
+  // vectorizers but disables heuristics based on the number of registers.
+  // FIXME: Return a more reasonable number, while keeping an eye on
+  // LoopVectorizer's unrolling heuristics.
+  unsigned getNumberOfRegisters(bool Vector) const { return 1; }
+
+  // Only <2 x half> should be vectorized, so always return 32 for the vector
+  // register size.
+  unsigned getRegisterBitWidth(bool Vector) const { return 32; }
+  unsigned getMinVectorRegisterBitWidth() const { return 32; }
+
+  // We don't want to prevent inlining because of target-cpu and -features
+  // attributes that were added to newer versions of LLVM/Clang: There are
+  // no incompatible functions in PTX, ptxas will throw errors in such cases.
+  bool areInlineCompatible(const Function *Caller,
+                           const Function *Callee) const {
+    return true;
   }
 
   // Increase the inlining cost threshold by a factor of 5, reflecting that

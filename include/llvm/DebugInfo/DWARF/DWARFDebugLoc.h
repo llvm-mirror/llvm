@@ -1,9 +1,8 @@
 //===- DWARFDebugLoc.h ------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -42,7 +41,8 @@ public:
     SmallVector<Entry, 2> Entries;
     /// Dump this list on OS.
     void dump(raw_ostream &OS, bool IsLittleEndian, unsigned AddressSize,
-              const MCRegisterInfo *MRI, unsigned Indent) const;
+              const MCRegisterInfo *MRI, uint64_t BaseAddress,
+              unsigned Indent) const;
   };
 
 private:
@@ -72,19 +72,21 @@ public:
                                               uint32_t *Offset);
 };
 
-class DWARFDebugLocDWO {
+class DWARFDebugLoclists {
 public:
   struct Entry {
-    uint64_t Start;
-    uint32_t Length;
+    uint8_t Kind;
+    uint64_t Value0;
+    uint64_t Value1;
     SmallVector<char, 4> Loc;
   };
 
   struct LocationList {
     unsigned Offset;
     SmallVector<Entry, 2> Entries;
-    void dump(raw_ostream &OS, bool IsLittleEndian, unsigned AddressSize,
-              const MCRegisterInfo *RegInfo, unsigned Indent) const;
+    void dump(raw_ostream &OS, uint64_t BaseAddr, bool IsLittleEndian,
+              unsigned AddressSize, const MCRegisterInfo *RegInfo,
+              unsigned Indent) const;
   };
 
 private:
@@ -97,15 +99,15 @@ private:
   bool IsLittleEndian;
 
 public:
-  void parse(DataExtractor data);
-  void dump(raw_ostream &OS, const MCRegisterInfo *RegInfo,
+  void parse(DataExtractor data, unsigned Version);
+  void dump(raw_ostream &OS, uint64_t BaseAddr, const MCRegisterInfo *RegInfo,
             Optional<uint64_t> Offset) const;
 
   /// Return the location list at the given offset or nullptr.
   LocationList const *getLocationListAtOffset(uint64_t Offset) const;
 
-  static Optional<LocationList> parseOneLocationList(DataExtractor Data,
-                                                     uint32_t *Offset);
+  static Optional<LocationList>
+  parseOneLocationList(DataExtractor Data, unsigned *Offset, unsigned Version);
 };
 
 } // end namespace llvm

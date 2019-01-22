@@ -22,7 +22,8 @@ define x86_vectorcallcc i32 @test_int_3(i64 inreg %a) {
 }
 ; X86-LABEL: {{^}}test_int_3@@8:
 ; X64-LABEL: {{^}}test_int_3@@8:
-; CHECK: movl %ecx, %eax
+; X86: movl %ecx, %eax
+; X64: movq %rcx, %rax
 
 define x86_vectorcallcc i32 @test_int_4(i32 inreg %a, i32 inreg %b) {
   %s = add i32 %a, %b
@@ -148,8 +149,8 @@ entry:
   ret <4 x float> %0
 }
 ; CHECK-LABEL: test_mixed_5
-; CHECK:       movaps	%xmm5, 16(%{{(e|r)}}sp)
-; CHECK:       movaps	%xmm5, %xmm0
+; CHECK-DAG:   movaps	%xmm{{[0,5]}}, 16(%{{(e|r)}}sp)
+; CHECK-DAG:   movaps	%xmm5, %xmm0
 ; CHECK:       ret{{[ql]}}
 
 define x86_vectorcallcc %struct.HVA4 @test_mixed_6(%struct.HVA4 inreg %a, %struct.HVA4* %b) {
@@ -157,7 +158,7 @@ entry:
   %retval = alloca %struct.HVA4, align 16
   %0 = bitcast %struct.HVA4* %retval to i8*
   %1 = bitcast %struct.HVA4* %b to i8*
-  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %0, i8* %1, i32 64, i32 16, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* align 16 %0, i8* align 16 %1, i32 64, i1 false)
   %2 = load %struct.HVA4, %struct.HVA4* %retval, align 16
   ret %struct.HVA4 %2
 }
@@ -168,27 +169,27 @@ entry:
 ; CHECK:       movaps	48(%{{[re]}}sp), %xmm3
 ; CHECK:       ret{{[ql]}}
 
-declare void @llvm.memset.p0i8.i64(i8* nocapture writeonly, i8, i64, i32, i1)
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i32, i1)
-declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture writeonly, i8* nocapture readonly, i32, i32, i1)
+declare void @llvm.memset.p0i8.i64(i8* nocapture writeonly, i8, i64, i1)
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i1)
+declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture writeonly, i8* nocapture readonly, i32, i1)
 
 define x86_vectorcallcc void @test_mixed_7(%struct.HVA5* noalias sret %agg.result) {
 entry:
   %a = alloca %struct.HVA5, align 16
   %0 = bitcast %struct.HVA5* %a to i8*
-  call void @llvm.memset.p0i8.i64(i8* %0, i8 0, i64 80, i32 16, i1 false)
+  call void @llvm.memset.p0i8.i64(i8* align 16 %0, i8 0, i64 80, i1 false)
   %1 = bitcast %struct.HVA5* %agg.result to i8*
   %2 = bitcast %struct.HVA5* %a to i8*
-  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %1, i8* %2, i64 80, i32 16, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 16 %1, i8* align 16 %2, i64 80, i1 false)
   ret void
 }
 ; CHECK-LABEL: test_mixed_7
+; X64:         mov{{[ql]}}	%rcx, %rax
 ; CHECK:       movaps	%xmm{{[0-9]}}, 64(%{{rcx|eax}})
 ; CHECK:       movaps	%xmm{{[0-9]}}, 48(%{{rcx|eax}})
 ; CHECK:       movaps	%xmm{{[0-9]}}, 32(%{{rcx|eax}})
 ; CHECK:       movaps	%xmm{{[0-9]}}, 16(%{{rcx|eax}})
 ; CHECK:       movaps	%xmm{{[0-9]}}, (%{{rcx|eax}})
-; X64:         mov{{[ql]}}	%rcx, %rax
 ; CHECK:       ret{{[ql]}}
 
 define x86_vectorcallcc <4 x float> @test_mixed_8(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %d, i32 %e, <4 x float> %f) {

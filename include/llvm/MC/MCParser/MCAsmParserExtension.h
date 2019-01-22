@@ -1,9 +1,8 @@
 //===- llvm/MC/MCAsmParserExtension.h - Asm Parser Hooks --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -20,7 +19,7 @@ namespace llvm {
 
 class Twine;
 
-/// \brief Generic interface for extending the MCAsmParser,
+/// Generic interface for extending the MCAsmParser,
 /// which is implemented by target and object file assembly parser
 /// implementations.
 class MCAsmParserExtension {
@@ -45,7 +44,7 @@ public:
   MCAsmParserExtension &operator=(const MCAsmParserExtension &) = delete;
   virtual ~MCAsmParserExtension();
 
-  /// \brief Initialize the extension for parsing using the given \p Parser.
+  /// Initialize the extension for parsing using the given \p Parser.
   /// The extension should use the AsmParser interfaces to register its
   /// parsing routines.
   virtual void Initialize(MCAsmParser &Parser);

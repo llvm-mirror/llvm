@@ -1,9 +1,8 @@
 //===- SymbolizableObjectFile.cpp -----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -155,7 +154,7 @@ std::error_code SymbolizableObjectFile::addSymbol(const SymbolRef &Symbol,
     // of the function's code, not the descriptor.
     uint64_t OpdOffset = SymbolAddress - OpdAddress;
     uint32_t OpdOffset32 = OpdOffset;
-    if (OpdOffset == OpdOffset32 && 
+    if (OpdOffset == OpdOffset32 &&
         OpdExtractor->isValidOffsetForAddress(OpdOffset32))
       SymbolAddress = OpdExtractor->getAddress(&OpdOffset32);
   }

@@ -1,14 +1,12 @@
 //===------ utils/elf2yaml.cpp - obj2yaml conversion tool -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "Error.h"
-#include "obj2yaml.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -23,10 +21,10 @@ namespace {
 template <class ELFT>
 class ELFDumper {
   typedef object::Elf_Sym_Impl<ELFT> Elf_Sym;
-  typedef typename object::ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
-  typedef typename object::ELFFile<ELFT>::Elf_Word Elf_Word;
-  typedef typename object::ELFFile<ELFT>::Elf_Rel Elf_Rel;
-  typedef typename object::ELFFile<ELFT>::Elf_Rela Elf_Rela;
+  typedef typename ELFT::Shdr Elf_Shdr;
+  typedef typename ELFT::Word Elf_Word;
+  typedef typename ELFT::Rel Elf_Rel;
+  typedef typename ELFT::Rela Elf_Rela;
 
   ArrayRef<Elf_Shdr> Sections;
 
@@ -42,6 +40,8 @@ class ELFDumper {
   const object::ELFFile<ELFT> &Obj;
   ArrayRef<Elf_Word> ShndxTable;
 
+  std::error_code dumpSymbols(const Elf_Shdr *Symtab,
+                              ELFYAML::LocalGlobalWeakSymbols &Symbols);
   std::error_code dumpSymbol(const Elf_Sym *Sym, const Elf_Shdr *SymTab,
                              StringRef StrTable, ELFYAML::Symbol &S);
   std::error_code dumpCommonSection(const Elf_Shdr *Shdr, ELFYAML::Section &S);
@@ -113,12 +113,14 @@ template <class ELFT> ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
   Y->Header.Class = ELFYAML::ELF_ELFCLASS(Obj.getHeader()->getFileClass());
   Y->Header.Data = ELFYAML::ELF_ELFDATA(Obj.getHeader()->getDataEncoding());
   Y->Header.OSABI = Obj.getHeader()->e_ident[ELF::EI_OSABI];
+  Y->Header.ABIVersion = Obj.getHeader()->e_ident[ELF::EI_ABIVERSION];
   Y->Header.Type = Obj.getHeader()->e_type;
   Y->Header.Machine = Obj.getHeader()->e_machine;
   Y->Header.Flags = Obj.getHeader()->e_flags;
   Y->Header.Entry = Obj.getHeader()->e_entry;
 
   const Elf_Shdr *Symtab = nullptr;
+  const Elf_Shdr *DynSymtab = nullptr;
 
   // Dump sections
   auto SectionsOrErr = Obj.sections();
@@ -129,12 +131,14 @@ template <class ELFT> ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
   for (const Elf_Shdr &Sec : Sections) {
     switch (Sec.sh_type) {
     case ELF::SHT_NULL:
-    case ELF::SHT_DYNSYM:
     case ELF::SHT_STRTAB:
       // Do not dump these sections.
       break;
     case ELF::SHT_SYMTAB:
       Symtab = &Sec;
+      break;
+    case ELF::SHT_DYNSYM:
+      DynSymtab = &Sec;
       break;
     case ELF::SHT_SYMTAB_SHNDX: {
       auto TableOrErr = Obj.getSHNDXTable(Sec);
@@ -187,46 +191,57 @@ template <class ELFT> ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
     }
   }
 
-  // Dump symbols
+  if (auto EC = dumpSymbols(Symtab, Y->Symbols))
+    return EC;
+  if (auto EC = dumpSymbols(DynSymtab, Y->DynamicSymbols))
+    return EC;
+
+  return Y.release();
+}
+
+template <class ELFT>
+std::error_code
+ELFDumper<ELFT>::dumpSymbols(const Elf_Shdr *Symtab,
+                             ELFYAML::LocalGlobalWeakSymbols &Symbols) {
   if (!Symtab)
-    return Y.release(); // if the symbol table is missing return early
+    return std::error_code();
+
   auto StrTableOrErr = Obj.getStringTableForSymtab(*Symtab);
   if (!StrTableOrErr)
     return errorToErrorCode(StrTableOrErr.takeError());
   StringRef StrTable = *StrTableOrErr;
 
-  bool IsFirstSym = true;
   auto SymtabOrErr = Obj.symbols(Symtab);
   if (!SymtabOrErr)
     return errorToErrorCode(SymtabOrErr.takeError());
-  for (const Elf_Sym &Sym : *SymtabOrErr) {
+
+  bool IsFirstSym = true;
+  for (const auto &Sym : *SymtabOrErr) {
     if (IsFirstSym) {
       IsFirstSym = false;
       continue;
     }
 
     ELFYAML::Symbol S;
-    if (std::error_code EC =
-            ELFDumper<ELFT>::dumpSymbol(&Sym, Symtab, StrTable, S))
+    if (auto EC = dumpSymbol(&Sym, Symtab, StrTable, S))
       return EC;
 
-    switch (Sym.getBinding())
-    {
+    switch (Sym.getBinding()) {
     case ELF::STB_LOCAL:
-      Y->Symbols.Local.push_back(S);
+      Symbols.Local.push_back(S);
       break;
     case ELF::STB_GLOBAL:
-      Y->Symbols.Global.push_back(S);
+      Symbols.Global.push_back(S);
       break;
     case ELF::STB_WEAK:
-      Y->Symbols.Weak.push_back(S);
+      Symbols.Weak.push_back(S);
       break;
     default:
       llvm_unreachable("Unknown ELF symbol binding");
     }
   }
 
-  return Y.release();
+  return std::error_code();
 }
 
 template <class ELFT>

@@ -1,9 +1,8 @@
 //=-- SampleProf.cpp - Sample profiling format support --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ProfileData/SampleProf.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -23,6 +24,14 @@
 
 using namespace llvm;
 using namespace sampleprof;
+
+namespace llvm {
+namespace sampleprof {
+SampleProfileFormat FunctionSamples::Format;
+DenseMap<uint64_t, StringRef> FunctionSamples::GUIDToFuncNameMap;
+Module *FunctionSamples::CurrentModule;
+} // namespace sampleprof
+} // namespace llvm
 
 namespace {
 
@@ -57,6 +66,8 @@ class SampleProfErrorCategoryType : public std::error_category {
       return "Unimplemented feature";
     case sampleprof_error::counter_overflow:
       return "Counter overflow";
+    case sampleprof_error::ostream_seek_unsupported:
+      return "Ostream does not support seek";
     }
     llvm_unreachable("A value of sampleprof_error has no message.");
   }
@@ -86,7 +97,7 @@ raw_ostream &llvm::sampleprof::operator<<(raw_ostream &OS,
 LLVM_DUMP_METHOD void LineLocation::dump() const { print(dbgs()); }
 #endif
 
-/// \brief Print the sample record to the stream \p OS indented by \p Indent.
+/// Print the sample record to the stream \p OS indented by \p Indent.
 void SampleRecord::print(raw_ostream &OS, unsigned Indent) const {
   OS << NumSamples;
   if (hasCalls()) {
@@ -107,7 +118,7 @@ raw_ostream &llvm::sampleprof::operator<<(raw_ostream &OS,
   return OS;
 }
 
-/// \brief Print the samples collected for a function on stream \p OS.
+/// Print the samples collected for a function on stream \p OS.
 void FunctionSamples::print(raw_ostream &OS, unsigned Indent) const {
   OS << TotalSamples << ", " << TotalHeadSamples << ", " << BodySamples.size()
      << " sampled lines\n";
@@ -148,6 +159,32 @@ raw_ostream &llvm::sampleprof::operator<<(raw_ostream &OS,
                                           const FunctionSamples &FS) {
   FS.print(OS);
   return OS;
+}
+
+unsigned FunctionSamples::getOffset(const DILocation *DIL) {
+  return (DIL->getLine() - DIL->getScope()->getSubprogram()->getLine()) &
+      0xffff;
+}
+
+const FunctionSamples *
+FunctionSamples::findFunctionSamples(const DILocation *DIL) const {
+  assert(DIL);
+  SmallVector<std::pair<LineLocation, StringRef>, 10> S;
+
+  const DILocation *PrevDIL = DIL;
+  for (DIL = DIL->getInlinedAt(); DIL; DIL = DIL->getInlinedAt()) {
+    S.push_back(std::make_pair(
+        LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()),
+        PrevDIL->getScope()->getSubprogram()->getLinkageName()));
+    PrevDIL = DIL;
+  }
+  if (S.size() == 0)
+    return this;
+  const FunctionSamples *FS = this;
+  for (int i = S.size() - 1; i >= 0 && FS != nullptr; i--) {
+    FS = FS->findFunctionSamplesAt(S[i].first, S[i].second);
+  }
+  return FS;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

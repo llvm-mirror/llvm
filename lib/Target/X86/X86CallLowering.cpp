@@ -1,9 +1,8 @@
 //===- llvm/lib/Target/X86/X86CallLowering.cpp - Call lowering ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -33,7 +32,8 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
@@ -41,14 +41,11 @@
 #include "llvm/IR/Value.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/LowLevelTypeImpl.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
+#include "llvm/Support/MachineValueType.h"
 #include <cassert>
 #include <cstdint>
 
 using namespace llvm;
-
-#include "X86GenCallingConv.inc"
 
 X86CallLowering::X86CallLowering(const X86TargetLowering &TLI)
     : CallLowering(&TLI) {}
@@ -65,10 +62,8 @@ bool X86CallLowering::splitToValueTypes(const ArgInfo &OrigArg,
   SmallVector<uint64_t, 4> Offsets;
   ComputeValueVTs(TLI, DL, OrigArg.Ty, SplitVTs, &Offsets, 0);
 
-  if (SplitVTs.size() != 1) {
-    // TODO: support struct/array split
-    return false;
-  }
+  if (OrigArg.Ty->isVoidTy())
+    return true;
 
   EVT VT = SplitVTs[0];
   unsigned NumParts = TLI.getNumRegisters(Context, VT);
@@ -126,7 +121,25 @@ struct OutgoingValueHandler : public CallLowering::ValueHandler {
   void assignValueToReg(unsigned ValVReg, unsigned PhysReg,
                         CCValAssign &VA) override {
     MIB.addUse(PhysReg, RegState::Implicit);
-    unsigned ExtReg = extendRegister(ValVReg, VA);
+
+    unsigned ExtReg;
+    // If we are copying the value to a physical register with the
+    // size larger than the size of the value itself - build AnyExt
+    // to the size of the register first and only then do the copy.
+    // The example of that would be copying from s32 to xmm0, for which
+    // case ValVT == LocVT == MVT::f32. If LocSize and ValSize are not equal
+    // we expect normal extendRegister mechanism to work.
+    unsigned PhysRegSize =
+        MRI.getTargetRegisterInfo()->getRegSizeInBits(PhysReg, MRI);
+    unsigned ValSize = VA.getValVT().getSizeInBits();
+    unsigned LocSize = VA.getLocVT().getSizeInBits();
+    if (PhysRegSize > ValSize && LocSize == ValSize) {
+      assert((PhysRegSize == 128 || PhysRegSize == 80)  && "We expect that to be 128 bit");
+      auto MIB = MIRBuilder.buildAnyExt(LLT::scalar(PhysRegSize), ValVReg);
+      ExtReg = MIB->getOperand(0).getReg();
+    } else
+      ExtReg = extendRegister(ValVReg, VA);
+
     MIRBuilder.buildCopy(PhysReg, ExtReg);
   }
 
@@ -167,27 +180,36 @@ protected:
 
 } // end anonymous namespace
 
-bool X86CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
-                                  const Value *Val, unsigned VReg) const {
-  assert(((Val && VReg) || (!Val && !VReg)) && "Return value without a vreg");
-
+bool X86CallLowering::lowerReturn(
+    MachineIRBuilder &MIRBuilder, const Value *Val,
+    ArrayRef<unsigned> VRegs) const {
+  assert(((Val && !VRegs.empty()) || (!Val && VRegs.empty())) &&
+         "Return value without a vreg");
   auto MIB = MIRBuilder.buildInstrNoInsert(X86::RET).addImm(0);
 
-  if (VReg) {
+  if (!VRegs.empty()) {
     MachineFunction &MF = MIRBuilder.getMF();
+    const Function &F = MF.getFunction();
     MachineRegisterInfo &MRI = MF.getRegInfo();
     auto &DL = MF.getDataLayout();
-    const Function &F = *MF.getFunction();
+    LLVMContext &Ctx = Val->getType()->getContext();
+    const X86TargetLowering &TLI = *getTLI<X86TargetLowering>();
 
-    ArgInfo OrigArg{VReg, Val->getType()};
-    setArgFlags(OrigArg, AttributeList::ReturnIndex, DL, F);
+    SmallVector<EVT, 4> SplitEVTs;
+    ComputeValueVTs(TLI, DL, Val->getType(), SplitEVTs);
+    assert(VRegs.size() == SplitEVTs.size() &&
+           "For each split Type there should be exactly one VReg.");
 
     SmallVector<ArgInfo, 8> SplitArgs;
-    if (!splitToValueTypes(OrigArg, SplitArgs, DL, MRI,
-                           [&](ArrayRef<unsigned> Regs) {
-                             MIRBuilder.buildUnmerge(Regs, VReg);
-                           }))
-      return false;
+    for (unsigned i = 0; i < SplitEVTs.size(); ++i) {
+      ArgInfo CurArgInfo = ArgInfo{VRegs[i], SplitEVTs[i].getTypeForEVT(Ctx)};
+      setArgFlags(CurArgInfo, AttributeList::ReturnIndex, DL, F);
+      if (!splitToValueTypes(CurArgInfo, SplitArgs, DL, MRI,
+                             [&](ArrayRef<unsigned> Regs) {
+                               MIRBuilder.buildUnmerge(Regs, VRegs[i]);
+                             }))
+        return false;
+    }
 
     OutgoingValueHandler Handler(MIRBuilder, MRI, MIB, RetCC_X86);
     if (!handleAssignments(MIRBuilder, SplitArgs, Handler))
@@ -229,10 +251,28 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
   void assignValueToReg(unsigned ValVReg, unsigned PhysReg,
                         CCValAssign &VA) override {
     markPhysRegUsed(PhysReg);
+
     switch (VA.getLocInfo()) {
-    default:
+    default: {
+      // If we are copying the value from a physical register with the
+      // size larger than the size of the value itself - build the copy
+      // of the phys reg first and then build the truncation of that copy.
+      // The example of that would be copying from xmm0 to s32, for which
+      // case ValVT == LocVT == MVT::f32. If LocSize and ValSize are not equal
+      // we expect this to be handled in SExt/ZExt/AExt case.
+      unsigned PhysRegSize =
+          MRI.getTargetRegisterInfo()->getRegSizeInBits(PhysReg, MRI);
+      unsigned ValSize = VA.getValVT().getSizeInBits();
+      unsigned LocSize = VA.getLocVT().getSizeInBits();
+      if (PhysRegSize > ValSize && LocSize == ValSize) {
+        auto Copy = MIRBuilder.buildCopy(LLT::scalar(PhysRegSize), PhysReg);
+        MIRBuilder.buildTrunc(ValVReg, Copy);
+        return;
+      }
+
       MIRBuilder.buildCopy(ValVReg, PhysReg);
       break;
+    }
     case CCValAssign::LocInfo::SExt:
     case CCValAssign::LocInfo::ZExt:
     case CCValAssign::LocInfo::AExt: {
@@ -334,7 +374,7 @@ bool X86CallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
                                 const ArgInfo &OrigRet,
                                 ArrayRef<ArgInfo> OrigArgs) const {
   MachineFunction &MF = MIRBuilder.getMF();
-  const Function &F = *MF.getFunction();
+  const Function &F = MF.getFunction();
   MachineRegisterInfo &MRI = MF.getRegInfo();
   auto &DL = F.getParent()->getDataLayout();
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
@@ -402,8 +442,7 @@ bool X86CallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   if (Callee.isReg())
     MIB->getOperand(0).setReg(constrainOperandRegClass(
         MF, *TRI, MRI, *MF.getSubtarget().getInstrInfo(),
-        *MF.getSubtarget().getRegBankInfo(), *MIB, MIB->getDesc(),
-        Callee.getReg(), 0));
+        *MF.getSubtarget().getRegBankInfo(), *MIB, MIB->getDesc(), Callee, 0));
 
   // Finally we can copy the returned value back into its virtual-register. In
   // symmetry with the arguments, the physical register must be an

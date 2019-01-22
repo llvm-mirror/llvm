@@ -1,9 +1,8 @@
 //===- unittest/ADT/MapVectorTest.cpp - MapVector unit tests ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -155,6 +154,45 @@ TEST(MapVectorTest, NonCopyable) {
 
   ASSERT_EQ(MV.count(1), 1u);
   ASSERT_EQ(*MV.find(2)->second, 2);
+}
+
+template <class IntType> struct MapVectorMappedTypeTest : ::testing::Test {
+  using int_type = IntType;
+};
+
+using MapIntTypes = ::testing::Types<int, long, long long, unsigned,
+                                     unsigned long, unsigned long long>;
+TYPED_TEST_CASE(MapVectorMappedTypeTest, MapIntTypes);
+
+TYPED_TEST(MapVectorMappedTypeTest, DifferentDenseMap) {
+  // Test that using a map with a mapped type other than 'unsigned' compiles
+  // and works.
+  using IntType = typename TestFixture::int_type;
+  using MapVectorType = MapVector<int, int, DenseMap<int, IntType>>;
+
+  MapVectorType MV;
+  std::pair<typename MapVectorType::iterator, bool> R;
+
+  R = MV.insert(std::make_pair(1, 2));
+  ASSERT_EQ(R.first, MV.begin());
+  EXPECT_EQ(R.first->first, 1);
+  EXPECT_EQ(R.first->second, 2);
+  EXPECT_TRUE(R.second);
+
+  const std::pair<int, int> Elem(1, 3);
+  R = MV.insert(Elem);
+  ASSERT_EQ(R.first, MV.begin());
+  EXPECT_EQ(R.first->first, 1);
+  EXPECT_EQ(R.first->second, 2);
+  EXPECT_FALSE(R.second);
+
+  int& value = MV[4];
+  EXPECT_EQ(value, 0);
+  value = 5;
+
+  EXPECT_EQ(MV.size(), 2u);
+  EXPECT_EQ(MV[1], 2);
+  EXPECT_EQ(MV[4], 5);
 }
 
 TEST(SmallMapVectorSmallTest, insert_pop) {

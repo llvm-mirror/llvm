@@ -1,9 +1,8 @@
 //===- InstrProf.cpp - Instrumented profiling format support --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,7 +55,7 @@
 using namespace llvm;
 
 static cl::opt<bool> StaticFuncFullModulePrefix(
-    "static-func-full-module-prefix", cl::init(true),
+    "static-func-full-module-prefix", cl::init(true), cl::Hidden,
     cl::desc("Use full module build paths in the profile counter names for "
              "static functions."));
 
@@ -69,7 +68,7 @@ static cl::opt<bool> StaticFuncFullModulePrefix(
 // the source directory name not being stripped. A non-zero option value here
 // can potentially prevent some inter-module indirect-call-promotions.
 static cl::opt<unsigned> StaticFuncStripDirNamePrefix(
-    "static-func-strip-dirname-prefix", cl::init(0),
+    "static-func-strip-dirname-prefix", cl::init(0), cl::Hidden,
     cl::desc("Strip specified level of directory name from source path in "
              "the profile counter name for static functions."));
 
@@ -252,11 +251,12 @@ static StringRef stripDirPrefix(StringRef PathNameStr, uint32_t NumPrefix) {
 // data, its original linkage must be non-internal.
 std::string getPGOFuncName(const Function &F, bool InLTO, uint64_t Version) {
   if (!InLTO) {
-    StringRef FileName = (StaticFuncFullModulePrefix
-                              ? F.getParent()->getName()
-                              : sys::path::filename(F.getParent()->getName()));
-    if (StaticFuncFullModulePrefix && StaticFuncStripDirNamePrefix != 0)
-      FileName = stripDirPrefix(FileName, StaticFuncStripDirNamePrefix);
+    StringRef FileName(F.getParent()->getSourceFileName());
+    uint32_t StripLevel = StaticFuncFullModulePrefix ? 0 : (uint32_t)-1;
+    if (StripLevel < StaticFuncStripDirNamePrefix)
+      StripLevel = StaticFuncStripDirNamePrefix;
+    if (StripLevel)
+      FileName = stripDirPrefix(FileName, StripLevel);
     return getPGOFuncName(F.getName(), F.getLinkage(), FileName, Version);
   }
 
@@ -355,9 +355,24 @@ Error InstrProfSymtab::create(Module &M, bool InLTO) {
       }
     }
   }
-
+  Sorted = false;
   finalizeSymtab();
   return Error::success();
+}
+
+uint64_t InstrProfSymtab::getFunctionHashFromAddress(uint64_t Address) {
+  finalizeSymtab();
+  auto Result =
+      std::lower_bound(AddrToMD5Map.begin(), AddrToMD5Map.end(), Address,
+                       [](const std::pair<uint64_t, uint64_t> &LHS,
+                          uint64_t RHS) { return LHS.first < RHS; });
+  // Raw function pointer collected by value profiler may be from
+  // external functions that are not instrumented. They won't have
+  // mapping data to be used by the deserializer. Force the value to
+  // be 0 in this case.
+  if (Result != AddrToMD5Map.end() && Result->first == Address)
+    return (uint64_t)Result->second;
+  return 0;
 }
 
 Error collectPGOFuncNameStrings(ArrayRef<std::string> NameStrs,
@@ -461,7 +476,6 @@ Error readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
     while (P < EndP && *P == 0)
       P++;
   }
-  Symtab.finalizeSymtab();
   return Error::success();
 }
 
@@ -561,32 +575,19 @@ void InstrProfRecord::scale(uint64_t Weight,
 
 // Map indirect call target name hash to name string.
 uint64_t InstrProfRecord::remapValue(uint64_t Value, uint32_t ValueKind,
-                                     ValueMapType *ValueMap) {
-  if (!ValueMap)
+                                     InstrProfSymtab *SymTab) {
+  if (!SymTab)
     return Value;
-  switch (ValueKind) {
-  case IPVK_IndirectCallTarget: {
-    auto Result =
-        std::lower_bound(ValueMap->begin(), ValueMap->end(), Value,
-                         [](const std::pair<uint64_t, uint64_t> &LHS,
-                            uint64_t RHS) { return LHS.first < RHS; });
-   // Raw function pointer collected by value profiler may be from 
-   // external functions that are not instrumented. They won't have
-   // mapping data to be used by the deserializer. Force the value to
-   // be 0 in this case.
-    if (Result != ValueMap->end() && Result->first == Value)
-      Value = (uint64_t)Result->second;
-    else
-      Value = 0;
-    break;
-  }
-  }
+
+  if (ValueKind == IPVK_IndirectCallTarget)
+    return SymTab->getFunctionHashFromAddress(Value);
+
   return Value;
 }
 
 void InstrProfRecord::addValueData(uint32_t ValueKind, uint32_t Site,
                                    InstrProfValueData *VData, uint32_t N,
-                                   ValueMapType *ValueMap) {
+                                   InstrProfSymtab *ValueMap) {
   for (uint32_t I = 0; I < N; I++) {
     VData[I].Value = remapValue(VData[I].Value, ValueKind, ValueMap);
   }
@@ -602,7 +603,7 @@ void InstrProfRecord::addValueData(uint32_t ValueKind, uint32_t Site,
 #include "llvm/ProfileData/InstrProfData.inc"
 
 /*!
- * \brief ValueProfRecordClosure Interface implementation for  InstrProfRecord
+ * ValueProfRecordClosure Interface implementation for  InstrProfRecord
  *  class. These C wrappers are used as adaptors so that C++ code can be
  *  invoked as callbacks.
  */
@@ -666,13 +667,13 @@ ValueProfData::serializeFrom(const InstrProfRecord &Record) {
 }
 
 void ValueProfRecord::deserializeTo(InstrProfRecord &Record,
-                                    InstrProfRecord::ValueMapType *VMap) {
+                                    InstrProfSymtab *SymTab) {
   Record.reserveSites(Kind, NumValueSites);
 
   InstrProfValueData *ValueData = getValueProfRecordValueData(this);
   for (uint64_t VSite = 0; VSite < NumValueSites; ++VSite) {
     uint8_t ValueDataCount = this->SiteCountArray[VSite];
-    Record.addValueData(Kind, VSite, ValueData, ValueDataCount, VMap);
+    Record.addValueData(Kind, VSite, ValueData, ValueDataCount, SymTab);
     ValueData += ValueDataCount;
   }
 }
@@ -706,13 +707,13 @@ void ValueProfRecord::swapBytes(support::endianness Old,
 }
 
 void ValueProfData::deserializeTo(InstrProfRecord &Record,
-                                  InstrProfRecord::ValueMapType *VMap) {
+                                  InstrProfSymtab *SymTab) {
   if (NumValueKinds == 0)
     return;
 
   ValueProfRecord *VR = getFirstValueProfRecord(this);
   for (uint32_t K = 0; K < NumValueKinds; K++) {
-    VR->deserializeTo(Record, VMap);
+    VR->deserializeTo(Record, SymTab);
     VR = getValueProfRecordNext(VR);
   }
 }
@@ -925,8 +926,7 @@ bool needsComdatForCounter(const Function &F, const Module &M) {
   if (F.hasComdat())
     return true;
 
-  Triple TT(M.getTargetTriple());
-  if (!TT.isOSBinFormatELF() && !TT.isOSBinFormatWasm())
+  if (!Triple(M.getTargetTriple()).supportsCOMDAT())
     return false;
 
   // See createPGOFuncNameVar for more details. To avoid link errors, profile

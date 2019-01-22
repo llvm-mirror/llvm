@@ -1,9 +1,8 @@
 //===-- AVRAsmBackend.cpp - AVR Asm Backend  ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -265,15 +264,19 @@ void AVRAsmBackend::adjustFixupValue(const MCFixup &Fixup,
     adjust::ldi::fixup(Size, Fixup, Value, Ctx);
     break;
   case AVR::fixup_lo8_ldi:
+    adjust::ldi::lo8(Size, Fixup, Value, Ctx);
+    break;
   case AVR::fixup_lo8_ldi_pm:
-    if (Kind == AVR::fixup_lo8_ldi_pm) adjust::pm(Value);
-
+  case AVR::fixup_lo8_ldi_gs:
+    adjust::pm(Value);
     adjust::ldi::lo8(Size, Fixup, Value, Ctx);
     break;
   case AVR::fixup_hi8_ldi:
+    adjust::ldi::hi8(Size, Fixup, Value, Ctx);
+    break;
   case AVR::fixup_hi8_ldi_pm:
-    if (Kind == AVR::fixup_hi8_ldi_pm) adjust::pm(Value);
-
+  case AVR::fixup_hi8_ldi_gs:
+    adjust::pm(Value);
     adjust::ldi::hi8(Size, Fixup, Value, Ctx);
     break;
   case AVR::fixup_hh8_ldi:
@@ -316,6 +319,13 @@ void AVRAsmBackend::adjustFixupValue(const MCFixup &Fixup,
 
     Value &= 0xffff;
     break;
+  case AVR::fixup_16_pm:
+    Value >>= 1; // Flash addresses are always shifted.
+    adjust::unsigned_width(16, Value, std::string("port number"), Fixup, Ctx);
+
+    Value &= 0xffff;
+    break;
+
   case AVR::fixup_6_adiw:
     adjust::fixup_6_adiw(Fixup, Value, Ctx);
     break;
@@ -329,6 +339,7 @@ void AVRAsmBackend::adjustFixupValue(const MCFixup &Fixup,
     break;
 
   // Fixups which do not require adjustments.
+  case FK_Data_1:
   case FK_Data_2:
   case FK_Data_4:
   case FK_Data_8:
@@ -340,15 +351,16 @@ void AVRAsmBackend::adjustFixupValue(const MCFixup &Fixup,
   }
 }
 
-std::unique_ptr<MCObjectWriter>
-AVRAsmBackend::createObjectWriter(raw_pwrite_stream &OS) const {
-  return createAVRELFObjectWriter(OS,
-                                  MCELFObjectTargetWriter::getOSABI(OSType));
+std::unique_ptr<MCObjectTargetWriter>
+AVRAsmBackend::createObjectTargetWriter() const {
+  return createAVRELFObjectWriter(MCELFObjectTargetWriter::getOSABI(OSType));
 }
 
 void AVRAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
-                               const MCValue &Target, MutableArrayRef<char> Data,
-                               uint64_t Value, bool IsPCRel) const {
+                               const MCValue &Target,
+                               MutableArrayRef<char> Data, uint64_t Value,
+                               bool IsResolved,
+                               const MCSubtargetInfo *STI) const {
   adjustFixupValue(Fixup, Target, Value, &Asm.getContext());
   if (Value == 0)
     return; // Doesn't change encoding.
@@ -422,8 +434,9 @@ MCFixupKindInfo const &AVRAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"fixup_8_hi8", 0, 8, 0},
       {"fixup_8_hlo8", 0, 8, 0},
 
-      {"fixup_sym_diff", 0, 32, 0},
-      {"fixup_16_ldst", 0, 16, 0},
+      {"fixup_diff8", 0, 8, 0},
+      {"fixup_diff16", 0, 16, 0},
+      {"fixup_diff32", 0, 32, 0},
 
       {"fixup_lds_sts_16", 0, 16, 0},
 
@@ -440,13 +453,13 @@ MCFixupKindInfo const &AVRAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
   return Infos[Kind - FirstTargetFixupKind];
 }
 
-bool AVRAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
+bool AVRAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
   // If the count is not 2-byte aligned, we must be writing data into the text
   // section (otherwise we have unaligned instructions, and thus have far
   // bigger problems), so just write zeros instead.
   assert((Count % 2) == 0 && "NOP instructions must be 2 bytes");
 
-  OW->WriteZeros(Count);
+  OS.write_zeros(Count);
   return true;
 }
 
@@ -463,10 +476,10 @@ bool AVRAsmBackend::shouldForceRelocation(const MCAssembler &Asm,
   }
 }
 
-MCAsmBackend *createAVRAsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                                  const Triple &TT, StringRef CPU,
+MCAsmBackend *createAVRAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                  const MCRegisterInfo &MRI,
                                   const llvm::MCTargetOptions &TO) {
-  return new AVRAsmBackend(TT.getOS());
+  return new AVRAsmBackend(STI.getTargetTriple().getOS());
 }
 
 } // end of namespace llvm

@@ -1,9 +1,8 @@
 //===- ObjectTransformLayer.h - Run all objects through functor -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@
 #define LLVM_EXECUTIONENGINE_ORC_OBJECTTRANSFORMLAYER_H
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/Orc/Layer.h"
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -22,37 +22,49 @@
 namespace llvm {
 namespace orc {
 
-/// @brief Object mutating layer.
+class ObjectTransformLayer : public ObjectLayer {
+public:
+  using TransformFunction =
+      std::function<Expected<std::unique_ptr<MemoryBuffer>>(
+          std::unique_ptr<MemoryBuffer>)>;
+
+  ObjectTransformLayer(ExecutionSession &ES, ObjectLayer &BaseLayer,
+                       TransformFunction Transform);
+
+  void emit(MaterializationResponsibility R,
+            std::unique_ptr<MemoryBuffer> O) override;
+
+private:
+  ObjectLayer &BaseLayer;
+  TransformFunction Transform;
+};
+
+/// Object mutating layer.
 ///
 ///   This layer accepts sets of ObjectFiles (via addObject). It
 /// immediately applies the user supplied functor to each object, then adds
 /// the set of transformed objects to the layer below.
 template <typename BaseLayerT, typename TransformFtor>
-class ObjectTransformLayer {
+class LegacyObjectTransformLayer {
 public:
-  /// @brief Handle to a set of added objects.
-  using ObjHandleT = typename BaseLayerT::ObjHandleT;
-
-  /// @brief Construct an ObjectTransformLayer with the given BaseLayer
-  ObjectTransformLayer(BaseLayerT &BaseLayer,
-                       TransformFtor Transform = TransformFtor())
+  /// Construct an ObjectTransformLayer with the given BaseLayer
+  LegacyObjectTransformLayer(BaseLayerT &BaseLayer,
+                             TransformFtor Transform = TransformFtor())
       : BaseLayer(BaseLayer), Transform(std::move(Transform)) {}
 
-  /// @brief Apply the transform functor to each object in the object set, then
+  /// Apply the transform functor to each object in the object set, then
   ///        add the resulting set of objects to the base layer, along with the
   ///        memory manager and symbol resolver.
   ///
   /// @return A handle for the added objects.
-  template <typename ObjectPtr>
-  Expected<ObjHandleT> addObject(ObjectPtr Obj,
-                                 std::shared_ptr<JITSymbolResolver> Resolver) {
-    return BaseLayer.addObject(Transform(std::move(Obj)), std::move(Resolver));
+  template <typename ObjectPtr> Error addObject(VModuleKey K, ObjectPtr Obj) {
+    return BaseLayer.addObject(std::move(K), Transform(std::move(Obj)));
   }
 
-  /// @brief Remove the object set associated with the handle H.
-  Error removeObject(ObjHandleT H) { return BaseLayer.removeObject(H); }
+  /// Remove the object set associated with the VModuleKey K.
+  Error removeObject(VModuleKey K) { return BaseLayer.removeObject(K); }
 
-  /// @brief Search for the given named symbol.
+  /// Search for the given named symbol.
   /// @param Name The name of the symbol to search for.
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it exists.
@@ -60,36 +72,34 @@ public:
     return BaseLayer.findSymbol(Name, ExportedSymbolsOnly);
   }
 
-  /// @brief Get the address of the given symbol in the context of the set of
-  ///        objects represented by the handle H. This call is forwarded to the
-  ///        base layer's implementation.
-  /// @param H The handle for the object set to search in.
+  /// Get the address of the given symbol in the context of the set of
+  ///        objects represented by the VModuleKey K. This call is forwarded to
+  ///        the base layer's implementation.
+  /// @param K The VModuleKey associated with the object set to search in.
   /// @param Name The name of the symbol to search for.
   /// @param ExportedSymbolsOnly If true, search only for exported symbols.
   /// @return A handle for the given named symbol, if it is found in the
   ///         given object set.
-  JITSymbol findSymbolIn(ObjHandleT H, const std::string &Name,
+  JITSymbol findSymbolIn(VModuleKey K, const std::string &Name,
                          bool ExportedSymbolsOnly) {
-    return BaseLayer.findSymbolIn(H, Name, ExportedSymbolsOnly);
+    return BaseLayer.findSymbolIn(K, Name, ExportedSymbolsOnly);
   }
 
-  /// @brief Immediately emit and finalize the object set represented by the
-  ///        given handle.
-  /// @param H Handle for object set to emit/finalize.
-  Error emitAndFinalize(ObjHandleT H) {
-    return BaseLayer.emitAndFinalize(H);
-  }
+  /// Immediately emit and finalize the object set represented by the
+  ///        given VModuleKey K.
+  Error emitAndFinalize(VModuleKey K) { return BaseLayer.emitAndFinalize(K); }
 
-  /// @brief Map section addresses for the objects associated with the handle H.
-  void mapSectionAddress(ObjHandleT H, const void *LocalAddress,
+  /// Map section addresses for the objects associated with the
+  /// VModuleKey K.
+  void mapSectionAddress(VModuleKey K, const void *LocalAddress,
                          JITTargetAddress TargetAddr) {
-    BaseLayer.mapSectionAddress(H, LocalAddress, TargetAddr);
+    BaseLayer.mapSectionAddress(K, LocalAddress, TargetAddr);
   }
 
-  /// @brief Access the transform functor directly.
+  /// Access the transform functor directly.
   TransformFtor &getTransform() { return Transform; }
 
-  /// @brief Access the mumate functor directly.
+  /// Access the mumate functor directly.
   const TransformFtor &getTransform() const { return Transform; }
 
 private:

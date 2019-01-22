@@ -1,9 +1,9 @@
 /*===----------- llvm-c/OrcBindings.h - Orc Lib C Iface ---------*- C++ -*-===*\
 |*                                                                            *|
-|*                     The LLVM Compiler Infrastructure                       *|
-|*                                                                            *|
-|* This file is distributed under the University of Illinois Open Source      *|
-|* License. See LICENSE.TXT for details.                                      *|
+|* Part of the LLVM Project, under the Apache License v2.0 with LLVM          *|
+|* Exceptions.                                                                *|
+|* See https://llvm.org/LICENSE.txt for license information.                  *|
+|* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception                    *|
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
@@ -22,6 +22,7 @@
 #ifndef LLVM_C_ORCBINDINGS_H
 #define LLVM_C_ORCBINDINGS_H
 
+#include "llvm-c/Error.h"
 #include "llvm-c/Object.h"
 #include "llvm-c/TargetMachine.h"
 
@@ -29,42 +30,12 @@
 extern "C" {
 #endif
 
-typedef struct LLVMOpaqueSharedModule *LLVMSharedModuleRef;
 typedef struct LLVMOrcOpaqueJITStack *LLVMOrcJITStackRef;
-typedef uint32_t LLVMOrcModuleHandle;
+typedef uint64_t LLVMOrcModuleHandle;
 typedef uint64_t LLVMOrcTargetAddress;
 typedef uint64_t (*LLVMOrcSymbolResolverFn)(const char *Name, void *LookupCtx);
 typedef uint64_t (*LLVMOrcLazyCompileCallbackFn)(LLVMOrcJITStackRef JITStack,
                                                  void *CallbackCtx);
-
-typedef enum { LLVMOrcErrSuccess = 0, LLVMOrcErrGeneric } LLVMOrcErrorCode;
-
-/**
- * Turn an LLVMModuleRef into an LLVMSharedModuleRef.
- *
- * The JIT uses shared ownership for LLVM modules, since it is generally
- * difficult to know when the JIT will be finished with a module (and the JIT
- * has no way of knowing when a user may be finished with one).
- *
- * Calling this method with an LLVMModuleRef creates a shared-pointer to the
- * module, and returns a reference to this shared pointer.
- *
- * The shared module should be disposed when finished with by calling
- * LLVMOrcDisposeSharedModule (not LLVMDisposeModule). The Module will be
- * deleted when the last shared pointer owner relinquishes it.
- */
-
-LLVMSharedModuleRef LLVMOrcMakeSharedModule(LLVMModuleRef Mod);
-
-/**
- * Dispose of a shared module.
- *
- * The module should not be accessed after this call. The module will be
- * deleted once all clients (including the JIT itself) have released their
- * shared pointers.
- */
-
-void LLVMOrcDisposeSharedModuleRef(LLVMSharedModuleRef SharedMod);
 
 /**
  * Create an ORC JIT stack.
@@ -100,45 +71,41 @@ void LLVMOrcDisposeMangledSymbol(char *MangledSymbol);
 /**
  * Create a lazy compile callback.
  */
-LLVMOrcErrorCode
-LLVMOrcCreateLazyCompileCallback(LLVMOrcJITStackRef JITStack,
-                                 LLVMOrcTargetAddress *RetAddr,
-                                 LLVMOrcLazyCompileCallbackFn Callback,
-                                 void *CallbackCtx);
+LLVMErrorRef LLVMOrcCreateLazyCompileCallback(
+    LLVMOrcJITStackRef JITStack, LLVMOrcTargetAddress *RetAddr,
+    LLVMOrcLazyCompileCallbackFn Callback, void *CallbackCtx);
 
 /**
  * Create a named indirect call stub.
  */
-LLVMOrcErrorCode LLVMOrcCreateIndirectStub(LLVMOrcJITStackRef JITStack,
-                                           const char *StubName,
-                                           LLVMOrcTargetAddress InitAddr);
+LLVMErrorRef LLVMOrcCreateIndirectStub(LLVMOrcJITStackRef JITStack,
+                                       const char *StubName,
+                                       LLVMOrcTargetAddress InitAddr);
 
 /**
  * Set the pointer for the given indirect stub.
  */
-LLVMOrcErrorCode LLVMOrcSetIndirectStubPointer(LLVMOrcJITStackRef JITStack,
-                                               const char *StubName,
-                                               LLVMOrcTargetAddress NewAddr);
+LLVMErrorRef LLVMOrcSetIndirectStubPointer(LLVMOrcJITStackRef JITStack,
+                                           const char *StubName,
+                                           LLVMOrcTargetAddress NewAddr);
 
 /**
  * Add module to be eagerly compiled.
  */
-LLVMOrcErrorCode
-LLVMOrcAddEagerlyCompiledIR(LLVMOrcJITStackRef JITStack,
-                            LLVMOrcModuleHandle *RetHandle,
-                            LLVMSharedModuleRef Mod,
-                            LLVMOrcSymbolResolverFn SymbolResolver,
-                            void *SymbolResolverCtx);
+LLVMErrorRef LLVMOrcAddEagerlyCompiledIR(LLVMOrcJITStackRef JITStack,
+                                         LLVMOrcModuleHandle *RetHandle,
+                                         LLVMModuleRef Mod,
+                                         LLVMOrcSymbolResolverFn SymbolResolver,
+                                         void *SymbolResolverCtx);
 
 /**
  * Add module to be lazily compiled one function at a time.
  */
-LLVMOrcErrorCode
-LLVMOrcAddLazilyCompiledIR(LLVMOrcJITStackRef JITStack,
-                           LLVMOrcModuleHandle *RetHandle,
-                           LLVMSharedModuleRef Mod,
-                           LLVMOrcSymbolResolverFn SymbolResolver,
-                           void *SymbolResolverCtx);
+LLVMErrorRef LLVMOrcAddLazilyCompiledIR(LLVMOrcJITStackRef JITStack,
+                                        LLVMOrcModuleHandle *RetHandle,
+                                        LLVMModuleRef Mod,
+                                        LLVMOrcSymbolResolverFn SymbolResolver,
+                                        void *SymbolResolverCtx);
 
 /**
  * Add an object file.
@@ -148,11 +115,11 @@ LLVMOrcAddLazilyCompiledIR(LLVMOrcJITStackRef JITStack,
  * Clients should *not* dispose of the 'Obj' argument: the JIT will manage it
  * from this call onwards.
  */
-LLVMOrcErrorCode LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
-                                      LLVMOrcModuleHandle *RetHandle,
-                                      LLVMMemoryBufferRef Obj,
-                                      LLVMOrcSymbolResolverFn SymbolResolver,
-                                      void *SymbolResolverCtx);
+LLVMErrorRef LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
+                                  LLVMOrcModuleHandle *RetHandle,
+                                  LLVMMemoryBufferRef Obj,
+                                  LLVMOrcSymbolResolverFn SymbolResolver,
+                                  void *SymbolResolverCtx);
 
 /**
  * Remove a module set from the JIT.
@@ -160,20 +127,43 @@ LLVMOrcErrorCode LLVMOrcAddObjectFile(LLVMOrcJITStackRef JITStack,
  * This works for all modules that can be added via OrcAdd*, including object
  * files.
  */
-LLVMOrcErrorCode LLVMOrcRemoveModule(LLVMOrcJITStackRef JITStack,
-                                     LLVMOrcModuleHandle H);
+LLVMErrorRef LLVMOrcRemoveModule(LLVMOrcJITStackRef JITStack,
+                                 LLVMOrcModuleHandle H);
 
 /**
  * Get symbol address from JIT instance.
  */
-LLVMOrcErrorCode LLVMOrcGetSymbolAddress(LLVMOrcJITStackRef JITStack,
-                                         LLVMOrcTargetAddress *RetAddr,
-                                         const char *SymbolName);
+LLVMErrorRef LLVMOrcGetSymbolAddress(LLVMOrcJITStackRef JITStack,
+                                     LLVMOrcTargetAddress *RetAddr,
+                                     const char *SymbolName);
+
+/**
+ * Get symbol address from JIT instance, searching only the specified
+ * handle.
+ */
+LLVMErrorRef LLVMOrcGetSymbolAddressIn(LLVMOrcJITStackRef JITStack,
+                                       LLVMOrcTargetAddress *RetAddr,
+                                       LLVMOrcModuleHandle H,
+                                       const char *SymbolName);
 
 /**
  * Dispose of an ORC JIT stack.
  */
-LLVMOrcErrorCode LLVMOrcDisposeInstance(LLVMOrcJITStackRef JITStack);
+LLVMErrorRef LLVMOrcDisposeInstance(LLVMOrcJITStackRef JITStack);
+
+/**
+ * Register a JIT Event Listener.
+ *
+ * A NULL listener is ignored.
+ */
+void LLVMOrcRegisterJITEventListener(LLVMOrcJITStackRef JITStack, LLVMJITEventListenerRef L);
+
+/**
+ * Unegister a JIT Event Listener.
+ *
+ * A NULL listener is ignored.
+ */
+void LLVMOrcUnregisterJITEventListener(LLVMOrcJITStackRef JITStack, LLVMJITEventListenerRef L);
 
 #ifdef __cplusplus
 }

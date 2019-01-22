@@ -1,6 +1,6 @@
-; RUN: llc -march=amdgcn -mcpu=tahiti -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=fiji -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
-; RUN: llc -march=amdgcn -mcpu=gfx900 -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GFX9 %s
+; RUN: llc -march=amdgcn -mtriple=amdgcn-- -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mtriple=amdgcn-- -mcpu=fiji -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mtriple=amdgcn-- -mcpu=gfx900 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GFX9 %s
 
 ; This ends up using all 255 registers and requires register
 ; scavenging which will fail to find an unsued register.
@@ -27,15 +27,15 @@
 ; GCN: NumVgprs: 256
 ; GCN: ScratchSize: 1536
 
-define amdgpu_vs void @main([9 x <4 x i32>] addrspace(2)* byval %arg, [17 x <4 x i32>] addrspace(2)* byval %arg1, [17 x <4 x i32>] addrspace(2)* byval %arg2, [34 x <8 x i32>] addrspace(2)* byval %arg3, [16 x <4 x i32>] addrspace(2)* byval %arg4, i32 inreg %arg5, i32 inreg %arg6, i32 %arg7, i32 %arg8, i32 %arg9, i32 %arg10) #0 {
+define amdgpu_vs void @main([9 x <4 x i32>] addrspace(4)* byval %arg, [17 x <4 x i32>] addrspace(4)* byval %arg1, [17 x <4 x i32>] addrspace(4)* byval %arg2, [34 x <8 x i32>] addrspace(4)* byval %arg3, [16 x <4 x i32>] addrspace(4)* byval %arg4, i32 inreg %arg5, i32 inreg %arg6, i32 %arg7, i32 %arg8, i32 %arg9, i32 %arg10) #0 {
 bb:
-  %tmp = getelementptr [17 x <4 x i32>], [17 x <4 x i32>] addrspace(2)* %arg1, i64 0, i64 0
-  %tmp11 = load <4 x i32>, <4 x i32> addrspace(2)* %tmp, align 16, !tbaa !0
-  %tmp12 = call float @llvm.SI.load.const.v4i32(<4 x i32> %tmp11, i32 0)
-  %tmp13 = call float @llvm.SI.load.const.v4i32(<4 x i32> %tmp11, i32 16)
-  %tmp14 = call float @llvm.SI.load.const.v4i32(<4 x i32> %tmp11, i32 32)
-  %tmp15 = getelementptr [16 x <4 x i32>], [16 x <4 x i32>] addrspace(2)* %arg4, i64 0, i64 0
-  %tmp16 = load <4 x i32>, <4 x i32> addrspace(2)* %tmp15, align 16, !tbaa !0
+  %tmp = getelementptr [17 x <4 x i32>], [17 x <4 x i32>] addrspace(4)* %arg1, i64 0, i64 0
+  %tmp11 = load <4 x i32>, <4 x i32> addrspace(4)* %tmp, align 16, !tbaa !0
+  %tmp12 = call float @llvm.amdgcn.s.buffer.load.f32(<4 x i32> %tmp11, i32 0, i32 0)
+  %tmp13 = call float @llvm.amdgcn.s.buffer.load.f32(<4 x i32> %tmp11, i32 16, i32 0)
+  %tmp14 = call float @llvm.amdgcn.s.buffer.load.f32(<4 x i32> %tmp11, i32 32, i32 0)
+  %tmp15 = getelementptr [16 x <4 x i32>], [16 x <4 x i32>] addrspace(4)* %arg4, i64 0, i64 0
+  %tmp16 = load <4 x i32>, <4 x i32> addrspace(4)* %tmp15, align 16, !tbaa !0
   %tmp17 = add i32 %arg5, %arg7
   %tmp16.cast = bitcast <4 x i32> %tmp16 to <4 x i32>
   %tmp18 = call <4 x float> @llvm.amdgcn.buffer.load.format.v4f32(<4 x i32> %tmp16.cast, i32 %tmp17, i32 0, i1 false, i1 false)
@@ -488,7 +488,7 @@ bb157:                                            ; preds = %bb24
 declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32) #1
 declare void @llvm.amdgcn.exp.f32(i32, i32, float, float, float, float, i1, i1) #0
 
-declare float @llvm.SI.load.const.v4i32(<4 x i32>, i32) #1
+declare float @llvm.amdgcn.s.buffer.load.f32(<4 x i32>, i32, i32) #1
 declare <4 x float> @llvm.amdgcn.buffer.load.format.v4f32(<4 x i32>, i32, i32, i1, i1) #2
 
 attributes #0 = { nounwind }

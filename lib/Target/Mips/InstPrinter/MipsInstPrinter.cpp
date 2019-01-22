@@ -1,9 +1,8 @@
 //===-- MipsInstPrinter.cpp - Convert Mips MCInst to assembly syntax ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -188,18 +187,12 @@ printMemOperandEA(const MCInst *MI, int opNum, raw_ostream &O) {
   printOperand(MI, opNum, O);
   O << ", ";
   printOperand(MI, opNum+1, O);
-  return;
 }
 
 void MipsInstPrinter::
 printFCCOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   const MCOperand& MO = MI->getOperand(opNum);
   O << MipsFCCToString((Mips::CondCode)MO.getImm());
-}
-
-void MipsInstPrinter::
-printRegisterPair(const MCInst *MI, int opNum, raw_ostream &O) {
-  printRegName(O, MI->getOperand(opNum).getReg());
 }
 
 void MipsInstPrinter::

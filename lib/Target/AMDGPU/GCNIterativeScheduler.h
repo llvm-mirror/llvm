@@ -1,9 +1,8 @@
 //===- GCNIterativeScheduler.h - GCN Scheduler ------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -32,7 +31,8 @@ public:
   enum StrategyKind {
     SCHEDULE_MINREGONLY,
     SCHEDULE_MINREGFORCED,
-    SCHEDULE_LEGACYMAXOCCUPANCY
+    SCHEDULE_LEGACYMAXOCCUPANCY,
+    SCHEDULE_ILP
   };
 
   GCNIterativeScheduler(MachineSchedContext *C,
@@ -108,6 +108,7 @@ protected:
 
   void scheduleLegacyMaxOccupancy(bool TryMaximizeOccupancy = true);
   void scheduleMinReg(bool force = false);
+  void scheduleILP(bool TryMaximizeOccupancy = true);
 
   void printRegions(raw_ostream &OS) const;
   void printSchedResult(raw_ostream &OS,

@@ -1,9 +1,8 @@
 //===- EHPersonalities.cpp - Compute EH-related information ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,20 +24,21 @@ EHPersonality llvm::classifyEHPersonality(const Value *Pers) {
   if (!F)
     return EHPersonality::Unknown;
   return StringSwitch<EHPersonality>(F->getName())
-    .Case("__gnat_eh_personality", EHPersonality::GNU_Ada)
-    .Case("__gxx_personality_v0",  EHPersonality::GNU_CXX)
-    .Case("__gxx_personality_seh0",EHPersonality::GNU_CXX)
-    .Case("__gxx_personality_sj0", EHPersonality::GNU_CXX_SjLj)
-    .Case("__gcc_personality_v0",  EHPersonality::GNU_C)
-    .Case("__gcc_personality_seh0",EHPersonality::GNU_C)
-    .Case("__gcc_personality_sj0", EHPersonality::GNU_C_SjLj)
-    .Case("__objc_personality_v0", EHPersonality::GNU_ObjC)
-    .Case("_except_handler3",      EHPersonality::MSVC_X86SEH)
-    .Case("_except_handler4",      EHPersonality::MSVC_X86SEH)
-    .Case("__C_specific_handler",  EHPersonality::MSVC_Win64SEH)
-    .Case("__CxxFrameHandler3",    EHPersonality::MSVC_CXX)
-    .Case("ProcessCLRException",   EHPersonality::CoreCLR)
-    .Case("rust_eh_personality",   EHPersonality::Rust)
+    .Case("__gnat_eh_personality",     EHPersonality::GNU_Ada)
+    .Case("__gxx_personality_v0",      EHPersonality::GNU_CXX)
+    .Case("__gxx_personality_seh0",    EHPersonality::GNU_CXX)
+    .Case("__gxx_personality_sj0",     EHPersonality::GNU_CXX_SjLj)
+    .Case("__gcc_personality_v0",      EHPersonality::GNU_C)
+    .Case("__gcc_personality_seh0",    EHPersonality::GNU_C)
+    .Case("__gcc_personality_sj0",     EHPersonality::GNU_C_SjLj)
+    .Case("__objc_personality_v0",     EHPersonality::GNU_ObjC)
+    .Case("_except_handler3",          EHPersonality::MSVC_X86SEH)
+    .Case("_except_handler4",          EHPersonality::MSVC_X86SEH)
+    .Case("__C_specific_handler",      EHPersonality::MSVC_Win64SEH)
+    .Case("__CxxFrameHandler3",        EHPersonality::MSVC_CXX)
+    .Case("ProcessCLRException",       EHPersonality::CoreCLR)
+    .Case("rust_eh_personality",       EHPersonality::Rust)
+    .Case("__gxx_wasm_personality_v0", EHPersonality::Wasm_CXX)
     .Default(EHPersonality::Unknown);
 }
 
@@ -55,6 +55,7 @@ StringRef llvm::getEHPersonalityName(EHPersonality Pers) {
   case EHPersonality::MSVC_CXX:      return "__CxxFrameHandler3";
   case EHPersonality::CoreCLR:       return "ProcessCLRException";
   case EHPersonality::Rust:          return "rust_eh_personality";
+  case EHPersonality::Wasm_CXX:      return "__gxx_wasm_personality_v0";
   case EHPersonality::Unknown:       llvm_unreachable("Unknown EHPersonality!");
   }
 
@@ -118,7 +119,7 @@ DenseMap<BasicBlock *, ColorVector> llvm::colorEHFunclets(Function &F) {
                            << "\'.\n");
 
     BasicBlock *SuccColor = Color;
-    TerminatorInst *Terminator = Visiting->getTerminator();
+    Instruction *Terminator = Visiting->getTerminator();
     if (auto *CatchRet = dyn_cast<CatchReturnInst>(Terminator)) {
       Value *ParentPad = CatchRet->getCatchSwitchParentPad();
       if (isa<ConstantTokenNone>(ParentPad))

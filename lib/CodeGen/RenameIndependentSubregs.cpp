@@ -1,41 +1,40 @@
 //===-- RenameIndependentSubregs.cpp - Live Interval Analysis -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// Rename independent subregisters looks for virtual registers with
 /// independently used subregisters and renames them to new virtual registers.
 /// Example: In the following:
-///   %vreg0:sub0<read-undef> = ...
-///   %vreg0:sub1 = ...
-///   use %vreg0:sub0
-///   %vreg0:sub0 = ...
-///   use %vreg0:sub0
-///   use %vreg0:sub1
+///   %0:sub0<read-undef> = ...
+///   %0:sub1 = ...
+///   use %0:sub0
+///   %0:sub0 = ...
+///   use %0:sub0
+///   use %0:sub1
 /// sub0 and sub1 are never used together, and we have two independent sub0
 /// definitions. This pass will rename to:
-///   %vreg0:sub0<read-undef> = ...
-///   %vreg1:sub1<read-undef> = ...
-///   use %vreg1:sub1
-///   %vreg2:sub1<read-undef> = ...
-///   use %vreg2:sub1
-///   use %vreg0:sub0
+///   %0:sub0<read-undef> = ...
+///   %1:sub1<read-undef> = ...
+///   use %1:sub1
+///   %2:sub1<read-undef> = ...
+///   use %2:sub1
+///   use %0:sub0
 //
 //===----------------------------------------------------------------------===//
 
 #include "LiveRangeUtils.h"
 #include "PHIEliminationUtils.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 
 using namespace llvm;
 
@@ -77,20 +76,20 @@ private:
   /// Split unrelated subregister components and rename them to new vregs.
   bool renameComponents(LiveInterval &LI) const;
 
-  /// \brief Build a vector of SubRange infos and a union find set of
+  /// Build a vector of SubRange infos and a union find set of
   /// equivalence classes.
   /// Returns true if more than 1 equivalence class was found.
   bool findComponents(IntEqClasses &Classes,
                       SmallVectorImpl<SubRangeInfo> &SubRangeInfos,
                       LiveInterval &LI) const;
 
-  /// \brief Distribute the LiveInterval segments into the new LiveIntervals
+  /// Distribute the LiveInterval segments into the new LiveIntervals
   /// belonging to their class.
   void distribute(const IntEqClasses &Classes,
                   const SmallVectorImpl<SubRangeInfo> &SubRangeInfos,
                   const SmallVectorImpl<LiveInterval*> &Intervals) const;
 
-  /// \brief Constructs main liverange and add missing undef+dead flags.
+  /// Constructs main liverange and add missing undef+dead flags.
   void computeMainRangesFixFlags(const IntEqClasses &Classes,
       const SmallVectorImpl<SubRangeInfo> &SubRangeInfos,
       const SmallVectorImpl<LiveInterval*> &Intervals) const;
@@ -134,17 +133,17 @@ bool RenameIndependentSubregs::renameComponents(LiveInterval &LI) const {
   const TargetRegisterClass *RegClass = MRI->getRegClass(Reg);
   SmallVector<LiveInterval*, 4> Intervals;
   Intervals.push_back(&LI);
-  DEBUG(dbgs() << PrintReg(Reg) << ": Found " << Classes.getNumClasses()
-        << " equivalence classes.\n");
-  DEBUG(dbgs() << PrintReg(Reg) << ": Splitting into newly created:");
+  LLVM_DEBUG(dbgs() << printReg(Reg) << ": Found " << Classes.getNumClasses()
+                    << " equivalence classes.\n");
+  LLVM_DEBUG(dbgs() << printReg(Reg) << ": Splitting into newly created:");
   for (unsigned I = 1, NumClasses = Classes.getNumClasses(); I < NumClasses;
        ++I) {
     unsigned NewVReg = MRI->createVirtualRegister(RegClass);
     LiveInterval &NewLI = LIS->createEmptyInterval(NewVReg);
     Intervals.push_back(&NewLI);
-    DEBUG(dbgs() << ' ' << PrintReg(NewVReg));
+    LLVM_DEBUG(dbgs() << ' ' << printReg(NewVReg));
   }
-  DEBUG(dbgs() << '\n');
+  LLVM_DEBUG(dbgs() << '\n');
 
   rewriteOperands(Classes, SubRangeInfos, Intervals);
   distribute(Classes, SubRangeInfos, Intervals);
@@ -219,7 +218,8 @@ void RenameIndependentSubregs::rewriteOperands(const IntEqClasses &Classes,
     if (!MO.isDef() && !MO.readsReg())
       continue;
 
-    SlotIndex Pos = LIS->getInstructionIndex(*MO.getParent());
+    auto *MI = MO.getParent();
+    SlotIndex Pos = LIS->getInstructionIndex(*MI);
     Pos = MO.isDef() ? Pos.getRegSlot(MO.isEarlyClobber())
                      : Pos.getBaseIndex();
     unsigned SubRegIdx = MO.getSubReg();
@@ -245,11 +245,14 @@ void RenameIndependentSubregs::rewriteOperands(const IntEqClasses &Classes,
     MO.setReg(VReg);
 
     if (MO.isTied() && Reg != VReg) {
-      /// Undef use operands are not tracked in the equivalence class but need
-      /// to be update if they are tied.
-      MO.getParent()->substituteRegister(Reg, VReg, 0, TRI);
+      /// Undef use operands are not tracked in the equivalence class,
+      /// but need to be updated if they are tied; take care to only
+      /// update the tied operand.
+      unsigned OperandNo = MI->getOperandNo(&MO);
+      unsigned TiedIdx = MI->findTiedOperandIdx(OperandNo);
+      MI->getOperand(TiedIdx).setReg(VReg);
 
-      // substituteRegister breaks the iterator, so restart.
+      // above substitution breaks the iterator, so restart.
       I = MRI->reg_nodbg_begin(Reg);
     }
   }
@@ -376,8 +379,8 @@ bool RenameIndependentSubregs::runOnMachineFunction(MachineFunction &MF) {
   if (!MRI->subRegLivenessEnabled())
     return false;
 
-  DEBUG(dbgs() << "Renaming independent subregister live ranges in "
-        << MF.getName() << '\n');
+  LLVM_DEBUG(dbgs() << "Renaming independent subregister live ranges in "
+                    << MF.getName() << '\n');
 
   LIS = &getAnalysis<LiveIntervals>();
   TII = MF.getSubtarget().getInstrInfo();

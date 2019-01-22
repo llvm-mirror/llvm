@@ -1,14 +1,13 @@
 //===--- AMDGPUMachineModuleInfo.h ------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief AMDGPU Machine Module Info.
+/// AMDGPU Machine Module Info.
 ///
 //
 //===----------------------------------------------------------------------===//
@@ -30,14 +29,14 @@ private:
   // All supported memory/synchronization scopes can be found here:
   //   http://llvm.org/docs/AMDGPUUsage.html#memory-scopes
 
-  /// \brief Agent synchronization scope ID.
+  /// Agent synchronization scope ID.
   SyncScope::ID AgentSSID;
-  /// \brief Workgroup synchronization scope ID.
+  /// Workgroup synchronization scope ID.
   SyncScope::ID WorkgroupSSID;
-  /// \brief Wavefront synchronization scope ID.
+  /// Wavefront synchronization scope ID.
   SyncScope::ID WavefrontSSID;
 
-  /// \brief In AMDGPU target synchronization scopes are inclusive, meaning a
+  /// In AMDGPU target synchronization scopes are inclusive, meaning a
   /// larger synchronization scope is inclusive of a smaller synchronization
   /// scope.
   ///
@@ -74,7 +73,7 @@ public:
     return WavefrontSSID;
   }
 
-  /// \brief In AMDGPU target synchronization scopes are inclusive, meaning a
+  /// In AMDGPU target synchronization scopes are inclusive, meaning a
   /// larger synchronization scope is inclusive of a smaller synchronization
   /// scope.
   ///

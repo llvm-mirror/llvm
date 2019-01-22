@@ -3,56 +3,6 @@
 ; even with arbitrary precision integers.
 ; RUN: opt < %s -instcombine -S | FileCheck %s
 
-define i47 @test1(i47 %A) {
-; CHECK-LABEL: @test1(
-; CHECK-NEXT:    ret i47 %A
-;
-  %B = shl i47 %A, 0
-  ret i47 %B
-}
-
-define i41 @test2(i7 %X) {
-; CHECK-LABEL: @test2(
-; CHECK-NEXT:    ret i41 0
-;
-  %A = zext i7 %X to i41
-  %B = shl i41 0, %A
-  ret i41 %B
-}
-
-define i41 @test3(i41 %A) {
-; CHECK-LABEL: @test3(
-; CHECK-NEXT:    ret i41 %A
-;
-  %B = ashr i41 %A, 0
-  ret i41 %B
-}
-
-define i39 @test4(i7 %X) {
-; CHECK-LABEL: @test4(
-; CHECK-NEXT:    ret i39 0
-;
-  %A = zext i7 %X to i39
-  %B = ashr i39 0, %A
-  ret i39 %B
-}
-
-define i55 @test5(i55 %A) {
-; CHECK-LABEL: @test5(
-; CHECK-NEXT:    ret i55 undef
-;
-  %B = lshr i55 %A, 55
-  ret i55 %B
-}
-
-define i32 @test5a(i32 %A) {
-; CHECK-LABEL: @test5a(
-; CHECK-NEXT:    ret i32 undef
-;
-  %B = shl i32 %A, 32
-  ret i32 %B
-}
-
 define i55 @test6(i55 %A) {
 ; CHECK-LABEL: @test6(
 ; CHECK-NEXT:    [[C:%.*]] = mul i55 %A, 6
@@ -369,8 +319,8 @@ define i1 @test16(i84 %X) {
 
 define <2 x i1> @test16vec(<2 x i84> %X) {
 ; CHECK-LABEL: @test16vec(
-; CHECK-NEXT:    [[AND:%.*]] = and <2 x i84> %X, <i84 16, i84 16>
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i84> [[AND]], zeroinitializer
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i84> [[X:%.*]], <i84 16, i84 16>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i84> [[TMP1]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %shr = ashr <2 x i84> %X, <i84 4, i84 4>
@@ -575,4 +525,23 @@ define i40 @test26(i40 %A) {
   %C = bitcast i40 %B to i40
   %D = shl i40 %C, 1
   ret i40 %D
+}
+
+; OSS-Fuzz #9880
+; https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=9880
+define i177 @ossfuzz_9880(i177 %X) {
+; CHECK-LABEL: @ossfuzz_9880(
+; CHECK-NEXT:    ret i177 1
+;
+  %A = alloca i177
+  %L1 = load i177, i177* %A
+  %B = or i177 0, -1
+  %B5 = udiv i177 %L1, %B
+  %B4 = add i177 %B5, %B
+  %B2 = add i177 %B, %B4
+  %B6 = mul i177 %B5, %B2
+  %B20 = shl i177 %L1, %B6
+  %B14 = sub i177 %B20, %B5
+  %B1 = udiv i177 %B14, %B6
+  ret i177 %B1
 }

@@ -5,11 +5,11 @@
 ; RUN: llvm-lto2 run -o %t.out %t.bc -save-temps \
 ; RUN:   -r %t.bc,test,px -r %t.bc,bar,x \
 ; RUN:   -lto-sample-profile-file=%S/Inputs/load-sample-prof-icp.prof
-; RUN: llvm-dis %t.out.0.4.opt.bc -o - | FileCheck %s
+; RUN: llvm-dis %t.out.1.4.opt.bc -o - | FileCheck %s
 ; RUN: llvm-lto2 run -o %t.out %t.bc -save-temps \
 ; RUN:   -r %t.bc,test,px -r %t.bc,bar,x -use-new-pm \
 ; RUN:   -lto-sample-profile-file=%S/Inputs/load-sample-prof-icp.prof
-; RUN: llvm-dis %t.out.0.4.opt.bc -o - | FileCheck %s
+; RUN: llvm-dis %t.out.1.4.opt.bc -o - | FileCheck %s
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
@@ -39,7 +39,7 @@ declare void @bar() local_unnamed_addr
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{i32 1, !"wchar_size", i32 4}
 !6 = !{!"clang version 6.0.0 "}
-!7 = distinct !DISubprogram(name: "test", scope: !1, file: !1, line: 3, type: !8, isLocal: false, isDefinition: true, scopeLine: 3, isOptimized: true, unit: !0, variables: !2)
+!7 = distinct !DISubprogram(name: "test", scope: !1, file: !1, line: 3, type: !8, isLocal: false, isDefinition: true, scopeLine: 3, isOptimized: true, unit: !0, retainedNodes: !2)
 !8 = !DISubroutineType(types: !9)
 !9 = !{null}
 !10 = !DILocation(line: 4, column: 5, scope: !7)

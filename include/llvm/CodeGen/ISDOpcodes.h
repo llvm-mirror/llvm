@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/ISDOpcodes.h - CodeGen opcodes -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -70,7 +69,7 @@ namespace ISD {
     /// of the frame or return address to return.  An index of zero corresponds
     /// to the current function's frame or return address, an index of one to
     /// the parent's frame or return address, and so on.
-    FRAMEADDR, RETURNADDR, ADDROFRETURNADDR,
+    FRAMEADDR, RETURNADDR, ADDROFRETURNADDR, SPONENTRY,
 
     /// LOCAL_RECOVER - Represents the llvm.localrecover intrinsic.
     /// Materializes the offset from the local object pointer of another
@@ -186,7 +185,8 @@ namespace ISD {
     /// BUILD_PAIR - This is the opposite of EXTRACT_ELEMENT in some ways.
     /// Given two values of the same integer value type, this produces a value
     /// twice as big.  Like EXTRACT_ELEMENT, this can only be used before
-    /// legalization.
+    /// legalization. The lower part of the composite value should be in
+    /// element 0 and the upper part should be in element 1.
     BUILD_PAIR,
 
     /// MERGE_VALUES - This node takes multiple discrete operands and returns
@@ -255,6 +255,29 @@ namespace ISD {
     /// Same for multiplication.
     SMULO, UMULO,
 
+    /// RESULT = [US]ADDSAT(LHS, RHS) - Perform saturation addition on 2
+    /// integers with the same bit width (W). If the true value of LHS + RHS
+    /// exceeds the largest value that can be represented by W bits, the
+    /// resulting value is this maximum value. Otherwise, if this value is less
+    /// than the smallest value that can be represented by W bits, the
+    /// resulting value is this minimum value.
+    SADDSAT, UADDSAT,
+
+    /// RESULT = [US]SUBSAT(LHS, RHS) - Perform saturation subtraction on 2
+    /// integers with the same bit width (W). If the true value of LHS - RHS
+    /// exceeds the largest value that can be represented by W bits, the
+    /// resulting value is this maximum value. Otherwise, if this value is less
+    /// than the smallest value that can be represented by W bits, the
+    /// resulting value is this minimum value.
+    SSUBSAT, USUBSAT,
+
+    /// RESULT = SMULFIX(LHS, RHS, SCALE) - Perform fixed point multiplication on
+    /// 2 integers with the same width and scale. SCALE represents the scale of
+    /// both operands as fixed point numbers. This SCALE parameter must be a
+    /// constant integer. A scale of zero is effectively performing
+    /// multiplication on 2 integers.
+    SMULFIX,
+
     /// Simple binary floating point operators.
     FADD, FSUB, FMUL, FDIV, FREM,
 
@@ -271,7 +294,8 @@ namespace ISD {
     /// They are used to limit optimizations while the DAG is being optimized.
     STRICT_FSQRT, STRICT_FPOW, STRICT_FPOWI, STRICT_FSIN, STRICT_FCOS,
     STRICT_FEXP, STRICT_FEXP2, STRICT_FLOG, STRICT_FLOG10, STRICT_FLOG2,
-    STRICT_FRINT, STRICT_FNEARBYINT,
+    STRICT_FRINT, STRICT_FNEARBYINT, STRICT_FMAXNUM, STRICT_FMINNUM,
+    STRICT_FCEIL, STRICT_FFLOOR, STRICT_FROUND, STRICT_FTRUNC,
 
     /// FMA - Perform a * b + c with no intermediate rounding step.
     FMA,
@@ -376,7 +400,13 @@ namespace ISD {
     /// When the 1st operand is a vector, the shift amount must be in the same
     /// type. (TLI.getShiftAmountTy() will return the same type when the input
     /// type is a vector.)
-    SHL, SRA, SRL, ROTL, ROTR,
+    /// For rotates and funnel shifts, the shift amount is treated as an unsigned
+    /// amount modulo the element size of the first operand.
+    ///
+    /// Funnel 'double' shifts take 3 operands, 2 inputs and the shift amount.
+    /// fshl(X,Y,Z): (X << (Z % BW)) | (Y >> (BW - (Z % BW)))
+    /// fshr(X,Y,Z): (X << (BW - (Z % BW))) | (Y >> (Z % BW))
+    SHL, SRA, SRL, ROTL, ROTR, FSHL, FSHR,
 
     /// Byte Swap and Counting operators.
     BSWAP, CTTZ, CTLZ, CTPOP, BITREVERSE,
@@ -411,19 +441,11 @@ namespace ISD {
     /// then the result type must also be a vector type.
     SETCC,
 
-    /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, and
-    /// op #2 is a *carry value*. This operator checks the result of
-    /// "LHS - RHS - Carry", and can be used to compare two wide integers:
-    /// (setcce lhshi rhshi (subc lhslo rhslo) cc). Only valid for integers.
-    /// FIXME: This node is deprecated in favor of SETCCCARRY.
-    /// It is kept around for now to provide a smooth transition path
-    /// toward the use of SETCCCARRY and will eventually be removed.
-    SETCCE,
-
     /// Like SetCC, ops #0 and #1 are the LHS and RHS operands to compare, but
     /// op #2 is a boolean indicating if there is an incoming carry. This
     /// operator checks the result of "LHS - RHS - Carry", and can be used to
-    /// compare two wide integers: (setcce lhshi rhshi (subc lhslo rhslo) cc).
+    /// compare two wide integers:
+    /// (setcccarry lhshi rhshi (subcarry lhslo rhslo) cc).
     /// Only valid for integers.
     SETCCCARRY,
 
@@ -466,35 +488,38 @@ namespace ISD {
     /// in-register any-extension of the low lanes of an integer vector. The
     /// result type must have fewer elements than the operand type, and those
     /// elements must be larger integer types such that the total size of the
-    /// operand type and the result type match. Each of the low operand
-    /// elements is any-extended into the corresponding, wider result
-    /// elements with the high bits becoming undef.
+    /// operand type is less than or equal to the size of the result type. Each
+    /// of the low operand elements is any-extended into the corresponding,
+    /// wider result elements with the high bits becoming undef.
+    /// NOTE: The type legalizer prefers to make the operand and result size
+    /// the same to allow expansion to shuffle vector during op legalization.
     ANY_EXTEND_VECTOR_INREG,
 
     /// SIGN_EXTEND_VECTOR_INREG(Vector) - This operator represents an
     /// in-register sign-extension of the low lanes of an integer vector. The
     /// result type must have fewer elements than the operand type, and those
     /// elements must be larger integer types such that the total size of the
-    /// operand type and the result type match. Each of the low operand
-    /// elements is sign-extended into the corresponding, wider result
-    /// elements.
-    // FIXME: The SIGN_EXTEND_INREG node isn't specifically limited to
-    // scalars, but it also doesn't handle vectors well. Either it should be
-    // restricted to scalars or this node (and its handling) should be merged
-    // into it.
+    /// operand type is less than or equal to the size of the result type. Each
+    /// of the low operand elements is sign-extended into the corresponding,
+    /// wider result elements.
+    /// NOTE: The type legalizer prefers to make the operand and result size
+    /// the same to allow expansion to shuffle vector during op legalization.
     SIGN_EXTEND_VECTOR_INREG,
 
     /// ZERO_EXTEND_VECTOR_INREG(Vector) - This operator represents an
     /// in-register zero-extension of the low lanes of an integer vector. The
     /// result type must have fewer elements than the operand type, and those
     /// elements must be larger integer types such that the total size of the
-    /// operand type and the result type match. Each of the low operand
-    /// elements is zero-extended into the corresponding, wider result
-    /// elements.
+    /// operand type is less than or equal to the size of the result type. Each
+    /// of the low operand elements is zero-extended into the corresponding,
+    /// wider result elements.
+    /// NOTE: The type legalizer prefers to make the operand and result size
+    /// the same to allow expansion to shuffle vector during op legalization.
     ZERO_EXTEND_VECTOR_INREG,
 
     /// FP_TO_[US]INT - Convert a floating point value to a signed or unsigned
-    /// integer.
+    /// integer. These have the same semantics as fptosi and fptoui in IR. If
+    /// the FP value cannot fit in the integer type, the results are undefined.
     FP_TO_SINT,
     FP_TO_UINT,
 
@@ -554,22 +579,29 @@ namespace ISD {
     /// is often a storage-only type but has native conversions.
     FP16_TO_FP, FP_TO_FP16,
 
-    /// FNEG, FABS, FSQRT, FSIN, FCOS, FPOWI, FPOW,
-    /// FLOG, FLOG2, FLOG10, FEXP, FEXP2,
-    /// FCEIL, FTRUNC, FRINT, FNEARBYINT, FROUND, FFLOOR - Perform various unary
-    /// floating point operations. These are inspired by libm.
-    FNEG, FABS, FSQRT, FSIN, FCOS, FPOWI, FPOW,
+    /// Perform various unary floating-point operations inspired by libm.
+    FNEG, FABS, FSQRT, FCBRT, FSIN, FCOS, FPOWI, FPOW,
     FLOG, FLOG2, FLOG10, FEXP, FEXP2,
     FCEIL, FTRUNC, FRINT, FNEARBYINT, FROUND, FFLOOR,
     /// FMINNUM/FMAXNUM - Perform floating-point minimum or maximum on two
     /// values.
-    /// In the case where a single input is NaN, the non-NaN input is returned.
+    //
+    /// In the case where a single input is a NaN (either signaling or quiet),
+    /// the non-NaN input is returned.
     ///
     /// The return value of (FMINNUM 0.0, -0.0) could be either 0.0 or -0.0.
     FMINNUM, FMAXNUM,
-    /// FMINNAN/FMAXNAN - Behave identically to FMINNUM/FMAXNUM, except that
-    /// when a single input is NaN, NaN is returned.
-    FMINNAN, FMAXNAN,
+
+    /// FMINNUM_IEEE/FMAXNUM_IEEE - Perform floating-point minimum or maximum on
+    /// two values, following the IEEE-754 2008 definition. This differs from
+    /// FMINNUM/FMAXNUM in the handling of signaling NaNs. If one input is a
+    /// signaling NaN, returns a quiet NaN.
+    FMINNUM_IEEE, FMAXNUM_IEEE,
+
+    /// FMINIMUM/FMAXIMUM - NaN-propagating minimum/maximum that also treat -0.0
+    /// as less than 0.0. While FMINNUM_IEEE/FMAXNUM_IEEE follow IEEE 754-2008
+    /// semantics, FMINIMUM/FMAXIMUM follow IEEE 754-2018 draft semantics.
+    FMINIMUM, FMAXIMUM,
 
     /// FSINCOS - Compute both fsin and fcos as a single operation.
     FSINCOS,
@@ -778,6 +810,7 @@ namespace ISD {
     ATOMIC_LOAD_ADD,
     ATOMIC_LOAD_SUB,
     ATOMIC_LOAD_AND,
+    ATOMIC_LOAD_CLR,
     ATOMIC_LOAD_OR,
     ATOMIC_LOAD_XOR,
     ATOMIC_LOAD_NAND,
@@ -789,11 +822,20 @@ namespace ISD {
     // Masked load and store - consecutive vector load and store operations
     // with additional mask operand that prevents memory accesses to the
     // masked-off lanes.
+    //
+    // Val, OutChain = MLOAD(BasePtr, Mask, PassThru)
+    // OutChain = MSTORE(Value, BasePtr, Mask)
     MLOAD, MSTORE,
 
     // Masked gather and scatter - load and store operations for a vector of
     // random addresses with additional mask operand that prevents memory
     // accesses to the masked-off lanes.
+    //
+    // Val, OutChain = GATHER(InChain, PassThru, Mask, BasePtr, Index, Scale)
+    // OutChain = SCATTER(InChain, Value, Mask, BasePtr, Index, Scale)
+    //
+    // The Index operand can have more vector elements than the other operands
+    // due to type legalization. The extra elements are ignored.
     MGATHER, MSCATTER,
 
     /// This corresponds to the llvm.lifetime.* intrinsics. The first operand
@@ -838,7 +880,7 @@ namespace ISD {
   /// which do not reference a specific memory location should be less than
   /// this value. Those that do must not be less than this value, and can
   /// be used with SelectionDAG::getMemIntrinsicNode.
-  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+300;
+  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+400;
 
   //===--------------------------------------------------------------------===//
   /// MemIndexedMode enum - This enum defines the load / store indexed

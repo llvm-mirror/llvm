@@ -4,28 +4,27 @@
 
 define void @foo(i32 %X, i32 %Y, i32 %Z) nounwind {
 ; JUMP2-LABEL: foo:
-; JUMP2:       # BB#0: # %entry
+; JUMP2:       # %bb.0: # %entry
 ; JUMP2-NEXT:    cmpl $5, {{[0-9]+}}(%esp)
 ; JUMP2-NEXT:    jl .LBB0_3
-; JUMP2-NEXT:  # BB#1: # %entry
+; JUMP2-NEXT:  # %bb.1: # %entry
 ; JUMP2-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; JUMP2-NEXT:    testl %eax, %eax
 ; JUMP2-NEXT:    je .LBB0_3
-; JUMP2-NEXT:  # BB#2: # %UnifiedReturnBlock
+; JUMP2-NEXT:  # %bb.2: # %UnifiedReturnBlock
 ; JUMP2-NEXT:    retl
 ; JUMP2-NEXT:  .LBB0_3: # %cond_true
 ; JUMP2-NEXT:    jmp bar # TAILCALL
 ;
 ; JUMP1-LABEL: foo:
-; JUMP1:       # BB#0: # %entry
+; JUMP1:       # %bb.0: # %entry
 ; JUMP1-NEXT:    cmpl $0, {{[0-9]+}}(%esp)
-; JUMP1-NEXT:    sete %al
-; JUMP1-NEXT:    cmpl $5, {{[0-9]+}}(%esp)
-; JUMP1-NEXT:    setl %cl
-; JUMP1-NEXT:    orb %al, %cl
-; JUMP1-NEXT:    cmpb $1, %cl
+; JUMP1-NEXT:    setne %al
+; JUMP1-NEXT:    cmpl $4, {{[0-9]+}}(%esp)
+; JUMP1-NEXT:    setg %cl
+; JUMP1-NEXT:    testb %al, %cl
 ; JUMP1-NEXT:    jne .LBB0_1
-; JUMP1-NEXT:  # BB#2: # %cond_true
+; JUMP1-NEXT:  # %bb.2: # %cond_true
 ; JUMP1-NEXT:    jmp bar # TAILCALL
 ; JUMP1-NEXT:  .LBB0_1: # %UnifiedReturnBlock
 ; JUMP1-NEXT:    retl
@@ -48,29 +47,27 @@ UnifiedReturnBlock:
 
 define void @unpredictable(i32 %X, i32 %Y, i32 %Z) nounwind {
 ; JUMP2-LABEL: unpredictable:
-; JUMP2:       # BB#0: # %entry
+; JUMP2:       # %bb.0: # %entry
 ; JUMP2-NEXT:    cmpl $0, {{[0-9]+}}(%esp)
-; JUMP2-NEXT:    sete %al
-; JUMP2-NEXT:    cmpl $5, {{[0-9]+}}(%esp)
-; JUMP2-NEXT:    setl %cl
-; JUMP2-NEXT:    orb %al, %cl
-; JUMP2-NEXT:    cmpb $1, %cl
+; JUMP2-NEXT:    setne %al
+; JUMP2-NEXT:    cmpl $4, {{[0-9]+}}(%esp)
+; JUMP2-NEXT:    setg %cl
+; JUMP2-NEXT:    testb %al, %cl
 ; JUMP2-NEXT:    jne .LBB1_1
-; JUMP2-NEXT:  # BB#2: # %cond_true
+; JUMP2-NEXT:  # %bb.2: # %cond_true
 ; JUMP2-NEXT:    jmp bar # TAILCALL
 ; JUMP2-NEXT:  .LBB1_1: # %UnifiedReturnBlock
 ; JUMP2-NEXT:    retl
 ;
 ; JUMP1-LABEL: unpredictable:
-; JUMP1:       # BB#0: # %entry
+; JUMP1:       # %bb.0: # %entry
 ; JUMP1-NEXT:    cmpl $0, {{[0-9]+}}(%esp)
-; JUMP1-NEXT:    sete %al
-; JUMP1-NEXT:    cmpl $5, {{[0-9]+}}(%esp)
-; JUMP1-NEXT:    setl %cl
-; JUMP1-NEXT:    orb %al, %cl
-; JUMP1-NEXT:    cmpb $1, %cl
+; JUMP1-NEXT:    setne %al
+; JUMP1-NEXT:    cmpl $4, {{[0-9]+}}(%esp)
+; JUMP1-NEXT:    setg %cl
+; JUMP1-NEXT:    testb %al, %cl
 ; JUMP1-NEXT:    jne .LBB1_1
-; JUMP1-NEXT:  # BB#2: # %cond_true
+; JUMP1-NEXT:  # %bb.2: # %cond_true
 ; JUMP1-NEXT:    jmp bar # TAILCALL
 ; JUMP1-NEXT:  .LBB1_1: # %UnifiedReturnBlock
 ; JUMP1-NEXT:    retl

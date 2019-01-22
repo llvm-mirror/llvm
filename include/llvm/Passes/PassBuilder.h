@@ -1,9 +1,8 @@
 //===- Parsing, selection, and construction of pass pipelines --*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -19,6 +18,8 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include <vector>
 
@@ -26,14 +27,18 @@ namespace llvm {
 class StringRef;
 class AAManager;
 class TargetMachine;
+class ModuleSummaryIndex;
 
 /// A struct capturing PGO tunables.
 struct PGOOptions {
   PGOOptions(std::string ProfileGenFile = "", std::string ProfileUseFile = "",
-             std::string SampleProfileFile = "", bool RunProfileGen = false,
-             bool SamplePGOSupport = false)
+             std::string SampleProfileFile = "",
+             std::string ProfileRemappingFile = "",
+             bool RunProfileGen = false, bool SamplePGOSupport = false)
       : ProfileGenFile(ProfileGenFile), ProfileUseFile(ProfileUseFile),
-        SampleProfileFile(SampleProfileFile), RunProfileGen(RunProfileGen),
+        SampleProfileFile(SampleProfileFile),
+        ProfileRemappingFile(ProfileRemappingFile),
+        RunProfileGen(RunProfileGen),
         SamplePGOSupport(SamplePGOSupport || !SampleProfileFile.empty()) {
     assert((RunProfileGen ||
             !SampleProfileFile.empty() ||
@@ -43,11 +48,12 @@ struct PGOOptions {
   std::string ProfileGenFile;
   std::string ProfileUseFile;
   std::string SampleProfileFile;
+  std::string ProfileRemappingFile;
   bool RunProfileGen;
   bool SamplePGOSupport;
 };
 
-/// \brief This class provides access to building LLVM's passes.
+/// This class provides access to building LLVM's passes.
 ///
 /// It's members provide the baseline state available to passes during their
 /// construction. The \c PassRegistry.def file specifies how to construct all
@@ -56,9 +62,10 @@ struct PGOOptions {
 class PassBuilder {
   TargetMachine *TM;
   Optional<PGOOptions> PGOOpt;
+  PassInstrumentationCallbacks *PIC;
 
 public:
-  /// \brief A struct to capture parsed pass pipeline names.
+  /// A struct to capture parsed pass pipeline names.
   ///
   /// A pipeline is defined as a series of names, each of which may in itself
   /// recursively contain a nested pipeline. A name is either the name of a pass
@@ -71,7 +78,7 @@ public:
     std::vector<PipelineElement> InnerPipeline;
   };
 
-  /// \brief ThinLTO phase.
+  /// ThinLTO phase.
   ///
   /// This enumerates the LLVM ThinLTO optimization phases.
   enum class ThinLTOPhase {
@@ -83,7 +90,7 @@ public:
     PostLink
   };
 
-  /// \brief LLVM-provided high-level optimization levels.
+  /// LLVM-provided high-level optimization levels.
   ///
   /// This enumerates the LLVM-provided high-level optimization levels. Each
   /// level has a specific goal and rationale.
@@ -170,10 +177,11 @@ public:
   };
 
   explicit PassBuilder(TargetMachine *TM = nullptr,
-                       Optional<PGOOptions> PGOOpt = None)
-      : TM(TM), PGOOpt(PGOOpt) {}
+                       Optional<PGOOptions> PGOOpt = None,
+                       PassInstrumentationCallbacks *PIC = nullptr)
+      : TM(TM), PGOOpt(PGOOpt), PIC(PIC) {}
 
-  /// \brief Cross register the analysis managers through their proxies.
+  /// Cross register the analysis managers through their proxies.
   ///
   /// This is an interface that can be used to cross register each
   // AnalysisManager with all the others analysis managers.
@@ -182,7 +190,7 @@ public:
                             CGSCCAnalysisManager &CGAM,
                             ModuleAnalysisManager &MAM);
 
-  /// \brief Registers all available module analysis passes.
+  /// Registers all available module analysis passes.
   ///
   /// This is an interface that can be used to populate a \c
   /// ModuleAnalysisManager with all registered module analyses. Callers can
@@ -190,7 +198,7 @@ public:
   /// pre-register analyses and this will not override those.
   void registerModuleAnalyses(ModuleAnalysisManager &MAM);
 
-  /// \brief Registers all available CGSCC analysis passes.
+  /// Registers all available CGSCC analysis passes.
   ///
   /// This is an interface that can be used to populate a \c CGSCCAnalysisManager
   /// with all registered CGSCC analyses. Callers can still manually register any
@@ -198,7 +206,7 @@ public:
   /// not override those.
   void registerCGSCCAnalyses(CGSCCAnalysisManager &CGAM);
 
-  /// \brief Registers all available function analysis passes.
+  /// Registers all available function analysis passes.
   ///
   /// This is an interface that can be used to populate a \c
   /// FunctionAnalysisManager with all registered function analyses. Callers can
@@ -206,7 +214,7 @@ public:
   /// pre-register analyses and this will not override those.
   void registerFunctionAnalyses(FunctionAnalysisManager &FAM);
 
-  /// \brief Registers all available loop analysis passes.
+  /// Registers all available loop analysis passes.
   ///
   /// This is an interface that can be used to populate a \c LoopAnalysisManager
   /// with all registered loop analyses. Callers can still manually register any
@@ -309,8 +317,9 @@ public:
   /// only intended for use when attempting to optimize code. If frontends
   /// require some transformations for semantic reasons, they should explicitly
   /// build them.
-  ModulePassManager buildThinLTODefaultPipeline(OptimizationLevel Level,
-                                                bool DebugLogging = false);
+  ModulePassManager
+  buildThinLTODefaultPipeline(OptimizationLevel Level, bool DebugLogging,
+                              const ModuleSummaryIndex *ImportSummary);
 
   /// Build a pre-link, LTO-targeting default optimization pipeline to a pass
   /// manager.
@@ -339,13 +348,14 @@ public:
   /// require some transformations for semantic reasons, they should explicitly
   /// build them.
   ModulePassManager buildLTODefaultPipeline(OptimizationLevel Level,
-                                            bool DebugLogging = false);
+                                            bool DebugLogging,
+                                            ModuleSummaryIndex *ExportSummary);
 
   /// Build the default `AAManager` with the default alias analysis pipeline
   /// registered.
   AAManager buildDefaultAAPipeline();
 
-  /// \brief Parse a textual pass pipeline description into a \c
+  /// Parse a textual pass pipeline description into a \c
   /// ModulePassManager.
   ///
   /// The format of the textual pass pipeline description looks something like:
@@ -374,8 +384,9 @@ public:
   /// If the sequence of passes aren't all the exact same kind of pass, it will
   /// be an error. You cannot mix different levels implicitly, you must
   /// explicitly form a pass manager in which to nest passes.
-  bool parsePassPipeline(ModulePassManager &MPM, StringRef PipelineText,
-                         bool VerifyEachPass = true, bool DebugLogging = false);
+  Error parsePassPipeline(ModulePassManager &MPM, StringRef PipelineText,
+                          bool VerifyEachPass = true,
+                          bool DebugLogging = false);
 
   /// {{@ Parse a textual pass pipeline description into a specific PassManager
   ///
@@ -384,12 +395,15 @@ public:
   /// this is the valid pipeline text:
   ///
   ///   function(lpass)
-  bool parsePassPipeline(CGSCCPassManager &CGPM, StringRef PipelineText,
-                         bool VerifyEachPass = true, bool DebugLogging = false);
-  bool parsePassPipeline(FunctionPassManager &FPM, StringRef PipelineText,
-                         bool VerifyEachPass = true, bool DebugLogging = false);
-  bool parsePassPipeline(LoopPassManager &LPM, StringRef PipelineText,
-                         bool VerifyEachPass = true, bool DebugLogging = false);
+  Error parsePassPipeline(CGSCCPassManager &CGPM, StringRef PipelineText,
+                          bool VerifyEachPass = true,
+                          bool DebugLogging = false);
+  Error parsePassPipeline(FunctionPassManager &FPM, StringRef PipelineText,
+                          bool VerifyEachPass = true,
+                          bool DebugLogging = false);
+  Error parsePassPipeline(LoopPassManager &LPM, StringRef PipelineText,
+                          bool VerifyEachPass = true,
+                          bool DebugLogging = false);
   /// @}}
 
   /// Parse a textual alias analysis pipeline into the provided AA manager.
@@ -407,9 +421,9 @@ public:
   /// Returns false if the text cannot be parsed cleanly. The specific state of
   /// the \p AA manager is unspecified if such an error is encountered and this
   /// returns false.
-  bool parseAAPipeline(AAManager &AA, StringRef PipelineText);
+  Error parseAAPipeline(AAManager &AA, StringRef PipelineText);
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding passes that perform peephole
@@ -420,7 +434,7 @@ public:
     PeepholeEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding late loop canonicalization and
@@ -434,7 +448,7 @@ public:
     LateLoopOptimizationsEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding loop passes to the end of the loop
@@ -444,7 +458,7 @@ public:
     LoopOptimizerEndEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding optimization passes after most of the
@@ -454,7 +468,7 @@ public:
     ScalarOptimizerLateEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding CallGraphSCC passes at the end of the
@@ -465,7 +479,7 @@ public:
     CGSCCOptimizerLateEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for a default optimizer pipeline extension
+  /// Register a callback for a default optimizer pipeline extension
   /// point
   ///
   /// This extension point allows adding optimization passes before the
@@ -476,7 +490,29 @@ public:
     VectorizerStartEPCallbacks.push_back(C);
   }
 
-  /// \brief Register a callback for parsing an AliasAnalysis Name to populate
+  /// Register a callback for a default optimizer pipeline extension point.
+  ///
+  /// This extension point allows adding optimization once at the start of the
+  /// pipeline. This does not apply to 'backend' compiles (LTO and ThinLTO
+  /// link-time pipelines).
+  void registerPipelineStartEPCallback(
+      const std::function<void(ModulePassManager &)> &C) {
+    PipelineStartEPCallbacks.push_back(C);
+  }
+
+  /// Register a callback for a default optimizer pipeline extension point
+  ///
+  /// This extension point allows adding optimizations at the very end of the
+  /// function optimization pipeline. A key difference between this and the
+  /// legacy PassManager's OptimizerLast callback is that this extension point
+  /// is not triggered at O0. Extensions to the O0 pipeline should append their
+  /// passes to the end of the overall pipeline.
+  void registerOptimizerLastEPCallback(
+      const std::function<void(FunctionPassManager &, OptimizationLevel)> &C) {
+    OptimizerLastEPCallbacks.push_back(C);
+  }
+
+  /// Register a callback for parsing an AliasAnalysis Name to populate
   /// the given AAManager \p AA
   void registerParseAACallback(
       const std::function<bool(StringRef Name, AAManager &AA)> &C) {
@@ -530,7 +566,7 @@ public:
   }
   /// @}}
 
-  /// \brief Register a callback for a top-level pipeline entry.
+  /// Register a callback for a top-level pipeline entry.
   ///
   /// If the PassManager type is not given at the top level of the pipeline
   /// text, this Callback should be used to determine the appropriate stack of
@@ -545,33 +581,34 @@ private:
   static Optional<std::vector<PipelineElement>>
   parsePipelineText(StringRef Text);
 
-  bool parseModulePass(ModulePassManager &MPM, const PipelineElement &E,
+  Error parseModulePass(ModulePassManager &MPM, const PipelineElement &E,
+                        bool VerifyEachPass, bool DebugLogging);
+  Error parseCGSCCPass(CGSCCPassManager &CGPM, const PipelineElement &E,
                        bool VerifyEachPass, bool DebugLogging);
-  bool parseCGSCCPass(CGSCCPassManager &CGPM, const PipelineElement &E,
+  Error parseFunctionPass(FunctionPassManager &FPM, const PipelineElement &E,
+                          bool VerifyEachPass, bool DebugLogging);
+  Error parseLoopPass(LoopPassManager &LPM, const PipelineElement &E,
                       bool VerifyEachPass, bool DebugLogging);
-  bool parseFunctionPass(FunctionPassManager &FPM, const PipelineElement &E,
-                     bool VerifyEachPass, bool DebugLogging);
-  bool parseLoopPass(LoopPassManager &LPM, const PipelineElement &E,
-                     bool VerifyEachPass, bool DebugLogging);
   bool parseAAPassName(AAManager &AA, StringRef Name);
 
-  bool parseLoopPassPipeline(LoopPassManager &LPM,
-                             ArrayRef<PipelineElement> Pipeline,
-                             bool VerifyEachPass, bool DebugLogging);
-  bool parseFunctionPassPipeline(FunctionPassManager &FPM,
-                                 ArrayRef<PipelineElement> Pipeline,
-                                 bool VerifyEachPass, bool DebugLogging);
-  bool parseCGSCCPassPipeline(CGSCCPassManager &CGPM,
+  Error parseLoopPassPipeline(LoopPassManager &LPM,
                               ArrayRef<PipelineElement> Pipeline,
                               bool VerifyEachPass, bool DebugLogging);
-  bool parseModulePassPipeline(ModulePassManager &MPM,
+  Error parseFunctionPassPipeline(FunctionPassManager &FPM,
+                                  ArrayRef<PipelineElement> Pipeline,
+                                  bool VerifyEachPass, bool DebugLogging);
+  Error parseCGSCCPassPipeline(CGSCCPassManager &CGPM,
                                ArrayRef<PipelineElement> Pipeline,
                                bool VerifyEachPass, bool DebugLogging);
+  Error parseModulePassPipeline(ModulePassManager &MPM,
+                                ArrayRef<PipelineElement> Pipeline,
+                                bool VerifyEachPass, bool DebugLogging);
 
   void addPGOInstrPasses(ModulePassManager &MPM, bool DebugLogging,
                          OptimizationLevel Level, bool RunProfileGen,
                          std::string ProfileGenFile,
-                         std::string ProfileUseFile);
+                         std::string ProfileUseFile,
+                         std::string ProfileRemappingFile);
 
   void invokePeepholeEPCallbacks(FunctionPassManager &, OptimizationLevel);
 
@@ -588,7 +625,11 @@ private:
       CGSCCOptimizerLateEPCallbacks;
   SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
       VectorizerStartEPCallbacks;
+  SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
+      OptimizerLastEPCallbacks;
   // Module callbacks
+  SmallVector<std::function<void(ModulePassManager &)>, 2>
+      PipelineStartEPCallbacks;
   SmallVector<std::function<void(ModuleAnalysisManager &)>, 2>
       ModuleAnalysisRegistrationCallbacks;
   SmallVector<std::function<bool(StringRef, ModulePassManager &,

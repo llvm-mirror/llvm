@@ -1,9 +1,8 @@
 //===-- llvm/Support/Compression.h ---Compression----------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,17 +22,15 @@ class StringRef;
 
 namespace zlib {
 
-enum CompressionLevel {
-  NoCompression,
-  DefaultCompression,
-  BestSpeedCompression,
-  BestSizeCompression
-};
+static constexpr int NoCompression = 0;
+static constexpr int BestSpeedCompression = 1;
+static constexpr int DefaultCompression = 6;
+static constexpr int BestSizeCompression = 9;
 
 bool isAvailable();
 
 Error compress(StringRef InputBuffer, SmallVectorImpl<char> &CompressedBuffer,
-               CompressionLevel Level = DefaultCompression);
+               int Level = DefaultCompression);
 
 Error uncompress(StringRef InputBuffer, char *UncompressedBuffer,
                  size_t &UncompressedSize);
@@ -49,4 +46,3 @@ uint32_t crc32(StringRef Buffer);
 } // End of namespace llvm
 
 #endif
-

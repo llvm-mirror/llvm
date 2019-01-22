@@ -1,9 +1,8 @@
 //===- CoroSplit.cpp - Converts a coroutine into a state machine ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This pass builds the coroutine frame and outlines resume and destroy parts
@@ -28,6 +27,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -59,7 +59,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <cassert>
 #include <cstddef>
@@ -250,7 +249,7 @@ static Function *createClone(Function &F, Twine Suffix, coro::Shape &Shape,
   auto *FnTy = cast<FunctionType>(FnPtrTy->getElementType());
 
   Function *NewF =
-      Function::Create(FnTy, GlobalValue::LinkageTypes::InternalLinkage,
+      Function::Create(FnTy, GlobalValue::LinkageTypes::ExternalLinkage,
                        F.getName() + Suffix, M);
   NewF->addParamAttr(0, Attribute::NonNull);
   NewF->addParamAttr(0, Attribute::NoAlias);
@@ -265,6 +264,7 @@ static Function *createClone(Function &F, Twine Suffix, coro::Shape &Shape,
   SmallVector<ReturnInst *, 4> Returns;
 
   CloneFunctionInto(NewF, &F, VMap, /*ModuleLevelChanges=*/true, Returns);
+  NewF->setLinkage(GlobalValue::LinkageTypes::InternalLinkage);
 
   // Remove old returns.
   for (ReturnInst *Return : Returns)
@@ -440,16 +440,14 @@ static void
 scanPHIsAndUpdateValueMap(Instruction *Prev, BasicBlock *NewBlock,
                           DenseMap<Value *, Value *> &ResolvedValues) {
   auto *PrevBB = Prev->getParent();
-  auto *I = &*NewBlock->begin();
-  while (auto PN = dyn_cast<PHINode>(I)) {
-    auto V = PN->getIncomingValueForBlock(PrevBB);
+  for (PHINode &PN : NewBlock->phis()) {
+    auto V = PN.getIncomingValueForBlock(PrevBB);
     // See if we already resolved it.
     auto VI = ResolvedValues.find(V);
     if (VI != ResolvedValues.end())
       V = VI->second;
     // Remember the value.
-    ResolvedValues[PN] = V;
-    I = I->getNextNode();
+    ResolvedValues[&PN] = V;
   }
 }
 
@@ -460,7 +458,7 @@ static bool simplifyTerminatorLeadingToRet(Instruction *InitialInst) {
   DenseMap<Value *, Value *> ResolvedValues;
 
   Instruction *I = InitialInst;
-  while (isa<TerminatorInst>(I)) {
+  while (I->isTerminator()) {
     if (isa<ReturnInst>(I)) {
       if (I != InitialInst)
         ReplaceInstWithInst(InitialInst, I->clone());
@@ -539,43 +537,92 @@ static void handleNoSuspendCoroutine(CoroBeginInst *CoroBegin, Type *FrameTy) {
   CoroBegin->eraseFromParent();
 }
 
-// look for a very simple pattern
-//    coro.save
-//    no other calls
-//    resume or destroy call
-//    coro.suspend
-//
-// If there are other calls between coro.save and coro.suspend, they can
-// potentially resume or destroy the coroutine, so it is unsafe to eliminate a
-// suspend point.
+// SimplifySuspendPoint needs to check that there is no calls between
+// coro_save and coro_suspend, since any of the calls may potentially resume
+// the coroutine and if that is the case we cannot eliminate the suspend point.
+static bool hasCallsInBlockBetween(Instruction *From, Instruction *To) {
+  for (Instruction *I = From; I != To; I = I->getNextNode()) {
+    // Assume that no intrinsic can resume the coroutine.
+    if (isa<IntrinsicInst>(I))
+      continue;
+
+    if (CallSite(I))
+      return true;
+  }
+  return false;
+}
+
+static bool hasCallsInBlocksBetween(BasicBlock *SaveBB, BasicBlock *ResDesBB) {
+  SmallPtrSet<BasicBlock *, 8> Set;
+  SmallVector<BasicBlock *, 8> Worklist;
+
+  Set.insert(SaveBB);
+  Worklist.push_back(ResDesBB);
+
+  // Accumulate all blocks between SaveBB and ResDesBB. Because CoroSaveIntr
+  // returns a token consumed by suspend instruction, all blocks in between
+  // will have to eventually hit SaveBB when going backwards from ResDesBB.
+  while (!Worklist.empty()) {
+    auto *BB = Worklist.pop_back_val();
+    Set.insert(BB);
+    for (auto *Pred : predecessors(BB))
+      if (Set.count(Pred) == 0)
+        Worklist.push_back(Pred);
+  }
+
+  // SaveBB and ResDesBB are checked separately in hasCallsBetween.
+  Set.erase(SaveBB);
+  Set.erase(ResDesBB);
+
+  for (auto *BB : Set)
+    if (hasCallsInBlockBetween(BB->getFirstNonPHI(), nullptr))
+      return true;
+
+  return false;
+}
+
+static bool hasCallsBetween(Instruction *Save, Instruction *ResumeOrDestroy) {
+  auto *SaveBB = Save->getParent();
+  auto *ResumeOrDestroyBB = ResumeOrDestroy->getParent();
+
+  if (SaveBB == ResumeOrDestroyBB)
+    return hasCallsInBlockBetween(Save->getNextNode(), ResumeOrDestroy);
+
+  // Any calls from Save to the end of the block?
+  if (hasCallsInBlockBetween(Save->getNextNode(), nullptr))
+    return true;
+
+  // Any calls from begging of the block up to ResumeOrDestroy?
+  if (hasCallsInBlockBetween(ResumeOrDestroyBB->getFirstNonPHI(),
+                             ResumeOrDestroy))
+    return true;
+
+  // Any calls in all of the blocks between SaveBB and ResumeOrDestroyBB?
+  if (hasCallsInBlocksBetween(SaveBB, ResumeOrDestroyBB))
+    return true;
+
+  return false;
+}
+
+// If a SuspendIntrin is preceded by Resume or Destroy, we can eliminate the
+// suspend point and replace it with nornal control flow.
 static bool simplifySuspendPoint(CoroSuspendInst *Suspend,
                                  CoroBeginInst *CoroBegin) {
-  auto *Save = Suspend->getCoroSave();
-  auto *BB = Suspend->getParent();
-  if (BB != Save->getParent())
-    return false;
-
-  CallSite SingleCallSite;
-
-  // Check that we have only one CallSite.
-  for (Instruction *I = Save->getNextNode(); I != Suspend;
-       I = I->getNextNode()) {
-    if (isa<CoroFrameInst>(I))
-      continue;
-    if (isa<CoroSubFnInst>(I))
-      continue;
-    if (CallSite CS = CallSite(I)) {
-      if (SingleCallSite)
-        return false;
-      else
-        SingleCallSite = CS;
-    }
+  Instruction *Prev = Suspend->getPrevNode();
+  if (!Prev) {
+    auto *Pred = Suspend->getParent()->getSinglePredecessor();
+    if (!Pred)
+      return false;
+    Prev = Pred->getTerminator();
   }
-  auto *CallInstr = SingleCallSite.getInstruction();
-  if (!CallInstr)
+
+  CallSite CS{Prev};
+  if (!CS)
     return false;
 
-  auto *Callee = SingleCallSite.getCalledValue()->stripPointerCasts();
+  auto *CallInstr = CS.getInstruction();
+
+  auto *Callee = CS.getCalledValue()->stripPointerCasts();
 
   // See if the callsite is for resumption or destruction of the coroutine.
   auto *SubFn = dyn_cast<CoroSubFnInst>(Callee);
@@ -586,6 +633,13 @@ static bool simplifySuspendPoint(CoroSuspendInst *Suspend,
   if (SubFn->getFrame() != CoroBegin)
     return false;
 
+  // See if the transformation is safe. Specifically, see if there are any
+  // calls in between Save and CallInstr. They can potenitally resume the
+  // coroutine rendering this optimization unsafe.
+  auto *Save = Suspend->getCoroSave();
+  if (hasCallsBetween(Save, CallInstr))
+    return false;
+
   // Replace llvm.coro.suspend with the value that results in resumption over
   // the resume or cleanup path.
   Suspend->replaceAllUsesWith(SubFn->getRawIndex());
@@ -593,8 +647,20 @@ static bool simplifySuspendPoint(CoroSuspendInst *Suspend,
   Save->eraseFromParent();
 
   // No longer need a call to coro.resume or coro.destroy.
+  if (auto *Invoke = dyn_cast<InvokeInst>(CallInstr)) {
+    BranchInst::Create(Invoke->getNormalDest(), Invoke);
+  }
+
+  // Grab the CalledValue from CS before erasing the CallInstr.
+  auto *CalledValue = CS.getCalledValue();
   CallInstr->eraseFromParent();
 
+  // If no more users remove it. Usually it is a bitcast of SubFn.
+  if (CalledValue != SubFn && CalledValue->user_empty())
+    if (auto *I = dyn_cast<Instruction>(CalledValue))
+      I->eraseFromParent();
+
+  // Now we are good to remove SubFn.
   if (SubFn->user_empty())
     SubFn->eraseFromParent();
 
@@ -655,13 +721,28 @@ getNotRelocatableInstructions(CoroBeginInst *CoroBegin,
   // set.
   do {
     Instruction *Current = Work.pop_back_val();
+    LLVM_DEBUG(dbgs() << "CoroSplit: Will not relocate: " << *Current << "\n");
     DoNotRelocate.insert(Current);
     for (Value *U : Current->operands()) {
       auto *I = dyn_cast<Instruction>(U);
       if (!I)
         continue;
-      if (isa<AllocaInst>(U))
+
+      if (auto *A = dyn_cast<AllocaInst>(I)) {
+        // Stores to alloca instructions that occur before the coroutine frame
+        // is allocated should not be moved; the stored values may be used by
+        // the coroutine frame allocator. The operands to those stores must also
+        // remain in place.
+        for (const auto &User : A->users())
+          if (auto *SI = dyn_cast<llvm::StoreInst>(User))
+            if (RelocBlocks.count(SI->getParent()) != 0 &&
+                DoNotRelocate.count(SI) == 0) {
+              Work.push_back(SI);
+              DoNotRelocate.insert(SI);
+            }
         continue;
+      }
+
       if (DoNotRelocate.count(I) == 0) {
         Work.push_back(I);
         DoNotRelocate.insert(I);
@@ -836,8 +917,8 @@ struct CoroSplit : public CallGraphSCCPass {
     for (Function *F : Coroutines) {
       Attribute Attr = F->getFnAttribute(CORO_PRESPLIT_ATTR);
       StringRef Value = Attr.getValueAsString();
-      DEBUG(dbgs() << "CoroSplit: Processing coroutine '" << F->getName()
-                   << "' state: " << Value << "\n");
+      LLVM_DEBUG(dbgs() << "CoroSplit: Processing coroutine '" << F->getName()
+                        << "' state: " << Value << "\n");
       if (Value == UNPREPARED_FOR_SPLIT) {
         prepareForSplit(*F, CG);
         continue;

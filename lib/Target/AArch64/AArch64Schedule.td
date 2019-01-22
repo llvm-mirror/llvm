@@ -1,9 +1,8 @@
 //==-- AArch64Schedule.td - AArch64 Scheduling Definitions -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -49,17 +48,6 @@ def WriteAdr       : SchedWrite; // Address pre/post increment.
 def WriteLDIdx : SchedWrite; // Load from a register index (maybe scaled).
 def WriteSTIdx : SchedWrite; // Store to a register index (maybe scaled).
 def ReadAdrBase : SchedRead; // Read the base resister of a reg-offset LD/ST.
-
-// Predicate for determining when a shiftable register is shifted.
-def RegShiftedPred : SchedPredicate<[{TII->hasShiftedReg(*MI)}]>;
-
-// Predicate for determining when a extendedable register is extended.
-def RegExtendedPred : SchedPredicate<[{TII->hasExtendedReg(*MI)}]>;
-
-// ScaledIdxPred is true if a WriteLDIdx operand will be
-// scaled. Subtargets can use this to dynamically select resources and
-// latency for WriteLDIdx and ReadAdrBase.
-def ScaledIdxPred : SchedPredicate<[{TII->isScaledAddr(*MI)}]>;
 
 // Serialized two-level address load.
 // EXAMPLE: LOADGot

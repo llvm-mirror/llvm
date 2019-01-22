@@ -17,31 +17,18 @@
 ; Function Attrs: norecurse nounwind uwtable
 define void @_Z1av() local_unnamed_addr #0 {
 ; CHECK-LABEL: _Z1av:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl struct_obj_3+{{.*}}(%rip), %eax
-; CHECK-NEXT:    movsbl {{.*}}(%rip), %ecx
+; CHECK-NEXT:    movzbl {{.*}}(%rip), %ecx
 ; CHECK-NEXT:    movzbl {{.*}}(%rip), %edx
-; CHECK-NEXT:    movzbl {{.*}}(%rip), %esi
 ; CHECK-NEXT:    andl $1, %eax
-; CHECK-NEXT:    leal (%rax,%rax), %edi
-; CHECK-NEXT:    subl %ecx, %edi
-; CHECK-NEXT:    subl %edx, %edi
-; CHECK-NEXT:    movl %edi, %ecx
-; CHECK-NEXT:    notl %ecx
-; CHECK-NEXT:    movzbl %cl, %ecx
-; CHECK-NEXT:    movw %cx, struct_obj_12+{{.*}}(%rip)
-; CHECK-NEXT:    xorl %ecx, %ecx
-; CHECK-NEXT:    testb %al, %al
-; CHECK-NEXT:    cmovel %eax, %ecx
-; CHECK-NEXT:    andl struct_obj_8+{{.*}}(%rip), %ecx
-; CHECK-NEXT:    andl $1, %ecx
-; CHECK-NEXT:    negl %ecx
-; CHECK-NEXT:    andl %esi, %ecx
-; CHECK-NEXT:    negl %ecx
-; CHECK-NEXT:    andl %eax, %ecx
-; CHECK-NEXT:    negl %ecx
-; CHECK-NEXT:    testl %ecx, %edi
-; CHECK-NEXT:    setne {{.*}}(%rip)
+; CHECK-NEXT:    addl %eax, %eax
+; CHECK-NEXT:    subl %ecx, %eax
+; CHECK-NEXT:    subl %edx, %eax
+; CHECK-NEXT:    notl %eax
+; CHECK-NEXT:    movzbl %al, %eax
+; CHECK-NEXT:    movw %ax, struct_obj_12+{{.*}}(%rip)
+; CHECK-NEXT:    movb $0, {{.*}}(%rip)
 ; CHECK-NEXT:    retq
 entry:
   %bf.load = load i32, i32* bitcast (i24* getelementptr inbounds (%struct.d.3.7.11.15.39.71.75.91.95.99.107.123.363, %struct.d.3.7.11.15.39.71.75.91.95.99.107.123.363* @struct_obj_3, i64 0, i32 0, i32 2) to i32*), align 2

@@ -1,9 +1,8 @@
 //===- HexagonExpandCondsets.cpp ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -17,33 +16,33 @@
 //
 // Liveness tracking aside, the main functionality of this pass is divided
 // into two steps. The first step is to replace an instruction
-//   vreg0 = C2_mux vreg1, vreg2, vreg3
+//   %0 = C2_mux %1, %2, %3
 // with a pair of conditional transfers
-//   vreg0 = A2_tfrt vreg1, vreg2
-//   vreg0 = A2_tfrf vreg1, vreg3
+//   %0 = A2_tfrt %1, %2
+//   %0 = A2_tfrf %1, %3
 // It is the intention that the execution of this pass could be terminated
 // after this step, and the code generated would be functionally correct.
 //
-// If the uses of the source values vreg1 and vreg2 are kills, and their
+// If the uses of the source values %1 and %2 are kills, and their
 // definitions are predicable, then in the second step, the conditional
 // transfers will then be rewritten as predicated instructions. E.g.
-//   vreg0 = A2_or vreg1, vreg2
-//   vreg3 = A2_tfrt vreg99, vreg0<kill>
+//   %0 = A2_or %1, %2
+//   %3 = A2_tfrt %99, killed %0
 // will be rewritten as
-//   vreg3 = A2_port vreg99, vreg1, vreg2
+//   %3 = A2_port %99, %1, %2
 //
 // This replacement has two variants: "up" and "down". Consider this case:
-//   vreg0 = A2_or vreg1, vreg2
+//   %0 = A2_or %1, %2
 //   ... [intervening instructions] ...
-//   vreg3 = A2_tfrt vreg99, vreg0<kill>
+//   %3 = A2_tfrt %99, killed %0
 // variant "up":
-//   vreg3 = A2_port vreg99, vreg1, vreg2
-//   ... [intervening instructions, vreg0->vreg3] ...
+//   %3 = A2_port %99, %1, %2
+//   ... [intervening instructions, %0->vreg3] ...
 //   [deleted]
 // variant "down":
 //   [deleted]
 //   ... [intervening instructions] ...
-//   vreg3 = A2_port vreg99, vreg1, vreg2
+//   %3 = A2_port %99, %1, %2
 //
 // Both, one or none of these variants may be valid, and checks are made
 // to rule out inapplicable variants.
@@ -51,13 +50,13 @@
 // As an additional optimization, before either of the two steps above is
 // executed, the pass attempts to coalesce the target register with one of
 // the source registers, e.g. given an instruction
-//   vreg3 = C2_mux vreg0, vreg1, vreg2
-// vreg3 will be coalesced with either vreg1 or vreg2. If this succeeds,
+//   %3 = C2_mux %0, %1, %2
+// %3 will be coalesced with either %1 or %2. If this succeeds,
 // the instruction would then be (for example)
-//   vreg3 = C2_mux vreg0, vreg3, vreg2
+//   %3 = C2_mux %0, %3, %2
 // and, under certain circumstances, this could result in only one predicated
 // instruction:
-//   vreg3 = A2_tfrf vreg0, vreg2
+//   %3 = A2_tfrf %0, %2
 //
 
 // Splitting a definition of a register into two predicated transfers
@@ -65,18 +64,18 @@
 // will see both instructions as actual definitions, and will mark the
 // first one as dead. The definition is not actually dead, and this
 // situation will need to be fixed. For example:
-//   vreg1<def,dead> = A2_tfrt ...  ; marked as dead
-//   vreg1<def> = A2_tfrf ...
+//   dead %1 = A2_tfrt ...  ; marked as dead
+//   %1 = A2_tfrf ...
 //
 // Since any of the individual predicated transfers may end up getting
 // removed (in case it is an identity copy), some pre-existing def may
 // be marked as dead after live interval recomputation:
-//   vreg1<def,dead> = ...          ; marked as dead
+//   dead %1 = ...          ; marked as dead
 //   ...
-//   vreg1<def> = A2_tfrf ...       ; if A2_tfrt is removed
-// This case happens if vreg1 was used as a source in A2_tfrt, which means
+//   %1 = A2_tfrf ...       ; if A2_tfrt is removed
+// This case happens if %1 was used as a source in A2_tfrt, which means
 // that is it actually live at the A2_tfrf, and so the now dead definition
-// of vreg1 will need to be updated to non-dead at some point.
+// of %1 will need to be updated to non-dead at some point.
 //
 // This issue could be remedied by adding implicit uses to the predicated
 // transfers, but this will create a problem with subsequent predication,
@@ -93,7 +92,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -103,6 +102,8 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/LaneBitmask.h"
@@ -111,8 +112,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <iterator>
 #include <set>
@@ -316,8 +315,10 @@ void HexagonExpandCondsets::updateKillFlags(unsigned Reg) {
   auto KillAt = [this,Reg] (SlotIndex K, LaneBitmask LM) -> void {
     // Set the <kill> flag on a use of Reg whose lane mask is contained in LM.
     MachineInstr *MI = LIS->getInstructionFromIndex(K);
-    for (auto &Op : MI->operands()) {
-      if (!Op.isReg() || !Op.isUse() || Op.getReg() != Reg)
+    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+      MachineOperand &Op = MI->getOperand(i);
+      if (!Op.isReg() || !Op.isUse() || Op.getReg() != Reg ||
+          MI->isRegTiedToDefOperand(i))
         continue;
       LaneBitmask SLM = getLaneMask(Reg, Op.getSubReg());
       if ((SLM & LM) == SLM) {
@@ -497,14 +498,18 @@ void HexagonExpandCondsets::updateDeadsInRange(unsigned Reg, LaneBitmask LM,
       if (!Op.isReg() || !DefRegs.count(Op))
         continue;
       if (Op.isDef()) {
-        ImpUses.insert({Op, i});
+        // Tied defs will always have corresponding uses, so no extra
+        // implicit uses are needed.
+        if (!Op.isTied())
+          ImpUses.insert({Op, i});
       } else {
         // This function can be called for the same register with different
         // lane masks. If the def in this instruction was for the whole
         // register, we can get here more than once. Avoid adding multiple
         // implicit uses (or adding an implicit use when an explicit one is
         // present).
-        ImpUses.erase(Op);
+        if (Op.isTied())
+          ImpUses.erase(Op);
       }
     }
     if (ImpUses.empty())
@@ -545,7 +550,14 @@ void HexagonExpandCondsets::removeInstr(MachineInstr &MI) {
 void HexagonExpandCondsets::updateLiveness(std::set<unsigned> &RegSet,
       bool Recalc, bool UpdateKills, bool UpdateDeads) {
   UpdateKills |= UpdateDeads;
-  for (auto R : RegSet) {
+  for (unsigned R : RegSet) {
+    if (!TargetRegisterInfo::isVirtualRegister(R)) {
+      assert(TargetRegisterInfo::isPhysicalRegister(R));
+      // There shouldn't be any physical registers as operands, except
+      // possibly reserved registers.
+      assert(MRI->isReserved(R));
+      continue;
+    }
     if (Recalc)
       recalculateLiveInterval(R);
     if (UpdateKills)
@@ -641,7 +653,7 @@ MachineInstr *HexagonExpandCondsets::genCondTfrFor(MachineOperand &SrcOp,
               .add(SrcOp);
   }
 
-  DEBUG(dbgs() << "created an initial copy: " << *MIB);
+  LLVM_DEBUG(dbgs() << "created an initial copy: " << *MIB);
   return &*MIB;
 }
 
@@ -654,8 +666,8 @@ bool HexagonExpandCondsets::split(MachineInstr &MI,
       return false;
     TfrCounter++;
   }
-  DEBUG(dbgs() << "\nsplitting BB#" << MI.getParent()->getNumber() << ": "
-               << MI);
+  LLVM_DEBUG(dbgs() << "\nsplitting " << printMBBReference(*MI.getParent())
+                    << ": " << MI);
   MachineOperand &MD = MI.getOperand(0);  // Definition
   MachineOperand &MP = MI.getOperand(1);  // Predicate register
   assert(MD.isDef());
@@ -760,8 +772,8 @@ MachineInstr *HexagonExpandCondsets::getReachingDefForPred(RegisterRef RD,
       if (RR.Reg != RD.Reg)
         continue;
       // If the "Reg" part agrees, there is still the subregister to check.
-      // If we are looking for vreg1:loreg, we can skip vreg1:hireg, but
-      // not vreg1 (w/o subregisters).
+      // If we are looking for %1:loreg, we can skip %1:hireg, but
+      // not %1 (w/o subregisters).
       if (RR.Sub == RD.Sub)
         return MI;
       if (RR.Sub == 0 || RD.Sub == 0)
@@ -878,14 +890,7 @@ void HexagonExpandCondsets::predicateAt(const MachineOperand &DefOp,
       MB.add(MO);
     Ox++;
   }
-
-  MachineFunction &MF = *B.getParent();
-  MachineInstr::mmo_iterator I = MI.memoperands_begin();
-  unsigned NR = std::distance(I, MI.memoperands_end());
-  MachineInstr::mmo_iterator MemRefs = MF.allocateMemRefsArray(NR);
-  for (unsigned i = 0; i < NR; ++i)
-    MemRefs[i] = *I++;
-  MB.setMemRefs(MemRefs, MemRefs+NR);
+  MB.cloneMemRefs(MI);
 
   MachineInstr *NewI = MB;
   NewI->clearKillInfo();
@@ -932,8 +937,8 @@ bool HexagonExpandCondsets::predicate(MachineInstr &TfrI, bool Cond,
   unsigned Opc = TfrI.getOpcode();
   (void)Opc;
   assert(Opc == Hexagon::A2_tfrt || Opc == Hexagon::A2_tfrf);
-  DEBUG(dbgs() << "\nattempt to predicate if-" << (Cond ? "true" : "false")
-               << ": " << TfrI);
+  LLVM_DEBUG(dbgs() << "\nattempt to predicate if-" << (Cond ? "true" : "false")
+                    << ": " << TfrI);
 
   MachineOperand &MD = TfrI.getOperand(0);
   MachineOperand &MP = TfrI.getOperand(1);
@@ -954,7 +959,7 @@ bool HexagonExpandCondsets::predicate(MachineInstr &TfrI, bool Cond,
   if (!DefI || !isPredicable(DefI))
     return false;
 
-  DEBUG(dbgs() << "Source def: " << *DefI);
+  LLVM_DEBUG(dbgs() << "Source def: " << *DefI);
 
   // Collect the information about registers defined and used between the
   // DefI and the TfrI.
@@ -1039,8 +1044,8 @@ bool HexagonExpandCondsets::predicate(MachineInstr &TfrI, bool Cond,
     if (!canMoveMemTo(*DefI, TfrI, true))
       CanDown = false;
 
-  DEBUG(dbgs() << "Can move up: " << (CanUp ? "yes" : "no")
-               << ", can move down: " << (CanDown ? "yes\n" : "no\n"));
+  LLVM_DEBUG(dbgs() << "Can move up: " << (CanUp ? "yes" : "no")
+                    << ", can move down: " << (CanDown ? "yes\n" : "no\n"));
   MachineBasicBlock::iterator PastDefIt = std::next(DefIt);
   if (CanUp)
     predicateAt(MD, *DefI, PastDefIt, MP, Cond, UpdRegs);
@@ -1071,7 +1076,7 @@ bool HexagonExpandCondsets::predicateInBlock(MachineBasicBlock &B,
       bool Done = predicate(*I, (Opc == Hexagon::A2_tfrt), UpdRegs);
       if (!Done) {
         // If we didn't predicate I, we may need to remove it in case it is
-        // an "identity" copy, e.g.  vreg1 = A2_tfrt vreg2, vreg1.
+        // an "identity" copy, e.g.  %1 = A2_tfrt %2, %1.
         if (RegisterRef(I->getOperand(0)) == RegisterRef(I->getOperand(2))) {
           for (auto &Op : I->operands())
             if (Op.isReg())
@@ -1135,10 +1140,10 @@ bool HexagonExpandCondsets::coalesceRegisters(RegisterRef R1, RegisterRef R2) {
     return false;
   bool Overlap = L1.overlaps(L2);
 
-  DEBUG(dbgs() << "compatible registers: ("
-               << (Overlap ? "overlap" : "disjoint") << ")\n  "
-               << PrintReg(R1.Reg, TRI, R1.Sub) << "  " << L1 << "\n  "
-               << PrintReg(R2.Reg, TRI, R2.Sub) << "  " << L2 << "\n");
+  LLVM_DEBUG(dbgs() << "compatible registers: ("
+                    << (Overlap ? "overlap" : "disjoint") << ")\n  "
+                    << printReg(R1.Reg, TRI, R1.Sub) << "  " << L1 << "\n  "
+                    << printReg(R2.Reg, TRI, R2.Sub) << "  " << L2 << "\n");
   if (R1.Sub || R2.Sub)
     return false;
   if (Overlap)
@@ -1171,7 +1176,7 @@ bool HexagonExpandCondsets::coalesceRegisters(RegisterRef R1, RegisterRef R2) {
   LIS->removeInterval(R2.Reg);
 
   updateKillFlags(R1.Reg);
-  DEBUG(dbgs() << "coalesced: " << L1 << "\n");
+  LLVM_DEBUG(dbgs() << "coalesced: " << L1 << "\n");
   L1.verify();
 
   return true;
@@ -1198,18 +1203,18 @@ bool HexagonExpandCondsets::coalesceSegments(
     MachineOperand &S1 = CI->getOperand(2), &S2 = CI->getOperand(3);
     bool Done = false;
     // Consider this case:
-    //   vreg1 = instr1 ...
-    //   vreg2 = instr2 ...
-    //   vreg0 = C2_mux ..., vreg1, vreg2
-    // If vreg0 was coalesced with vreg1, we could end up with the following
+    //   %1 = instr1 ...
+    //   %2 = instr2 ...
+    //   %0 = C2_mux ..., %1, %2
+    // If %0 was coalesced with %1, we could end up with the following
     // code:
-    //   vreg0 = instr1 ...
-    //   vreg2 = instr2 ...
-    //   vreg0 = A2_tfrf ..., vreg2
+    //   %0 = instr1 ...
+    //   %2 = instr2 ...
+    //   %0 = A2_tfrf ..., %2
     // which will later become:
-    //   vreg0 = instr1 ...
-    //   vreg0 = instr2_cNotPt ...
-    // i.e. there will be an unconditional definition (instr1) of vreg0
+    //   %0 = instr1 ...
+    //   %0 = instr2_cNotPt ...
+    // i.e. there will be an unconditional definition (instr1) of %0
     // followed by a conditional one. The output dependency was there before
     // and it unavoidable, but if instr1 is predicable, we will no longer be
     // able to predicate it here.
@@ -1243,7 +1248,7 @@ bool HexagonExpandCondsets::coalesceSegments(
 }
 
 bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   HII = static_cast<const HexagonInstrInfo*>(MF.getSubtarget().getInstrInfo());
@@ -1252,8 +1257,8 @@ bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
   LIS = &getAnalysis<LiveIntervals>();
   MRI = &MF.getRegInfo();
 
-  DEBUG(LIS->print(dbgs() << "Before expand-condsets\n",
-                   MF.getFunction()->getParent()));
+  LLVM_DEBUG(LIS->print(dbgs() << "Before expand-condsets\n",
+                        MF.getFunction().getParent()));
 
   bool Changed = false;
   std::set<unsigned> CoalUpd, PredUpd;
@@ -1280,8 +1285,8 @@ bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
         if (!CoalUpd.count(Op.getReg()))
           KillUpd.insert(Op.getReg());
   updateLiveness(KillUpd, false, true, false);
-  DEBUG(LIS->print(dbgs() << "After coalescing\n",
-                   MF.getFunction()->getParent()));
+  LLVM_DEBUG(
+      LIS->print(dbgs() << "After coalescing\n", MF.getFunction().getParent()));
 
   // First, simply split all muxes into a pair of conditional transfers
   // and update the live intervals to reflect the new arrangement. The
@@ -1297,8 +1302,8 @@ bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
   // predication, and after splitting they are difficult to recalculate
   // (because of predicated defs), so make sure they are left untouched.
   // Predication does not use live intervals.
-  DEBUG(LIS->print(dbgs() << "After splitting\n",
-                   MF.getFunction()->getParent()));
+  LLVM_DEBUG(
+      LIS->print(dbgs() << "After splitting\n", MF.getFunction().getParent()));
 
   // Traverse all blocks and collapse predicable instructions feeding
   // conditional transfers into predicated instructions.
@@ -1306,16 +1311,16 @@ bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
   // cases that were not created in the previous step.
   for (auto &B : MF)
     Changed |= predicateInBlock(B, PredUpd);
-  DEBUG(LIS->print(dbgs() << "After predicating\n",
-                   MF.getFunction()->getParent()));
+  LLVM_DEBUG(LIS->print(dbgs() << "After predicating\n",
+                        MF.getFunction().getParent()));
 
   PredUpd.insert(CoalUpd.begin(), CoalUpd.end());
   updateLiveness(PredUpd, true, true, true);
 
-  DEBUG({
+  LLVM_DEBUG({
     if (Changed)
       LIS->print(dbgs() << "After expand-condsets\n",
-                 MF.getFunction()->getParent());
+                 MF.getFunction().getParent());
   });
 
   return Changed;
@@ -1324,7 +1329,6 @@ bool HexagonExpandCondsets::runOnMachineFunction(MachineFunction &MF) {
 //===----------------------------------------------------------------------===//
 //                         Public Constructor Functions
 //===----------------------------------------------------------------------===//
-
 FunctionPass *llvm::createHexagonExpandCondsets() {
   return new HexagonExpandCondsets();
 }

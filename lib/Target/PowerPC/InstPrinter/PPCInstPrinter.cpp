@@ -1,9 +1,8 @@
 //===-- PPCInstPrinter.cpp - Convert PPC MCInst to assembly syntax --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "MCTargetDesc/PPCPredicates.h"
 #include "PPCInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -23,7 +23,6 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
@@ -38,6 +37,12 @@ FullRegNames("ppc-asm-full-reg-names", cl::Hidden, cl::init(false),
 static cl::opt<bool>
 ShowVSRNumsAsVR("ppc-vsr-nums-as-vr", cl::Hidden, cl::init(false),
              cl::desc("Prints full register names with vs{31-63} as v{0-31}"));
+
+// Prints full register names with percent symbol.
+static cl::opt<bool>
+FullRegNamesWithPercent("ppc-reg-with-percent-prefix", cl::Hidden,
+                        cl::init(false),
+                        cl::desc("Prints full register names with percent"));
 
 #define PRINT_ALIAS_INSTR
 #include "PPCGenAsmWriter.inc"
@@ -169,7 +174,7 @@ void PPCInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 
 
 void PPCInstPrinter::printPredicateOperand(const MCInst *MI, unsigned OpNo,
-                                           raw_ostream &O, 
+                                           raw_ostream &O,
                                            const char *Modifier) {
   unsigned Code = MI->getOperand(OpNo).getImm();
 
@@ -445,40 +450,52 @@ void PPCInstPrinter::printTLSCall(const MCInst *MI, unsigned OpNo,
     O << '@' << MCSymbolRefExpr::getVariantKindName(refExp.getKind());
 }
 
-
-/// stripRegisterPrefix - This method strips the character prefix from a
-/// register name so that only the number is left.  Used by for linux asm.
-static const char *stripRegisterPrefix(const char *RegName, unsigned RegNum,
-                                       unsigned RegEncoding) {
-  if (FullRegNames) {
-    if (RegNum >= PPC::CR0EQ && RegNum <= PPC::CR7UN) {
-      const char *CRBits[] =
-      { "lt", "gt", "eq", "un",
-        "4*cr1+lt", "4*cr1+gt", "4*cr1+eq", "4*cr1+un",
-        "4*cr2+lt", "4*cr2+gt", "4*cr2+eq", "4*cr2+un",
-        "4*cr3+lt", "4*cr3+gt", "4*cr3+eq", "4*cr3+un",
-        "4*cr4+lt", "4*cr4+gt", "4*cr4+eq", "4*cr4+un",
-        "4*cr5+lt", "4*cr5+gt", "4*cr5+eq", "4*cr5+un",
-        "4*cr6+lt", "4*cr6+gt", "4*cr6+eq", "4*cr6+un",
-        "4*cr7+lt", "4*cr7+gt", "4*cr7+eq", "4*cr7+un"
-      };
-      return CRBits[RegEncoding];
-    }
-    return RegName;
-  }
+/// showRegistersWithPercentPrefix - Check if this register name should be
+/// printed with a percentage symbol as prefix.
+bool PPCInstPrinter::showRegistersWithPercentPrefix(const char *RegName) const {
+  if (!FullRegNamesWithPercent || TT.isOSDarwin() || TT.getOS() == Triple::AIX)
+    return false;
 
   switch (RegName[0]) {
+  default:
+    return false;
   case 'r':
   case 'f':
-  case 'q': // for QPX
+  case 'q':
   case 'v':
-    if (RegName[1] == 's')
-      return RegName + 2;
-    return RegName + 1;
-  case 'c': if (RegName[1] == 'r') return RegName + 2;
+  case 'c':
+    return true;
   }
+}
 
-  return RegName;
+/// getVerboseConditionalRegName - This method expands the condition register
+/// when requested explicitly or targetting Darwin.
+const char *PPCInstPrinter::getVerboseConditionRegName(unsigned RegNum,
+                                                       unsigned RegEncoding)
+                                                       const {
+  if (!TT.isOSDarwin() && !FullRegNames)
+    return nullptr;
+  if (RegNum < PPC::CR0EQ || RegNum > PPC::CR7UN)
+    return nullptr;
+  const char *CRBits[] = {
+    "lt", "gt", "eq", "un",
+    "4*cr1+lt", "4*cr1+gt", "4*cr1+eq", "4*cr1+un",
+    "4*cr2+lt", "4*cr2+gt", "4*cr2+eq", "4*cr2+un",
+    "4*cr3+lt", "4*cr3+gt", "4*cr3+eq", "4*cr3+un",
+    "4*cr4+lt", "4*cr4+gt", "4*cr4+eq", "4*cr4+un",
+    "4*cr5+lt", "4*cr5+gt", "4*cr5+eq", "4*cr5+un",
+    "4*cr6+lt", "4*cr6+gt", "4*cr6+eq", "4*cr6+un",
+    "4*cr7+lt", "4*cr7+gt", "4*cr7+eq", "4*cr7+un"
+  };
+  return CRBits[RegEncoding];
+}
+
+// showRegistersWithPrefix - This method determines whether registers
+// should be number-only or include the prefix.
+bool PPCInstPrinter::showRegistersWithPrefix() const {
+  if (TT.getOS() == Triple::AIX)
+    return false;
+  return TT.isOSDarwin() || FullRegNamesWithPercent || FullRegNames;
 }
 
 void PPCInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
@@ -486,26 +503,18 @@ void PPCInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
     unsigned Reg = Op.getReg();
+    if (!ShowVSRNumsAsVR)
+      Reg = PPCInstrInfo::getRegNumForOperand(MII.get(MI->getOpcode()),
+                                              Reg, OpNo);
 
-    // There are VSX instructions that use VSX register numbering (vs0 - vs63)
-    // as well as those that use VMX register numbering (v0 - v31 which
-    // correspond to vs32 - vs63). If we have an instruction that uses VSX
-    // numbering, we need to convert the VMX registers to VSX registers.
-    // Namely, we print 32-63 when the instruction operates on one of the
-    // VMX registers.
-    // (Please synchronize with PPCAsmPrinter::printOperand)
-    if ((MII.get(MI->getOpcode()).TSFlags & PPCII::UseVSXReg) &&
-        !ShowVSRNumsAsVR) {
-      if (PPCInstrInfo::isVRRegister(Reg))
-        Reg = PPC::VSX32 + (Reg - PPC::V0);
-      else if (PPCInstrInfo::isVFRegister(Reg))
-        Reg = PPC::VSX32 + (Reg - PPC::VF0);
-    }
-
-    const char *RegName = getRegisterName(Reg);
-    // The linux and AIX assembler does not take register prefixes.
-    if (!isDarwinSyntax())
-      RegName = stripRegisterPrefix(RegName, Reg, MRI.getEncodingValue(Reg));
+    const char *RegName;
+    RegName = getVerboseConditionRegName(Reg, MRI.getEncodingValue(Reg));
+    if (RegName == nullptr)
+     RegName = getRegisterName(Reg);
+    if (showRegistersWithPercentPrefix(RegName))
+      O << "%";
+    if (!showRegistersWithPrefix())
+      RegName = PPCRegisterInfo::stripRegisterPrefix(RegName);
 
     O << RegName;
     return;

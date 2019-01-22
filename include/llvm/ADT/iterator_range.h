@@ -1,9 +1,8 @@
 //===- iterator_range.h - A range adaptor for iterators ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -24,7 +23,7 @@
 
 namespace llvm {
 
-/// \brief A range adaptor for a pair of iterators.
+/// A range adaptor for a pair of iterators.
 ///
 /// This just wraps two iterators into a range-compatible interface. Nothing
 /// fancy at all.
@@ -47,7 +46,7 @@ public:
   IteratorT end() const { return end_iterator; }
 };
 
-/// \brief Convenience function for iterating over sub-ranges.
+/// Convenience function for iterating over sub-ranges.
 ///
 /// This provides a bit of syntactic sugar to make using sub-ranges
 /// in for loops a bit easier. Analogous to std::make_pair().
@@ -59,9 +58,10 @@ template <typename T> iterator_range<T> make_range(std::pair<T, T> p) {
   return iterator_range<T>(std::move(p.first), std::move(p.second));
 }
 
-template<typename T>
-iterator_range<decltype(begin(std::declval<T>()))> drop_begin(T &&t, int n) {
-  return make_range(std::next(begin(t), n), end(t));
+template <typename T>
+iterator_range<decltype(adl_begin(std::declval<T>()))> drop_begin(T &&t,
+                                                                  int n) {
+  return make_range(std::next(adl_begin(t), n), adl_end(t));
 }
 }
 

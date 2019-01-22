@@ -1,9 +1,8 @@
 //===-- llvm-dwp.cpp - Split DWARF merging tool for llvm ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,8 +14,6 @@
 #include "DWPStringPool.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnitIndex.h"
@@ -26,45 +23,40 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCTargetOptionsCommandFlags.h"
+#include "llvm/MC/MCTargetOptionsCommandFlags.inc"
 #include "llvm/Object/Decompressor.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/Compression.h"
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/Options.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
-#include <deque>
-#include <iostream>
-#include <memory>
 
 using namespace llvm;
 using namespace llvm::object;
-using namespace cl;
 
-OptionCategory DwpCategory("Specific Options");
-static list<std::string> InputFiles(Positional, ZeroOrMore,
-                                    desc("<input files>"), cat(DwpCategory));
+cl::OptionCategory DwpCategory("Specific Options");
+static cl::list<std::string> InputFiles(cl::Positional, cl::ZeroOrMore,
+                                        cl::desc("<input files>"),
+                                        cl::cat(DwpCategory));
 
-static list<std::string> ExecFilenames(
-    "e", ZeroOrMore,
-    desc("Specify the executable/library files to get the list of *.dwo from"),
-    value_desc("filename"), cat(DwpCategory));
+static cl::list<std::string> ExecFilenames(
+    "e", cl::ZeroOrMore,
+    cl::desc("Specify the executable/library files to get the list of *.dwo from"),
+    cl::value_desc("filename"), cl::cat(DwpCategory));
 
-static opt<std::string> OutputFilename(Required, "o",
-                                       desc("Specify the output file."),
-                                       value_desc("filename"),
-                                       cat(DwpCategory));
+static cl::opt<std::string> OutputFilename(cl::Required, "o",
+                                           cl::desc("Specify the output file."),
+                                           cl::value_desc("filename"),
+                                           cl::cat(DwpCategory));
 
 static void writeStringsAndOffsets(MCStreamer &Out, DWPStringPool &Strings,
                                    MCSection *StrOffsetSection,
@@ -192,7 +184,7 @@ static Expected<CompileUnitIdentifiers> getCUIdentifiers(StringRef Abbrev,
       break;
     default:
       DWARFFormValue::skipValue(Form, InfoData, &Offset,
-                                DWARFFormParams({Version, AddrSize, Format}));
+                                dwarf::FormParams({Version, AddrSize, Format}));
     }
   }
   return ID;
@@ -649,8 +641,9 @@ static int error(const Twine &Error, const Twine &Context) {
 }
 
 int main(int argc, char **argv) {
+  InitLLVM X(argc, argv);
 
-  ParseCommandLineOptions(argc, argv, "merge split dwarf (.dwo) files");
+  cl::ParseCommandLineOptions(argc, argv, "merge split dwarf (.dwo) files\n");
 
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
@@ -682,19 +675,19 @@ int main(int argc, char **argv) {
   MCContext MC(MAI.get(), MRI.get(), &MOFI);
   MOFI.InitMCObjectFileInfo(TheTriple, /*PIC*/ false, MC);
 
+  std::unique_ptr<MCSubtargetInfo> MSTI(
+      TheTarget->createMCSubtargetInfo(TripleName, "", ""));
+  if (!MSTI)
+    return error("no subtarget info for target " + TripleName, Context);
+
   MCTargetOptions Options;
-  auto MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, "", Options);
+  auto MAB = TheTarget->createMCAsmBackend(*MSTI, *MRI, Options);
   if (!MAB)
     return error("no asm backend for target " + TripleName, Context);
 
   std::unique_ptr<MCInstrInfo> MII(TheTarget->createMCInstrInfo());
   if (!MII)
     return error("no instr info info for target " + TripleName, Context);
-
-  std::unique_ptr<MCSubtargetInfo> MSTI(
-      TheTarget->createMCSubtargetInfo(TripleName, "", ""));
-  if (!MSTI)
-    return error("no subtarget info for target " + TripleName, Context);
 
   MCCodeEmitter *MCE = TheTarget->createMCCodeEmitter(*MII, *MRI, MC);
   if (!MCE)
@@ -703,14 +696,22 @@ int main(int argc, char **argv) {
   // Create the output file.
   std::error_code EC;
   raw_fd_ostream OutFile(OutputFilename, EC, sys::fs::F_None);
+  Optional<buffer_ostream> BOS;
+  raw_pwrite_stream *OS;
   if (EC)
     return error(Twine(OutputFilename) + ": " + EC.message(), Context);
+  if (OutFile.supportsSeeking()) {
+    OS = &OutFile;
+  } else {
+    BOS.emplace(OutFile);
+    OS = BOS.getPointer();
+  }
 
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
   std::unique_ptr<MCStreamer> MS(TheTarget->createMCObjectStreamer(
-      TheTriple, MC, std::unique_ptr<MCAsmBackend>(MAB), OutFile,
-      std::unique_ptr<MCCodeEmitter>(MCE), *MSTI, MCOptions.MCRelaxAll,
-      MCOptions.MCIncrementalLinkerCompatible,
+      TheTriple, MC, std::unique_ptr<MCAsmBackend>(MAB),
+      MAB->createObjectWriter(*OS), std::unique_ptr<MCCodeEmitter>(MCE),
+      *MSTI, MCOptions.MCRelaxAll, MCOptions.MCIncrementalLinkerCompatible,
       /*DWARFMustBeAtTheEnd*/ false));
   if (!MS)
     return error("no object streamer for target " + TripleName, Context);

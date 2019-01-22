@@ -26,8 +26,6 @@
 ; RUN:    -check-prefixes=ALL,MM,MM32
 ; RUN: llc < %s -march=mips -mcpu=mips32r6 -mattr=+micromips | FileCheck %s \
 ; RUN:    -check-prefixes=ALL,MM,MM32
-; RUN: llc < %s -march=mips -mcpu=mips64r6 -target-abi n64 -mattr=+micromips | FileCheck %s \
-; RUN:    -check-prefixes=ALL,MM,MM64
 
 define signext i1 @not_i1(i1 signext %a) {
 entry:
@@ -77,7 +75,8 @@ entry:
 
   ; GP32:         not     $2, $4
 
-  ; GP64:         not     $2, $4
+  ; GP64:         not     $1, $4
+  ; GP64:         sll     $2, $1, 0
 
   ; MM:           not16   $2, $4
 
@@ -97,9 +96,6 @@ entry:
 
   ; MM32:         not16   $2, $4
   ; MM32:         not16   $3, $5
-
-  ; MM64:         daddiu  $[[T0:[0-9]+]], $zero, -1
-  ; MM64:         xor     $2, $4, $[[T0]]
 
   %r = xor i64 %a, -1
   ret i64 %r
@@ -123,10 +119,6 @@ entry:
   ; MM32:         not16   $4, $6
   ; MM32:         not16   $5, $7
 
-  ; MM64:         daddiu  $[[T0:[0-9]+]], $zero, -1
-  ; MM64:         xor     $2, $4, $[[T0]]
-  ; MM64:         xor     $3, $5, $[[T0]]
-
   %r = xor i128 %a, -1
   ret i128 %r
 }
@@ -138,7 +130,6 @@ entry:
   ; GP32:         nor     $2, $5, $4
   ; GP64:         or      $1, $5, $4
   ; MM32:         nor     $2, $5, $4
-  ; MM64:         or      $1, $5, $4
 
   %or = or i1 %b, %a
   %r = xor i1 %or, -1
@@ -152,7 +143,6 @@ entry:
   ; GP32:         nor     $2, $5, $4
   ; GP64:         or      $1, $5, $4
   ; MM32:         nor     $2, $5, $4
-  ; MM64:         or      $1, $5, $4
 
   %or = or i8 %b, %a
   %r = xor i8 %or, -1
@@ -166,7 +156,6 @@ entry:
   ; GP32:         nor     $2, $5, $4
   ; GP64:         or      $1, $5, $4
   ; MM32:         nor     $2, $5, $4
-  ; MM64:         or      $1, $5, $4
 
   %or = or i16 %b, %a
   %r = xor i16 %or, -1
@@ -181,13 +170,10 @@ entry:
 
   ; GP64:         or      $[[T0:[0-9]+]], $5, $4
   ; GP64:         sll     $[[T1:[0-9]+]], $[[T0]], 0
-  ; GP64:         not     $2, $[[T1]]
+  ; GP64:         not     $[[T2:[0-9]+]], $[[T1]]
+  ; GP64:         sll     $2, $[[T2]], 0
 
   ; MM32:         nor     $2, $5, $4
-
-  ; MM64:         or      $[[T0:[0-9]+]], $5, $4
-  ; MM64:         sll     $[[T1:[0-9]+]], $[[T0]], 0
-  ; MM64:         not16   $2, $[[T1]]
 
   %or = or i32 %b, %a
   %r = xor i32 %or, -1
@@ -206,8 +192,6 @@ entry:
 
   ; MM32:         nor     $2, $6, $4
   ; MM32:         nor     $3, $7, $5
-
-  ; MM64:         nor     $2, $5, $4
 
   %or = or i64 %b, %a
   %r = xor i64 %or, -1
@@ -238,9 +222,6 @@ entry:
   ; MM32:         nor     $4, $[[T0]], $6
   ; MM32:         lw      $[[T3:[0-9]+]], 28($sp)
   ; MM32:         nor     $5, $[[T3]], $7
-
-  ; MM64:         nor     $2, $6, $4
-  ; MM64:         nor     $3, $7, $5
 
   %or = or i128 %b, %a
   %r = xor i128 %or, -1

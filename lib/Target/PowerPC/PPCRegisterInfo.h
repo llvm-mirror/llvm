@@ -1,9 +1,8 @@
 //===-- PPCRegisterInfo.h - PowerPC Register Information Impl ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -139,6 +138,23 @@ public:
   // Base pointer (stack realignment) support.
   unsigned getBaseRegister(const MachineFunction &MF) const;
   bool hasBasePointer(const MachineFunction &MF) const;
+
+  /// stripRegisterPrefix - This method strips the character prefix from a
+  /// register name so that only the number is left.  Used by for linux asm.
+  static const char *stripRegisterPrefix(const char *RegName) {
+    switch (RegName[0]) {
+      case 'r':
+      case 'f':
+      case 'q': // for QPX
+      case 'v':
+        if (RegName[1] == 's')
+          return RegName + 2;
+        return RegName + 1;
+      case 'c': if (RegName[1] == 'r') return RegName + 2;
+    }
+
+    return RegName;
+  }
 };
 
 } // end namespace llvm

@@ -1,4 +1,4 @@
-; RUN: llc -O0 -fast-isel-abort=1 -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
+; RUN: llc -fast-isel-sink-local-values -O0 -fast-isel -fast-isel-abort=1 -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
 
 define void @t0(i32 %a) nounwind {
 entry:
@@ -30,11 +30,11 @@ define void @t1(i64 %a) nounwind {
 define zeroext i1 @i1(i1 %a) nounwind {
 entry:
 ; CHECK: @i1
-; CHECK: and w0, w0, #0x1
-; CHECK: strb w0, [sp, #15]
-; CHECK: ldrb w0, [sp, #15]
-; CHECK: and w0, w0, #0x1
-; CHECK: and w0, w0, #0x1
+; CHECK: and [[REG:w[0-9]+]], w0, #0x1
+; CHECK: strb [[REG]], [sp, #15]
+; CHECK: ldrb [[REG1:w[0-9]+]], [sp, #15]
+; CHECK: and [[REG2:w[0-9]+]], [[REG1]], #0x1
+; CHECK: and w0, [[REG2]], #0x1
 ; CHECK: add sp, sp, #16
 ; CHECK: ret
   %a.addr = alloca i1, align 1
@@ -95,6 +95,8 @@ declare void @llvm.trap() nounwind
 define void @ands(i32* %addr) {
 ; CHECK-LABEL: ands:
 ; CHECK: tst [[COND:w[0-9]+]], #0x1
+; CHECK-NEXT: orr w{{[0-9]+}}, wzr, #0x2
+; CHECK-NEXT: orr w{{[0-9]+}}, wzr, #0x1
 ; CHECK-NEXT: csel [[COND]],
 entry:
   %cond91 = select i1 undef, i32 1, i32 2

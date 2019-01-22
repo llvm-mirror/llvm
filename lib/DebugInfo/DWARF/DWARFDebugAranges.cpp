@@ -1,9 +1,8 @@
 //===- DWARFDebugAranges.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugArangeSet.h"
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/WithColor.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -53,10 +53,12 @@ void DWARFDebugAranges::generate(DWARFContext *CTX) {
   for (const auto &CU : CTX->compile_units()) {
     uint32_t CUOffset = CU->getOffset();
     if (ParsedCUOffsets.insert(CUOffset).second) {
-      DWARFAddressRangesVector CURanges;
-      CU->collectAddressRanges(CURanges);
-      for (const auto &R : CURanges)
-        appendRange(CUOffset, R.LowPC, R.HighPC);
+      Expected<DWARFAddressRangesVector> CURanges = CU->collectAddressRanges();
+      if (!CURanges)
+        WithColor::error() << toString(CURanges.takeError()) << '\n';
+      else
+        for (const auto &R : *CURanges)
+          appendRange(CUOffset, R.LowPC, R.HighPC);
     }
   }
 
@@ -80,7 +82,7 @@ void DWARFDebugAranges::appendRange(uint32_t CUOffset, uint64_t LowPC,
 void DWARFDebugAranges::construct() {
   std::multiset<uint32_t> ValidCUs;  // Maintain the set of CUs describing
                                      // a current address range.
-  std::sort(Endpoints.begin(), Endpoints.end());
+  llvm::sort(Endpoints);
   uint64_t PrevAddress = -1ULL;
   for (const auto &E : Endpoints) {
     if (PrevAddress < E.Address && !ValidCUs.empty()) {

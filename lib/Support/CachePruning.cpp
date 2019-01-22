@@ -1,9 +1,8 @@
 //===-CachePruning.cpp - LLVM Cache Directory Pruning ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,6 +25,28 @@
 #include <system_error>
 
 using namespace llvm;
+
+namespace {
+struct FileInfo {
+  sys::TimePoint<> Time;
+  uint64_t Size;
+  std::string Path;
+
+  /// Used to determine which files to prune first. Also used to determine
+  /// set membership, so must take into account all fields.
+  bool operator<(const FileInfo &Other) const {
+    if (Time < Other.Time)
+      return true;
+    else if (Other.Time < Time)
+      return false;
+    if (Other.Size < Size)
+      return true;
+    else if (Size < Other.Size)
+      return false;
+    return Path < Other.Path;
+  }
+};
+} // anonymous namespace
 
 /// Write a new timestamp file with the given path. This is used for the pruning
 /// interval option.
@@ -113,6 +134,10 @@ llvm::parseCachePruningPolicy(StringRef PolicyStr) {
         return make_error<StringError>("'" + Value + "' not an integer",
                                        inconvertibleErrorCode());
       Policy.MaxSizeBytes = Size * Mult;
+    } else if (Key == "cache_size_files") {
+      if (Value.getAsInteger(0, Policy.MaxSizeFiles))
+        return make_error<StringError>("'" + Value + "' not an integer",
+                                       inconvertibleErrorCode());
     } else {
       return make_error<StringError>("Unknown key: '" + Key + "'",
                                      inconvertibleErrorCode());
@@ -141,8 +166,8 @@ bool llvm::pruneCache(StringRef Path, CachePruningPolicy Policy) {
 
   if (Policy.Expiration == seconds(0) &&
       Policy.MaxSizePercentageOfAvailableSpace == 0 &&
-      Policy.MaxSizeBytes == 0) {
-    DEBUG(dbgs() << "No pruning settings set, exit early\n");
+      Policy.MaxSizeBytes == 0 && Policy.MaxSizeFiles == 0) {
+    LLVM_DEBUG(dbgs() << "No pruning settings set, exit early\n");
     // Nothing will be pruned, early exit
     return false;
   }
@@ -161,15 +186,17 @@ bool llvm::pruneCache(StringRef Path, CachePruningPolicy Policy) {
       return false;
     }
   } else {
-    if (Policy.Interval == seconds(0)) {
+    if (!Policy.Interval)
+      return false;
+    if (Policy.Interval != seconds(0)) {
       // Check whether the time stamp is older than our pruning interval.
       // If not, do nothing.
       const auto TimeStampModTime = FileStatus.getLastModificationTime();
       auto TimeStampAge = CurrentTime - TimeStampModTime;
-      if (TimeStampAge <= Policy.Interval) {
-        DEBUG(dbgs() << "Timestamp file too recent ("
-                     << duration_cast<seconds>(TimeStampAge).count()
-                     << "s old), do not prune.\n");
+      if (TimeStampAge <= *Policy.Interval) {
+        LLVM_DEBUG(dbgs() << "Timestamp file too recent ("
+                          << duration_cast<seconds>(TimeStampAge).count()
+                          << "s old), do not prune.\n");
         return false;
       }
     }
@@ -179,11 +206,9 @@ bool llvm::pruneCache(StringRef Path, CachePruningPolicy Policy) {
     writeTimestampFile(TimestampFile);
   }
 
-  bool ShouldComputeSize =
-      (Policy.MaxSizePercentageOfAvailableSpace > 0 || Policy.MaxSizeBytes > 0);
-
-  // Keep track of space. Needs to be kept ordered by size for determinism.
-  std::set<std::pair<uint64_t, std::string>> FileSizes;
+  // Keep track of files to delete to get below the size limit.
+  // Order by time of last use so that recently used files are preserved.
+  std::set<FileInfo> FileInfos;
   uint64_t TotalSize = 0;
 
   // Walk the entire directory cache, looking for unused files.
@@ -204,29 +229,48 @@ bool llvm::pruneCache(StringRef Path, CachePruningPolicy Policy) {
     // there.
     ErrorOr<sys::fs::basic_file_status> StatusOrErr = File->status();
     if (!StatusOrErr) {
-      DEBUG(dbgs() << "Ignore " << File->path() << " (can't stat)\n");
+      LLVM_DEBUG(dbgs() << "Ignore " << File->path() << " (can't stat)\n");
       continue;
     }
 
     // If the file hasn't been used recently enough, delete it
     const auto FileAccessTime = StatusOrErr->getLastAccessedTime();
     auto FileAge = CurrentTime - FileAccessTime;
-    if (FileAge > Policy.Expiration) {
-      DEBUG(dbgs() << "Remove " << File->path() << " ("
-                   << duration_cast<seconds>(FileAge).count() << "s old)\n");
+    if (Policy.Expiration != seconds(0) && FileAge > Policy.Expiration) {
+      LLVM_DEBUG(dbgs() << "Remove " << File->path() << " ("
+                        << duration_cast<seconds>(FileAge).count()
+                        << "s old)\n");
       sys::fs::remove(File->path());
       continue;
     }
 
     // Leave it here for now, but add it to the list of size-based pruning.
-    if (!ShouldComputeSize)
-      continue;
     TotalSize += StatusOrErr->getSize();
-    FileSizes.insert({StatusOrErr->getSize(), std::string(File->path())});
+    FileInfos.insert({FileAccessTime, StatusOrErr->getSize(), File->path()});
   }
 
+  auto FileInfo = FileInfos.begin();
+  size_t NumFiles = FileInfos.size();
+
+  auto RemoveCacheFile = [&]() {
+    // Remove the file.
+    sys::fs::remove(FileInfo->Path);
+    // Update size
+    TotalSize -= FileInfo->Size;
+    NumFiles--;
+    LLVM_DEBUG(dbgs() << " - Remove " << FileInfo->Path << " (size "
+                      << FileInfo->Size << "), new occupancy is " << TotalSize
+                      << "%\n");
+    ++FileInfo;
+  };
+
+  // Prune for number of files.
+  if (Policy.MaxSizeFiles)
+    while (NumFiles > Policy.MaxSizeFiles)
+      RemoveCacheFile();
+
   // Prune for size now if needed
-  if (ShouldComputeSize) {
+  if (Policy.MaxSizePercentageOfAvailableSpace > 0 || Policy.MaxSizeBytes > 0) {
     auto ErrOrSpaceInfo = sys::fs::disk_space(Path);
     if (!ErrOrSpaceInfo) {
       report_fatal_error("Can't get available size");
@@ -242,22 +286,14 @@ bool llvm::pruneCache(StringRef Path, CachePruningPolicy Policy) {
         AvailableSpace * Policy.MaxSizePercentageOfAvailableSpace / 100ull,
         Policy.MaxSizeBytes);
 
-    DEBUG(dbgs() << "Occupancy: " << ((100 * TotalSize) / AvailableSpace)
-                 << "% target is: " << Policy.MaxSizePercentageOfAvailableSpace
-                 << "%, " << Policy.MaxSizeBytes << " bytes\n");
+    LLVM_DEBUG(dbgs() << "Occupancy: " << ((100 * TotalSize) / AvailableSpace)
+                      << "% target is: "
+                      << Policy.MaxSizePercentageOfAvailableSpace << "%, "
+                      << Policy.MaxSizeBytes << " bytes\n");
 
-    auto FileAndSize = FileSizes.rbegin();
-    // Remove the oldest accessed files first, till we get below the threshold
-    while (TotalSize > TotalSizeTarget && FileAndSize != FileSizes.rend()) {
-      // Remove the file.
-      sys::fs::remove(FileAndSize->second);
-      // Update size
-      TotalSize -= FileAndSize->first;
-      DEBUG(dbgs() << " - Remove " << FileAndSize->second << " (size "
-                   << FileAndSize->first << "), new occupancy is " << TotalSize
-                   << "%\n");
-      ++FileAndSize;
-    }
+    // Remove the oldest accessed files first, till we get below the threshold.
+    while (TotalSize > TotalSizeTarget && FileInfo != FileInfos.end())
+      RemoveCacheFile();
   }
   return true;
 }

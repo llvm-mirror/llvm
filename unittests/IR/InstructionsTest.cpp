@@ -1,12 +1,12 @@
 //===- llvm/unittest/IR/InstructionsTest.cpp - Instructions unit tests ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -21,12 +21,21 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/NoFolder.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Support/SourceMgr.h"
 #include "gmock/gmock-matchers.h"
 #include "gtest/gtest.h"
 #include <memory>
 
 namespace llvm {
 namespace {
+
+static std::unique_ptr<Module> parseIR(LLVMContext &C, const char *IR) {
+  SMDiagnostic Err;
+  std::unique_ptr<Module> Mod = parseAssemblyString(IR, Err, C);
+  if (!Mod)
+    Err.print("InstructionsTests", errs());
+  return Mod;
+}
 
 TEST(InstructionsTest, ReturnInst) {
   LLVMContext C;
@@ -745,6 +754,240 @@ TEST(InstructionsTest, CommuteShuffleMask) {
   SmallVector<int, 16> Indices({-1, 0, 7});
   ShuffleVectorInst::commuteShuffleMask(Indices, 4);
   EXPECT_THAT(Indices, testing::ContainerEq(ArrayRef<int>({-1, 4, 3})));
+}
+
+TEST(InstructionsTest, ShuffleMaskQueries) {
+  // Create the elements for various constant vectors.
+  LLVMContext Ctx;
+  Type *Int32Ty = Type::getInt32Ty(Ctx);
+  Constant *CU = UndefValue::get(Int32Ty);
+  Constant *C0 = ConstantInt::get(Int32Ty, 0);
+  Constant *C1 = ConstantInt::get(Int32Ty, 1);
+  Constant *C2 = ConstantInt::get(Int32Ty, 2);
+  Constant *C3 = ConstantInt::get(Int32Ty, 3);
+  Constant *C4 = ConstantInt::get(Int32Ty, 4);
+  Constant *C5 = ConstantInt::get(Int32Ty, 5);
+  Constant *C6 = ConstantInt::get(Int32Ty, 6);
+  Constant *C7 = ConstantInt::get(Int32Ty, 7);
+
+  Constant *Identity = ConstantVector::get({C0, CU, C2, C3, C4});
+  EXPECT_TRUE(ShuffleVectorInst::isIdentityMask(Identity));
+  EXPECT_FALSE(ShuffleVectorInst::isSelectMask(Identity)); // identity is distinguished from select
+  EXPECT_FALSE(ShuffleVectorInst::isReverseMask(Identity));
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(Identity)); // identity is always single source
+  EXPECT_FALSE(ShuffleVectorInst::isZeroEltSplatMask(Identity));
+  EXPECT_FALSE(ShuffleVectorInst::isTransposeMask(Identity));
+
+  Constant *Select = ConstantVector::get({CU, C1, C5});
+  EXPECT_FALSE(ShuffleVectorInst::isIdentityMask(Select));
+  EXPECT_TRUE(ShuffleVectorInst::isSelectMask(Select));
+  EXPECT_FALSE(ShuffleVectorInst::isReverseMask(Select));
+  EXPECT_FALSE(ShuffleVectorInst::isSingleSourceMask(Select));
+  EXPECT_FALSE(ShuffleVectorInst::isZeroEltSplatMask(Select));
+  EXPECT_FALSE(ShuffleVectorInst::isTransposeMask(Select));
+  
+  Constant *Reverse = ConstantVector::get({C3, C2, C1, CU});
+  EXPECT_FALSE(ShuffleVectorInst::isIdentityMask(Reverse));
+  EXPECT_FALSE(ShuffleVectorInst::isSelectMask(Reverse));
+  EXPECT_TRUE(ShuffleVectorInst::isReverseMask(Reverse));
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(Reverse)); // reverse is always single source
+  EXPECT_FALSE(ShuffleVectorInst::isZeroEltSplatMask(Reverse));
+  EXPECT_FALSE(ShuffleVectorInst::isTransposeMask(Reverse));
+
+  Constant *SingleSource = ConstantVector::get({C2, C2, C0, CU});
+  EXPECT_FALSE(ShuffleVectorInst::isIdentityMask(SingleSource));
+  EXPECT_FALSE(ShuffleVectorInst::isSelectMask(SingleSource));
+  EXPECT_FALSE(ShuffleVectorInst::isReverseMask(SingleSource));
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(SingleSource));
+  EXPECT_FALSE(ShuffleVectorInst::isZeroEltSplatMask(SingleSource));
+  EXPECT_FALSE(ShuffleVectorInst::isTransposeMask(SingleSource));
+
+  Constant *ZeroEltSplat = ConstantVector::get({C0, C0, CU, C0});
+  EXPECT_FALSE(ShuffleVectorInst::isIdentityMask(ZeroEltSplat));
+  EXPECT_FALSE(ShuffleVectorInst::isSelectMask(ZeroEltSplat));
+  EXPECT_FALSE(ShuffleVectorInst::isReverseMask(ZeroEltSplat));
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(ZeroEltSplat)); // 0-splat is always single source
+  EXPECT_TRUE(ShuffleVectorInst::isZeroEltSplatMask(ZeroEltSplat));
+  EXPECT_FALSE(ShuffleVectorInst::isTransposeMask(ZeroEltSplat));
+
+  Constant *Transpose = ConstantVector::get({C0, C4, C2, C6});
+  EXPECT_FALSE(ShuffleVectorInst::isIdentityMask(Transpose));
+  EXPECT_FALSE(ShuffleVectorInst::isSelectMask(Transpose));
+  EXPECT_FALSE(ShuffleVectorInst::isReverseMask(Transpose));
+  EXPECT_FALSE(ShuffleVectorInst::isSingleSourceMask(Transpose));
+  EXPECT_FALSE(ShuffleVectorInst::isZeroEltSplatMask(Transpose));
+  EXPECT_TRUE(ShuffleVectorInst::isTransposeMask(Transpose));
+
+  // More tests to make sure the logic is/stays correct...
+  EXPECT_TRUE(ShuffleVectorInst::isIdentityMask(ConstantVector::get({CU, C1, CU, C3})));
+  EXPECT_TRUE(ShuffleVectorInst::isIdentityMask(ConstantVector::get({C4, CU, C6, CU})));
+
+  EXPECT_TRUE(ShuffleVectorInst::isSelectMask(ConstantVector::get({C4, C1, C6, CU})));
+  EXPECT_TRUE(ShuffleVectorInst::isSelectMask(ConstantVector::get({CU, C1, C6, C3})));
+
+  EXPECT_TRUE(ShuffleVectorInst::isReverseMask(ConstantVector::get({C7, C6, CU, C4})));
+  EXPECT_TRUE(ShuffleVectorInst::isReverseMask(ConstantVector::get({C3, CU, C1, CU})));
+
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(ConstantVector::get({C7, C5, CU, C7})));
+  EXPECT_TRUE(ShuffleVectorInst::isSingleSourceMask(ConstantVector::get({C3, C0, CU, C3})));
+
+  EXPECT_TRUE(ShuffleVectorInst::isZeroEltSplatMask(ConstantVector::get({C4, CU, CU, C4})));
+  EXPECT_TRUE(ShuffleVectorInst::isZeroEltSplatMask(ConstantVector::get({CU, C0, CU, C0})));
+
+  EXPECT_TRUE(ShuffleVectorInst::isTransposeMask(ConstantVector::get({C1, C5, C3, C7})));
+  EXPECT_TRUE(ShuffleVectorInst::isTransposeMask(ConstantVector::get({C1, C3})));
+
+  // Nothing special about the values here - just re-using inputs to reduce code. 
+  Constant *V0 = ConstantVector::get({C0, C1, C2, C3});
+  Constant *V1 = ConstantVector::get({C3, C2, C1, C0});
+
+  // Identity with undef elts.
+  ShuffleVectorInst *Id1 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C0, C1, CU, CU}));
+  EXPECT_TRUE(Id1->isIdentity());
+  EXPECT_FALSE(Id1->isIdentityWithPadding());
+  EXPECT_FALSE(Id1->isIdentityWithExtract());
+  EXPECT_FALSE(Id1->isConcat());
+  delete Id1;
+
+  // Result has less elements than operands.
+  ShuffleVectorInst *Id2 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C0, C1, C2}));
+  EXPECT_FALSE(Id2->isIdentity());
+  EXPECT_FALSE(Id2->isIdentityWithPadding());
+  EXPECT_TRUE(Id2->isIdentityWithExtract());
+  EXPECT_FALSE(Id2->isConcat());
+  delete Id2;
+
+  // Result has less elements than operands; choose from Op1.
+  ShuffleVectorInst *Id3 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C4, CU, C6}));
+  EXPECT_FALSE(Id3->isIdentity());
+  EXPECT_FALSE(Id3->isIdentityWithPadding());
+  EXPECT_TRUE(Id3->isIdentityWithExtract());
+  EXPECT_FALSE(Id3->isConcat());
+  delete Id3;
+
+  // Result has less elements than operands; choose from Op0 and Op1 is not identity.
+  ShuffleVectorInst *Id4 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C4, C1, C6}));
+  EXPECT_FALSE(Id4->isIdentity());
+  EXPECT_FALSE(Id4->isIdentityWithPadding());
+  EXPECT_FALSE(Id4->isIdentityWithExtract());
+  EXPECT_FALSE(Id4->isConcat());
+  delete Id4;
+
+  // Result has more elements than operands, and extra elements are undef.
+  ShuffleVectorInst *Id5 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({CU, C1, C2, C3, CU, CU}));
+  EXPECT_FALSE(Id5->isIdentity());
+  EXPECT_TRUE(Id5->isIdentityWithPadding());
+  EXPECT_FALSE(Id5->isIdentityWithExtract());
+  EXPECT_FALSE(Id5->isConcat());
+  delete Id5;
+
+  // Result has more elements than operands, and extra elements are undef; choose from Op1.
+  ShuffleVectorInst *Id6 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C4, C5, C6, CU, CU, CU}));
+  EXPECT_FALSE(Id6->isIdentity());
+  EXPECT_TRUE(Id6->isIdentityWithPadding());
+  EXPECT_FALSE(Id6->isIdentityWithExtract());
+  EXPECT_FALSE(Id6->isConcat());
+  delete Id6;
+  
+  // Result has more elements than operands, but extra elements are not undef.
+  ShuffleVectorInst *Id7 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C0, C1, C2, C3, CU, C1}));
+  EXPECT_FALSE(Id7->isIdentity());
+  EXPECT_FALSE(Id7->isIdentityWithPadding());
+  EXPECT_FALSE(Id7->isIdentityWithExtract());
+  EXPECT_FALSE(Id7->isConcat());
+  delete Id7;
+  
+  // Result has more elements than operands; choose from Op0 and Op1 is not identity.
+  ShuffleVectorInst *Id8 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C4, CU, C2, C3, CU, CU}));
+  EXPECT_FALSE(Id8->isIdentity());
+  EXPECT_FALSE(Id8->isIdentityWithPadding());
+  EXPECT_FALSE(Id8->isIdentityWithExtract());
+  EXPECT_FALSE(Id8->isConcat());
+  delete Id8;
+
+  // Result has twice as many elements as operands; choose consecutively from Op0 and Op1 is concat.
+  ShuffleVectorInst *Id9 = new ShuffleVectorInst(V0, V1,
+                                                 ConstantVector::get({C0, CU, C2, C3, CU, CU, C6, C7}));
+  EXPECT_FALSE(Id9->isIdentity());
+  EXPECT_FALSE(Id9->isIdentityWithPadding());
+  EXPECT_FALSE(Id9->isIdentityWithExtract());
+  EXPECT_TRUE(Id9->isConcat());
+  delete Id9;
+
+  // Result has less than twice as many elements as operands, so not a concat.
+  ShuffleVectorInst *Id10 = new ShuffleVectorInst(V0, V1,
+                                                  ConstantVector::get({C0, CU, C2, C3, CU, CU, C6}));
+  EXPECT_FALSE(Id10->isIdentity());
+  EXPECT_FALSE(Id10->isIdentityWithPadding());
+  EXPECT_FALSE(Id10->isIdentityWithExtract());
+  EXPECT_FALSE(Id10->isConcat());
+  delete Id10;
+
+  // Result has more than twice as many elements as operands, so not a concat.
+  ShuffleVectorInst *Id11 = new ShuffleVectorInst(V0, V1,
+                                                  ConstantVector::get({C0, CU, C2, C3, CU, CU, C6, C7, CU}));
+  EXPECT_FALSE(Id11->isIdentity());
+  EXPECT_FALSE(Id11->isIdentityWithPadding());
+  EXPECT_FALSE(Id11->isIdentityWithExtract());
+  EXPECT_FALSE(Id11->isConcat());
+  delete Id11;
+
+  // If an input is undef, it's not a concat.
+  // TODO: IdentityWithPadding should be true here even though the high mask values are not undef.
+  ShuffleVectorInst *Id12 = new ShuffleVectorInst(V0, ConstantVector::get({CU, CU, CU, CU}),
+                                                  ConstantVector::get({C0, CU, C2, C3, CU, CU, C6, C7}));
+  EXPECT_FALSE(Id12->isIdentity());
+  EXPECT_FALSE(Id12->isIdentityWithPadding());
+  EXPECT_FALSE(Id12->isIdentityWithExtract());
+  EXPECT_FALSE(Id12->isConcat());
+  delete Id12;
+}
+
+TEST(InstructionsTest, SkipDebug) {
+  LLVMContext C;
+  std::unique_ptr<Module> M = parseIR(C,
+                                      R"(
+      declare void @llvm.dbg.value(metadata, metadata, metadata)
+
+      define void @f() {
+      entry:
+        call void @llvm.dbg.value(metadata i32 0, metadata !11, metadata !DIExpression()), !dbg !13
+        ret void
+      }
+
+      !llvm.dbg.cu = !{!0}
+      !llvm.module.flags = !{!3, !4}
+      !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 6.0.0", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
+      !1 = !DIFile(filename: "t2.c", directory: "foo")
+      !2 = !{}
+      !3 = !{i32 2, !"Dwarf Version", i32 4}
+      !4 = !{i32 2, !"Debug Info Version", i32 3}
+      !8 = distinct !DISubprogram(name: "f", scope: !1, file: !1, line: 1, type: !9, isLocal: false, isDefinition: true, scopeLine: 1, isOptimized: false, unit: !0, retainedNodes: !2)
+      !9 = !DISubroutineType(types: !10)
+      !10 = !{null}
+      !11 = !DILocalVariable(name: "x", scope: !8, file: !1, line: 2, type: !12)
+      !12 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
+      !13 = !DILocation(line: 2, column: 7, scope: !8)
+  )");
+  ASSERT_TRUE(M);
+  Function *F = cast<Function>(M->getNamedValue("f"));
+  BasicBlock &BB = F->front();
+
+  // The first non-debug instruction is the terminator.
+  auto *Term = BB.getTerminator();
+  EXPECT_EQ(Term, BB.begin()->getNextNonDebugInstruction());
+  EXPECT_EQ(Term->getIterator(), skipDebugIntrinsics(BB.begin()));
+
+  // After the terminator, there are no non-debug instructions.
+  EXPECT_EQ(nullptr, Term->getNextNonDebugInstruction());
 }
 
 } // end anonymous namespace

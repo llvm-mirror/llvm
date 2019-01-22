@@ -1,9 +1,8 @@
 //===- TargetItinerary.td - Target Itinierary Description --*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -44,9 +43,9 @@ def Reserved : ReservationKind<1>;
 // the execution of an instruction.  Cycles represents the number of
 // discrete time slots needed to complete the stage.  Units represent
 // the choice of functional units that can be used to complete the
-// stage.  Eg. IntUnit1, IntUnit2. NextCycles indicates how many
-// cycles should elapse from the start of this stage to the start of
-// the next stage in the itinerary.  For example:
+// stage.  Eg. IntUnit1, IntUnit2. TimeInc indicates how many cycles
+// should elapse from the start of this stage to the start of the next
+// stage in the itinerary.  For example:
 //
 // A stage is specified in one of two ways:
 //

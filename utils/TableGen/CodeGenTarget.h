@@ -1,9 +1,8 @@
 //===- CodeGenTarget.h - Target Class Wrapper -------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,6 +20,7 @@
 #include "CodeGenInstruction.h"
 #include "CodeGenRegisters.h"
 #include "InfoByHwMode.h"
+#include "SDNodeProperties.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TableGen/Record.h"
 #include <algorithm>
@@ -30,25 +30,6 @@ namespace llvm {
 struct CodeGenRegister;
 class CodeGenSchedModels;
 class CodeGenTarget;
-
-// SelectionDAG node properties.
-//  SDNPMemOperand: indicates that a node touches memory and therefore must
-//                  have an associated memory operand that describes the access.
-enum SDNP {
-  SDNPCommutative,
-  SDNPAssociative,
-  SDNPHasChain,
-  SDNPOutGlue,
-  SDNPInGlue,
-  SDNPOptInGlue,
-  SDNPMayLoad,
-  SDNPMayStore,
-  SDNPSideEffect,
-  SDNPMemOperand,
-  SDNPVariadic,
-  SDNPWantRoot,
-  SDNPWantParent
-};
 
 /// getValueType - Return the MVT::SimpleValueType that the specified TableGen
 /// record corresponds to.
@@ -80,6 +61,7 @@ class CodeGenTarget {
   mutable std::unique_ptr<CodeGenSchedModels> SchedModels;
 
   mutable std::vector<const CodeGenInstruction*> InstrsByEnum;
+  mutable unsigned NumPseudoInstructions = 0;
 public:
   CodeGenTarget(RecordKeeper &Records);
   ~CodeGenTarget();
@@ -94,6 +76,11 @@ public:
   /// getInstructionSet - Return the InstructionSet object.
   ///
   Record *getInstructionSet() const;
+
+  /// getAllowRegisterRenaming - Return the AllowRegisterRenaming flag value for
+  /// this target.
+  ///
+  bool getAllowRegisterRenaming() const;
 
   /// getAsmParser - Return the AssemblyParser definition for this target.
   ///
@@ -158,11 +145,25 @@ public:
     return *I->second;
   }
 
-  /// getInstructionsByEnumValue - Return all of the instructions defined by the
-  /// target, ordered by their enum value.
-  ArrayRef<const CodeGenInstruction *>
-  getInstructionsByEnumValue() const {
-    if (InstrsByEnum.empty()) ComputeInstrsByEnum();
+  /// Returns the number of predefined instructions.
+  static unsigned getNumFixedInstructions();
+
+  /// Returns the number of pseudo instructions.
+  unsigned getNumPseudoInstructions() const {
+    if (InstrsByEnum.empty())
+      ComputeInstrsByEnum();
+    return NumPseudoInstructions;
+  }
+
+  /// Return all of the instructions defined by the target, ordered by their
+  /// enum value.
+  /// The following order of instructions is also guaranteed:
+  /// - fixed / generic instructions as declared in TargetOpcodes.def, in order;
+  /// - pseudo instructions in lexicographical order sorted by name;
+  /// - other instructions in lexicographical order sorted by name.
+  ArrayRef<const CodeGenInstruction *> getInstructionsByEnumValue() const {
+    if (InstrsByEnum.empty())
+      ComputeInstrsByEnum();
     return InstrsByEnum;
   }
 

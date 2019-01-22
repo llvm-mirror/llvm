@@ -1,9 +1,8 @@
 //===- IntrinsicsSystemZ.td - Defines SystemZ intrinsics ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -198,17 +197,17 @@ multiclass SystemZQuaternaryIntCCBHF {
 
 let TargetPrefix = "s390" in {
   def int_s390_tbegin : Intrinsic<[llvm_i32_ty], [llvm_ptr_ty, llvm_i32_ty],
-                                  [IntrNoDuplicate]>;
+                                  [IntrNoDuplicate, IntrWriteMem]>;
 
   def int_s390_tbegin_nofloat : Intrinsic<[llvm_i32_ty],
                                           [llvm_ptr_ty, llvm_i32_ty],
-                                          [IntrNoDuplicate]>;
+                                          [IntrNoDuplicate, IntrWriteMem]>;
 
   def int_s390_tbeginc : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty],
-                                   [IntrNoDuplicate]>;
+                                   [IntrNoDuplicate, IntrWriteMem]>;
 
   def int_s390_tabort : Intrinsic<[], [llvm_i64_ty],
-                                  [IntrNoReturn, Throws]>;
+                                  [IntrNoReturn, Throws, IntrWriteMem]>;
 
   def int_s390_tend : GCCBuiltin<"__builtin_tend">,
                       Intrinsic<[llvm_i32_ty], []>;
@@ -217,7 +216,7 @@ let TargetPrefix = "s390" in {
                       Intrinsic<[llvm_i32_ty], [], [IntrNoMem]>;
 
   def int_s390_ntstg : Intrinsic<[], [llvm_i64_ty, llvm_ptr64_ty],
-                                 [IntrArgMemOnly]>;
+                                 [IntrArgMemOnly, IntrWriteMem]>;
 
   def int_s390_ppa_txassist : GCCBuiltin<"__builtin_tx_assist">,
                               Intrinsic<[], [llvm_i32_ty]>;
@@ -260,9 +259,7 @@ let TargetPrefix = "s390" in {
 
   def int_s390_vstl : GCCBuiltin<"__builtin_s390_vstl">,
                       Intrinsic<[], [llvm_v16i8_ty, llvm_i32_ty, llvm_ptr_ty],
-                                // In fact write-only but there's no property
-                                // for that.
-                                [IntrArgMemOnly]>;
+                                [IntrArgMemOnly, IntrWriteMem]>;
 
   defm int_s390_vupl  : SystemZUnaryExtBHWF<"vupl">;
   defm int_s390_vupll : SystemZUnaryExtBHF<"vupll">;
@@ -413,9 +410,7 @@ let TargetPrefix = "s390" in {
 
   def int_s390_vstrl : GCCBuiltin<"__builtin_s390_vstrl">,
                        Intrinsic<[], [llvm_v16i8_ty, llvm_i32_ty, llvm_ptr_ty],
-                                 // In fact write-only but there's no property
-                                 // for that.
-                                 [IntrArgMemOnly]>;
+                                 [IntrArgMemOnly, IntrWriteMem]>;
 }
 
 //===----------------------------------------------------------------------===//

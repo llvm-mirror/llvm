@@ -12,7 +12,7 @@ declare i32 @llvm.eh.typeid.for(i8*)
 declare i8* @llvm.frameaddress(i32)
 declare i8* @llvm.localrecover(i8*, i8*, i32)
 declare void @llvm.localescape(...)
-declare i8* @llvm.x86.seh.recoverfp(i8*, i8*)
+declare i8* @llvm.eh.recoverfp(i8*, i8*)
 
 define i32 @main() personality i8* bitcast (i32 (...)* @_except_handler3 to i8*) {
 entry:
@@ -37,7 +37,7 @@ __try.cont:                                       ; preds = %entry, %__except
 define internal i32 @"filt$main"() {
 entry:
   %ebp = tail call i8* @llvm.frameaddress(i32 1)
-  %parentfp = tail call i8* @llvm.x86.seh.recoverfp(i8* bitcast (i32 ()* @main to i8*), i8* %ebp)
+  %parentfp = tail call i8* @llvm.eh.recoverfp(i8* bitcast (i32 ()* @main to i8*), i8* %ebp)
   %code.i8 = tail call i8* @llvm.localrecover(i8* bitcast (i32 ()* @main to i8*), i8* %parentfp, i32 0)
   %__exceptioncode = bitcast i8* %code.i8 to i32*
   %info.addr = getelementptr inbounds i8, i8* %ebp, i32 -20
@@ -60,7 +60,7 @@ entry:
 ; CHECK: pushl %edi
 ; CHECK: pushl %esi
 
-; CHECK: Lmain$frame_escape_0 = [[code_offs:[-0-9]+]]
+; CHECK: .set Lmain$frame_escape_0, [[code_offs:[-0-9]+]]
 ; CHECK: movl %esp, [[reg_offs:[-0-9]+]](%ebp)
 ; CHECK: movl $L__ehtable$main,
 ;       EH state 0
@@ -80,7 +80,7 @@ entry:
 ; CHECK: calll _printf
 
 ; CHECK: .section .xdata,"dr"
-; CHECK: Lmain$parent_frame_offset = [[reg_offs]]
+; CHECK: .set Lmain$parent_frame_offset, [[reg_offs]]
 ; CHECK: .p2align 2
 ; CHECK: L__ehtable$main
 ; CHECK-NEXT: .long -1

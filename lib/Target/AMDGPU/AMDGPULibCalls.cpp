@@ -1,14 +1,13 @@
 //===- AMDGPULibCalls.cpp -------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief This file does AMD library function optimizations.
+/// This file does AMD library function optimizations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -217,8 +216,8 @@ INITIALIZE_PASS(AMDGPUUseNativeCalls, "amdgpu-usenative",
                 false, false)
 
 template <typename IRB>
-CallInst *CreateCallEx(IRB &B, Value *Callee, Value *Arg, const Twine &Name="")
-{
+static CallInst *CreateCallEx(IRB &B, Value *Callee, Value *Arg,
+                              const Twine &Name = "") {
   CallInst *R = B.CreateCall(Callee, Arg, Name);
   if (Function* F = dyn_cast<Function>(Callee))
     R->setCallingConv(F->getCallingConv());
@@ -226,8 +225,8 @@ CallInst *CreateCallEx(IRB &B, Value *Callee, Value *Arg, const Twine &Name="")
 }
 
 template <typename IRB>
-CallInst *CreateCallEx2(IRB &B, Value *Callee, Value *Arg1, Value *Arg2,
-                        const Twine &Name="") {
+static CallInst *CreateCallEx2(IRB &B, Value *Callee, Value *Arg1, Value *Arg2,
+                               const Twine &Name = "") {
   CallInst *R = B.CreateCall(Callee, {Arg1, Arg2}, Name);
   if (Function* F = dyn_cast<Function>(Callee))
     R->setCallingConv(F->getCallingConv());
@@ -487,7 +486,7 @@ bool AMDGPULibCalls::parseFunctionName(const StringRef& FMangledName,
 
 bool AMDGPULibCalls::isUnsafeMath(const CallInst *CI) const {
   if (auto Op = dyn_cast<FPMathOperator>(CI))
-    if (Op->hasUnsafeAlgebra())
+    if (Op->isFast())
       return true;
   const Function *F = CI->getParent()->getParent();
   Attribute Attr = F->getFnAttribute("unsafe-fp-math");
@@ -765,8 +764,7 @@ bool AMDGPULibCalls::TDOFold(CallInst *CI, const FuncInfo &FInfo) {
         ArrayRef<double> tmp(DVal);
         nval = ConstantDataVector::get(context, tmp);
       }
-      DEBUG(errs() << "AMDIC: " << *CI
-                   << " ---> " << *nval << "\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *nval << "\n");
       replaceCall(nval);
       return true;
     }
@@ -776,8 +774,7 @@ bool AMDGPULibCalls::TDOFold(CallInst *CI, const FuncInfo &FInfo) {
       for (int i = 0; i < sz; ++i) {
         if (CF->isExactlyValue(ftbl[i].input)) {
           Value *nval = ConstantFP::get(CF->getType(), ftbl[i].result);
-          DEBUG(errs() << "AMDIC: " << *CI
-                       << " ---> " << *nval << "\n");
+          LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *nval << "\n");
           replaceCall(nval);
           return true;
         }
@@ -798,11 +795,11 @@ bool AMDGPULibCalls::replaceWithNative(CallInst *CI, const FuncInfo &FInfo) {
   AMDGPULibFunc nf = FInfo;
   nf.setPrefix(AMDGPULibFunc::NATIVE);
   if (Constant *FPExpr = getFunction(M, nf)) {
-    DEBUG(dbgs() << "AMDIC: " << *CI << " ---> ");
+    LLVM_DEBUG(dbgs() << "AMDIC: " << *CI << " ---> ");
 
     CI->setCalledFunction(FPExpr);
 
-    DEBUG(dbgs() << *CI << '\n');
+    LLVM_DEBUG(dbgs() << *CI << '\n');
 
     return true;
   }
@@ -820,8 +817,7 @@ bool AMDGPULibCalls::fold_recip(CallInst *CI, IRBuilder<> &B,
     Value *nval = B.CreateFDiv(ConstantFP::get(CF->getType(), 1.0),
                                opr0,
                                "recip2div");
-    DEBUG(errs() << "AMDIC: " << *CI
-                 << " ---> " << *nval << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *nval << "\n");
     replaceCall(nval);
     return true;
   }
@@ -899,7 +895,7 @@ bool AMDGPULibCalls::fold_pow(CallInst *CI, IRBuilder<> &B,
 
   if ((CF && CF->isZero()) || (CINT && ci_opr1 == 0) || CZero) {
     //  pow/powr/pown(x, 0) == 1
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> 1\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> 1\n");
     Constant *cnval = ConstantFP::get(eltType, 1.0);
     if (getVecSize(FInfo) > 1) {
       cnval = ConstantDataVector::getSplat(getVecSize(FInfo), cnval);
@@ -909,23 +905,21 @@ bool AMDGPULibCalls::fold_pow(CallInst *CI, IRBuilder<> &B,
   }
   if ((CF && CF->isExactlyValue(1.0)) || (CINT && ci_opr1 == 1)) {
     // pow/powr/pown(x, 1.0) = x
-    DEBUG(errs() << "AMDIC: " << *CI
-                 << " ---> " << *opr0 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr0 << "\n");
     replaceCall(opr0);
     return true;
   }
   if ((CF && CF->isExactlyValue(2.0)) || (CINT && ci_opr1 == 2)) {
     // pow/powr/pown(x, 2.0) = x*x
-    DEBUG(errs() << "AMDIC: " << *CI
-                 << " ---> " << *opr0 << " * " << *opr0 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr0 << " * " << *opr0
+                      << "\n");
     Value *nval = B.CreateFMul(opr0, opr0, "__pow2");
     replaceCall(nval);
     return true;
   }
   if ((CF && CF->isExactlyValue(-1.0)) || (CINT && ci_opr1 == -1)) {
     // pow/powr/pown(x, -1.0) = 1.0/x
-    DEBUG(errs() << "AMDIC: " << *CI
-                 << " ---> 1 / " << *opr0 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> 1 / " << *opr0 << "\n");
     Constant *cnval = ConstantFP::get(eltType, 1.0);
     if (getVecSize(FInfo) > 1) {
       cnval = ConstantDataVector::getSplat(getVecSize(FInfo), cnval);
@@ -942,8 +936,8 @@ bool AMDGPULibCalls::fold_pow(CallInst *CI, IRBuilder<> &B,
     if (Constant *FPExpr = getFunction(M,
         AMDGPULibFunc(issqrt ? AMDGPULibFunc::EI_SQRT
                              : AMDGPULibFunc::EI_RSQRT, FInfo))) {
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                   << FInfo.getName().c_str() << "(" << *opr0 << ")\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> "
+                        << FInfo.getName().c_str() << "(" << *opr0 << ")\n");
       Value *nval = CreateCallEx(B,FPExpr, opr0, issqrt ? "__pow2sqrt"
                                                         : "__pow2rsqrt");
       replaceCall(nval);
@@ -999,8 +993,9 @@ bool AMDGPULibCalls::fold_pow(CallInst *CI, IRBuilder<> &B,
       }
       nval = B.CreateFDiv(cnval, nval, "__1powprod");
     }
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                 <<  ((ci_opr1 < 0) ? "1/prod(" : "prod(") << *opr0 << ")\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> "
+                      << ((ci_opr1 < 0) ? "1/prod(" : "prod(") << *opr0
+                      << ")\n");
     replaceCall(nval);
     return true;
   }
@@ -1137,8 +1132,8 @@ bool AMDGPULibCalls::fold_pow(CallInst *CI, IRBuilder<> &B,
     nval = B.CreateBitCast(nval, opr0->getType());
   }
 
-  DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-               << "exp2(" << *opr1 << " * log2(" << *opr0 << "))\n");
+  LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> "
+                    << "exp2(" << *opr1 << " * log2(" << *opr0 << "))\n");
   replaceCall(nval);
 
   return true;
@@ -1155,8 +1150,7 @@ bool AMDGPULibCalls::fold_rootn(CallInst *CI, IRBuilder<> &B,
   }
   int ci_opr1 = (int)CINT->getSExtValue();
   if (ci_opr1 == 1) {  // rootn(x, 1) = x
-    DEBUG(errs() << "AMDIC: " << *CI
-                 << " ---> " << *opr0 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr0 << "\n");
     replaceCall(opr0);
     return true;
   }
@@ -1166,7 +1160,7 @@ bool AMDGPULibCalls::fold_rootn(CallInst *CI, IRBuilder<> &B,
     Module *M = CI->getModule();
     if (Constant *FPExpr = getFunction(M, AMDGPULibFunc(AMDGPULibFunc::EI_SQRT,
                                                         FInfo))) {
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> sqrt(" << *opr0 << ")\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> sqrt(" << *opr0 << ")\n");
       Value *nval = CreateCallEx(B,FPExpr, opr0, "__rootn2sqrt");
       replaceCall(nval);
       return true;
@@ -1175,13 +1169,13 @@ bool AMDGPULibCalls::fold_rootn(CallInst *CI, IRBuilder<> &B,
     Module *M = CI->getModule();
     if (Constant *FPExpr = getFunction(M, AMDGPULibFunc(AMDGPULibFunc::EI_CBRT,
                                                         FInfo))) {
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> cbrt(" << *opr0 << ")\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> cbrt(" << *opr0 << ")\n");
       Value *nval = CreateCallEx(B,FPExpr, opr0, "__rootn2cbrt");
       replaceCall(nval);
       return true;
     }
   } else if (ci_opr1 == -1) { // rootn(x, -1) = 1.0/x
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> 1.0 / " << *opr0 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> 1.0 / " << *opr0 << "\n");
     Value *nval = B.CreateFDiv(ConstantFP::get(opr0->getType(), 1.0),
                                opr0,
                                "__rootn2div");
@@ -1193,7 +1187,8 @@ bool AMDGPULibCalls::fold_rootn(CallInst *CI, IRBuilder<> &B,
     Module *M = CI->getModule();
     if (Constant *FPExpr = getFunction(M, AMDGPULibFunc(AMDGPULibFunc::EI_RSQRT,
                                                         FInfo))) {
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> rsqrt(" << *opr0 << ")\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> rsqrt(" << *opr0
+                        << ")\n");
       Value *nval = CreateCallEx(B,FPExpr, opr0, "__rootn2rsqrt");
       replaceCall(nval);
       return true;
@@ -1212,22 +1207,22 @@ bool AMDGPULibCalls::fold_fma_mad(CallInst *CI, IRBuilder<> &B,
   ConstantFP *CF1 = dyn_cast<ConstantFP>(opr1);
   if ((CF0 && CF0->isZero()) || (CF1 && CF1->isZero())) {
     // fma/mad(a, b, c) = c if a=0 || b=0
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr2 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr2 << "\n");
     replaceCall(opr2);
     return true;
   }
   if (CF0 && CF0->isExactlyValue(1.0f)) {
     // fma/mad(a, b, c) = b+c if a=1
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                 << *opr1 << " + " << *opr2 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr1 << " + " << *opr2
+                      << "\n");
     Value *nval = B.CreateFAdd(opr1, opr2, "fmaadd");
     replaceCall(nval);
     return true;
   }
   if (CF1 && CF1->isExactlyValue(1.0f)) {
     // fma/mad(a, b, c) = a+c if b=1
-    DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                 << *opr0 << " + " << *opr2 << "\n");
+    LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr0 << " + " << *opr2
+                      << "\n");
     Value *nval = B.CreateFAdd(opr0, opr2, "fmaadd");
     replaceCall(nval);
     return true;
@@ -1235,8 +1230,8 @@ bool AMDGPULibCalls::fold_fma_mad(CallInst *CI, IRBuilder<> &B,
   if (ConstantFP *CF = dyn_cast<ConstantFP>(opr2)) {
     if (CF->isZero()) {
       // fma/mad(a, b, c) = a*b if c=0
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                   << *opr0 << " * " << *opr1 << "\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> " << *opr0 << " * "
+                        << *opr1 << "\n");
       Value *nval = B.CreateFMul(opr0, opr1, "fmamul");
       replaceCall(nval);
       return true;
@@ -1263,8 +1258,8 @@ bool AMDGPULibCalls::fold_sqrt(CallInst *CI, IRBuilder<> &B,
     if (Constant *FPExpr = getNativeFunction(
         CI->getModule(), AMDGPULibFunc(AMDGPULibFunc::EI_SQRT, FInfo))) {
       Value *opr0 = CI->getArgOperand(0);
-      DEBUG(errs() << "AMDIC: " << *CI << " ---> "
-                   << "sqrt(" << *opr0 << ")\n");
+      LLVM_DEBUG(errs() << "AMDIC: " << *CI << " ---> "
+                        << "sqrt(" << *opr0 << ")\n");
       Value *nval = CreateCallEx(B,FPExpr, opr0, "__sqrt");
       replaceCall(nval);
       return true;
@@ -1337,7 +1332,7 @@ bool AMDGPULibCalls::fold_sincos(CallInst *CI, IRBuilder<> &B,
   // for OpenCL 2.0 we have only generic implementation of sincos
   // function.
   AMDGPULibFunc nf(AMDGPULibFunc::EI_SINCOS, fInfo);
-  nf.getLeads()[0].PtrKind = AMDGPULibFunc::GENERIC;
+  nf.getLeads()[0].PtrKind = AMDGPULibFunc::getEPtrKindFromAddrSpace(AMDGPUAS::FLAT_ADDRESS);
   Function *Fsincos = dyn_cast_or_null<Function>(getFunction(M, nf));
   if (!Fsincos) return false;
 
@@ -1350,13 +1345,12 @@ bool AMDGPULibCalls::fold_sincos(CallInst *CI, IRBuilder<> &B,
   // The allocaInst allocates the memory in private address space. This need
   // to be bitcasted to point to the address space of cos pointer type.
   // In OpenCL 2.0 this is generic, while in 1.2 that is private.
-  const AMDGPUAS AS = AMDGPU::getAMDGPUAS(*M);
-  if (PTy->getPointerAddressSpace() != AS.PRIVATE_ADDRESS)
+  if (PTy->getPointerAddressSpace() != AMDGPUAS::PRIVATE_ADDRESS)
     P = B.CreateAddrSpaceCast(Alloc, PTy);
   CallInst *Call = CreateCallEx2(B, Fsincos, UI->getArgOperand(0), P);
 
-  DEBUG(errs() << "AMDIC: fold_sincos (" << *CI << ", " << *UI
-               << ") with " << *Call << "\n");
+  LLVM_DEBUG(errs() << "AMDIC: fold_sincos (" << *CI << ", " << *UI << ") with "
+                    << *Call << "\n");
 
   if (!isSin) { // CI->cos, UI->sin
     B.SetInsertPoint(&*ItOld);
@@ -1719,9 +1713,8 @@ bool AMDGPUSimplifyLibCalls::runOnFunction(Function &F) {
   bool Changed = false;
   auto AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
-  DEBUG(dbgs() << "AMDIC: process function ";
-        F.printAsOperand(dbgs(), false, F.getParent());
-        dbgs() << '\n';);
+  LLVM_DEBUG(dbgs() << "AMDIC: process function ";
+             F.printAsOperand(dbgs(), false, F.getParent()); dbgs() << '\n';);
 
   if (!EnablePreLink)
     Changed |= setFastFlags(F, Options);
@@ -1737,8 +1730,8 @@ bool AMDGPUSimplifyLibCalls::runOnFunction(Function &F) {
       Function *Callee = CI->getCalledFunction();
       if (Callee == 0) continue;
 
-      DEBUG(dbgs() << "AMDIC: try folding " << *CI << "\n";
-            dbgs().flush());
+      LLVM_DEBUG(dbgs() << "AMDIC: try folding " << *CI << "\n";
+                 dbgs().flush());
       if(Simplifier.fold(CI, AA))
         Changed = true;
     }

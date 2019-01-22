@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=thumbv7-apple-ios -relocation-model=pic -disable-fp-elim -mcpu=cortex-a8 < %s
+; RUN: llc -mtriple=thumbv7-apple-ios -relocation-model=pic -frame-pointer=all -mcpu=cortex-a8 < %s
 
 ; CodeGen SplitCriticalEdge() shouldn't try to break edge to a landing pad.
 ; rdar://11300144
@@ -19,7 +19,7 @@ declare i32 @llvm.eh.typeid.for(i8*) nounwind readnone
 
 declare i8* @__cxa_begin_catch(i8*)
 
-declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i32, i1) nounwind
+declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i1) nounwind
 
 declare void @__cxa_end_catch()
 

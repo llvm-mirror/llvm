@@ -1,9 +1,8 @@
 //===-- llvm/Operator.h - Operator utility subclass -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -163,52 +162,72 @@ private:
 
   unsigned Flags = 0;
 
-  FastMathFlags(unsigned F) : Flags(F) { }
+  FastMathFlags(unsigned F) {
+    // If all 7 bits are set, turn this into -1. If the number of bits grows,
+    // this must be updated. This is intended to provide some forward binary
+    // compatibility insurance for the meaning of 'fast' in case bits are added.
+    if (F == 0x7F) Flags = ~0U;
+    else Flags = F;
+  }
 
 public:
-  /// This is how the bits are used in Value::SubclassOptionalData so they
-  /// should fit there too.
+  // This is how the bits are used in Value::SubclassOptionalData so they
+  // should fit there too.
+  // WARNING: We're out of space. SubclassOptionalData only has 7 bits. New
+  // functionality will require a change in how this information is stored.
   enum {
-    UnsafeAlgebra   = (1 << 0),
+    AllowReassoc    = (1 << 0),
     NoNaNs          = (1 << 1),
     NoInfs          = (1 << 2),
     NoSignedZeros   = (1 << 3),
     AllowReciprocal = (1 << 4),
-    AllowContract   = (1 << 5)
+    AllowContract   = (1 << 5),
+    ApproxFunc      = (1 << 6)
   };
 
   FastMathFlags() = default;
 
-  /// Whether any flag is set
   bool any() const { return Flags != 0; }
+  bool none() const { return Flags == 0; }
+  bool all() const { return Flags == ~0U; }
 
-  /// Set all the flags to false
   void clear() { Flags = 0; }
+  void set()   { Flags = ~0U; }
 
   /// Flag queries
+  bool allowReassoc() const    { return 0 != (Flags & AllowReassoc); }
   bool noNaNs() const          { return 0 != (Flags & NoNaNs); }
   bool noInfs() const          { return 0 != (Flags & NoInfs); }
   bool noSignedZeros() const   { return 0 != (Flags & NoSignedZeros); }
   bool allowReciprocal() const { return 0 != (Flags & AllowReciprocal); }
-  bool allowContract() const { return 0 != (Flags & AllowContract); }
-  bool unsafeAlgebra() const   { return 0 != (Flags & UnsafeAlgebra); }
+  bool allowContract() const   { return 0 != (Flags & AllowContract); }
+  bool approxFunc() const      { return 0 != (Flags & ApproxFunc); }
+  /// 'Fast' means all bits are set.
+  bool isFast() const          { return all(); }
 
   /// Flag setters
-  void setNoNaNs()          { Flags |= NoNaNs; }
-  void setNoInfs()          { Flags |= NoInfs; }
-  void setNoSignedZeros()   { Flags |= NoSignedZeros; }
-  void setAllowReciprocal() { Flags |= AllowReciprocal; }
-  void setAllowContract(bool B) {
+  void setAllowReassoc(bool B = true) {
+    Flags = (Flags & ~AllowReassoc) | B * AllowReassoc;
+  }
+  void setNoNaNs(bool B = true) {
+    Flags = (Flags & ~NoNaNs) | B * NoNaNs;
+  }
+  void setNoInfs(bool B = true) {
+    Flags = (Flags & ~NoInfs) | B * NoInfs;
+  }
+  void setNoSignedZeros(bool B = true) {
+    Flags = (Flags & ~NoSignedZeros) | B * NoSignedZeros;
+  }
+  void setAllowReciprocal(bool B = true) {
+    Flags = (Flags & ~AllowReciprocal) | B * AllowReciprocal;
+  }
+  void setAllowContract(bool B = true) {
     Flags = (Flags & ~AllowContract) | B * AllowContract;
   }
-  void setUnsafeAlgebra() {
-    Flags |= UnsafeAlgebra;
-    setNoNaNs();
-    setNoInfs();
-    setNoSignedZeros();
-    setAllowReciprocal();
-    setAllowContract(true);
+  void setApproxFunc(bool B = true) {
+    Flags = (Flags & ~ApproxFunc) | B * ApproxFunc;
   }
+  void setFast(bool B = true) { B ? set() : clear(); }
 
   void operator&=(const FastMathFlags &OtherFlags) {
     Flags &= OtherFlags.Flags;
@@ -221,18 +240,21 @@ class FPMathOperator : public Operator {
 private:
   friend class Instruction;
 
-  void setHasUnsafeAlgebra(bool B) {
-    SubclassOptionalData =
-      (SubclassOptionalData & ~FastMathFlags::UnsafeAlgebra) |
-      (B * FastMathFlags::UnsafeAlgebra);
+  /// 'Fast' means all bits are set.
+  void setFast(bool B) {
+    setHasAllowReassoc(B);
+    setHasNoNaNs(B);
+    setHasNoInfs(B);
+    setHasNoSignedZeros(B);
+    setHasAllowReciprocal(B);
+    setHasAllowContract(B);
+    setHasApproxFunc(B);
+  }
 
-    // Unsafe algebra implies all the others
-    if (B) {
-      setHasNoNaNs(true);
-      setHasNoInfs(true);
-      setHasNoSignedZeros(true);
-      setHasAllowReciprocal(true);
-    }
+  void setHasAllowReassoc(bool B) {
+    SubclassOptionalData =
+    (SubclassOptionalData & ~FastMathFlags::AllowReassoc) |
+    (B * FastMathFlags::AllowReassoc);
   }
 
   void setHasNoNaNs(bool B) {
@@ -265,6 +287,12 @@ private:
         (B * FastMathFlags::AllowContract);
   }
 
+  void setHasApproxFunc(bool B) {
+    SubclassOptionalData =
+        (SubclassOptionalData & ~FastMathFlags::ApproxFunc) |
+        (B * FastMathFlags::ApproxFunc);
+  }
+
   /// Convenience function for setting multiple fast-math flags.
   /// FMF is a mask of the bits to set.
   void setFastMathFlags(FastMathFlags FMF) {
@@ -278,40 +306,51 @@ private:
   }
 
 public:
-  /// Test whether this operation is permitted to be
-  /// algebraically transformed, aka the 'A' fast-math property.
-  bool hasUnsafeAlgebra() const {
-    return (SubclassOptionalData & FastMathFlags::UnsafeAlgebra) != 0;
+  /// Test if this operation allows all non-strict floating-point transforms.
+  bool isFast() const {
+    return ((SubclassOptionalData & FastMathFlags::AllowReassoc) != 0 &&
+            (SubclassOptionalData & FastMathFlags::NoNaNs) != 0 &&
+            (SubclassOptionalData & FastMathFlags::NoInfs) != 0 &&
+            (SubclassOptionalData & FastMathFlags::NoSignedZeros) != 0 &&
+            (SubclassOptionalData & FastMathFlags::AllowReciprocal) != 0 &&
+            (SubclassOptionalData & FastMathFlags::AllowContract) != 0 &&
+            (SubclassOptionalData & FastMathFlags::ApproxFunc) != 0);
   }
 
-  /// Test whether this operation's arguments and results are to be
-  /// treated as non-NaN, aka the 'N' fast-math property.
+  /// Test if this operation may be simplified with reassociative transforms.
+  bool hasAllowReassoc() const {
+    return (SubclassOptionalData & FastMathFlags::AllowReassoc) != 0;
+  }
+
+  /// Test if this operation's arguments and results are assumed not-NaN.
   bool hasNoNaNs() const {
     return (SubclassOptionalData & FastMathFlags::NoNaNs) != 0;
   }
 
-  /// Test whether this operation's arguments and results are to be
-  /// treated as NoN-Inf, aka the 'I' fast-math property.
+  /// Test if this operation's arguments and results are assumed not-infinite.
   bool hasNoInfs() const {
     return (SubclassOptionalData & FastMathFlags::NoInfs) != 0;
   }
 
-  /// Test whether this operation can treat the sign of zero
-  /// as insignificant, aka the 'S' fast-math property.
+  /// Test if this operation can ignore the sign of zero.
   bool hasNoSignedZeros() const {
     return (SubclassOptionalData & FastMathFlags::NoSignedZeros) != 0;
   }
 
-  /// Test whether this operation is permitted to use
-  /// reciprocal instead of division, aka the 'R' fast-math property.
+  /// Test if this operation can use reciprocal multiply instead of division.
   bool hasAllowReciprocal() const {
     return (SubclassOptionalData & FastMathFlags::AllowReciprocal) != 0;
   }
 
-  /// Test whether this operation is permitted to
-  /// be floating-point contracted.
+  /// Test if this operation can be floating-point contracted (FMA).
   bool hasAllowContract() const {
     return (SubclassOptionalData & FastMathFlags::AllowContract) != 0;
+  }
+
+  /// Test if this operation allows approximations of math library functions or
+  /// intrinsics.
+  bool hasApproxFunc() const {
+    return (SubclassOptionalData & FastMathFlags::ApproxFunc) != 0;
   }
 
   /// Convenience function for getting all the fast-math flags
@@ -324,19 +363,26 @@ public:
   /// precision.
   float getFPAccuracy() const;
 
-  static bool classof(const Instruction *I) {
-    return I->getType()->isFPOrFPVectorTy() ||
-      I->getOpcode() == Instruction::FCmp;
-  }
-
-  static bool classof(const ConstantExpr *CE) {
-    return CE->getType()->isFPOrFPVectorTy() ||
-           CE->getOpcode() == Instruction::FCmp;
-  }
-
   static bool classof(const Value *V) {
-    return (isa<Instruction>(V) && classof(cast<Instruction>(V))) ||
-           (isa<ConstantExpr>(V) && classof(cast<ConstantExpr>(V)));
+    unsigned Opcode;
+    if (auto *I = dyn_cast<Instruction>(V))
+      Opcode = I->getOpcode();
+    else if (auto *CE = dyn_cast<ConstantExpr>(V))
+      Opcode = CE->getOpcode();
+    else
+      return false;
+
+    switch (Opcode) {
+    case Instruction::FCmp:
+      return true;
+    // non math FP Operators (no FMF)
+    case Instruction::ExtractElement:
+    case Instruction::ShuffleVector:
+    case Instruction::InsertElement:
+      return false;
+    default:
+      return V->getType()->isFPOrFPVectorTy();
+    }
   }
 };
 
@@ -478,7 +524,7 @@ public:
       });
   }
 
-  /// \brief Accumulate the constant address offset of this GEP if possible.
+  /// Accumulate the constant address offset of this GEP if possible.
   ///
   /// This routine accepts an APInt into which it will accumulate the constant
   /// offset of this GEP if the GEP is in fact constant. If the GEP is not

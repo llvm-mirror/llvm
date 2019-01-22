@@ -4,17 +4,17 @@
 
 define i32 @test_add_1_cmov_slt(i64* %p, i32 %a0, i32 %a1) #0 {
 ; FASTINCDEC-LABEL: test_add_1_cmov_slt:
-; FASTINCDEC:       # BB#0: # %entry
-; FASTINCDEC-NEXT:    lock incq (%rdi)
-; FASTINCDEC-NEXT:    cmovgl %edx, %esi
+; FASTINCDEC:       # %bb.0: # %entry
 ; FASTINCDEC-NEXT:    movl %esi, %eax
+; FASTINCDEC-NEXT:    lock incq (%rdi)
+; FASTINCDEC-NEXT:    cmovgl %edx, %eax
 ; FASTINCDEC-NEXT:    retq
 ;
 ; SLOWINCDEC-LABEL: test_add_1_cmov_slt:
-; SLOWINCDEC:       # BB#0: # %entry
-; SLOWINCDEC-NEXT:    lock addq $1, (%rdi)
-; SLOWINCDEC-NEXT:    cmovgl %edx, %esi
+; SLOWINCDEC:       # %bb.0: # %entry
 ; SLOWINCDEC-NEXT:    movl %esi, %eax
+; SLOWINCDEC-NEXT:    lock addq $1, (%rdi)
+; SLOWINCDEC-NEXT:    cmovgl %edx, %eax
 ; SLOWINCDEC-NEXT:    retq
 entry:
   %tmp0 = atomicrmw add i64* %p, i64 1 seq_cst
@@ -25,17 +25,17 @@ entry:
 
 define i32 @test_add_1_cmov_sge(i64* %p, i32 %a0, i32 %a1) #0 {
 ; FASTINCDEC-LABEL: test_add_1_cmov_sge:
-; FASTINCDEC:       # BB#0: # %entry
-; FASTINCDEC-NEXT:    lock incq (%rdi)
-; FASTINCDEC-NEXT:    cmovlel %edx, %esi
+; FASTINCDEC:       # %bb.0: # %entry
 ; FASTINCDEC-NEXT:    movl %esi, %eax
+; FASTINCDEC-NEXT:    lock incq (%rdi)
+; FASTINCDEC-NEXT:    cmovlel %edx, %eax
 ; FASTINCDEC-NEXT:    retq
 ;
 ; SLOWINCDEC-LABEL: test_add_1_cmov_sge:
-; SLOWINCDEC:       # BB#0: # %entry
-; SLOWINCDEC-NEXT:    lock addq $1, (%rdi)
-; SLOWINCDEC-NEXT:    cmovlel %edx, %esi
+; SLOWINCDEC:       # %bb.0: # %entry
 ; SLOWINCDEC-NEXT:    movl %esi, %eax
+; SLOWINCDEC-NEXT:    lock addq $1, (%rdi)
+; SLOWINCDEC-NEXT:    cmovlel %edx, %eax
 ; SLOWINCDEC-NEXT:    retq
 entry:
   %tmp0 = atomicrmw add i64* %p, i64 1 seq_cst
@@ -45,12 +45,19 @@ entry:
 }
 
 define i32 @test_sub_1_cmov_sle(i64* %p, i32 %a0, i32 %a1) #0 {
-; CHECK-LABEL: test_sub_1_cmov_sle:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    lock addq $-1, (%rdi)
-; CHECK-NEXT:    cmovgel %edx, %esi
-; CHECK-NEXT:    movl %esi, %eax
-; CHECK-NEXT:    retq
+; FASTINCDEC-LABEL: test_sub_1_cmov_sle:
+; FASTINCDEC:       # %bb.0: # %entry
+; FASTINCDEC-NEXT:    movl %esi, %eax
+; FASTINCDEC-NEXT:    lock decq (%rdi)
+; FASTINCDEC-NEXT:    cmovgel %edx, %eax
+; FASTINCDEC-NEXT:    retq
+;
+; SLOWINCDEC-LABEL: test_sub_1_cmov_sle:
+; SLOWINCDEC:       # %bb.0: # %entry
+; SLOWINCDEC-NEXT:    movl %esi, %eax
+; SLOWINCDEC-NEXT:    lock addq $-1, (%rdi)
+; SLOWINCDEC-NEXT:    cmovgel %edx, %eax
+; SLOWINCDEC-NEXT:    retq
 entry:
   %tmp0 = atomicrmw sub i64* %p, i64 1 seq_cst
   %tmp1 = icmp sle i64 %tmp0, 0
@@ -59,12 +66,19 @@ entry:
 }
 
 define i32 @test_sub_1_cmov_sgt(i64* %p, i32 %a0, i32 %a1) #0 {
-; CHECK-LABEL: test_sub_1_cmov_sgt:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    lock addq $-1, (%rdi)
-; CHECK-NEXT:    cmovll %edx, %esi
-; CHECK-NEXT:    movl %esi, %eax
-; CHECK-NEXT:    retq
+; FASTINCDEC-LABEL: test_sub_1_cmov_sgt:
+; FASTINCDEC:       # %bb.0: # %entry
+; FASTINCDEC-NEXT:    movl %esi, %eax
+; FASTINCDEC-NEXT:    lock decq (%rdi)
+; FASTINCDEC-NEXT:    cmovll %edx, %eax
+; FASTINCDEC-NEXT:    retq
+;
+; SLOWINCDEC-LABEL: test_sub_1_cmov_sgt:
+; SLOWINCDEC:       # %bb.0: # %entry
+; SLOWINCDEC-NEXT:    movl %esi, %eax
+; SLOWINCDEC-NEXT:    lock addq $-1, (%rdi)
+; SLOWINCDEC-NEXT:    cmovll %edx, %eax
+; SLOWINCDEC-NEXT:    retq
 entry:
   %tmp0 = atomicrmw sub i64* %p, i64 1 seq_cst
   %tmp1 = icmp sgt i64 %tmp0, 0
@@ -75,11 +89,11 @@ entry:
 ; FIXME: (setcc slt x, 0) gets combined into shr early.
 define i8 @test_add_1_setcc_slt(i64* %p) #0 {
 ; CHECK-LABEL: test_add_1_setcc_slt:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl $1, %eax
 ; CHECK-NEXT:    lock xaddq %rax, (%rdi)
 ; CHECK-NEXT:    shrq $63, %rax
-; CHECK-NEXT:    # kill: %AL<def> %AL<kill> %RAX<kill>
+; CHECK-NEXT:    # kill: def $al killed $al killed $rax
 ; CHECK-NEXT:    retq
 entry:
   %tmp0 = atomicrmw add i64* %p, i64 1 seq_cst
@@ -89,11 +103,17 @@ entry:
 }
 
 define i8 @test_sub_1_setcc_sgt(i64* %p) #0 {
-; CHECK-LABEL: test_sub_1_setcc_sgt:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    lock addq $-1, (%rdi)
-; CHECK-NEXT:    setge %al
-; CHECK-NEXT:    retq
+; FASTINCDEC-LABEL: test_sub_1_setcc_sgt:
+; FASTINCDEC:       # %bb.0: # %entry
+; FASTINCDEC-NEXT:    lock decq (%rdi)
+; FASTINCDEC-NEXT:    setge %al
+; FASTINCDEC-NEXT:    retq
+;
+; SLOWINCDEC-LABEL: test_sub_1_setcc_sgt:
+; SLOWINCDEC:       # %bb.0: # %entry
+; SLOWINCDEC-NEXT:    lock addq $-1, (%rdi)
+; SLOWINCDEC-NEXT:    setge %al
+; SLOWINCDEC-NEXT:    retq
 entry:
   %tmp0 = atomicrmw sub i64* %p, i64 1 seq_cst
   %tmp1 = icmp sgt i64 %tmp0, 0
@@ -103,10 +123,10 @@ entry:
 
 define i32 @test_add_1_brcond_sge(i64* %p, i32 %a0, i32 %a1) #0 {
 ; FASTINCDEC-LABEL: test_add_1_brcond_sge:
-; FASTINCDEC:       # BB#0: # %entry
+; FASTINCDEC:       # %bb.0: # %entry
 ; FASTINCDEC-NEXT:    lock incq (%rdi)
 ; FASTINCDEC-NEXT:    jle .LBB6_2
-; FASTINCDEC-NEXT:  # BB#1: # %t
+; FASTINCDEC-NEXT:  # %bb.1: # %t
 ; FASTINCDEC-NEXT:    movl %esi, %eax
 ; FASTINCDEC-NEXT:    retq
 ; FASTINCDEC-NEXT:  .LBB6_2: # %f
@@ -114,10 +134,10 @@ define i32 @test_add_1_brcond_sge(i64* %p, i32 %a0, i32 %a1) #0 {
 ; FASTINCDEC-NEXT:    retq
 ;
 ; SLOWINCDEC-LABEL: test_add_1_brcond_sge:
-; SLOWINCDEC:       # BB#0: # %entry
+; SLOWINCDEC:       # %bb.0: # %entry
 ; SLOWINCDEC-NEXT:    lock addq $1, (%rdi)
 ; SLOWINCDEC-NEXT:    jle .LBB6_2
-; SLOWINCDEC-NEXT:  # BB#1: # %t
+; SLOWINCDEC-NEXT:  # %bb.1: # %t
 ; SLOWINCDEC-NEXT:    movl %esi, %eax
 ; SLOWINCDEC-NEXT:    retq
 ; SLOWINCDEC-NEXT:  .LBB6_2: # %f
@@ -138,12 +158,12 @@ f:
 
 define i32 @test_add_1_cmov_sle(i64* %p, i32 %a0, i32 %a1) #0 {
 ; CHECK-LABEL: test_add_1_cmov_sle:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    movl $1, %eax
-; CHECK-NEXT:    lock xaddq %rax, (%rdi)
-; CHECK-NEXT:    testq %rax, %rax
-; CHECK-NEXT:    cmovgl %edx, %esi
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl %esi, %eax
+; CHECK-NEXT:    movl $1, %ecx
+; CHECK-NEXT:    lock xaddq %rcx, (%rdi)
+; CHECK-NEXT:    testq %rcx, %rcx
+; CHECK-NEXT:    cmovgl %edx, %eax
 ; CHECK-NEXT:    retq
 entry:
   %tmp0 = atomicrmw add i64* %p, i64 1 seq_cst
@@ -154,12 +174,12 @@ entry:
 
 define i32 @test_add_1_cmov_sgt(i64* %p, i32 %a0, i32 %a1) #0 {
 ; CHECK-LABEL: test_add_1_cmov_sgt:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    movl $1, %eax
-; CHECK-NEXT:    lock xaddq %rax, (%rdi)
-; CHECK-NEXT:    testq %rax, %rax
-; CHECK-NEXT:    cmovlel %edx, %esi
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl %esi, %eax
+; CHECK-NEXT:    movl $1, %ecx
+; CHECK-NEXT:    lock xaddq %rcx, (%rdi)
+; CHECK-NEXT:    testq %rcx, %rcx
+; CHECK-NEXT:    cmovlel %edx, %eax
 ; CHECK-NEXT:    retq
 entry:
   %tmp0 = atomicrmw add i64* %p, i64 1 seq_cst
@@ -172,7 +192,7 @@ entry:
 
 define i8 @test_add_1_setcc_sgt_reuse(i64* %p, i64* %p2) #0 {
 ; CHECK-LABEL: test_add_1_setcc_sgt_reuse:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl $1, %ecx
 ; CHECK-NEXT:    lock xaddq %rcx, (%rdi)
 ; CHECK-NEXT:    testq %rcx, %rcx
@@ -189,7 +209,7 @@ entry:
 
 define i8 @test_sub_2_setcc_sgt(i64* %p) #0 {
 ; CHECK-LABEL: test_sub_2_setcc_sgt:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movq $-2, %rax
 ; CHECK-NEXT:    lock xaddq %rax, (%rdi)
 ; CHECK-NEXT:    testq %rax, %rax
@@ -205,7 +225,7 @@ entry:
 define i8 @test_add_1_cmov_cmov(i64* %p, i8* %q) #0 {
 ; TODO: It's possible to use "lock inc" here, but both cmovs need to be updated.
 ; CHECK-LABEL: test_add_1_cmov_cmov:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl $1, %eax
 ; CHECK-NEXT:    lock xaddq %rax, (%rdi)
 ; CHECK-NEXT:    testq   %rax, %rax
@@ -220,13 +240,13 @@ entry:
 
 define i8 @test_sub_1_cmp_1_setcc_eq(i64* %p) #0 {
 ; FASTINCDEC-LABEL: test_sub_1_cmp_1_setcc_eq:
-; FASTINCDEC:       # BB#0: # %entry
+; FASTINCDEC:       # %bb.0: # %entry
 ; FASTINCDEC-NEXT:    lock decq (%rdi)
 ; FASTINCDEC-NEXT:    sete %al
 ; FASTINCDEC-NEXT:    retq
 ;
 ; SLOWINCDEC-LABEL: test_sub_1_cmp_1_setcc_eq:
-; SLOWINCDEC:       # BB#0: # %entry
+; SLOWINCDEC:       # %bb.0: # %entry
 ; SLOWINCDEC-NEXT:    lock subq $1, (%rdi)
 ; SLOWINCDEC-NEXT:    sete %al
 ; SLOWINCDEC-NEXT:    retq
@@ -239,13 +259,13 @@ entry:
 
 define i8 @test_sub_1_cmp_1_setcc_ne(i64* %p) #0 {
 ; FASTINCDEC-LABEL: test_sub_1_cmp_1_setcc_ne:
-; FASTINCDEC:       # BB#0: # %entry
+; FASTINCDEC:       # %bb.0: # %entry
 ; FASTINCDEC-NEXT:    lock decq (%rdi)
 ; FASTINCDEC-NEXT:    setne %al
 ; FASTINCDEC-NEXT:    retq
 ;
 ; SLOWINCDEC-LABEL: test_sub_1_cmp_1_setcc_ne:
-; SLOWINCDEC:       # BB#0: # %entry
+; SLOWINCDEC:       # %bb.0: # %entry
 ; SLOWINCDEC-NEXT:    lock subq $1, (%rdi)
 ; SLOWINCDEC-NEXT:    setne %al
 ; SLOWINCDEC-NEXT:    retq
@@ -257,17 +277,11 @@ entry:
 }
 
 define i8 @test_sub_1_cmp_1_setcc_ugt(i64* %p) #0 {
-; FASTINCDEC-LABEL: test_sub_1_cmp_1_setcc_ugt:
-; FASTINCDEC:       # BB#0: # %entry
-; FASTINCDEC-NEXT:    lock decq (%rdi)
-; FASTINCDEC-NEXT:    seta %al
-; FASTINCDEC-NEXT:    retq
-;
-; SLOWINCDEC-LABEL: test_sub_1_cmp_1_setcc_ugt:
-; SLOWINCDEC:       # BB#0: # %entry
-; SLOWINCDEC-NEXT:    lock subq $1, (%rdi)
-; SLOWINCDEC-NEXT:    seta %al
-; SLOWINCDEC-NEXT:    retq
+; CHECK-LABEL: test_sub_1_cmp_1_setcc_ugt:
+; CHECK:       # %bb.0: # %entry
+; CHECK-NEXT:    lock subq $1, (%rdi)
+; CHECK-NEXT:    seta %al
+; CHECK-NEXT:    retq
 entry:
   %tmp0 = atomicrmw sub i64* %p, i64 1 seq_cst
   %tmp1 = icmp ugt i64 %tmp0, 1
@@ -279,7 +293,7 @@ entry:
 ; comparison can be folded into the atomic subtract.
 define i8 @test_sub_1_cmp_1_setcc_sle(i64* %p) #0 {
 ; CHECK-LABEL: test_sub_1_cmp_1_setcc_sle:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movq $-1, %rax
 ; CHECK-NEXT:    lock xaddq %rax, (%rdi)
 ; CHECK-NEXT:    cmpq $2, %rax
@@ -294,7 +308,7 @@ entry:
 
 define i8 @test_sub_3_cmp_3_setcc_eq(i64* %p) #0 {
 ; CHECK-LABEL: test_sub_3_cmp_3_setcc_eq:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lock subq $3, (%rdi)
 ; CHECK-NEXT:    sete %al
 ; CHECK-NEXT:    retq
@@ -309,7 +323,7 @@ entry:
 ; comparison can be folded into the atomic subtract.
 define i8 @test_sub_3_cmp_3_setcc_uge(i64* %p) #0 {
 ; CHECK-LABEL: test_sub_3_cmp_3_setcc_uge:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movq $-3, %rax
 ; CHECK-NEXT:    lock xaddq %rax, (%rdi)
 ; CHECK-NEXT:    cmpq $2, %rax

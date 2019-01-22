@@ -1,9 +1,8 @@
 //===- llvm/ADT/EquivalenceClasses.h - Generic Equiv. Classes ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -237,6 +236,16 @@ public:
     // L2's leader is now L1.
     L2LV.Leader = &L1LV;
     return L1;
+  }
+
+  // isEquivalent - Return true if V1 is equivalent to V2. This can happen if
+  // V1 is equal to V2 or if they belong to one equivalence class.
+  bool isEquivalent(const ElemTy &V1, const ElemTy &V2) const {
+    // Fast path: any element is equivalent to itself.
+    if (V1 == V2)
+      return true;
+    auto It = findLeader(V1);
+    return It != member_end() && It == findLeader(V2);
   }
 
   class member_iterator : public std::iterator<std::forward_iterator_tag,

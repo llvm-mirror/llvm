@@ -247,7 +247,6 @@
 ; CHECK:   Pointer (0x1012) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: const int (0x1004)
-; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
@@ -263,7 +262,6 @@
 ; CHECK:   Pointer (0x1014) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: <vftable 1 methods> (0x1013)
-; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
@@ -298,7 +296,7 @@
 ; CHECK:   }
 ; CHECK:   Struct (0x1016) {
 ; CHECK:     TypeLeafKind: LF_STRUCTURE (0x1505)
-; CHECK:     MemberCount: 2
+; CHECK:     MemberCount: 4
 ; CHECK:     Properties [ (0x200)
 ; CHECK:       HasUniqueName (0x200)
 ; CHECK:     ]
@@ -362,11 +360,10 @@
 ; CHECK:   Pointer (0x101C) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: DerivedClass (0x1011)
-; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
-; CHECK:     IsConst: 0
+; CHECK:     IsConst: 1
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
 ; CHECK:     SizeOf: 8
@@ -375,7 +372,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: DerivedClass (0x1011)
-; CHECK:     ThisType: DerivedClass* (0x101C)
+; CHECK:     ThisType: DerivedClass* const (0x101C)
 ; CHECK:     CallingConvention: NearC (0x0)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -476,7 +473,7 @@ attributes #3 = { nounwind }
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{i32 1, !"PIC Level", i32 2}
 !6 = !{!"clang version 3.9.0 "}
-!7 = distinct !DISubprogram(name: "UseTypes", linkageName: "\01?UseTypes@@YAXXZ", scope: !1, file: !1, line: 26, type: !8, isLocal: false, isDefinition: true, scopeLine: 26, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!7 = distinct !DISubprogram(name: "UseTypes", linkageName: "\01?UseTypes@@YAXXZ", scope: !1, file: !1, line: 26, type: !8, isLocal: false, isDefinition: true, scopeLine: 26, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !8 = !DISubroutineType(types: !9)
 !9 = !{null}
 !10 = !DILocalVariable(name: "s", scope: !7, file: !1, line: 27, type: !11)
@@ -522,7 +519,7 @@ attributes #3 = { nounwind }
 !50 = !DIDerivedType(tag: DW_TAG_member, name: "n", scope: !48, file: !1, line: 24, baseType: !14, size: 32, align: 32)
 !51 = !DILocation(line: 31, column: 17, scope: !7)
 !52 = !DILocation(line: 32, column: 1, scope: !7)
-!53 = distinct !DISubprogram(name: "DerivedClass::DerivedClass", linkageName: "\01??0DerivedClass@@QEAA@XZ", scope: !36, file: !1, line: 20, type: !54, isLocal: false, isDefinition: true, scopeLine: 20, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, unit: !0, declaration: !57, variables: !2)
+!53 = distinct !DISubprogram(name: "DerivedClass::DerivedClass", linkageName: "\01??0DerivedClass@@QEAA@XZ", scope: !36, file: !1, line: 20, type: !54, isLocal: false, isDefinition: true, scopeLine: 20, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, unit: !0, declaration: !57, retainedNodes: !2)
 !54 = !DISubroutineType(types: !55)
 !55 = !{null, !56}
 !56 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !36, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer)

@@ -1,9 +1,8 @@
 //===- MSFCommon.cpp - Common types and functions for MSF files -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -64,15 +63,13 @@ MSFStreamLayout llvm::msf::getFpmStreamLayout(const MSFLayout &Msf,
                                               bool IncludeUnusedFpmData,
                                               bool AltFpm) {
   MSFStreamLayout FL;
-  uint32_t NumFpmIntervals = getNumFpmIntervals(Msf, IncludeUnusedFpmData);
-  support::ulittle32_t FpmBlock = Msf.SB->FreeBlockMapBlock;
-  assert(FpmBlock == 1 || FpmBlock == 2);
-  if (AltFpm) {
-    // If they requested the alternate FPM, then 2 becomes 1 and 1 becomes 2.
-    FpmBlock = 3U - FpmBlock;
-  }
+  uint32_t NumFpmIntervals =
+      getNumFpmIntervals(Msf, IncludeUnusedFpmData, AltFpm);
+
+  uint32_t FpmBlock = AltFpm ? Msf.alternateFpmBlock() : Msf.mainFpmBlock();
+
   for (uint32_t I = 0; I < NumFpmIntervals; ++I) {
-    FL.Blocks.push_back(FpmBlock);
+    FL.Blocks.push_back(support::ulittle32_t(FpmBlock));
     FpmBlock += msf::getFpmIntervalLength(Msf);
   }
 

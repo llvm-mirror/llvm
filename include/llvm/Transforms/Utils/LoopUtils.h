@@ -1,9 +1,8 @@
 //===- llvm/Transforms/Utils/LoopUtils.h - Loop utilities -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,7 +20,10 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/EHPersonalities.h"
+#include "llvm/Analysis/IVDescriptors.h"
+#include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
@@ -38,6 +40,7 @@ class BasicBlock;
 class DataLayout;
 class Loop;
 class LoopInfo;
+class MemorySSAUpdater;
 class OptimizationRemarkEmitter;
 class PredicatedScalarEvolution;
 class PredIteratorCache;
@@ -45,325 +48,6 @@ class ScalarEvolution;
 class SCEV;
 class TargetLibraryInfo;
 class TargetTransformInfo;
-
-/// \brief Captures loop safety information.
-/// It keep information for loop & its header may throw exception.
-struct LoopSafetyInfo {
-  bool MayThrow = false;       // The current loop contains an instruction which
-                               // may throw.
-  bool HeaderMayThrow = false; // Same as previous, but specific to loop header
-  // Used to update funclet bundle operands.
-  DenseMap<BasicBlock *, ColorVector> BlockColors;
-
-  LoopSafetyInfo() = default;
-};
-
-/// The RecurrenceDescriptor is used to identify recurrences variables in a
-/// loop. Reduction is a special case of recurrence that has uses of the
-/// recurrence variable outside the loop. The method isReductionPHI identifies
-/// reductions that are basic recurrences.
-///
-/// Basic recurrences are defined as the summation, product, OR, AND, XOR, min,
-/// or max of a set of terms. For example: for(i=0; i<n; i++) { total +=
-/// array[i]; } is a summation of array elements. Basic recurrences are a
-/// special case of chains of recurrences (CR). See ScalarEvolution for CR
-/// references.
-
-/// This struct holds information about recurrence variables.
-class RecurrenceDescriptor {
-public:
-  /// This enum represents the kinds of recurrences that we support.
-  enum RecurrenceKind {
-    RK_NoRecurrence,  ///< Not a recurrence.
-    RK_IntegerAdd,    ///< Sum of integers.
-    RK_IntegerMult,   ///< Product of integers.
-    RK_IntegerOr,     ///< Bitwise or logical OR of numbers.
-    RK_IntegerAnd,    ///< Bitwise or logical AND of numbers.
-    RK_IntegerXor,    ///< Bitwise or logical XOR of numbers.
-    RK_IntegerMinMax, ///< Min/max implemented in terms of select(cmp()).
-    RK_FloatAdd,      ///< Sum of floats.
-    RK_FloatMult,     ///< Product of floats.
-    RK_FloatMinMax    ///< Min/max implemented in terms of select(cmp()).
-  };
-
-  // This enum represents the kind of minmax recurrence.
-  enum MinMaxRecurrenceKind {
-    MRK_Invalid,
-    MRK_UIntMin,
-    MRK_UIntMax,
-    MRK_SIntMin,
-    MRK_SIntMax,
-    MRK_FloatMin,
-    MRK_FloatMax
-  };
-
-  RecurrenceDescriptor() = default;
-
-  RecurrenceDescriptor(Value *Start, Instruction *Exit, RecurrenceKind K,
-                       MinMaxRecurrenceKind MK, Instruction *UAI, Type *RT,
-                       bool Signed, SmallPtrSetImpl<Instruction *> &CI)
-      : StartValue(Start), LoopExitInstr(Exit), Kind(K), MinMaxKind(MK),
-        UnsafeAlgebraInst(UAI), RecurrenceType(RT), IsSigned(Signed) {
-    CastInsts.insert(CI.begin(), CI.end());
-  }
-
-  /// This POD struct holds information about a potential recurrence operation.
-  class InstDesc {
-  public:
-    InstDesc(bool IsRecur, Instruction *I, Instruction *UAI = nullptr)
-        : IsRecurrence(IsRecur), PatternLastInst(I), MinMaxKind(MRK_Invalid),
-          UnsafeAlgebraInst(UAI) {}
-
-    InstDesc(Instruction *I, MinMaxRecurrenceKind K, Instruction *UAI = nullptr)
-        : IsRecurrence(true), PatternLastInst(I), MinMaxKind(K),
-          UnsafeAlgebraInst(UAI) {}
-
-    bool isRecurrence() { return IsRecurrence; }
-
-    bool hasUnsafeAlgebra() { return UnsafeAlgebraInst != nullptr; }
-
-    Instruction *getUnsafeAlgebraInst() { return UnsafeAlgebraInst; }
-
-    MinMaxRecurrenceKind getMinMaxKind() { return MinMaxKind; }
-
-    Instruction *getPatternInst() { return PatternLastInst; }
-
-  private:
-    // Is this instruction a recurrence candidate.
-    bool IsRecurrence;
-    // The last instruction in a min/max pattern (select of the select(icmp())
-    // pattern), or the current recurrence instruction otherwise.
-    Instruction *PatternLastInst;
-    // If this is a min/max pattern the comparison predicate.
-    MinMaxRecurrenceKind MinMaxKind;
-    // Recurrence has unsafe algebra.
-    Instruction *UnsafeAlgebraInst;
-  };
-
-  /// Returns a struct describing if the instruction 'I' can be a recurrence
-  /// variable of type 'Kind'. If the recurrence is a min/max pattern of
-  /// select(icmp()) this function advances the instruction pointer 'I' from the
-  /// compare instruction to the select instruction and stores this pointer in
-  /// 'PatternLastInst' member of the returned struct.
-  static InstDesc isRecurrenceInstr(Instruction *I, RecurrenceKind Kind,
-                                    InstDesc &Prev, bool HasFunNoNaNAttr);
-
-  /// Returns true if instruction I has multiple uses in Insts
-  static bool hasMultipleUsesOf(Instruction *I,
-                                SmallPtrSetImpl<Instruction *> &Insts);
-
-  /// Returns true if all uses of the instruction I is within the Set.
-  static bool areAllUsesIn(Instruction *I, SmallPtrSetImpl<Instruction *> &Set);
-
-  /// Returns a struct describing if the instruction if the instruction is a
-  /// Select(ICmp(X, Y), X, Y) instruction pattern corresponding to a min(X, Y)
-  /// or max(X, Y).
-  static InstDesc isMinMaxSelectCmpPattern(Instruction *I, InstDesc &Prev);
-
-  /// Returns identity corresponding to the RecurrenceKind.
-  static Constant *getRecurrenceIdentity(RecurrenceKind K, Type *Tp);
-
-  /// Returns the opcode of binary operation corresponding to the
-  /// RecurrenceKind.
-  static unsigned getRecurrenceBinOp(RecurrenceKind Kind);
-
-  /// Returns a Min/Max operation corresponding to MinMaxRecurrenceKind.
-  static Value *createMinMaxOp(IRBuilder<> &Builder, MinMaxRecurrenceKind RK,
-                               Value *Left, Value *Right);
-
-  /// Returns true if Phi is a reduction of type Kind and adds it to the
-  /// RecurrenceDescriptor.
-  static bool AddReductionVar(PHINode *Phi, RecurrenceKind Kind, Loop *TheLoop,
-                              bool HasFunNoNaNAttr,
-                              RecurrenceDescriptor &RedDes);
-
-  /// Returns true if Phi is a reduction in TheLoop. The RecurrenceDescriptor is
-  /// returned in RedDes.
-  static bool isReductionPHI(PHINode *Phi, Loop *TheLoop,
-                             RecurrenceDescriptor &RedDes);
-
-  /// Returns true if Phi is a first-order recurrence. A first-order recurrence
-  /// is a non-reduction recurrence relation in which the value of the
-  /// recurrence in the current loop iteration equals a value defined in the
-  /// previous iteration. \p SinkAfter includes pairs of instructions where the
-  /// first will be rescheduled to appear after the second if/when the loop is
-  /// vectorized. It may be augmented with additional pairs if needed in order
-  /// to handle Phi as a first-order recurrence.
-  static bool
-  isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
-                         DenseMap<Instruction *, Instruction *> &SinkAfter,
-                         DominatorTree *DT);
-
-  RecurrenceKind getRecurrenceKind() { return Kind; }
-
-  MinMaxRecurrenceKind getMinMaxRecurrenceKind() { return MinMaxKind; }
-
-  TrackingVH<Value> getRecurrenceStartValue() { return StartValue; }
-
-  Instruction *getLoopExitInstr() { return LoopExitInstr; }
-
-  /// Returns true if the recurrence has unsafe algebra which requires a relaxed
-  /// floating-point model.
-  bool hasUnsafeAlgebra() { return UnsafeAlgebraInst != nullptr; }
-
-  /// Returns first unsafe algebra instruction in the PHI node's use-chain.
-  Instruction *getUnsafeAlgebraInst() { return UnsafeAlgebraInst; }
-
-  /// Returns true if the recurrence kind is an integer kind.
-  static bool isIntegerRecurrenceKind(RecurrenceKind Kind);
-
-  /// Returns true if the recurrence kind is a floating point kind.
-  static bool isFloatingPointRecurrenceKind(RecurrenceKind Kind);
-
-  /// Returns true if the recurrence kind is an arithmetic kind.
-  static bool isArithmeticRecurrenceKind(RecurrenceKind Kind);
-
-  /// Determines if Phi may have been type-promoted. If Phi has a single user
-  /// that ANDs the Phi with a type mask, return the user. RT is updated to
-  /// account for the narrower bit width represented by the mask, and the AND
-  /// instruction is added to CI.
-  static Instruction *lookThroughAnd(PHINode *Phi, Type *&RT,
-                                     SmallPtrSetImpl<Instruction *> &Visited,
-                                     SmallPtrSetImpl<Instruction *> &CI);
-
-  /// Returns true if all the source operands of a recurrence are either
-  /// SExtInsts or ZExtInsts. This function is intended to be used with
-  /// lookThroughAnd to determine if the recurrence has been type-promoted. The
-  /// source operands are added to CI, and IsSigned is updated to indicate if
-  /// all source operands are SExtInsts.
-  static bool getSourceExtensionKind(Instruction *Start, Instruction *Exit,
-                                     Type *RT, bool &IsSigned,
-                                     SmallPtrSetImpl<Instruction *> &Visited,
-                                     SmallPtrSetImpl<Instruction *> &CI);
-
-  /// Returns the type of the recurrence. This type can be narrower than the
-  /// actual type of the Phi if the recurrence has been type-promoted.
-  Type *getRecurrenceType() { return RecurrenceType; }
-
-  /// Returns a reference to the instructions used for type-promoting the
-  /// recurrence.
-  SmallPtrSet<Instruction *, 8> &getCastInsts() { return CastInsts; }
-
-  /// Returns true if all source operands of the recurrence are SExtInsts.
-  bool isSigned() { return IsSigned; }
-
-private:
-  // The starting value of the recurrence.
-  // It does not have to be zero!
-  TrackingVH<Value> StartValue;
-  // The instruction who's value is used outside the loop.
-  Instruction *LoopExitInstr = nullptr;
-  // The kind of the recurrence.
-  RecurrenceKind Kind = RK_NoRecurrence;
-  // If this a min/max recurrence the kind of recurrence.
-  MinMaxRecurrenceKind MinMaxKind = MRK_Invalid;
-  // First occurrence of unasfe algebra in the PHI's use-chain.
-  Instruction *UnsafeAlgebraInst = nullptr;
-  // The type of the recurrence.
-  Type *RecurrenceType = nullptr;
-  // True if all source operands of the recurrence are SExtInsts.
-  bool IsSigned = false;
-  // Instructions used for type-promoting the recurrence.
-  SmallPtrSet<Instruction *, 8> CastInsts;
-};
-
-/// A struct for saving information about induction variables.
-class InductionDescriptor {
-public:
-  /// This enum represents the kinds of inductions that we support.
-  enum InductionKind {
-    IK_NoInduction,  ///< Not an induction variable.
-    IK_IntInduction, ///< Integer induction variable. Step = C.
-    IK_PtrInduction, ///< Pointer induction var. Step = C / sizeof(elem).
-    IK_FpInduction   ///< Floating point induction variable.
-  };
-
-public:
-  /// Default constructor - creates an invalid induction.
-  InductionDescriptor() = default;
-
-  /// Get the consecutive direction. Returns:
-  ///   0 - unknown or non-consecutive.
-  ///   1 - consecutive and increasing.
-  ///  -1 - consecutive and decreasing.
-  int getConsecutiveDirection() const;
-
-  /// Compute the transformed value of Index at offset StartValue using step
-  /// StepValue.
-  /// For integer induction, returns StartValue + Index * StepValue.
-  /// For pointer induction, returns StartValue[Index * StepValue].
-  /// FIXME: The newly created binary instructions should contain nsw/nuw
-  /// flags, which can be found from the original scalar operations.
-  Value *transform(IRBuilder<> &B, Value *Index, ScalarEvolution *SE,
-                   const DataLayout& DL) const;
-
-  Value *getStartValue() const { return StartValue; }
-  InductionKind getKind() const { return IK; }
-  const SCEV *getStep() const { return Step; }
-  ConstantInt *getConstIntStepValue() const;
-
-  /// Returns true if \p Phi is an induction in the loop \p L. If \p Phi is an
-  /// induction, the induction descriptor \p D will contain the data describing
-  /// this induction. If by some other means the caller has a better SCEV
-  /// expression for \p Phi than the one returned by the ScalarEvolution
-  /// analysis, it can be passed through \p Expr.
-  static bool isInductionPHI(PHINode *Phi, const Loop* L, ScalarEvolution *SE,
-                             InductionDescriptor &D,
-                             const SCEV *Expr = nullptr);
-
-  /// Returns true if \p Phi is a floating point induction in the loop \p L.
-  /// If \p Phi is an induction, the induction descriptor \p D will contain 
-  /// the data describing this induction.
-  static bool isFPInductionPHI(PHINode *Phi, const Loop* L,
-                               ScalarEvolution *SE, InductionDescriptor &D);
-
-  /// Returns true if \p Phi is a loop \p L induction, in the context associated
-  /// with the run-time predicate of PSE. If \p Assume is true, this can add
-  /// further SCEV predicates to \p PSE in order to prove that \p Phi is an
-  /// induction.
-  /// If \p Phi is an induction, \p D will contain the data describing this
-  /// induction.
-  static bool isInductionPHI(PHINode *Phi, const Loop* L,
-                             PredicatedScalarEvolution &PSE,
-                             InductionDescriptor &D, bool Assume = false);
-
-  /// Returns true if the induction type is FP and the binary operator does
-  /// not have the "fast-math" property. Such operation requires a relaxed FP
-  /// mode.
-  bool hasUnsafeAlgebra() {
-    return InductionBinOp &&
-      !cast<FPMathOperator>(InductionBinOp)->hasUnsafeAlgebra();
-  }
-
-  /// Returns induction operator that does not have "fast-math" property
-  /// and requires FP unsafe mode.
-  Instruction *getUnsafeAlgebraInst() {
-    if (!InductionBinOp ||
-        cast<FPMathOperator>(InductionBinOp)->hasUnsafeAlgebra())
-      return nullptr;
-    return InductionBinOp;
-  }
-
-  /// Returns binary opcode of the induction operator.
-  Instruction::BinaryOps getInductionOpcode() const {
-    return InductionBinOp ? InductionBinOp->getOpcode() :
-      Instruction::BinaryOpsEnd;
-  }
-
-private:
-  /// Private constructor - used by \c isInductionPHI.
-  InductionDescriptor(Value *Start, InductionKind K, const SCEV *Step,
-                      BinaryOperator *InductionBinOp = nullptr);
-
-  /// Start value.
-  TrackingVH<Value> StartValue;
-  /// Induction kind.
-  InductionKind IK = IK_NoInduction;
-  /// Step value.
-  const SCEV *Step = nullptr;
-  // Instruction that advances induction variable.
-  BinaryOperator *InductionBinOp = nullptr;
-};
 
 BasicBlock *InsertPreheaderForLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
                                    bool PreserveLCSSA);
@@ -390,11 +74,12 @@ bool formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
 bool formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
                               DominatorTree &DT, LoopInfo &LI);
 
-/// \brief Put loop into LCSSA form.
+/// Put loop into LCSSA form.
 ///
 /// Looks at all instructions in the loop which have uses outside of the
 /// current loop. For each, an LCSSA PHI node is inserted and the uses outside
-/// the loop are rewritten to use this node.
+/// the loop are rewritten to use this node. Sub-loops must be in LCSSA form
+/// already.
 ///
 /// LoopInfo and DominatorTree are required and preserved.
 ///
@@ -403,7 +88,7 @@ bool formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
 /// Returns true if any modifications are made to the loop.
 bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution *SE);
 
-/// \brief Put a loop nest into LCSSA form.
+/// Put a loop nest into LCSSA form.
 ///
 /// This recursively forms LCSSA for a loop nest.
 ///
@@ -415,7 +100,7 @@ bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution *SE);
 bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
                           ScalarEvolution *SE);
 
-/// \brief Walk the specified region of the CFG (defined by all blocks
+/// Walk the specified region of the CFG (defined by all blocks
 /// dominated by the specified block, and that are in the current loop) in
 /// reverse depth first order w.r.t the DominatorTree. This allows us to visit
 /// uses before definitions, allowing us to sink a loop body in one pass without
@@ -424,10 +109,11 @@ bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
 /// instructions of the loop and loop safety information as
 /// arguments. Diagnostics is emitted via \p ORE. It returns changed status.
 bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
-                TargetLibraryInfo *, Loop *, AliasSetTracker *,
-                LoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
+                TargetLibraryInfo *, TargetTransformInfo *, Loop *,
+                AliasSetTracker *, MemorySSAUpdater *, ICFLoopSafetyInfo *,
+                OptimizationRemarkEmitter *ORE);
 
-/// \brief Walk the specified region of the CFG (defined by all blocks
+/// Walk the specified region of the CFG (defined by all blocks
 /// dominated by the specified block, and that are in the current loop) in depth
 /// first order w.r.t the DominatorTree.  This allows us to visit definitions
 /// before uses, allowing us to hoist a loop body in one pass without iteration.
@@ -437,7 +123,8 @@ bool sinkRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 /// ORE. It returns changed status.
 bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
                  TargetLibraryInfo *, Loop *, AliasSetTracker *,
-                 LoopSafetyInfo *, OptimizationRemarkEmitter *ORE);
+                 MemorySSAUpdater *, ICFLoopSafetyInfo *,
+                 OptimizationRemarkEmitter *ORE);
 
 /// This function deletes dead loops. The caller of this function needs to
 /// guarantee that the loop is infact dead.
@@ -453,7 +140,7 @@ bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 void deleteDeadLoop(Loop *L, DominatorTree *DT, ScalarEvolution *SE,
                     LoopInfo *LI);
 
-/// \brief Try to promote memory values to scalars by sinking stores out of
+/// Try to promote memory values to scalars by sinking stores out of
 /// the loop and moving loads to before the loop.  We do this by looping over
 /// the stores in the loop, looking for stores to Must pointers which are
 /// loop invariant. It takes a set of must-alias values, Loop exit blocks
@@ -466,7 +153,8 @@ bool promoteLoopAccessesToScalars(const SmallSetVector<Value *, 8> &,
                                   SmallVectorImpl<Instruction *> &,
                                   PredIteratorCache &, LoopInfo *,
                                   DominatorTree *, const TargetLibraryInfo *,
-                                  Loop *, AliasSetTracker *, LoopSafetyInfo *,
+                                  Loop *, AliasSetTracker *,
+                                  ICFLoopSafetyInfo *,
                                   OptimizationRemarkEmitter *);
 
 /// Does a BFS from a given node to all of its children inside a given loop.
@@ -474,37 +162,101 @@ bool promoteLoopAccessesToScalars(const SmallSetVector<Value *, 8> &,
 SmallVector<DomTreeNode *, 16> collectChildrenInLoop(DomTreeNode *N,
                                                      const Loop *CurLoop);
 
-/// \brief Computes safety information for a loop
-/// checks loop body & header for the possibility of may throw
-/// exception, it takes LoopSafetyInfo and loop as argument.
-/// Updates safety information in LoopSafetyInfo argument.
-void computeLoopSafetyInfo(LoopSafetyInfo *, Loop *);
-
-/// Returns true if the instruction in a loop is guaranteed to execute at least
-/// once.
-bool isGuaranteedToExecute(const Instruction &Inst, const DominatorTree *DT,
-                           const Loop *CurLoop,
-                           const LoopSafetyInfo *SafetyInfo);
-
-/// \brief Returns the instructions that use values defined in the loop.
+/// Returns the instructions that use values defined in the loop.
 SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
 
-/// \brief Find string metadata for loop
+/// Find string metadata for loop
 ///
 /// If it has a value (e.g. {"llvm.distribute", 1} return the value as an
 /// operand or null otherwise.  If the string metadata is not found return
 /// Optional's not-a-value.
-Optional<const MDOperand *> findStringMetadataForLoop(Loop *TheLoop,
+Optional<const MDOperand *> findStringMetadataForLoop(const Loop *TheLoop,
                                                       StringRef Name);
 
-/// \brief Set input string into loop metadata by keeping other values intact.
+/// Find named metadata for a loop with an integer value.
+llvm::Optional<int> getOptionalIntLoopAttribute(Loop *TheLoop, StringRef Name);
+
+/// Create a new loop identifier for a loop created from a loop transformation.
+///
+/// @param OrigLoopID The loop ID of the loop before the transformation.
+/// @param FollowupAttrs List of attribute names that contain attributes to be
+///                      added to the new loop ID.
+/// @param InheritOptionsAttrsPrefix Selects which attributes should be inherited
+///                                  from the original loop. The following values
+///                                  are considered:
+///        nullptr   : Inherit all attributes from @p OrigLoopID.
+///        ""        : Do not inherit any attribute from @p OrigLoopID; only use
+///                    those specified by a followup attribute.
+///        "<prefix>": Inherit all attributes except those which start with
+///                    <prefix>; commonly used to remove metadata for the
+///                    applied transformation.
+/// @param AlwaysNew If true, do not try to reuse OrigLoopID and never return
+///                  None.
+///
+/// @return The loop ID for the after-transformation loop. The following values
+///         can be returned:
+///         None         : No followup attribute was found; it is up to the
+///                        transformation to choose attributes that make sense.
+///         @p OrigLoopID: The original identifier can be reused.
+///         nullptr      : The new loop has no attributes.
+///         MDNode*      : A new unique loop identifier.
+Optional<MDNode *>
+makeFollowupLoopID(MDNode *OrigLoopID, ArrayRef<StringRef> FollowupAttrs,
+                   const char *InheritOptionsAttrsPrefix = "",
+                   bool AlwaysNew = false);
+
+/// Look for the loop attribute that disables all transformation heuristic.
+bool hasDisableAllTransformsHint(const Loop *L);
+
+/// The mode sets how eager a transformation should be applied.
+enum TransformationMode {
+  /// The pass can use heuristics to determine whether a transformation should
+  /// be applied.
+  TM_Unspecified,
+
+  /// The transformation should be applied without considering a cost model.
+  TM_Enable,
+
+  /// The transformation should not be applied.
+  TM_Disable,
+
+  /// Force is a flag and should not be used alone.
+  TM_Force = 0x04,
+
+  /// The transformation was directed by the user, e.g. by a #pragma in
+  /// the source code. If the transformation could not be applied, a
+  /// warning should be emitted.
+  TM_ForcedByUser = TM_Enable | TM_Force,
+
+  /// The transformation must not be applied. For instance, `#pragma clang loop
+  /// unroll(disable)` explicitly forbids any unrolling to take place. Unlike
+  /// general loop metadata, it must not be dropped. Most passes should not
+  /// behave differently under TM_Disable and TM_SuppressedByUser.
+  TM_SuppressedByUser = TM_Disable | TM_Force
+};
+
+/// @{
+/// Get the mode for LLVM's supported loop transformations.
+TransformationMode hasUnrollTransformation(Loop *L);
+TransformationMode hasUnrollAndJamTransformation(Loop *L);
+TransformationMode hasVectorizeTransformation(Loop *L);
+TransformationMode hasDistributeTransformation(Loop *L);
+TransformationMode hasLICMVersioningTransformation(Loop *L);
+/// @}
+
+/// Set input string into loop metadata by keeping other values intact.
 void addStringMetadataToLoop(Loop *TheLoop, const char *MDString,
                              unsigned V = 0);
 
-/// \brief Get a loop's estimated trip count based on branch weight metadata.
+/// Get a loop's estimated trip count based on branch weight metadata.
 /// Returns 0 when the count is estimated to be 0, or None when a meaningful
 /// estimate can not be made.
 Optional<unsigned> getLoopEstimatedTripCount(Loop *L);
+
+/// Check inner loop (L) backedge count is known to be invariant on all
+/// iterations of its outer loop. If the loop has no parent, this is trivially
+/// true.
+bool hasIterationCountInvariantInParent(Loop *L, ScalarEvolution &SE);
 
 /// Helper to consistently add the set of standard passes to a loop pass's \c
 /// AnalysisUsage.
@@ -513,35 +265,49 @@ Optional<unsigned> getLoopEstimatedTripCount(Loop *L);
 /// getAnalysisUsage.
 void getLoopAnalysisUsage(AnalysisUsage &AU);
 
-/// Returns true if the hoister and sinker can handle this instruction.
-/// If SafetyInfo is null, we are checking for sinking instructions from
-/// preheader to loop body (no speculation).
-/// If SafetyInfo is not null, we are checking for hoisting/sinking
-/// instructions from loop body to preheader/exit. Check if the instruction
-/// can execute speculatively.
+/// Returns true if is legal to hoist or sink this instruction disregarding the
+/// possible introduction of faults.  Reasoning about potential faulting
+/// instructions is the responsibility of the caller since it is challenging to
+/// do efficiently from within this routine.
+/// \p TargetExecutesOncePerLoop is true only when it is guaranteed that the
+/// target executes at most once per execution of the loop body.  This is used
+/// to assess the legality of duplicating atomic loads.  Generally, this is
+/// true when moving out of loop and not true when moving into loops.
 /// If \p ORE is set use it to emit optimization remarks.
 bool canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                         Loop *CurLoop, AliasSetTracker *CurAST,
-                        LoopSafetyInfo *SafetyInfo,
+                        MemorySSAUpdater *MSSAU, bool TargetExecutesOncePerLoop,
                         OptimizationRemarkEmitter *ORE = nullptr);
+
+/// Returns a Min/Max operation corresponding to MinMaxRecurrenceKind.
+Value *createMinMaxOp(IRBuilder<> &Builder,
+                      RecurrenceDescriptor::MinMaxRecurrenceKind RK,
+                      Value *Left, Value *Right);
+
+/// Generates an ordered vector reduction using extracts to reduce the value.
+Value *
+getOrderedReduction(IRBuilder<> &Builder, Value *Acc, Value *Src, unsigned Op,
+                    RecurrenceDescriptor::MinMaxRecurrenceKind MinMaxKind =
+                        RecurrenceDescriptor::MRK_Invalid,
+                    ArrayRef<Value *> RedOps = None);
 
 /// Generates a vector reduction using shufflevectors to reduce the value.
 Value *getShuffleReduction(IRBuilder<> &Builder, Value *Src, unsigned Op,
                            RecurrenceDescriptor::MinMaxRecurrenceKind
                                MinMaxKind = RecurrenceDescriptor::MRK_Invalid,
-                           ArrayRef<Value *> RedOps = ArrayRef<Value *>());
+                           ArrayRef<Value *> RedOps = None);
 
 /// Create a target reduction of the given vector. The reduction operation
 /// is described by the \p Opcode parameter. min/max reductions require
 /// additional information supplied in \p Flags.
 /// The target is queried to determine if intrinsics or shuffle sequences are
 /// required to implement the reduction.
-Value *
-createSimpleTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
-                            unsigned Opcode, Value *Src,
-                            TargetTransformInfo::ReductionFlags Flags =
-                                TargetTransformInfo::ReductionFlags(),
-                            ArrayRef<Value *> RedOps = ArrayRef<Value *>());
+Value *createSimpleTargetReduction(IRBuilder<> &B,
+                                   const TargetTransformInfo *TTI,
+                                   unsigned Opcode, Value *Src,
+                                   TargetTransformInfo::ReductionFlags Flags =
+                                       TargetTransformInfo::ReductionFlags(),
+                                   ArrayRef<Value *> RedOps = None);
 
 /// Create a generic target reduction using a recurrence descriptor \p Desc
 /// The target is queried to determine if intrinsics or shuffle sequences are
@@ -556,6 +322,23 @@ Value *createTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
 /// when intersecting.
 /// Flag set: NSW, NUW, exact, and all of fast-math.
 void propagateIRFlags(Value *I, ArrayRef<Value *> VL, Value *OpValue = nullptr);
+
+/// Returns true if we can prove that \p S is defined and always negative in
+/// loop \p L.
+bool isKnownNegativeInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE);
+
+/// Returns true if we can prove that \p S is defined and always non-negative in
+/// loop \p L.
+bool isKnownNonNegativeInLoop(const SCEV *S, const Loop *L,
+                              ScalarEvolution &SE);
+
+/// Returns true if \p S is defined and never is equal to signed/unsigned max.
+bool cannotBeMaxInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
+                       bool Signed);
+
+/// Returns true if \p S is defined and never is equal to signed/unsigned min.
+bool cannotBeMinInLoop(const SCEV *S, const Loop *L, ScalarEvolution &SE,
+                       bool Signed);
 
 } // end namespace llvm
 

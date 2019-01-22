@@ -1,9 +1,8 @@
 //===- AMDGPUAnnotateKernelFeaturesPass.cpp -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,7 +45,6 @@ namespace {
 class AMDGPUAnnotateKernelFeatures : public CallGraphSCCPass {
 private:
   const TargetMachine *TM = nullptr;
-  AMDGPUAS AS;
 
   bool addFeatureAttributes(Function &F);
 
@@ -67,11 +65,10 @@ public:
     CallGraphSCCPass::getAnalysisUsage(AU);
   }
 
-  static bool visitConstantExpr(const ConstantExpr *CE, AMDGPUAS AS);
+  static bool visitConstantExpr(const ConstantExpr *CE);
   static bool visitConstantExprsRecursively(
     const Constant *EntryC,
-    SmallPtrSet<const Constant *, 8> &ConstantExprVisited,
-    AMDGPUAS AS);
+    SmallPtrSet<const Constant *, 8> &ConstantExprVisited);
 };
 
 } // end anonymous namespace
@@ -85,20 +82,18 @@ INITIALIZE_PASS(AMDGPUAnnotateKernelFeatures, DEBUG_TYPE,
 
 
 // The queue ptr is only needed when casting to flat, not from it.
-static bool castRequiresQueuePtr(unsigned SrcAS, const AMDGPUAS &AS) {
-  return SrcAS == AS.LOCAL_ADDRESS || SrcAS == AS.PRIVATE_ADDRESS;
+static bool castRequiresQueuePtr(unsigned SrcAS) {
+  return SrcAS == AMDGPUAS::LOCAL_ADDRESS || SrcAS == AMDGPUAS::PRIVATE_ADDRESS;
 }
 
-static bool castRequiresQueuePtr(const AddrSpaceCastInst *ASC,
-    const AMDGPUAS &AS) {
-  return castRequiresQueuePtr(ASC->getSrcAddressSpace(), AS);
+static bool castRequiresQueuePtr(const AddrSpaceCastInst *ASC) {
+  return castRequiresQueuePtr(ASC->getSrcAddressSpace());
 }
 
-bool AMDGPUAnnotateKernelFeatures::visitConstantExpr(const ConstantExpr *CE,
-    AMDGPUAS AS) {
+bool AMDGPUAnnotateKernelFeatures::visitConstantExpr(const ConstantExpr *CE) {
   if (CE->getOpcode() == Instruction::AddrSpaceCast) {
     unsigned SrcAS = CE->getOperand(0)->getType()->getPointerAddressSpace();
-    return castRequiresQueuePtr(SrcAS, AS);
+    return castRequiresQueuePtr(SrcAS);
   }
 
   return false;
@@ -106,8 +101,7 @@ bool AMDGPUAnnotateKernelFeatures::visitConstantExpr(const ConstantExpr *CE,
 
 bool AMDGPUAnnotateKernelFeatures::visitConstantExprsRecursively(
   const Constant *EntryC,
-  SmallPtrSet<const Constant *, 8> &ConstantExprVisited,
-  AMDGPUAS AS) {
+  SmallPtrSet<const Constant *, 8> &ConstantExprVisited) {
 
   if (!ConstantExprVisited.insert(EntryC).second)
     return false;
@@ -120,7 +114,7 @@ bool AMDGPUAnnotateKernelFeatures::visitConstantExprsRecursively(
 
     // Check this constant expression.
     if (const auto *CE = dyn_cast<ConstantExpr>(C)) {
-      if (visitConstantExpr(CE, AS))
+      if (visitConstantExpr(CE))
         return true;
     }
 
@@ -219,7 +213,7 @@ static void copyFeaturesToFunction(Function &Parent, const Function &Callee,
 }
 
 bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
-  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>(F);
+  const GCNSubtarget &ST = TM->getSubtarget<GCNSubtarget>(F);
   bool HasFlat = ST.hasFlatAddressSpace();
   bool HasApertureRegs = ST.hasApertureRegs();
   SmallPtrSet<const Constant *, 8> ConstantExprVisited;
@@ -262,7 +256,7 @@ bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
         continue;
 
       if (const AddrSpaceCastInst *ASC = dyn_cast<AddrSpaceCastInst>(&I)) {
-        if (castRequiresQueuePtr(ASC, AS)) {
+        if (castRequiresQueuePtr(ASC)) {
           NeedQueuePtr = true;
           continue;
         }
@@ -273,7 +267,7 @@ bool AMDGPUAnnotateKernelFeatures::addFeatureAttributes(Function &F) {
         if (!OpC)
           continue;
 
-        if (visitConstantExprsRecursively(OpC, ConstantExprVisited, AS)) {
+        if (visitConstantExprsRecursively(OpC, ConstantExprVisited)) {
           NeedQueuePtr = true;
           break;
         }
@@ -318,7 +312,6 @@ bool AMDGPUAnnotateKernelFeatures::doInitialization(CallGraph &CG) {
   if (!TPC)
     report_fatal_error("TargetMachine is required");
 
-  AS = AMDGPU::getAMDGPUAS(CG.getModule());
   TM = &TPC->getTM<TargetMachine>();
   return false;
 }

@@ -1,9 +1,8 @@
 //===-- Statistic.cpp - Easy way to expose stats information --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -39,22 +38,27 @@ using namespace llvm;
 /// -stats - Command line option to cause transformations to emit stats about
 /// what they did.
 ///
-static cl::opt<bool> Stats("stats",
-    cl::desc("Enable statistics output from program (available with Asserts)"));
-
+static cl::opt<bool> Stats(
+    "stats",
+    cl::desc("Enable statistics output from program (available with Asserts)"),
+    cl::Hidden);
 
 static cl::opt<bool> StatsAsJSON("stats-json",
-                                 cl::desc("Display statistics as json data"));
+                                 cl::desc("Display statistics as json data"),
+                                 cl::Hidden);
 
 static bool Enabled;
 static bool PrintOnExit;
 
 namespace {
-/// StatisticInfo - This class is used in a ManagedStatic so that it is created
-/// on demand (when the first statistic is bumped) and destroyed only when
-/// llvm_shutdown is called.  We print statistics from the destructor.
+/// This class is used in a ManagedStatic so that it is created on demand (when
+/// the first statistic is bumped) and destroyed only when llvm_shutdown is
+/// called. We print statistics from the destructor.
+/// This class is also used to look up statistic values from applications that
+/// use LLVM.
 class StatisticInfo {
-  std::vector<const Statistic*> Stats;
+  std::vector<Statistic*> Stats;
+
   friend void llvm::PrintStatistics();
   friend void llvm::PrintStatistics(raw_ostream &OS);
   friend void llvm::PrintStatisticsJSON(raw_ostream &OS);
@@ -62,14 +66,24 @@ class StatisticInfo {
   /// Sort statistics by debugtype,name,description.
   void sort();
 public:
+  using const_iterator = std::vector<Statistic *>::const_iterator;
+
   StatisticInfo();
   ~StatisticInfo();
 
-  void addStatistic(const Statistic *S) {
+  void addStatistic(Statistic *S) {
     Stats.push_back(S);
   }
+
+  const_iterator begin() const { return Stats.begin(); }
+  const_iterator end() const { return Stats.end(); }
+  iterator_range<const_iterator> statistics() const {
+    return {begin(), end()};
+  }
+
+  void reset();
 };
-}
+} // end anonymous namespace
 
 static ManagedStatic<StatisticInfo> StatInfo;
 static ManagedStatic<sys::SmartMutex<true> > StatLock;
@@ -79,17 +93,24 @@ static ManagedStatic<sys::SmartMutex<true> > StatLock;
 void Statistic::RegisterStatistic() {
   // If stats are enabled, inform StatInfo that this statistic should be
   // printed.
-  sys::SmartScopedLock<true> Writer(*StatLock);
-  if (!Initialized) {
+  // llvm_shutdown calls destructors while holding the ManagedStatic mutex.
+  // These destructors end up calling PrintStatistics, which takes StatLock.
+  // Since dereferencing StatInfo and StatLock can require taking the
+  // ManagedStatic mutex, doing so with StatLock held would lead to a lock
+  // order inversion. To avoid that, we dereference the ManagedStatics first,
+  // and only take StatLock afterwards.
+  if (!Initialized.load(std::memory_order_relaxed)) {
+    sys::SmartMutex<true> &Lock = *StatLock;
+    StatisticInfo &SI = *StatInfo;
+    sys::SmartScopedLock<true> Writer(Lock);
+    // Check Initialized again after acquiring the lock.
+    if (Initialized.load(std::memory_order_relaxed))
+      return;
     if (Stats || Enabled)
-      StatInfo->addStatistic(this);
+      SI.addStatistic(this);
 
-    TsanHappensBefore(this);
-    sys::MemoryFence();
     // Remember we have been registered.
-    TsanIgnoreWritesBegin();
-    Initialized = true;
-    TsanIgnoreWritesEnd();
+    Initialized.store(true, std::memory_order_release);
   }
 }
 
@@ -126,6 +147,28 @@ void StatisticInfo::sort() {
   });
 }
 
+void StatisticInfo::reset() {
+  sys::SmartScopedLock<true> Writer(*StatLock);
+
+  // Tell each statistic that it isn't registered so it has to register
+  // again. We're holding the lock so it won't be able to do so until we're
+  // finished. Once we've forced it to re-register (after we return), then zero
+  // the value.
+  for (auto *Stat : Stats) {
+    // Value updates to a statistic that complete before this statement in the
+    // iteration for that statistic will be lost as intended.
+    Stat->Initialized = false;
+    Stat->Value = 0;
+  }
+
+  // Clear the registration list and release the lock once we're done. Any
+  // pending updates from other threads will safely take effect after we return.
+  // That might not be what the user wants if they're measuring a compilation
+  // but it's their responsibility to prevent concurrent compilations to make
+  // a single compilation measurable.
+  Stats.clear();
+}
+
 void llvm::PrintStatistics(raw_ostream &OS) {
   StatisticInfo &Stats = *StatInfo;
 
@@ -157,6 +200,7 @@ void llvm::PrintStatistics(raw_ostream &OS) {
 }
 
 void llvm::PrintStatisticsJSON(raw_ostream &OS) {
+  sys::SmartScopedLock<true> Reader(*StatLock);
   StatisticInfo &Stats = *StatInfo;
 
   Stats.sort();
@@ -166,9 +210,10 @@ void llvm::PrintStatisticsJSON(raw_ostream &OS) {
   const char *delim = "";
   for (const Statistic *Stat : Stats.Stats) {
     OS << delim;
-    assert(!yaml::needsQuotes(Stat->getDebugType()) &&
+    assert(yaml::needsQuotes(Stat->getDebugType()) == yaml::QuotingType::None &&
            "Statistic group/type name is simple.");
-    assert(!yaml::needsQuotes(Stat->getName()) && "Statistic name is simple");
+    assert(yaml::needsQuotes(Stat->getName()) == yaml::QuotingType::None &&
+           "Statistic name is simple");
     OS << "\t\"" << Stat->getDebugType() << '.' << Stat->getName() << "\": "
        << Stat->getValue();
     delim = ",\n";
@@ -181,7 +226,8 @@ void llvm::PrintStatisticsJSON(raw_ostream &OS) {
 }
 
 void llvm::PrintStatistics() {
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
+#if LLVM_ENABLE_STATS
+  sys::SmartScopedLock<true> Reader(*StatLock);
   StatisticInfo &Stats = *StatInfo;
 
   // Statistics not enabled?
@@ -205,4 +251,17 @@ void llvm::PrintStatistics() {
                  << "Build with asserts or with -DLLVM_ENABLE_STATS\n";
   }
 #endif
+}
+
+const std::vector<std::pair<StringRef, unsigned>> llvm::GetStatistics() {
+  sys::SmartScopedLock<true> Reader(*StatLock);
+  std::vector<std::pair<StringRef, unsigned>> ReturnStats;
+
+  for (const auto &Stat : StatInfo->statistics())
+    ReturnStats.emplace_back(Stat->getName(), Stat->getValue());
+  return ReturnStats;
+}
+
+void llvm::ResetStatistics() {
+  StatInfo->reset();
 }

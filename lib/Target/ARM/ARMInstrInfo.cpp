@@ -1,9 +1,8 @@
 //===-- ARMInstrInfo.cpp - ARM Instruction Information --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -132,6 +131,6 @@ void ARMInstrInfo::expandLoadStackGuard(MachineBasicBlock::iterator MI) const {
   BuildMI(MBB, MI, DL, get(ARM::LDRi12), Reg)
       .addReg(Reg, RegState::Kill)
       .addImm(0)
-      .setMemRefs(MI->memoperands_begin(), MI->memoperands_end())
+      .cloneMemRefs(*MI)
       .add(predOps(ARMCC::AL));
 }

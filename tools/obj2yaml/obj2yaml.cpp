@@ -1,20 +1,17 @@
 //===------ utils/obj2yaml.cpp - obj2yaml conversion tool -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
-#include "Error.h"
 #include "obj2yaml.h"
+#include "Error.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
+#include "llvm/Support/InitLLVM.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -52,7 +49,7 @@ static void reportError(StringRef Input, Error Err) {
     Input = "<stdin>";
   std::string ErrMsg;
   raw_string_ostream OS(ErrMsg);
-  logAllUnhandledErrors(std::move(Err), OS, "");
+  logAllUnhandledErrors(std::move(Err), OS);
   OS.flush();
   errs() << "Error reading file: " << Input << ": " << ErrMsg;
   errs().flush();
@@ -62,10 +59,8 @@ cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<input file>"),
                                    cl::init("-"));
 
 int main(int argc, char *argv[]) {
+  InitLLVM X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv);
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
 
   if (Error Err = dumpInput(InputFilename)) {
     reportError(InputFilename, std::move(Err));

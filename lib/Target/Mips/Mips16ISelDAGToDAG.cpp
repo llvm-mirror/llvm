@@ -1,9 +1,8 @@
 //===-- Mips16ISelDAGToDAG.cpp - A Dag to Dag Inst Selector for Mips16 ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -191,41 +190,6 @@ bool Mips16DAGToDAGISel::trySelect(SDNode *Node) {
   switch (Opcode) {
   default:
     break;
-
-  case ISD::SUBE:
-  case ISD::ADDE: {
-    SDValue InFlag = Node->getOperand(2), CmpLHS;
-    unsigned Opc = InFlag.getOpcode();
-    (void)Opc;
-    assert(((Opc == ISD::ADDC || Opc == ISD::ADDE) ||
-            (Opc == ISD::SUBC || Opc == ISD::SUBE)) &&
-           "(ADD|SUB)E flag operand must come from (ADD|SUB)C/E insn");
-
-    unsigned MOp;
-    if (Opcode == ISD::ADDE) {
-      CmpLHS = InFlag.getValue(0);
-      MOp = Mips::AdduRxRyRz16;
-    } else {
-      CmpLHS = InFlag.getOperand(0);
-      MOp = Mips::SubuRxRyRz16;
-    }
-
-    SDValue Ops[] = {CmpLHS, InFlag.getOperand(1)};
-
-    SDValue LHS = Node->getOperand(0);
-    SDValue RHS = Node->getOperand(1);
-
-    EVT VT = LHS.getValueType();
-
-    unsigned Sltu_op = Mips::SltuRxRyRz16;
-    SDNode *Carry = CurDAG->getMachineNode(Sltu_op, DL, VT, Ops);
-    unsigned Addu_op = Mips::AdduRxRyRz16;
-    SDNode *AddCarry =
-        CurDAG->getMachineNode(Addu_op, DL, VT, SDValue(Carry, 0), RHS);
-
-    CurDAG->SelectNodeTo(Node, MOp, VT, MVT::Glue, LHS, SDValue(AddCarry, 0));
-    return true;
-  }
 
   /// Mul with two results
   case ISD::SMUL_LOHI:

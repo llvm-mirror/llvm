@@ -1,9 +1,8 @@
 //=- X86InstComments.h - Generate verbose-asm comments for instrs -*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,14 +16,11 @@
 
 namespace llvm {
 
-  enum AsmComments {
-    AC_EVEX_2_VEX = 0x2 // For instr that was compressed from EVEX to VEX.
-  };
-
   class MCInst;
+  class MCInstrInfo;
   class raw_ostream;
   bool EmitAnyX86InstComments(const MCInst *MI, raw_ostream &OS,
-                              const char *(*getRegName)(unsigned));
+                              const MCInstrInfo &MCII);
 }
 
 #endif

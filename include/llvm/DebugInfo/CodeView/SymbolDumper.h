@@ -1,9 +1,8 @@
 //===-- SymbolDumper.h - CodeView symbol info dumper ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,10 +26,10 @@ class CVSymbolDumper {
 public:
   CVSymbolDumper(ScopedPrinter &W, TypeCollection &Types,
                  CodeViewContainer Container,
-                 std::unique_ptr<SymbolDumpDelegate> ObjDelegate,
+                 std::unique_ptr<SymbolDumpDelegate> ObjDelegate, CPUType CPU,
                  bool PrintRecordBytes)
       : W(W), Types(Types), Container(Container),
-        ObjDelegate(std::move(ObjDelegate)),
+        ObjDelegate(std::move(ObjDelegate)), CompilationCPUType(CPU),
         PrintRecordBytes(PrintRecordBytes) {}
 
   /// Dumps one type record.  Returns false if there was a type parsing error,
@@ -43,12 +42,14 @@ public:
   /// parse error, and true otherwise.
   Error dump(const CVSymbolArray &Symbols);
 
+  CPUType getCompilationCPUType() const { return CompilationCPUType; }
+
 private:
   ScopedPrinter &W;
   TypeCollection &Types;
   CodeViewContainer Container;
   std::unique_ptr<SymbolDumpDelegate> ObjDelegate;
-
+  CPUType CompilationCPUType;
   bool PrintRecordBytes;
 };
 } // end namespace codeview

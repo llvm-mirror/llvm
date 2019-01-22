@@ -1,9 +1,8 @@
 //===- SpecialCaseListTest.cpp - Unit tests for SpecialCaseList -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -58,6 +57,30 @@ TEST_F(SpecialCaseListTest, Basic) {
   EXPECT_FALSE(SCL->inSection("", "src", "hi"));
   EXPECT_FALSE(SCL->inSection("", "fun", "hello"));
   EXPECT_FALSE(SCL->inSection("", "src", "hello", "category"));
+
+  EXPECT_EQ(3u, SCL->inSectionBlame("", "src", "hello"));
+  EXPECT_EQ(4u, SCL->inSectionBlame("", "src", "bye"));
+  EXPECT_EQ(5u, SCL->inSectionBlame("", "src", "hi", "category"));
+  EXPECT_EQ(6u, SCL->inSectionBlame("", "src", "zzzz", "category"));
+  EXPECT_EQ(0u, SCL->inSectionBlame("", "src", "hi"));
+  EXPECT_EQ(0u, SCL->inSectionBlame("", "fun", "hello"));
+  EXPECT_EQ(0u, SCL->inSectionBlame("", "src", "hello", "category"));
+}
+
+TEST_F(SpecialCaseListTest, CorrectErrorLineNumberWithBlankLine) {
+  std::string Error;
+  EXPECT_EQ(nullptr, makeSpecialCaseList("# This is a comment.\n"
+                                         "\n"
+                                         "[not valid\n",
+                                         Error));
+  EXPECT_TRUE(
+      ((StringRef)Error).startswith("malformed section header on line 3:"));
+
+  EXPECT_EQ(nullptr, makeSpecialCaseList("\n\n\n"
+                                         "[not valid\n",
+                                         Error));
+  EXPECT_TRUE(
+      ((StringRef)Error).startswith("malformed section header on line 4:"));
 }
 
 TEST_F(SpecialCaseListTest, SectionRegexErrorHandling) {

@@ -1,16 +1,15 @@
 //===-- DebugLoc.cpp - Implement DebugLoc class ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/DebugLoc.h"
 #include "LLVMContextImpl.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/IntrinsicInst.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -56,15 +55,28 @@ DebugLoc DebugLoc::getFnDebugLoc() const {
   return DebugLoc();
 }
 
+bool DebugLoc::isImplicitCode() const {
+  if (DILocation *Loc = get()) {
+    return Loc->isImplicitCode();
+  }
+  return true;
+}
+
+void DebugLoc::setImplicitCode(bool ImplicitCode) {
+  if (DILocation *Loc = get()) {
+    Loc->setImplicitCode(ImplicitCode);
+  }
+}
+
 DebugLoc DebugLoc::get(unsigned Line, unsigned Col, const MDNode *Scope,
-                       const MDNode *InlinedAt) {
+                       const MDNode *InlinedAt, bool ImplicitCode) {
   // If no scope is available, this is an unknown location.
   if (!Scope)
     return DebugLoc();
 
   return DILocation::get(Scope->getContext(), Line, Col,
                          const_cast<MDNode *>(Scope),
-                         const_cast<MDNode *>(InlinedAt));
+                         const_cast<MDNode *>(InlinedAt), ImplicitCode);
 }
 
 DebugLoc DebugLoc::appendInlinedAt(DebugLoc DL, DILocation *InlinedAt,
@@ -100,19 +112,7 @@ DebugLoc DebugLoc::appendInlinedAt(DebugLoc DL, DILocation *InlinedAt,
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void DebugLoc::dump() const {
-  if (!Loc)
-    return;
-
-  dbgs() << getLine();
-  if (getCol() != 0)
-    dbgs() << ',' << getCol();
-  if (DebugLoc InlinedAtDL = DebugLoc(getInlinedAt())) {
-    dbgs() << " @ ";
-    InlinedAtDL.dump();
-  } else
-    dbgs() << "\n";
-}
+LLVM_DUMP_METHOD void DebugLoc::dump() const { print(dbgs()); }
 #endif
 
 void DebugLoc::print(raw_ostream &OS) const {

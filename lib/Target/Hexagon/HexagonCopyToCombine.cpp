@@ -1,9 +1,8 @@
 //===------- HexagonCopyToCombine.cpp - Hexagon Copy-To-Combine Pass ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This pass replaces transfer instructions by combine instructions.
@@ -21,12 +20,12 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/PassSupport.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
 
@@ -300,7 +299,7 @@ bool HexagonCopyToCombine::isSafeToMoveTogether(MachineInstr &I1,
       //   * reads I2's def reg
       //   * or has unmodelled side effects
       // we can't move I2 across it.
-      if (I->isDebugValue())
+      if (I->isDebugInstr())
         continue;
 
       if (isUnsafeToMoveAcross(*I, I2UseReg, I2DestReg, TRI)) {
@@ -351,14 +350,14 @@ bool HexagonCopyToCombine::isSafeToMoveTogether(MachineInstr &I1,
       //   kill flag for a register (a removeRegisterKilled() analogous to
       //   addRegisterKilled) that handles aliased register correctly.
       //   * or has a killed aliased register use of I1's use reg
-      //           %D4<def> = A2_tfrpi 16
-      //           %R6<def> = A2_tfr %R9
-      //           %R8<def> = KILL %R8, %D4<imp-use,kill>
+      //           %d4 = A2_tfrpi 16
+      //           %r6 = A2_tfr %r9
+      //           %r8 = KILL %r8, implicit killed %d4
       //      If we want to move R6 = across the KILL instruction we would have
-      //      to remove the %D4<imp-use,kill> operand. For now, we are
+      //      to remove the implicit killed %d4 operand. For now, we are
       //      conservative and disallow the move.
       // we can't move I1 across it.
-      if (MI.isDebugValue()) {
+      if (MI.isDebugInstr()) {
         if (MI.readsRegister(I1DestReg, TRI)) // Move this instruction after I2.
           DbgMItoMove.push_back(&MI);
         continue;
@@ -396,7 +395,7 @@ void
 HexagonCopyToCombine::findPotentialNewifiableTFRs(MachineBasicBlock &BB) {
   DenseMap<unsigned, MachineInstr *> LastDef;
   for (MachineInstr &MI : BB) {
-    if (MI.isDebugValue())
+    if (MI.isDebugInstr())
       continue;
 
     // Mark TFRs that feed a potential new value store as such.
@@ -423,7 +422,7 @@ HexagonCopyToCombine::findPotentialNewifiableTFRs(MachineBasicBlock &BB) {
         MachineBasicBlock::iterator It(DefInst);
         unsigned NumInstsToDef = 0;
         while (&*It != &MI) {
-          if (!It->isDebugValue())
+          if (!It->isDebugInstr())
             ++NumInstsToDef;
           ++It;
         }
@@ -459,7 +458,7 @@ HexagonCopyToCombine::findPotentialNewifiableTFRs(MachineBasicBlock &BB) {
 }
 
 bool HexagonCopyToCombine::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   if (IsCombinesDisabled) return false;
@@ -471,8 +470,8 @@ bool HexagonCopyToCombine::runOnMachineFunction(MachineFunction &MF) {
   TRI = ST->getRegisterInfo();
   TII = ST->getInstrInfo();
 
-  const Function *F = MF.getFunction();
-  bool OptForSize = F->hasFnAttribute(Attribute::OptimizeForSize);
+  const Function &F = MF.getFunction();
+  bool OptForSize = F.hasFnAttribute(Attribute::OptimizeForSize);
 
   // Combine aggressively (for code size)
   ShouldCombineAggressively =
@@ -489,7 +488,7 @@ bool HexagonCopyToCombine::runOnMachineFunction(MachineFunction &MF) {
         MI != End;) {
       MachineInstr &I1 = *MI++;
 
-      if (I1.isDebugValue())
+      if (I1.isDebugInstr())
         continue;
 
       // Don't combine a TFR whose user could be newified (instructions that
@@ -526,7 +525,7 @@ MachineInstr *HexagonCopyToCombine::findPairable(MachineInstr &I1,
                                                  bool &DoInsertAtI1,
                                                  bool AllowC64) {
   MachineBasicBlock::iterator I2 = std::next(MachineBasicBlock::iterator(I1));
-  while (I2 != I1.getParent()->end() && I2->isDebugValue())
+  while (I2 != I1.getParent()->end() && I2->isDebugInstr())
     ++I2;
 
   unsigned I1DestReg = I1.getOperand(0).getReg();
@@ -555,8 +554,7 @@ MachineInstr *HexagonCopyToCombine::findPairable(MachineInstr &I1,
     if ((!IsI1LowReg && !IsI2LowReg) || !isEvenReg(FirstRegIndex))
       continue;
 
-    // Check that the two instructions are combinable. V4 allows more
-    // instructions to be merged into a combine.
+    // Check that the two instructions are combinable.
     // The order matters because in a A2_tfrsi we might can encode a int8 as
     // the hi reg operand but only a uint6 as the low reg operand.
     if ((IsI2LowReg && !areCombinableOperations(TRI, I1, *I2, AllowC64)) ||
@@ -649,7 +647,7 @@ void HexagonCopyToCombine::emitConst64(MachineBasicBlock::iterator &InsertPt,
                                        unsigned DoubleDestReg,
                                        MachineOperand &HiOperand,
                                        MachineOperand &LoOperand) {
-  DEBUG(dbgs() << "Found a CONST64\n");
+  LLVM_DEBUG(dbgs() << "Found a CONST64\n");
 
   DebugLoc DL = InsertPt->getDebugLoc();
   MachineBasicBlock *BB = InsertPt->getParent();

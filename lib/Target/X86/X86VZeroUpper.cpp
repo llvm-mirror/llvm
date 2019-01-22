@@ -1,9 +1,8 @@
 //===- X86VZeroUpper.cpp - AVX vzeroupper instruction inserter ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,14 +25,14 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 
 using namespace llvm;
@@ -235,7 +234,7 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
     // If the call has no RegMask, skip it as well. It usually happens on
     // helper function calls (such as '_chkstk', '_ftol2') where standard
     // calling convention is not used (RegMask is not used to mark register
-    // clobbered and register usage (def/imp-def/use) is well-defined and
+    // clobbered and register usage (def/implicit-def/use) is well-defined and
     // explicitly specified.
     if (IsCall && !callHasRegMask(MI))
       continue;
@@ -264,8 +263,8 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
     }
   }
 
-  DEBUG(dbgs() << "MBB #" << MBB.getNumber() << " exit state: "
-               << getBlockExitStateName(CurState) << '\n');
+  LLVM_DEBUG(dbgs() << "MBB #" << MBB.getNumber() << " exit state: "
+                    << getBlockExitStateName(CurState) << '\n');
 
   if (CurState == EXITS_DIRTY)
     for (MachineBasicBlock::succ_iterator SI = MBB.succ_begin(),
@@ -285,7 +284,7 @@ bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
   TII = ST.getInstrInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
   EverMadeChange = false;
-  IsX86INTR = MF.getFunction()->getCallingConv() == CallingConv::X86_INTR;
+  IsX86INTR = MF.getFunction().getCallingConv() == CallingConv::X86_INTR;
 
   bool FnHasLiveInYmmOrZmm = checkFnHasLiveInYmmOrZmm(MRI);
 
@@ -341,8 +340,8 @@ bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
     // successors need to be added to the worklist (if they haven't been
     // already).
     if (BBState.ExitState == PASS_THROUGH) {
-      DEBUG(dbgs() << "MBB #" << MBB.getNumber()
-                   << " was Pass-through, is now Dirty-out.\n");
+      LLVM_DEBUG(dbgs() << "MBB #" << MBB.getNumber()
+                        << " was Pass-through, is now Dirty-out.\n");
       for (MachineBasicBlock *Succ : MBB.successors())
         addDirtySuccessor(*Succ);
     }

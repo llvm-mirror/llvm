@@ -5,7 +5,7 @@
 	.globl	test_inline_modifier_L
 	.type	test_inline_modifier_L,@function
 test_inline_modifier_L:                 // @test_inline_modifier_L
-// BB#0:
+// %bb.0:
 	//APP
 	add x0, x0, #:lo12:var_simple
 	//NO_APP
@@ -38,7 +38,7 @@ test_inline_modifier_L:                 // @test_inline_modifier_L
 	.globl	test_inline_modifier_G
 	.type	test_inline_modifier_G,@function
 test_inline_modifier_G:                 // @test_inline_modifier_G
-// BB#0:
+// %bb.0:
 	//APP
 	add x0, x0, #:dtprel_hi12:var_tlsld, lsl #12
 	//NO_APP
@@ -55,7 +55,7 @@ test_inline_modifier_G:                 // @test_inline_modifier_G
 	.globl	test_inline_modifier_A
 	.type	test_inline_modifier_A,@function
 test_inline_modifier_A:                 // @test_inline_modifier_A
-// BB#0:
+// %bb.0:
 	//APP
 	adrp x0, var_simple
 	//NO_APP
@@ -68,6 +68,9 @@ test_inline_modifier_A:                 // @test_inline_modifier_A
 	//APP
 	adrp x0, :gottprel:var_tlsie
 	//NO_APP
+	//APP
+	ldr x0, :got:var_got
+	//NO_APP
 	ret
 .Ltmp2:
 	.size	test_inline_modifier_A, .Ltmp2-test_inline_modifier_A
@@ -75,11 +78,12 @@ test_inline_modifier_A:                 // @test_inline_modifier_A
 // CHECK: R_AARCH64_ADR_GOT_PAGE var_got
 // CHECK: R_AARCH64_TLSDESC_ADR_PAGE21 var_tlsgd
 // CHECK: R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21 var_tlsie
+// CHECK: R_AARCH64_GOT_LD_PREL19 var_got
 
 	.globl	test_inline_modifier_wx
 	.type	test_inline_modifier_wx,@function
 test_inline_modifier_wx:                // @test_inline_modifier_wx
-// BB#0:
+// %bb.0:
 	mov	 w2, w0
 	//APP
 	add w2, w2, w2
@@ -115,7 +119,7 @@ test_inline_modifier_wx:                // @test_inline_modifier_wx
 	.globl	test_inline_modifier_bhsdq
 	.type	test_inline_modifier_bhsdq,@function
 test_inline_modifier_bhsdq:             // @test_inline_modifier_bhsdq
-// BB#0:
+// %bb.0:
 	//APP
 	ldr b0, [sp]
 	//NO_APP
@@ -153,7 +157,7 @@ test_inline_modifier_bhsdq:             // @test_inline_modifier_bhsdq
 	.globl	test_inline_modifier_c
 	.type	test_inline_modifier_c,@function
 test_inline_modifier_c:                 // @test_inline_modifier_c
-// BB#0:
+// %bb.0:
 	//APP
 	adr x0, 3
 	//NO_APP

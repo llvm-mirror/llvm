@@ -1,9 +1,8 @@
 //===- Evaluator.h - LLVM IR evaluator --------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,6 +17,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
@@ -72,6 +72,18 @@ public:
   void setVal(Value *V, Constant *C) {
     ValueStack.back()[V] = C;
   }
+
+  /// Given call site return callee and list of its formal arguments
+  Function *getCalleeWithFormalArgs(CallSite &CS,
+                                    SmallVector<Constant *, 8> &Formals);
+
+  /// Given call site and callee returns list of callee formal argument
+  /// values converting them when necessary
+  bool getFormalParams(CallSite &CS, Function *F,
+                       SmallVector<Constant *, 8> &Formals);
+
+  /// Casts call result to a type of bitcast call expression
+  Constant *castCallResultIfNeeded(Value *CallExpr, Constant *RV);
 
   const DenseMap<Constant*, Constant*> &getMutatedMemory() const {
     return MutatedMemory;

@@ -1,9 +1,8 @@
 //===- RecordStreamer.h - Record asm defined and used symbols ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -20,17 +19,24 @@
 
 namespace llvm {
 
+class GlobalValue;
+class Module;
+
 class RecordStreamer : public MCStreamer {
 public:
   enum State { NeverSeen, Global, Defined, DefinedGlobal, DefinedWeak, Used,
                UndefinedWeak};
 
 private:
+  const Module &M;
   StringMap<State> Symbols;
   // Map of aliases created by .symver directives, saved so we can update
   // their symbol binding after parsing complete. This maps from each
   // aliasee to its list of aliases.
-  DenseMap<const MCSymbol *, std::vector<MCSymbol *>> SymverAliasMap;
+  DenseMap<const MCSymbol *, std::vector<StringRef>> SymverAliasMap;
+
+  /// Get the state recorded for the given symbol.
+  State getSymbolState(const MCSymbol *Sym);
 
   void markDefined(const MCSymbol &Symbol);
   void markGlobal(const MCSymbol &Symbol, MCSymbolAttr Attribute);
@@ -38,36 +44,33 @@ private:
   void visitUsedSymbol(const MCSymbol &Sym) override;
 
 public:
-  RecordStreamer(MCContext &Context);
+  RecordStreamer(MCContext &Context, const Module &M);
 
-  using const_iterator = StringMap<State>::const_iterator;
-
-  const_iterator begin();
-  const_iterator end();
   void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
                        bool) override;
   void EmitLabel(MCSymbol *Symbol, SMLoc Loc = SMLoc()) override;
   void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
   bool EmitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
   void EmitZerofill(MCSection *Section, MCSymbol *Symbol, uint64_t Size,
-                    unsigned ByteAlignment) override;
+                    unsigned ByteAlignment, SMLoc Loc = SMLoc()) override;
   void EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                         unsigned ByteAlignment) override;
   /// Record .symver aliases for later processing.
-  void emitELFSymverDirective(MCSymbol *Alias,
+  void emitELFSymverDirective(StringRef AliasName,
                               const MCSymbol *Aliasee) override;
-  /// Return the map of .symver aliasee to associated aliases.
-  DenseMap<const MCSymbol *, std::vector<MCSymbol *>> &symverAliases() {
-    return SymverAliasMap;
-  }
 
-  /// Get the state recorded for the given symbol.
-  State getSymbolState(const MCSymbol *Sym) {
-    auto SI = Symbols.find(Sym->getName());
-    if (SI == Symbols.end())
-      return NeverSeen;
-    return SI->second;
-  }
+  // Emit ELF .symver aliases and ensure they have the same binding as the
+  // defined symbol they alias with.
+  void flushSymverDirectives();
+
+  // Symbols iterators
+  using const_iterator = StringMap<State>::const_iterator;
+  const_iterator begin();
+  const_iterator end();
+
+  // SymverAliasMap iterators
+  using const_symver_iterator = decltype(SymverAliasMap)::const_iterator;
+  iterator_range<const_symver_iterator> symverAliases();
 };
 
 } // end namespace llvm

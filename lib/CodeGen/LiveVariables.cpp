@@ -1,9 +1,8 @@
 //===-- LiveVariables.cpp - Live Variable Analysis for Machine Code -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -34,10 +33,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -235,7 +234,7 @@ void LiveVariables::HandlePhysRegUse(unsigned Reg, MachineInstr &MI) {
     // Otherwise, the last sub-register def implicitly defines this register.
     // e.g.
     // AH =
-    // AL = ... <imp-def EAX>, <imp-kill AH>
+    // AL = ... implicit-def EAX, implicit killed AH
     //    = AH
     // ...
     //    = EAX
@@ -321,17 +320,17 @@ bool LiveVariables::HandlePhysRegKill(unsigned Reg, MachineInstr *MI) {
   // AH =
   //
   //    = AX
-  //    = AL, AX<imp-use, kill>
+  //    = AL, implicit killed AX
   // AX =
   //
   // Or whole register is defined, but not used at all.
-  // AX<dead> =
+  // dead AX =
   // ...
   // AX =
   //
   // Or whole register is defined, but only partly used.
-  // AX<dead> = AL<imp-def>
-  //    = AL<kill>
+  // dead AX = implicit-def AL
+  //    = killed AL
   // AX =
   MachineInstr *LastPartDef = nullptr;
   unsigned LastPartDefDist = 0;
@@ -364,7 +363,7 @@ bool LiveVariables::HandlePhysRegKill(unsigned Reg, MachineInstr *MI) {
   if (!PhysRegUse[Reg]) {
     // Partial uses. Mark register def dead and add implicit def of
     // sub-registers which are used.
-    // EAX<dead>  = op  AL<imp-def>
+    // dead EAX  = op  implicit-def AL
     // That is, EAX def is dead but AL def extends pass it.
     PhysRegDef[Reg]->addRegisterDead(Reg, TRI, true);
     for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs) {
@@ -499,7 +498,7 @@ void LiveVariables::UpdatePhysRegDefs(MachineInstr &MI,
 
 void LiveVariables::runOnInstr(MachineInstr &MI,
                                SmallVectorImpl<unsigned> &Defs) {
-  assert(!MI.isDebugValue());
+  assert(!MI.isDebugInstr());
   // Process all of the operands of the instruction...
   unsigned NumOperandsToProcess = MI.getNumOperands();
 
@@ -576,7 +575,7 @@ void LiveVariables::runOnBlock(MachineBasicBlock *MBB, const unsigned NumRegs) {
   DistanceMap.clear();
   unsigned Dist = 0;
   for (MachineInstr &MI : *MBB) {
-    if (MI.isDebugValue())
+    if (MI.isDebugInstr())
       continue;
     DistanceMap.insert(std::make_pair(&MI, Dist++));
 

@@ -1,9 +1,8 @@
 //===-- AArch64MCAsmInfo.cpp - AArch64 asm properties ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,18 +100,38 @@ AArch64MCAsmInfoELF::AArch64MCAsmInfoELF(const Triple &T) {
   HasIdentDirective = true;
 }
 
-AArch64MCAsmInfoCOFF::AArch64MCAsmInfoCOFF() {
+AArch64MCAsmInfoMicrosoftCOFF::AArch64MCAsmInfoMicrosoftCOFF() {
   PrivateGlobalPrefix = ".L";
   PrivateLabelPrefix = ".L";
+
+  Data16bitsDirective = "\t.hword\t";
+  Data32bitsDirective = "\t.word\t";
+  Data64bitsDirective = "\t.xword\t";
+
   AlignmentIsInBytes = false;
   SupportsDebugInformation = true;
-  ExceptionsType = ExceptionHandling::WinEH;
-}
+  CodePointerSize = 8;
 
-AArch64MCAsmInfoMicrosoftCOFF::AArch64MCAsmInfoMicrosoftCOFF() {
   CommentString = ";";
+  ExceptionsType = ExceptionHandling::WinEH;
+  WinEHEncodingType = WinEH::EncodingType::Itanium;
 }
 
 AArch64MCAsmInfoGNUCOFF::AArch64MCAsmInfoGNUCOFF() {
+  PrivateGlobalPrefix = ".L";
+  PrivateLabelPrefix = ".L";
+
+  Data16bitsDirective = "\t.hword\t";
+  Data32bitsDirective = "\t.word\t";
+  Data64bitsDirective = "\t.xword\t";
+
+  AlignmentIsInBytes = false;
+  SupportsDebugInformation = true;
+  CodePointerSize = 8;
+
   CommentString = "//";
+  ExceptionsType = ExceptionHandling::DwarfCFI;
+  // The default is dwarf, but WinEH can be enabled optionally, which requires
+  // WinEHEncodingType to be set.
+  WinEHEncodingType = WinEH::EncodingType::Itanium;
 }

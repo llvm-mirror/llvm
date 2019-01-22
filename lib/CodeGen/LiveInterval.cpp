@@ -1,9 +1,8 @@
 //===- LiveInterval.cpp - Live Interval Representation --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,17 +25,18 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -986,11 +986,12 @@ void LiveInterval::SubRange::print(raw_ostream &OS) const {
 }
 
 void LiveInterval::print(raw_ostream &OS) const {
-  OS << PrintReg(reg) << ' ';
+  OS << printReg(reg) << ' ';
   super::print(OS);
   // Print subranges
   for (const SubRange &SR : subranges())
     OS << SR;
+  OS << " weight:" << weight;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1308,17 +1309,17 @@ void ConnectedVNInfoEqClasses::Distribute(LiveInterval &LI, LiveInterval *LIV[],
     MachineOperand &MO = *RI;
     MachineInstr *MI = RI->getParent();
     ++RI;
-    // DBG_VALUE instructions don't have slot indexes, so get the index of the
-    // instruction before them.
-    // Normally, DBG_VALUE instructions are removed before this function is
-    // called, but it is not a requirement.
-    SlotIndex Idx;
-    if (MI->isDebugValue())
-      Idx = LIS.getSlotIndexes()->getIndexBefore(*MI);
-    else
-      Idx = LIS.getInstructionIndex(*MI);
-    LiveQueryResult LRQ = LI.Query(Idx);
-    const VNInfo *VNI = MO.readsReg() ? LRQ.valueIn() : LRQ.valueDefined();
+    const VNInfo *VNI;
+    if (MI->isDebugValue()) {
+      // DBG_VALUE instructions don't have slot indexes, so get the index of
+      // the instruction before them. The value is defined there too.
+      SlotIndex Idx = LIS.getSlotIndexes()->getIndexBefore(*MI);
+      VNI = LI.Query(Idx).valueOut();
+    } else {
+      SlotIndex Idx = LIS.getInstructionIndex(*MI);
+      LiveQueryResult LRQ = LI.Query(Idx);
+      VNI = MO.readsReg() ? LRQ.valueIn() : LRQ.valueDefined();
+    }
     // In the case of an <undef> use that isn't tied to any def, VNI will be
     // NULL. If the use is tied to a def, VNI will be the defined value.
     if (!VNI)

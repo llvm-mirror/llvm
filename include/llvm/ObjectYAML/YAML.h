@@ -1,9 +1,8 @@
 //===- YAML.h ---------------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,7 +20,7 @@ class raw_ostream;
 
 namespace yaml {
 
-/// \brief Specialized YAMLIO scalar type for representing a binary blob.
+/// Specialized YAMLIO scalar type for representing a binary blob.
 ///
 /// A typical use case would be to represent the content of a section in a
 /// binary file.
@@ -64,11 +63,11 @@ namespace yaml {
 class BinaryRef {
   friend bool operator==(const BinaryRef &LHS, const BinaryRef &RHS);
 
-  /// \brief Either raw binary data, or a string of hex bytes (must always
+  /// Either raw binary data, or a string of hex bytes (must always
   /// be an even number of characters).
   ArrayRef<uint8_t> Data;
 
-  /// \brief Discriminator between the two states of the `Data` member.
+  /// Discriminator between the two states of the `Data` member.
   bool DataIsHexString = true;
 
 public:
@@ -77,7 +76,7 @@ public:
   BinaryRef(StringRef Data)
       : Data(reinterpret_cast<const uint8_t *>(Data.data()), Data.size()) {}
 
-  /// \brief The number of bytes that are represented by this BinaryRef.
+  /// The number of bytes that are represented by this BinaryRef.
   /// This is the number of bytes that writeAsBinary() will write.
   ArrayRef<uint8_t>::size_type binary_size() const {
     if (DataIsHexString)
@@ -85,11 +84,11 @@ public:
     return Data.size();
   }
 
-  /// \brief Write the contents (regardless of whether it is binary or a
+  /// Write the contents (regardless of whether it is binary or a
   /// hex string) as binary to the given raw_ostream.
   void writeAsBinary(raw_ostream &OS) const;
 
-  /// \brief Write the contents (regardless of whether it is binary or a
+  /// Write the contents (regardless of whether it is binary or a
   /// hex string) as hex to the given raw_ostream.
   ///
   /// For example, a possible output could be `DEADBEEFCAFEBABE`.
@@ -107,7 +106,7 @@ inline bool operator==(const BinaryRef &LHS, const BinaryRef &RHS) {
 template <> struct ScalarTraits<BinaryRef> {
   static void output(const BinaryRef &, void *, raw_ostream &);
   static StringRef input(StringRef, void *, BinaryRef &);
-  static bool mustQuote(StringRef S) { return needsQuotes(S); }
+  static QuotingType mustQuote(StringRef S) { return needsQuotes(S); }
 };
 
 } // end namespace yaml

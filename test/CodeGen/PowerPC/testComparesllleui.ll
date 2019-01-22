@@ -1,9 +1,8 @@
-; XFAIL: *
 ; RUN: llc -verify-machineinstrs -mtriple=powerpc64-unknown-linux-gnu -O2 \
-; RUN:   -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
+; RUN:   -ppc-gpr-icmps=all -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
 ; RUN:  --implicit-check-not cmpw --implicit-check-not cmpd --implicit-check-not cmpl
 ; RUN: llc -verify-machineinstrs -mtriple=powerpc64le-unknown-linux-gnu -O2 \
-; RUN:   -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
+; RUN:   -ppc-gpr-icmps=all -ppc-asm-full-reg-names -mcpu=pwr8 < %s | FileCheck %s \
 ; RUN:  --implicit-check-not cmpw --implicit-check-not cmpd --implicit-check-not cmpl
 
 @glob = common local_unnamed_addr global i32 0, align 4
@@ -16,8 +15,8 @@ entry:
   ret i64 %conv1
 ; CHECK-LABEL: test_llleui:
 ; CHECK: sub [[REG1:r[0-9]+]], r4, r3
-; CHECK-NEXT: rldicl [[REG2:r[0-9]+]], [[REG1]], 1, 63
-; CHECK-NEXT: xori r3, [[REG2]], 1
+; CHECK-NEXT: not [[REG2:r[0-9]+]], [[REG1]]
+; CHECK-NEXT: rldicl r3, [[REG2]], 1, 63
 ; CHECK: blr
 }
 
@@ -68,8 +67,8 @@ entry:
   ret void
 ; CHECK-LABEL: test_llleui_store:
 ; CHECK: sub [[REG1:r[0-9]+]], r4, r3
-; CHECK: rldicl [[REG2:r[0-9]+]], [[REG1]], 1, 63
-; CHECK: xori {{r[0-9]+}}, [[REG2]], 1
+; CHECK: not [[REG2:r[0-9]+]], [[REG1]]
+; CHECK-NEXT: rldicl r3, [[REG2]], 1, 63
 ; CHECK: blr
 }
 

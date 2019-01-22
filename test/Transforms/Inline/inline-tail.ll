@@ -181,3 +181,39 @@ define i32 @test_mixedret_a(i1 zeroext %b) {
   %rv = musttail call i32 @test_mixedret_b(i1 zeroext %b)
   ret i32 %rv
 }
+
+declare i32 @donttailcall()
+
+define i32 @notail() {
+  %rv = notail call i32 @donttailcall()
+  ret i32 %rv
+}
+
+; CHECK: @test_notail
+; CHECK: notail call i32 @donttailcall
+; CHECK: ret
+define i32 @test_notail() {
+  %rv = tail call i32 @notail()
+  ret i32 %rv
+}
+
+; PR31014: Inlining a musttail call through a notail call site should remove
+; any tail marking, otherwise we break verifier invariants.
+
+declare void @do_ret(i32)
+
+define void @test_notail_inline_musttail(i32 %a) {
+  notail call void @inline_musttail(i32 %a)
+  musttail call void @do_ret(i32 %a)
+  ret void
+}
+
+define internal void @inline_musttail(i32 %a) {
+  musttail call void @do_ret(i32 %a)
+  ret void
+}
+
+; CHECK-LABEL: define void @test_notail_inline_musttail(i32 %a)
+; CHECK:   {{^ *}}call void @do_ret(i32 %a)
+; CHECK:   musttail call void @do_ret(i32 %a)
+; CHECK:   ret void

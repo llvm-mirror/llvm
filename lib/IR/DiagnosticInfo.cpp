@@ -1,9 +1,8 @@
 //===- llvm/Support/DiagnosticInfo.cpp - Diagnostic Definitions -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -33,7 +32,9 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 #include <atomic>
 #include <cassert>
@@ -102,10 +103,15 @@ void DiagnosticInfoPGOProfile::print(DiagnosticPrinter &DP) const {
   DP << getMsg();
 }
 
+void DiagnosticInfo::anchor() {}
+void DiagnosticInfoStackSize::anchor() {}
+void DiagnosticInfoWithLocationBase::anchor() {}
+void DiagnosticInfoIROptimization::anchor() {}
+
 DiagnosticLocation::DiagnosticLocation(const DebugLoc &DL) {
   if (!DL)
     return;
-  Filename = DL->getFilename();
+  File = DL->getFile();
   Line = DL->getLine();
   Column = DL->getColumn();
 }
@@ -113,17 +119,36 @@ DiagnosticLocation::DiagnosticLocation(const DebugLoc &DL) {
 DiagnosticLocation::DiagnosticLocation(const DISubprogram *SP) {
   if (!SP)
     return;
-  Filename = SP->getFilename();
+  
+  File = SP->getFile();
   Line = SP->getScopeLine();
   Column = 0;
 }
 
-void DiagnosticInfoWithLocationBase::getLocation(StringRef *Filename,
-                                                 unsigned *Line,
-                                                 unsigned *Column) const {
-  *Filename = Loc.getFilename();
-  *Line = Loc.getLine();
-  *Column = Loc.getColumn();
+StringRef DiagnosticLocation::getRelativePath() const {
+  return File->getFilename();
+}
+
+std::string DiagnosticLocation::getAbsolutePath() const {
+  StringRef Name = File->getFilename();
+  if (sys::path::is_absolute(Name))
+    return Name;
+
+  SmallString<128> Path;
+  sys::path::append(Path, File->getDirectory(), Name);
+  return sys::path::remove_leading_dotslash(Path).str();
+}
+
+std::string DiagnosticInfoWithLocationBase::getAbsolutePath() const {
+  return Loc.getAbsolutePath();
+}
+
+void DiagnosticInfoWithLocationBase::getLocation(StringRef &RelativePath,
+                                                 unsigned &Line,
+                                                 unsigned &Column) const {
+  RelativePath = Loc.getRelativePath();
+  Line = Loc.getLine();
+  Column = Loc.getColumn();
 }
 
 const std::string DiagnosticInfoWithLocationBase::getLocationStr() const {
@@ -131,7 +156,7 @@ const std::string DiagnosticInfoWithLocationBase::getLocationStr() const {
   unsigned Line = 0;
   unsigned Column = 0;
   if (isLocationAvailable())
-    getLocation(&Filename, &Line, &Column);
+    getLocation(Filename, Line, Column);
   return (Filename + ":" + Twine(Line) + ":" + Twine(Column)).str();
 }
 
@@ -144,7 +169,7 @@ DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, const Value *V
   else if (auto *I = dyn_cast<Instruction>(V))
     Loc = I->getDebugLoc();
 
-  // Only include names that correspond to user variables.  FIXME: we should use
+  // Only include names that correspond to user variables.  FIXME: We should use
   // debug info if available to get the name of the user variable.
   if (isa<llvm::Argument>(V) || isa<GlobalValue>(V))
     Val = GlobalValue::dropLLVMManglingEscape(V->getName());
@@ -166,6 +191,9 @@ DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, StringRef S)
 
 DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, int N)
     : Key(Key), Val(itostr(N)) {}
+
+DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, float N)
+    : Key(Key), Val(llvm::to_string(N)) {}
 
 DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, long N)
     : Key(Key), Val(itostr(N)) {}
@@ -342,6 +370,9 @@ std::string DiagnosticInfoOptimizationBase::getMsg() const {
   return OS.str();
 }
 
+void OptimizationRemarkAnalysisFPCommute::anchor() {}
+void OptimizationRemarkAnalysisAliasing::anchor() {}
+
 namespace llvm {
 namespace yaml {
 
@@ -395,7 +426,7 @@ template <> struct MappingTraits<DiagnosticLocation> {
   static void mapping(IO &io, DiagnosticLocation &DL) {
     assert(io.outputting() && "input not yet implemented");
 
-    StringRef File = DL.getFilename();
+    StringRef File = DL.getRelativePath();
     unsigned Line = DL.getLine();
     unsigned Col = DL.getColumn();
 

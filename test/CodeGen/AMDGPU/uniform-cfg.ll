@@ -1,5 +1,5 @@
-; RUN: llc -march=amdgcn -mcpu=verde -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=verde -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -amdgpu-early-ifcvt=0 -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -enable-var-scope -check-prefix=GCN -check-prefix=VI %s
 
 ; GCN-LABEL: {{^}}uniform_if_scc:
 ; GCN-DAG: s_cmp_eq_u32 s{{[0-9]+}}, 0
@@ -195,7 +195,7 @@ if.end:                                           ; preds = %if.else, %if.then
 
 ; GCN-LABEL: {{^}}uniform_if_else:
 ; GCN: s_cmp_lg_u32 s{{[0-9]+}}, 0
-; GCN-NEXT: s_cbranch_scc0 [[IF_LABEL:[0-9_A-Za-z]+]]
+; GCN: s_cbranch_scc0 [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; GCN: v_mov_b32_e32 [[IMM_REG:v[0-9]+]], 2
 ; GCN: s_branch [[ENDIF_LABEL:[0-9_A-Za-z]+]]
@@ -248,10 +248,10 @@ ENDIF:                                            ; preds = %IF, %main_body
 }
 
 ; GCN-LABEL: {{^}}icmp_users_different_blocks:
-; GCN: s_load_dword [[COND:s[0-9]+]]
-; GCN: s_cmp_lt_i32 [[COND]], 1
+; GCN: s_load_dwordx2 s{{\[}}[[COND0:[0-9]+]]:[[COND1:[0-9]+]]{{\]}}
+; GCN: s_cmp_lt_i32 s[[COND0]], 1
 ; GCN: s_cbranch_scc1 [[EXIT:[A-Za-z0-9_]+]]
-; GCN: v_cmp_gt_i32_e64 vcc, [[COND]], 0{{$}}
+; GCN: v_cmp_gt_i32_e64 {{[^,]*}}, s[[COND1]], 0{{$}}
 ; GCN: s_cbranch_vccz [[BODY:[A-Za-z0-9_]+]]
 ; GCN: {{^}}[[EXIT]]:
 ; GCN: s_endpgm
@@ -401,7 +401,7 @@ exit:
 ; GCN: s_cmp_lt_i32 [[COND]], 1
 ; GCN: s_cbranch_scc1 BB[[FNNUM:[0-9]+]]_3
 
-; GCN: BB#1:
+; GCN: %bb.1:
 ; GCN-NOT: cmp
 ; GCN: buffer_load_dword
 ; GCN: buffer_store_dword
@@ -432,8 +432,7 @@ bb9:                                              ; preds = %bb8, %bb4
 ; GCN-LABEL: {{^}}uniform_if_scc_i64_eq:
 ; VI-DAG: s_cmp_eq_u64 s{{\[[0-9]+:[0-9]+\]}}, 0
 ; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
-
-; SI: v_cmp_eq_u64_e64
+; SI-DAG: v_cmp_eq_u64_e64
 ; SI: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; VI: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
@@ -465,7 +464,7 @@ done:
 ; VI-DAG: s_cmp_lg_u64 s{{\[[0-9]+:[0-9]+\]}}, 0
 ; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 
-; SI: v_cmp_ne_u64_e64
+; SI-DAG: v_cmp_ne_u64_e64
 ; SI: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; VI: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
@@ -494,15 +493,15 @@ done:
 }
 
 ; GCN-LABEL: {{^}}uniform_if_scc_i64_sgt:
-; GCN: s_mov_b32 [[S_VAL:s[0-9]+]], 0
-; GCN: v_cmp_gt_i64_e64
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
+; GCN-DAG: v_cmp_gt_i64_e64
 ; GCN: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
 ; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: v_mov_b32_e32 [[V_VAL]], [[S_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
 ; GCN: buffer_store_dword [[V_VAL]]
 define amdgpu_kernel void @uniform_if_scc_i64_sgt(i64 %cond, i32 addrspace(1)* %out) {
 entry:
@@ -560,7 +559,7 @@ done:
 }
 
 ; GCN-LABEL: {{^}}move_to_valu_vgpr_operand_phi:
-; GCN: v_add_i32_e32
+; GCN: v_add_{{[iu]}}32_e32
 ; GCN: ds_write_b32
 define void @move_to_valu_vgpr_operand_phi(i32 addrspace(3)* %out) {
 bb0:

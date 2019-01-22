@@ -52,16 +52,15 @@ function(llvm_process_sources OUT_VAR)
   cmake_parse_arguments(ARG "" "" "ADDITIONAL_HEADERS;ADDITIONAL_HEADER_DIRS" ${ARGN})
   set(sources ${ARG_UNPARSED_ARGUMENTS})
   llvm_check_source_file_list( ${sources} )
-  if( MSVC_IDE OR XCODE )
-    # This adds .td and .h files to the Visual Studio solution:
-    add_td_sources(sources)
-    find_all_header_files(hdrs "${ARG_ADDITIONAL_HEADER_DIRS}")
-    if (hdrs)
-      set_source_files_properties(${hdrs} PROPERTIES HEADER_FILE_ONLY ON)
-    endif()
-    set_source_files_properties(${ARG_ADDITIONAL_HEADERS} PROPERTIES HEADER_FILE_ONLY ON)
-    list(APPEND sources ${ARG_ADDITIONAL_HEADERS} ${hdrs})
+  
+  # This adds .td and .h files to the Visual Studio solution:
+  add_td_sources(sources)
+  find_all_header_files(hdrs "${ARG_ADDITIONAL_HEADER_DIRS}")
+  if (hdrs)
+    set_source_files_properties(${hdrs} PROPERTIES HEADER_FILE_ONLY ON)
   endif()
+  set_source_files_properties(${ARG_ADDITIONAL_HEADERS} PROPERTIES HEADER_FILE_ONLY ON)
+  list(APPEND sources ${ARG_ADDITIONAL_HEADERS} ${hdrs})
 
   set( ${OUT_VAR} ${sources} PARENT_SCOPE )
 endfunction(llvm_process_sources)
@@ -69,14 +68,18 @@ endfunction(llvm_process_sources)
 
 function(llvm_check_source_file_list)
   cmake_parse_arguments(ARG "" "SOURCE_DIR" "" ${ARGN})
-  set(listed ${ARG_UNPARSED_ARGUMENTS})
+  foreach(l ${ARG_UNPARSED_ARGUMENTS})
+      get_filename_component(fp ${l} REALPATH)
+      list(APPEND listed ${fp})
+  endforeach()
+
   if(ARG_SOURCE_DIR)
     file(GLOB globbed
-         RELATIVE "${CMAKE_CURRENT_LIST_DIR}"
          "${ARG_SOURCE_DIR}/*.c" "${ARG_SOURCE_DIR}/*.cpp")
   else()
     file(GLOB globbed *.c *.cpp)
   endif()
+
   foreach(g ${globbed})
     get_filename_component(fn ${g} NAME)
     if(ARG_SOURCE_DIR)
@@ -84,15 +87,21 @@ function(llvm_check_source_file_list)
     else()
       set(entry "${fn}")
     endif()
+    get_filename_component(gp ${g} REALPATH)
 
     # Don't reject hidden files. Some editors create backups in the
     # same directory as the file.
     if (NOT "${fn}" MATCHES "^\\.")
       list(FIND LLVM_OPTIONAL_SOURCES ${entry} idx)
       if( idx LESS 0 )
-        list(FIND listed ${entry} idx)
+        list(FIND listed ${gp} idx)
         if( idx LESS 0 )
-          message(SEND_ERROR "Found unknown source file ${g}
+          if(ARG_SOURCE_DIR)
+              set(fn_relative "${ARG_SOURCE_DIR}/${fn}")
+          else()
+              set(fn_relative "${fn}")
+          endif()
+          message(SEND_ERROR "Found unknown source file ${fn_relative}
 Please update ${CMAKE_CURRENT_LIST_FILE}\n")
         endif()
       endif()

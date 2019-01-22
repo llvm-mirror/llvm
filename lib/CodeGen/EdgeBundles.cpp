@@ -1,9 +1,8 @@
 //===-------- EdgeBundles.cpp - Bundles of CFG edges ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -80,13 +79,15 @@ raw_ostream &WriteGraph<>(raw_ostream &O, const EdgeBundles &G,
   O << "digraph {\n";
   for (const auto &MBB : *MF) {
     unsigned BB = MBB.getNumber();
-    O << "\t\"BB#" << BB << "\" [ shape=box ]\n"
-      << '\t' << G.getBundle(BB, false) << " -> \"BB#" << BB << "\"\n"
-      << "\t\"BB#" << BB << "\" -> " << G.getBundle(BB, true) << '\n';
+    O << "\t\"" << printMBBReference(MBB) << "\" [ shape=box ]\n"
+      << '\t' << G.getBundle(BB, false) << " -> \"" << printMBBReference(MBB)
+      << "\"\n"
+      << "\t\"" << printMBBReference(MBB) << "\" -> " << G.getBundle(BB, true)
+      << '\n';
     for (MachineBasicBlock::const_succ_iterator SI = MBB.succ_begin(),
            SE = MBB.succ_end(); SI != SE; ++SI)
-      O << "\t\"BB#" << BB << "\" -> \"BB#" << (*SI)->getNumber()
-        << "\" [ color=lightgray ]\n";
+      O << "\t\"" << printMBBReference(MBB) << "\" -> \""
+        << printMBBReference(**SI) << "\" [ color=lightgray ]\n";
   }
   O << "}\n";
   return O;

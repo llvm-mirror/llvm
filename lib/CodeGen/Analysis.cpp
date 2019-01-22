@@ -1,9 +1,8 @@
 //===-- Analysis.cpp - CodeGen LLVM IR Analysis Utilities -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,7 +13,9 @@
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -24,9 +25,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 
 using namespace llvm;
@@ -472,7 +470,7 @@ static bool nextRealType(SmallVectorImpl<CompositeType *> &SubTypes,
 bool llvm::isInTailCallPosition(ImmutableCallSite CS, const TargetMachine &TM) {
   const Instruction *I = CS.getInstruction();
   const BasicBlock *ExitBB = I->getParent();
-  const TerminatorInst *Term = ExitBB->getTerminator();
+  const Instruction *Term = ExitBB->getTerminator();
   const ReturnInst *Ret = dyn_cast<ReturnInst>(Term);
 
   // The block must end in a return statement or unreachable.
@@ -497,6 +495,10 @@ bool llvm::isInTailCallPosition(ImmutableCallSite CS, const TargetMachine &TM) {
       // Debug info intrinsics do not get in the way of tail call optimization.
       if (isa<DbgInfoIntrinsic>(BBI))
         continue;
+      // A lifetime end intrinsic should not stop tail call optimization.
+      if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(BBI))
+        if (II->getIntrinsicID() == Intrinsic::lifetime_end)
+          continue;
       if (BBI->mayHaveSideEffects() || BBI->mayReadFromMemory() ||
           !isSafeToSpeculativelyExecute(&*BBI))
         return false;
@@ -520,10 +522,12 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
   AttrBuilder CalleeAttrs(cast<CallInst>(I)->getAttributes(),
                           AttributeList::ReturnIndex);
 
-  // Noalias is completely benign as far as calling convention goes, it
-  // shouldn't affect whether the call is a tail call.
+  // NoAlias and NonNull are completely benign as far as calling convention
+  // goes, they shouldn't affect whether the call is a tail call.
   CallerAttrs.removeAttribute(Attribute::NoAlias);
   CalleeAttrs.removeAttribute(Attribute::NoAlias);
+  CallerAttrs.removeAttribute(Attribute::NonNull);
+  CalleeAttrs.removeAttribute(Attribute::NonNull);
 
   if (CallerAttrs.contains(Attribute::ZExt)) {
     if (!CalleeAttrs.contains(Attribute::ZExt))
@@ -539,6 +543,21 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
     ADS = false;
     CallerAttrs.removeAttribute(Attribute::SExt);
     CalleeAttrs.removeAttribute(Attribute::SExt);
+  }
+
+  // Drop sext and zext return attributes if the result is not used.
+  // This enables tail calls for code like:
+  //
+  // define void @caller() {
+  // entry:
+  //   %unused_result = tail call zeroext i1 @callee()
+  //   br label %retlabel
+  // retlabel:
+  //   ret void
+  // }
+  if (I->use_empty()) {
+    CalleeAttrs.removeAttribute(Attribute::SExt);
+    CalleeAttrs.removeAttribute(Attribute::ZExt);
   }
 
   // If they're still different, there's some facet we don't understand
@@ -630,28 +649,28 @@ bool llvm::returnTypeIsEligibleForTailCall(const Function *F,
   return true;
 }
 
-static void collectFuncletMembers(
-    DenseMap<const MachineBasicBlock *, int> &FuncletMembership, int Funclet,
+static void collectEHScopeMembers(
+    DenseMap<const MachineBasicBlock *, int> &EHScopeMembership, int EHScope,
     const MachineBasicBlock *MBB) {
   SmallVector<const MachineBasicBlock *, 16> Worklist = {MBB};
   while (!Worklist.empty()) {
     const MachineBasicBlock *Visiting = Worklist.pop_back_val();
-    // Don't follow blocks which start new funclets.
+    // Don't follow blocks which start new scopes.
     if (Visiting->isEHPad() && Visiting != MBB)
       continue;
 
-    // Add this MBB to our funclet.
-    auto P = FuncletMembership.insert(std::make_pair(Visiting, Funclet));
+    // Add this MBB to our scope.
+    auto P = EHScopeMembership.insert(std::make_pair(Visiting, EHScope));
 
     // Don't revisit blocks.
     if (!P.second) {
-      assert(P.first->second == Funclet && "MBB is part of two funclets!");
+      assert(P.first->second == EHScope && "MBB is part of two scopes!");
       continue;
     }
 
-    // Returns are boundaries where funclet transfer can occur, don't follow
+    // Returns are boundaries where scope transfer can occur, don't follow
     // successors.
-    if (Visiting->isReturnBlock())
+    if (Visiting->isEHScopeReturnBlock())
       continue;
 
     for (const MachineBasicBlock *Succ : Visiting->successors())
@@ -660,25 +679,25 @@ static void collectFuncletMembers(
 }
 
 DenseMap<const MachineBasicBlock *, int>
-llvm::getFuncletMembership(const MachineFunction &MF) {
-  DenseMap<const MachineBasicBlock *, int> FuncletMembership;
+llvm::getEHScopeMembership(const MachineFunction &MF) {
+  DenseMap<const MachineBasicBlock *, int> EHScopeMembership;
 
   // We don't have anything to do if there aren't any EH pads.
-  if (!MF.hasEHFunclets())
-    return FuncletMembership;
+  if (!MF.hasEHScopes())
+    return EHScopeMembership;
 
   int EntryBBNumber = MF.front().getNumber();
   bool IsSEH = isAsynchronousEHPersonality(
-      classifyEHPersonality(MF.getFunction()->getPersonalityFn()));
+      classifyEHPersonality(MF.getFunction().getPersonalityFn()));
 
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
-  SmallVector<const MachineBasicBlock *, 16> FuncletBlocks;
+  SmallVector<const MachineBasicBlock *, 16> EHScopeBlocks;
   SmallVector<const MachineBasicBlock *, 16> UnreachableBlocks;
   SmallVector<const MachineBasicBlock *, 16> SEHCatchPads;
   SmallVector<std::pair<const MachineBasicBlock *, int>, 16> CatchRetSuccessors;
   for (const MachineBasicBlock &MBB : MF) {
-    if (MBB.isEHFuncletEntry()) {
-      FuncletBlocks.push_back(&MBB);
+    if (MBB.isEHScopeEntry()) {
+      EHScopeBlocks.push_back(&MBB);
     } else if (IsSEH && MBB.isEHPad()) {
       SEHCatchPads.push_back(&MBB);
     } else if (MBB.pred_empty()) {
@@ -687,8 +706,8 @@ llvm::getFuncletMembership(const MachineFunction &MF) {
 
     MachineBasicBlock::const_iterator MBBI = MBB.getFirstTerminator();
 
-    // CatchPads are not funclets for SEH so do not consider CatchRet to
-    // transfer control to another funclet.
+    // CatchPads are not scopes for SEH so do not consider CatchRet to
+    // transfer control to another scope.
     if (MBBI == MBB.end() || MBBI->getOpcode() != TII->getCatchReturnOpcode())
       continue;
 
@@ -701,24 +720,24 @@ llvm::getFuncletMembership(const MachineFunction &MF) {
   }
 
   // We don't have anything to do if there aren't any EH pads.
-  if (FuncletBlocks.empty())
-    return FuncletMembership;
+  if (EHScopeBlocks.empty())
+    return EHScopeMembership;
 
   // Identify all the basic blocks reachable from the function entry.
-  collectFuncletMembers(FuncletMembership, EntryBBNumber, &MF.front());
-  // All blocks not part of a funclet are in the parent function.
+  collectEHScopeMembers(EHScopeMembership, EntryBBNumber, &MF.front());
+  // All blocks not part of a scope are in the parent function.
   for (const MachineBasicBlock *MBB : UnreachableBlocks)
-    collectFuncletMembers(FuncletMembership, EntryBBNumber, MBB);
-  // Next, identify all the blocks inside the funclets.
-  for (const MachineBasicBlock *MBB : FuncletBlocks)
-    collectFuncletMembers(FuncletMembership, MBB->getNumber(), MBB);
-  // SEH CatchPads aren't really funclets, handle them separately.
+    collectEHScopeMembers(EHScopeMembership, EntryBBNumber, MBB);
+  // Next, identify all the blocks inside the scopes.
+  for (const MachineBasicBlock *MBB : EHScopeBlocks)
+    collectEHScopeMembers(EHScopeMembership, MBB->getNumber(), MBB);
+  // SEH CatchPads aren't really scopes, handle them separately.
   for (const MachineBasicBlock *MBB : SEHCatchPads)
-    collectFuncletMembers(FuncletMembership, EntryBBNumber, MBB);
+    collectEHScopeMembers(EHScopeMembership, EntryBBNumber, MBB);
   // Finally, identify all the targets of a catchret.
   for (std::pair<const MachineBasicBlock *, int> CatchRetPair :
        CatchRetSuccessors)
-    collectFuncletMembers(FuncletMembership, CatchRetPair.second,
+    collectEHScopeMembers(EHScopeMembership, CatchRetPair.second,
                           CatchRetPair.first);
-  return FuncletMembership;
+  return EHScopeMembership;
 }

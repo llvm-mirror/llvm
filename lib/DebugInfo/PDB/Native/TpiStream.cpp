@@ -1,9 +1,8 @@
 //===- TpiStream.cpp - PDB Type Info (TPI) Stream 2 Access ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,8 +10,11 @@
 
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
+#include "llvm/DebugInfo/CodeView/RecordName.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
+#include "llvm/DebugInfo/CodeView/TypeRecordHelpers.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
+#include "llvm/DebugInfo/PDB/Native/Hash.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
@@ -140,6 +142,88 @@ uint16_t TpiStream::getTypeHashStreamAuxIndex() const {
 uint32_t TpiStream::getNumHashBuckets() const { return Header->NumHashBuckets; }
 uint32_t TpiStream::getHashKeySize() const { return Header->HashKeySize; }
 
+void TpiStream::buildHashMap() {
+  if (!HashMap.empty())
+    return;
+  if (HashValues.empty())
+    return;
+
+  HashMap.resize(Header->NumHashBuckets);
+
+  TypeIndex TIB{Header->TypeIndexBegin};
+  TypeIndex TIE{Header->TypeIndexEnd};
+  while (TIB < TIE) {
+    uint32_t HV = HashValues[TIB.toArrayIndex()];
+    HashMap[HV].push_back(TIB++);
+  }
+}
+
+std::vector<TypeIndex> TpiStream::findRecordsByName(StringRef Name) const {
+  if (!supportsTypeLookup())
+    const_cast<TpiStream*>(this)->buildHashMap();
+
+  uint32_t Bucket = hashStringV1(Name) % Header->NumHashBuckets;
+  if (Bucket > HashMap.size())
+    return {};
+
+  std::vector<TypeIndex> Result;
+  for (TypeIndex TI : HashMap[Bucket]) {
+    std::string ThisName = computeTypeName(*Types, TI);
+    if (ThisName == Name)
+      Result.push_back(TI);
+  }
+  return Result;
+}
+
+bool TpiStream::supportsTypeLookup() const { return !HashMap.empty(); }
+
+Expected<TypeIndex>
+TpiStream::findFullDeclForForwardRef(TypeIndex ForwardRefTI) const {
+  if (!supportsTypeLookup())
+    const_cast<TpiStream*>(this)->buildHashMap();
+
+  CVType F = Types->getType(ForwardRefTI);
+  if (!isUdtForwardRef(F))
+    return ForwardRefTI;
+
+  Expected<TagRecordHash> ForwardTRH = hashTagRecord(F);
+  if (!ForwardTRH)
+    return ForwardTRH.takeError();
+
+  uint32_t BucketIdx = ForwardTRH->FullRecordHash % Header->NumHashBuckets;
+
+  for (TypeIndex TI : HashMap[BucketIdx]) {
+    CVType CVT = Types->getType(TI);
+    if (CVT.kind() != F.kind())
+      continue;
+
+    Expected<TagRecordHash> FullTRH = hashTagRecord(CVT);
+    if (!FullTRH)
+      return FullTRH.takeError();
+    if (ForwardTRH->FullRecordHash != FullTRH->FullRecordHash)
+      continue;
+    TagRecord &ForwardTR = ForwardTRH->getRecord();
+    TagRecord &FullTR = FullTRH->getRecord();
+
+    if (!ForwardTR.hasUniqueName()) {
+      if (ForwardTR.getName() == FullTR.getName())
+        return TI;
+      continue;
+    }
+
+    if (!FullTR.hasUniqueName())
+      continue;
+    if (ForwardTR.getUniqueName() == FullTR.getUniqueName())
+      return TI;
+  }
+  return ForwardRefTI;
+}
+
+codeview::CVType TpiStream::getType(codeview::TypeIndex Index) {
+  assert(!Index.isSimple());
+  return Types->getType(Index);
+}
+
 BinarySubstreamRef TpiStream::getTypeRecordsSubstream() const {
   return TypeRecordsSubstream;
 }
@@ -152,7 +236,9 @@ FixedStreamArray<TypeIndexOffset> TpiStream::getTypeIndexOffsets() const {
   return TypeIndexOffsets;
 }
 
-HashTable &TpiStream::getHashAdjusters() { return HashAdjusters; }
+HashTable<support::ulittle32_t> &TpiStream::getHashAdjusters() {
+  return HashAdjusters;
+}
 
 CVTypeRange TpiStream::types(bool *HadError) const {
   return make_range(TypeRecords.begin(HadError), TypeRecords.end());

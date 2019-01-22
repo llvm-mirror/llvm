@@ -1,9 +1,8 @@
 //===-- SparcInstrInfo.cpp - Sparc Instruction Information ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -115,7 +114,7 @@ static SPCC::CondCodes GetOppositeBranchCondition(SPCC::CondCodes CC)
   case SPCC::FCC_UE:   return SPCC::FCC_LG;
   case SPCC::FCC_NE:   return SPCC::FCC_E;
   case SPCC::FCC_E:    return SPCC::FCC_NE;
-  
+
   case SPCC::CPCC_A:   return SPCC::CPCC_N;
   case SPCC::CPCC_N:   return SPCC::CPCC_A;
   case SPCC::CPCC_3:   LLVM_FALLTHROUGH;
@@ -280,7 +279,7 @@ unsigned SparcInstrInfo::removeBranch(MachineBasicBlock &MBB,
   while (I != MBB.begin()) {
     --I;
 
-    if (I->isDebugValue())
+    if (I->isDebugInstr())
       continue;
 
     if (I->getOpcode() != SP::BA

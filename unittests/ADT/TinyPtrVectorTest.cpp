@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/TinyPtrVectorTest.cpp ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -152,6 +151,12 @@ TYPED_TEST(TinyPtrVectorTest, CopyAndMoveCtorTest) {
   TypeParam Move(std::move(Copy2));
   this->expectValues(Move, this->testArray(42));
   this->expectValues(Copy2, this->testArray(0));
+
+  TypeParam MultipleElements(this->testArray(2));
+  TypeParam SingleElement(this->testArray(1));
+  MultipleElements = std::move(SingleElement);
+  this->expectValues(MultipleElements, this->testArray(1));
+  this->expectValues(SingleElement, this->testArray(0));
 }
 
 TYPED_TEST(TinyPtrVectorTest, CopyAndMoveTest) {

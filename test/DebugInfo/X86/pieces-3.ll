@@ -17,12 +17,11 @@
 ;
 ; CHECK: DW_TAG_formal_parameter [3]
 ; CHECK-NEXT:   DW_AT_location [DW_FORM_data4]        (
-; CHECK-NEXT:     0x0000000000000000 - 0x0000000000000004: DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4
-; CHECK-NEXT:     0x0000000000000004 - 0x0000000000000008: DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4)
+; CHECK-NEXT:     [0x0000000000000000, 0x0000000000000007): DW_OP_reg5 RDI, DW_OP_piece 0x8, DW_OP_piece 0x4, DW_OP_reg4 RSI, DW_OP_piece 0x4
 ; CHECK-NEXT:   DW_AT_name {{.*}}"outer"
 ; CHECK: DW_TAG_variable
-; CHECK-NEXT:   DW_AT_location {{.*}}(DW_OP_reg4 RSI, DW_OP_piece 0x4)
-; CHECK-NEXT:   "i1"
+; CHECK-NEXT:   DW_AT_name {{.*}}"i1"
+; CHECK-NOT:    DW_AT_location
 
 ; ModuleID = '/Volumes/Data/llvm/test/DebugInfo/X86/sroasplit-2.ll'
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
@@ -39,8 +38,8 @@ define i32 @foo(i64 %outer.coerce0, i64 %outer.coerce1) #0 !dbg !4 {
   call void @llvm.dbg.value(metadata i32 %outer.sroa.1.8.extract.trunc, metadata !34, metadata !35), !dbg !33
   %outer.sroa.1.12.extract.shift = lshr i64 %outer.coerce1, 32, !dbg !33
   %outer.sroa.1.12.extract.trunc = trunc i64 %outer.sroa.1.12.extract.shift to i32, !dbg !33
-  call void @llvm.dbg.value(metadata i64 %outer.sroa.1.12.extract.shift, metadata !34, metadata !35), !dbg !33
-  call void @llvm.dbg.value(metadata i32 %outer.sroa.1.12.extract.trunc, metadata !34, metadata !35), !dbg !33
+  call void @llvm.dbg.value(metadata i64 %outer.sroa.1.12.extract.shift, metadata !34, metadata !37), !dbg !33
+  call void @llvm.dbg.value(metadata i32 %outer.sroa.1.12.extract.trunc, metadata !34, metadata !37), !dbg !33
   call void @llvm.dbg.declare(metadata !{null}, metadata !34, metadata !35), !dbg !33
   ret i32 %outer.sroa.1.8.extract.trunc, !dbg !36
 }
@@ -49,7 +48,7 @@ define i32 @foo(i64 %outer.coerce0, i64 %outer.coerce1) #0 !dbg !4 {
 declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 ; Function Attrs: nounwind
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i32, i1) #2
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i1) #2
 
 ; Function Attrs: nounwind readnone
 declare void @llvm.dbg.value(metadata, metadata, metadata) #1
@@ -65,7 +64,7 @@ attributes #2 = { nounwind }
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: FullDebug, file: !1, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
 !1 = !DIFile(filename: "sroasplit-2.c", directory: "")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "foo", line: 10, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 10, file: !1, scope: !5, type: !6, variables: !2)
+!4 = distinct !DISubprogram(name: "foo", line: 10, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 10, file: !1, scope: !5, type: !6, retainedNodes: !2)
 !5 = !DIFile(filename: "sroasplit-2.c", directory: "")
 !6 = !DISubroutineType(types: !7)
 !7 = !{!8, !9}
@@ -98,3 +97,4 @@ attributes #2 = { nounwind }
 !34 = !DILocalVariable(name: "i1", line: 11, scope: !4, file: !5, type: !14)
 !35 = !DIExpression(DW_OP_LLVM_fragment, 0, 32)
 !36 = !DILocation(line: 12, scope: !4)
+!37 = !DIExpression(DW_OP_LLVM_fragment, 32, 32)

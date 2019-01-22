@@ -1,9 +1,8 @@
 //===------------- PPCEarlyReturn.cpp - Form Early Returns ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -73,7 +72,7 @@ protected:
 
         if ((*PI)->empty())
           continue;
-        
+
         for (MachineBasicBlock::iterator J = (*PI)->getLastNonDebugInstr();;) {
           if (J == (*PI)->end())
             break;
@@ -128,7 +127,7 @@ protected:
                 if (J->getOperand(i).isMBB() &&
                     J->getOperand(i).getMBB() == &ReturnMBB)
                   OtherReference = true;
-          } else if (!J->isTerminator() && !J->isDebugValue())
+          } else if (!J->isTerminator() && !J->isDebugInstr())
             break;
 
           if (J == (*PI)->begin())
@@ -173,7 +172,7 @@ protected:
 
 public:
     bool runOnMachineFunction(MachineFunction &MF) override {
-      if (skipFunction(*MF.getFunction()))
+      if (skipFunction(MF.getFunction()))
         return false;
 
       TII = MF.getSubtarget().getInstrInfo();

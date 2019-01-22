@@ -1,9 +1,8 @@
 //===---------------------- ProcessImplicitDefs.cpp -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,10 +12,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -44,7 +43,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &au) const override;
 
-  bool runOnMachineFunction(MachineFunction &fn) override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
 };
 } // end anonymous namespace
 
@@ -73,7 +72,7 @@ bool ProcessImplicitDefs::canTurnIntoImplicitDef(MachineInstr *MI) {
 }
 
 void ProcessImplicitDefs::processImplicitDef(MachineInstr *MI) {
-  DEBUG(dbgs() << "Processing " << *MI);
+  LLVM_DEBUG(dbgs() << "Processing " << *MI);
   unsigned Reg = MI->getOperand(0).getReg();
 
   if (TargetRegisterInfo::isVirtualRegister(Reg)) {
@@ -84,7 +83,7 @@ void ProcessImplicitDefs::processImplicitDef(MachineInstr *MI) {
       MachineInstr *UserMI = MO.getParent();
       if (!canTurnIntoImplicitDef(UserMI))
         continue;
-      DEBUG(dbgs() << "Converting to IMPLICIT_DEF: " << *UserMI);
+      LLVM_DEBUG(dbgs() << "Converting to IMPLICIT_DEF: " << *UserMI);
       UserMI->setDesc(TII->get(TargetOpcode::IMPLICIT_DEF));
       WorkList.insert(UserMI);
     }
@@ -116,7 +115,7 @@ void ProcessImplicitDefs::processImplicitDef(MachineInstr *MI) {
 
   // If we found the using MI, we can erase the IMPLICIT_DEF.
   if (Found) {
-    DEBUG(dbgs() << "Physreg user: " << *UserMI);
+    LLVM_DEBUG(dbgs() << "Physreg user: " << *UserMI);
     MI->eraseFromParent();
     return;
   }
@@ -125,15 +124,15 @@ void ProcessImplicitDefs::processImplicitDef(MachineInstr *MI) {
   // Leave the physreg IMPLICIT_DEF, but trim any extra operands.
   for (unsigned i = MI->getNumOperands() - 1; i; --i)
     MI->RemoveOperand(i);
-  DEBUG(dbgs() << "Keeping physreg: " << *MI);
+  LLVM_DEBUG(dbgs() << "Keeping physreg: " << *MI);
 }
 
 /// processImplicitDefs - Process IMPLICIT_DEF instructions and turn them into
 /// <undef> operands.
 bool ProcessImplicitDefs::runOnMachineFunction(MachineFunction &MF) {
 
-  DEBUG(dbgs() << "********** PROCESS IMPLICIT DEFS **********\n"
-               << "********** Function: " << MF.getName() << '\n');
+  LLVM_DEBUG(dbgs() << "********** PROCESS IMPLICIT DEFS **********\n"
+                    << "********** Function: " << MF.getName() << '\n');
 
   bool Changed = false;
 
@@ -154,8 +153,8 @@ bool ProcessImplicitDefs::runOnMachineFunction(MachineFunction &MF) {
     if (WorkList.empty())
       continue;
 
-    DEBUG(dbgs() << "BB#" << MFI->getNumber() << " has " << WorkList.size()
-                 << " implicit defs.\n");
+    LLVM_DEBUG(dbgs() << printMBBReference(*MFI) << " has " << WorkList.size()
+                      << " implicit defs.\n");
     Changed = true;
 
     // Drain the WorkList to recursively process any new implicit defs.

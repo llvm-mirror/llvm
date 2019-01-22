@@ -1,11 +1,18 @@
 add_llvm_library(LLVMGlobalISel
+        CSEInfo.cpp
+        CSEMIRBuilder.cpp
         CallLowering.cpp
         GlobalISel.cpp
+        Combiner.cpp
+        CombinerHelper.cpp
+        GISelChangeObserver.cpp
         IRTranslator.cpp
         InstructionSelect.cpp
         InstructionSelector.cpp
-        LegalizerHelper.cpp
+        LegalityPredicates.cpp
+        LegalizeMutations.cpp
         Legalizer.cpp
+        LegalizerHelper.cpp
         LegalizerInfo.cpp
         Localizer.cpp
         MachineIRBuilder.cpp

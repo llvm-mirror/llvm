@@ -1,9 +1,8 @@
 //===- SourceCoverageViewText.cpp - A text-based code coverage view -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -51,13 +50,13 @@ namespace {
 static const unsigned LineCoverageColumnWidth = 7;
 static const unsigned LineNumberColumnWidth = 5;
 
-/// \brief Get the width of the leading columns.
+/// Get the width of the leading columns.
 unsigned getCombinedColumnWidth(const CoverageViewOptions &Opts) {
   return (Opts.ShowLineStats ? LineCoverageColumnWidth + 1 : 0) +
          (Opts.ShowLineNumbers ? LineNumberColumnWidth + 1 : 0);
 }
 
-/// \brief The width of the line that is used to divide between the view and
+/// The width of the line that is used to divide between the view and
 /// the subviews.
 unsigned getDividerWidth(const CoverageViewOptions &Opts) {
   return getCombinedColumnWidth(Opts) + 4;
@@ -106,7 +105,8 @@ void SourceCoverageViewText::renderLine(raw_ostream &OS, LineRef L,
   SmallVector<std::pair<unsigned, unsigned>, 2> HighlightedRanges;
 
   // The first segment overlaps from a previous line, so we treat it specially.
-  if (WrappedSegment && WrappedSegment->HasCount && WrappedSegment->Count == 0)
+  if (WrappedSegment && !WrappedSegment->IsGapRegion &&
+      WrappedSegment->HasCount && WrappedSegment->Count == 0)
     Highlight = raw_ostream::RED;
 
   // Output each segment of the line, possibly highlighted.
@@ -120,11 +120,11 @@ void SourceCoverageViewText::renderLine(raw_ostream &OS, LineRef L,
     if (getOptions().Debug && Highlight)
       HighlightedRanges.push_back(std::make_pair(Col, End));
     Col = End;
-    if (Col == ExpansionCol)
-      Highlight = raw_ostream::CYAN;
-    else if ((!S->IsGapRegion || Highlight == raw_ostream::RED) &&
-             S->HasCount && S->Count == 0)
+    if ((!S->IsGapRegion || (Highlight && *Highlight == raw_ostream::RED)) &&
+        S->HasCount && S->Count == 0)
       Highlight = raw_ostream::RED;
+    else if (Col == ExpansionCol)
+      Highlight = raw_ostream::CYAN;
     else
       Highlight = None;
   }

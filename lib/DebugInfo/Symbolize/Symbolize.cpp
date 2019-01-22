@@ -1,9 +1,8 @@
 //===-- LLVMSymbolize.cpp -------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,8 +20,8 @@
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/PDB/PDB.h"
 #include "llvm/DebugInfo/PDB/PDBContext.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/Object/COFF.h"
-#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Support/Casting.h"
@@ -186,14 +185,19 @@ bool findDebugBinary(const std::string &OrigPath,
     return true;
   }
   // Try /path/to/original_binary/.debug/debuglink_name
-  DebugPath = OrigRealPath;
+  DebugPath = OrigDir;
   llvm::sys::path::append(DebugPath, ".debug", DebuglinkName);
   if (checkFileCRC(DebugPath, CRCHash)) {
     Result = DebugPath.str();
     return true;
   }
+#if defined(__NetBSD__)
+  // Try /usr/libdata/debug/path/to/original_binary/debuglink_name
+  DebugPath = "/usr/libdata/debug";
+#else
   // Try /usr/lib/debug/path/to/original_binary/debuglink_name
   DebugPath = "/usr/lib/debug";
+#endif
   llvm::sys::path::append(DebugPath, llvm::sys::path::relative_path(OrigDir),
                           DebuglinkName);
   if (checkFileCRC(DebugPath, CRCHash)) {
@@ -405,7 +409,8 @@ LLVMSymbolizer::getOrCreateModuleInfo(const std::string &ModuleName,
                                     Objects.first->getFileName(), Session)) {
         Modules.insert(
             std::make_pair(ModuleName, std::unique_ptr<SymbolizableModule>()));
-        return std::move(Err);
+        // Return along the PDB filename to provide more context
+        return createFileError(PDBFileName, std::move(Err));
       }
       Context.reset(new PDBContext(*CoffObject, std::move(Session)));
     }
@@ -460,28 +465,22 @@ StringRef demanglePE32ExternCFunc(StringRef SymbolName) {
 
 } // end anonymous namespace
 
-#if !defined(_MSC_VER)
-// Assume that __cxa_demangle is provided by libcxxabi (except for Windows).
-extern "C" char *__cxa_demangle(const char *mangled_name, char *output_buffer,
-                                size_t *length, int *status);
-#endif
-
 std::string
 LLVMSymbolizer::DemangleName(const std::string &Name,
                              const SymbolizableModule *DbiModuleDescriptor) {
-#if !defined(_MSC_VER)
   // We can spoil names of symbols with C linkage, so use an heuristic
   // approach to check if the name should be demangled.
   if (Name.substr(0, 2) == "_Z") {
     int status = 0;
-    char *DemangledName = __cxa_demangle(Name.c_str(), nullptr, nullptr, &status);
+    char *DemangledName = itaniumDemangle(Name.c_str(), nullptr, nullptr, &status);
     if (status != 0)
       return Name;
     std::string Result = DemangledName;
     free(DemangledName);
     return Result;
   }
-#else
+
+#if defined(_MSC_VER)
   if (!Name.empty() && Name.front() == '?') {
     // Only do MSVC C++ demangling on symbols starting with '?'.
     char DemangledName[1024] = {0};

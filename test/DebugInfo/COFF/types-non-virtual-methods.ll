@@ -64,11 +64,10 @@
 ; CHECK:   Pointer (0x1004) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: A (0x1003)
-; CHECK:     PointerAttributes: 0x800A
 ; CHECK:     PtrType: Near32 (0xA)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
-; CHECK:     IsConst: 0
+; CHECK:     IsConst: 1
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
 ; CHECK:   }
@@ -76,7 +75,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: A (0x1003)
-; CHECK:     ThisType: A* (0x1004)
+; CHECK:     ThisType: A* const (0x1004)
 ; CHECK:     CallingConvention: ThisCall (0xB)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -121,12 +120,12 @@
 ; CHECK:   StringId (0x1008) {
 ; CHECK:     TypeLeafKind: LF_STRING_ID (0x1605)
 ; CHECK:     Id: 0x0
-; CHECK:     StringData: \t.cpp
+; CHECK:     StringData: /t.cpp
 ; CHECK:   }
 ; CHECK:   UdtSourceLine (0x1009) {
 ; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
 ; CHECK:     UDT: A (0x1007)
-; CHECK:     SourceFile: \t.cpp (0x1008)
+; CHECK:     SourceFile: /t.cpp (0x1008)
 ; CHECK:     LineNumber: 1
 ; CHECK:   }
 ; CHECK:   Class (0x100A) {
@@ -144,11 +143,10 @@
 ; CHECK:   Pointer (0x100B) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: B (0x100A)
-; CHECK:     PointerAttributes: 0x800A
 ; CHECK:     PtrType: Near32 (0xA)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
-; CHECK:     IsConst: 0
+; CHECK:     IsConst: 1
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
 ; CHECK:     SizeOf: 4
@@ -157,7 +155,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: B (0x100A)
-; CHECK:     ThisType: B* (0x100B)
+; CHECK:     ThisType: B* const (0x100B)
 ; CHECK:     CallingConvention: ThisCall (0xB)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -176,7 +174,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: B (0x100A)
-; CHECK:     ThisType: B* (0x100B)
+; CHECK:     ThisType: B* const (0x100B)
 ; CHECK:     CallingConvention: ThisCall (0xB)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -195,7 +193,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: B (0x100A)
-; CHECK:     ThisType: B* (0x100B)
+; CHECK:     ThisType: B* const (0x100B)
 ; CHECK:     CallingConvention: ThisCall (0xB)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -241,7 +239,7 @@
 ; CHECK:   UdtSourceLine (0x1014) {
 ; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
 ; CHECK:     UDT: B (0x1013)
-; CHECK:     SourceFile: \t.cpp (0x1008)
+; CHECK:     SourceFile: /t.cpp (0x1008)
 ; CHECK:     LineNumber: 11
 ; CHECK:   }
 ; CHECK: ]
@@ -279,7 +277,7 @@ attributes #1 = { nounwind readnone }
 !3 = !{i32 2, !"CodeView", i32 1}
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{!"clang version 3.9.0 (trunk 272316)"}
-!6 = distinct !DISubprogram(name: "foo", linkageName: "\01?foo@@YAXXZ", scope: !1, file: !1, line: 18, type: !7, isLocal: false, isDefinition: true, scopeLine: 18, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!6 = distinct !DISubprogram(name: "foo", linkageName: "\01?foo@@YAXXZ", scope: !1, file: !1, line: 18, type: !7, isLocal: false, isDefinition: true, scopeLine: 18, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !7 = !DISubroutineType(types: !8)
 !8 = !{null}
 !9 = !DILocalVariable(name: "a", scope: !6, file: !1, line: 19, type: !10)

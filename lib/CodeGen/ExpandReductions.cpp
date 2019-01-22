@@ -1,9 +1,8 @@
 //===--- ExpandReductions.cpp - Expand experimental reduction intrinsics --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -78,13 +77,15 @@ RecurrenceDescriptor::MinMaxRecurrenceKind getMRK(Intrinsic::ID ID) {
 
 bool expandReductions(Function &F, const TargetTransformInfo *TTI) {
   bool Changed = false;
-  SmallVector<IntrinsicInst*, 4> Worklist;
+  SmallVector<IntrinsicInst *, 4> Worklist;
   for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
     if (auto II = dyn_cast<IntrinsicInst>(&*I))
       Worklist.push_back(II);
 
   for (auto *II : Worklist) {
     IRBuilder<> Builder(II);
+    bool IsOrdered = false;
+    Value *Acc = nullptr;
     Value *Vec = nullptr;
     auto ID = II->getIntrinsicID();
     auto MRK = RecurrenceDescriptor::MRK_Invalid;
@@ -92,11 +93,10 @@ bool expandReductions(Function &F, const TargetTransformInfo *TTI) {
     case Intrinsic::experimental_vector_reduce_fadd:
     case Intrinsic::experimental_vector_reduce_fmul:
       // FMFs must be attached to the call, otherwise it's an ordered reduction
-      // and it can't be handled by generating this shuffle sequence.
-      // TODO: Implement scalarization of ordered reductions here for targets
-      // without native support.
-      if (!II->getFastMathFlags().unsafeAlgebra())
-        continue;
+      // and it can't be handled by generating a shuffle sequence.
+      if (!II->getFastMathFlags().isFast())
+        IsOrdered = true;
+      Acc = II->getArgOperand(0);
       Vec = II->getArgOperand(1);
       break;
     case Intrinsic::experimental_vector_reduce_add:
@@ -118,7 +118,9 @@ bool expandReductions(Function &F, const TargetTransformInfo *TTI) {
     }
     if (!TTI->shouldExpandReduction(II))
       continue;
-    auto Rdx = getShuffleReduction(Builder, Vec, getOpcode(ID), MRK);
+    Value *Rdx =
+        IsOrdered ? getOrderedReduction(Builder, Acc, Vec, getOpcode(ID), MRK)
+                  : getShuffleReduction(Builder, Vec, getOpcode(ID), MRK);
     II->replaceAllUsesWith(Rdx);
     II->eraseFromParent();
     Changed = true;

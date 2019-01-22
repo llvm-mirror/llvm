@@ -1,9 +1,8 @@
 //===- TestPasses.cpp - "buggy" passes used to test bugpoint --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -99,7 +98,6 @@ static RegisterPass<CrashOnDeclFunc>
   Z("bugpoint-crash-decl-funcs",
     "BugPoint Test Pass - Intentionally crash on declared functions");
 
-#include <iostream>
 namespace {
 /// CrashOnOneCU - This pass is used to test bugpoint. It intentionally
 /// crashes if the Module has two or more compile units
@@ -124,3 +122,28 @@ char CrashOnTooManyCUs::ID = 0;
 static RegisterPass<CrashOnTooManyCUs>
     A("bugpoint-crash-too-many-cus",
       "BugPoint Test Pass - Intentionally crash on too many CUs");
+
+namespace {
+class CrashOnFunctionAttribute : public FunctionPass {
+public:
+  static char ID; // Pass ID, replacement for typeid
+  CrashOnFunctionAttribute() : FunctionPass(ID) {}
+
+private:
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesAll();
+  }
+
+  bool runOnFunction(Function &F) override {
+    AttributeSet A = F.getAttributes().getFnAttributes();
+    if (A.hasAttribute("bugpoint-crash"))
+      abort();
+    return false;
+  }
+};
+} // namespace
+
+char CrashOnFunctionAttribute::ID = 0;
+static RegisterPass<CrashOnFunctionAttribute>
+    B("bugpoint-crashfuncattr", "BugPoint Test Pass - Intentionally crash on "
+                                "function attribute 'bugpoint-crash'");

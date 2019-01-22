@@ -1,9 +1,8 @@
 //===- FormatAdapters.h - Formatters for common LLVM types -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,7 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FormatCommon.h"
 #include "llvm/Support/FormatVariadicDetails.h"
 #include "llvm/Support/raw_ostream.h"
@@ -19,7 +19,7 @@
 namespace llvm {
 template <typename T> class FormatAdapter : public detail::format_adapter {
 protected:
-  explicit FormatAdapter(T &&Item) : Item(Item) {}
+  explicit FormatAdapter(T &&Item) : Item(std::forward<T>(Item)) {}
 
   T Item;
 };
@@ -71,6 +71,14 @@ public:
     }
   }
 };
+
+class ErrorAdapter : public FormatAdapter<Error> {
+public:
+  ErrorAdapter(Error &&Item) : FormatAdapter(std::move(Item)) {}
+  ErrorAdapter(ErrorAdapter &&) = default;
+  ~ErrorAdapter() { consumeError(std::move(Item)); }
+  void format(llvm::raw_ostream &Stream, StringRef Style) { Stream << Item; }
+};
 }
 
 template <typename T>
@@ -87,6 +95,13 @@ detail::PadAdapter<T> fmt_pad(T &&Item, size_t Left, size_t Right) {
 template <typename T>
 detail::RepeatAdapter<T> fmt_repeat(T &&Item, size_t Count) {
   return detail::RepeatAdapter<T>(std::forward<T>(Item), Count);
+}
+
+// llvm::Error values must be consumed before being destroyed.
+// Wrapping an error in fmt_consume explicitly indicates that the formatv_object
+// should take ownership and consume it.
+inline detail::ErrorAdapter fmt_consume(Error &&Item) {
+  return detail::ErrorAdapter(std::move(Item));
 }
 }
 

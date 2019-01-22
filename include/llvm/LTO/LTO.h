@@ -1,9 +1,8 @@
 //===-LTO.h - LLVM Link Time Optimizer ------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,7 +18,6 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/Analysis/ObjectUtils.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/LTO/Config.h"
@@ -41,13 +39,13 @@ class Module;
 class Target;
 class raw_pwrite_stream;
 
-/// Resolve Weak and LinkOnce values in the \p Index. Linkage changes recorded
-/// in the index and the ThinLTO backends must apply the changes to the Module
-/// via thinLTOResolveWeakForLinkerModule.
+/// Resolve linkage for prevailing symbols in the \p Index. Linkage changes
+/// recorded in the index and the ThinLTO backends must apply the changes to
+/// the module via thinLTOResolvePrevailingInModule.
 ///
 /// This is done for correctness (if value exported, ensure we always
 /// emit a copy), and compile-time optimization (allow drop of duplicates).
-void thinLTOResolveWeakForLinkerInIndex(
+void thinLTOResolvePrevailingInIndex(
     ModuleSummaryIndex &Index,
     function_ref<bool(GlobalValue::GUID, const GlobalValueSummary *)>
         isPrevailing,
@@ -60,6 +58,19 @@ void thinLTOResolveWeakForLinkerInIndex(
 void thinLTOInternalizeAndPromoteInIndex(
     ModuleSummaryIndex &Index,
     function_ref<bool(StringRef, GlobalValue::GUID)> isExported);
+
+/// Computes a unique hash for the Module considering the current list of
+/// export/import and other global analysis results.
+/// The hash is produced in \p Key.
+void computeLTOCacheKey(
+    SmallString<40> &Key, const lto::Config &Conf,
+    const ModuleSummaryIndex &Index, StringRef ModuleID,
+    const FunctionImporter::ImportMapTy &ImportList,
+    const FunctionImporter::ExportSetTy &ExportList,
+    const std::map<GlobalValue::GUID, GlobalValue::LinkageTypes> &ResolvedODR,
+    const GVSummaryMapTy &DefinedGlobals,
+    const std::set<GlobalValue::GUID> &CfiFunctionDefs = {},
+    const std::set<GlobalValue::GUID> &CfiFunctionDecls = {});
 
 namespace lto {
 
@@ -210,10 +221,16 @@ ThinBackend createInProcessThinBackend(unsigned ParallelismLevel);
 /// appends ".thinlto.bc" and writes the index to that path. If
 /// ShouldEmitImportsFiles is true it also writes a list of imported files to a
 /// similar path with ".imports" appended instead.
+/// LinkedObjectsFile is an output stream to write the list of object files for
+/// the final ThinLTO linking. Can be nullptr.
+/// OnWrite is callback which receives module identifier and notifies LTO user
+/// that index file for the module (and optionally imports file) was created.
+using IndexWriteCallback = std::function<void(const std::string &)>;
 ThinBackend createWriteIndexesThinBackend(std::string OldPrefix,
                                           std::string NewPrefix,
                                           bool ShouldEmitImportsFiles,
-                                          std::string LinkedObjectsFile);
+                                          raw_fd_ostream *LinkedObjectsFile,
+                                          IndexWriteCallback OnWrite);
 
 /// This class implements a resolution-based interface to LLVM's LTO
 /// functionality. It supports regular LTO, parallel LTO code generation and
@@ -279,7 +296,6 @@ private:
 
     unsigned ParallelCodeGenParallelismLevel;
     LTOLLVMContext Ctx;
-    bool HasModule = false;
     std::unique_ptr<Module> CombinedModule;
     std::unique_ptr<IRMover> Mover;
 
@@ -320,6 +336,14 @@ private:
     bool VisibleOutsideSummary = false;
 
     bool UnnamedAddr = true;
+
+    /// True if module contains the prevailing definition.
+    bool Prevailing = false;
+
+    /// Returns true if module contains the prevailing definition and symbol is
+    /// an IR symbol. For example when module-level inline asm block is used,
+    /// symbol can be prevailing in module but have no IR name.
+    bool isPrevailingIRSymbol() const { return Prevailing && !IRName.empty(); }
 
     /// This field keeps track of the partition number of this global. The
     /// regular LTO object is partition 0, while each ThinLTO object has its own
@@ -372,10 +396,12 @@ private:
                    const SymbolResolution *&ResI, const SymbolResolution *ResE);
 
   Error runRegularLTO(AddStreamFn AddStream);
-  Error runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache,
-                   bool HasRegularLTO);
+  Error runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache);
 
   mutable bool CalledGetMaxTasks = false;
+
+  // Use Optional to distinguish false from not yet initialized.
+  Optional<bool> EnableSplitLTOUnit;
 };
 
 /// The resolution for a symbol. The linker must provide a SymbolResolution for

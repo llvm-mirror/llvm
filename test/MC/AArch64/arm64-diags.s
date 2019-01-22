@@ -9,7 +9,7 @@ foo:
   ldr x3, [foo + 4]
 ; CHECK:  ldr x3, foo+4               ; encoding: [0bAAA00011,A,A,0x58]
 ; CHECK:                              ;   fixup A - offset: 0, value: foo+4, kind: fixup_aarch64_ldr_pcrel_imm19
-; CHECK-ERRORS: error: expected label or encodable integer pc offset
+; CHECK-ERRORS: error: invalid operand for instruction
 
 ; The last argument should be flagged as an error.  rdar://9576009
   ld4.8b	{v0, v1, v2, v3}, [x0], #33
@@ -42,13 +42,13 @@ foo:
 ; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
 ; CHECK-ERRORS:         ldr x0, [x0, #804]!
 ; CHECK-ERRORS:                 ^
-; CHECK-ERRORS: error: expected label or encodable integer pc offset
+; CHECK-ERRORS: error: invalid operand for instruction
 ; CHECK-ERRORS:         ldr w0, [w0, #301]!
 ; CHECK-ERRORS:                  ^
 ; CHECK-ERRORS: error: index must be an integer in range [-256, 255].
 ; CHECK-ERRORS:         ldr x0, [x0], #804
 ; CHECK-ERRORS:                       ^
-; CHECK-ERRORS: error: expected label or encodable integer pc offset
+; CHECK-ERRORS: error: invalid operand for instruction
 ; CHECK-ERRORS:         ldr w0, [w0], #301
 ; CHECK-ERRORS:                  ^
 ; CHECK-ERRORS: error: index must be a multiple of 4 in range [-256, 252].
@@ -245,6 +245,67 @@ ldr    q1, [x3, w3, sxtw #1]
 ; CHECK-ERRORS: error: unpredictable STR instruction, writeback base is also a source
 ; CHECK-ERRORS:   str w2, [x2, #8]!
 ; CHECK-ERRORS:       ^
+
+; Store exclusive instructions are unpredictable if the status register clashes
+; with anything.
+  stlxrb w1, w1, [x5]
+  stxrb w3, w5, [x3]
+  stxrh w7, w9, [x7]
+  stlxrh wzr, wzr, [x13]
+  stxr w9, w9, [x12]
+  stlxr w22, x1, [x22]
+  stxr w4, x4, [x9]
+  stlxr w5, x0, [x5]
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stlxrb w1, w1, [x5]
+; CHECK-ERRORS:          ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stxrb w3, w5, [x3]
+; CHECK-ERRORS:         ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stxrh w7, w9, [x7]
+; CHECK-ERRORS:         ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stlxrh wzr, wzr, [x13]
+; CHECK-ERRORS:          ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stxr w9, w9, [x12]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stlxr w22, x1, [x22]
+; CHECK-ERRORS:         ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stxr w4, x4, [x9]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXR instruction, status is also a source
+; CHECK-ERRORS:   stlxr w5, x0, [x5]
+; CHECK-ERRORS:         ^
+
+  stxp w0, w0, w1, [x3]
+  stxp w0, w1, w0, [x5]
+  stxp w10, w4, w5, [x10]
+  stxp wzr, xzr, x4, [x5]
+  stxp w3, x5, x3, [sp]
+  stxp w25, x4, x2, [x25]
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp w0, w0, w1, [x3]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp w0, w1, w0, [x5]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp w10, w4, w5, [x10]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp wzr, xzr, x4, [x5]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp w3, x5, x3, [sp]
+; CHECK-ERRORS:        ^
+; CHECK-ERRORS: error: unpredictable STXP instruction, status is also a source
+; CHECK-ERRORS:   stxp w25, x4, x2, [x25]
+; CHECK-ERRORS:        ^
+
 
 ; The validity checking for shifted-immediate operands.  rdar://13174476
 ; Where the immediate is out of range.
@@ -477,7 +538,7 @@ tlbi vale3
 ; CHECK-ERRORS: error: too few operands for instruction
 ; CHECK-ERRORS:   b.ne
 ; CHECK-ERRORS:   ^
-; CHECK-ERRORS: error: expected label or encodable integer pc offset
+; CHECK-ERRORS: error: invalid operand for instruction
 ; CHECK-ERRORS:   b.eq 0, 0
 ; CHECK-ERRORS:           ^
 

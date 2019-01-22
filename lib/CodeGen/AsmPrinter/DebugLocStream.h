@@ -1,9 +1,8 @@
 //===--- lib/CodeGen/DebugLocStream.h - DWARF debug_loc stream --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,7 +21,7 @@ class DwarfCompileUnit;
 class MachineInstr;
 class MCSymbol;
 
-/// \brief Byte stream of .debug_loc entries.
+/// Byte stream of .debug_loc entries.
 ///
 /// Stores a unified stream of .debug_loc entries.  There's \a List for each
 /// variable/inlined-at pair, and an \a Entry for each \a DebugLocEntry.
@@ -55,7 +54,7 @@ private:
   SmallString<256> DWARFBytes;
   SmallVector<std::string, 32> Comments;
 
-  /// \brief Only verbose textual output needs comments.  This will be set to
+  /// Only verbose textual output needs comments.  This will be set to
   /// true for that case, and false otherwise.
   bool GenerateComments;
 
@@ -69,7 +68,7 @@ public:
   class EntryBuilder;
 
 private:
-  /// \brief Start a new .debug_loc entry list.
+  /// Start a new .debug_loc entry list.
   ///
   /// Start a new .debug_loc entry list.  Return the new list's index so it can
   /// be retrieved later via \a getList().
@@ -89,7 +88,7 @@ private:
   /// \return false iff the list is deleted.
   bool finalizeList(AsmPrinter &Asm);
 
-  /// \brief Start a new .debug_loc entry.
+  /// Start a new .debug_loc entry.
   ///
   /// Until the next call, bytes added to the stream will be added to this
   /// entry.

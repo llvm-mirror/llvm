@@ -1,7 +1,9 @@
 ; RUN: llc -mtriple=x86_64-unknown-linux-gnu %s -o %t -filetype=obj
-; RUN: llvm-dwarfdump -debug-info %t | FileCheck %s
+; RUN: llvm-dwarfdump -debug-info %t | FileCheck %s --check-prefix LINUX
+; RUN: llc -mtriple=x86_64-apple-macosx %s -o %t -filetype=obj
+; RUN: llvm-dwarfdump -debug-info %t | FileCheck %s --check-prefix DARWIN
 ;
-; Test the DW_AT_producer DWARG attribute.
+; Test the DW_AT_producer DWARF attribute.
 ; When producer and flags are both given in DIComileUnit, set DW_AT_producer
 ; as two values combined.
 ;
@@ -16,8 +18,10 @@
 ;     return 0;
 ;   }
 
-; CHECK: DW_AT_producer
-; CHECK-SAME: "clang++ -g -grecord-gcc-switches test.cc -S -emit-llvm -o -"
+; LINUX: DW_AT_producer{{.*}}("clang++ -g -grecord-gcc-switches test.cc -S -emit-llvm -o -")
+; DARWIN: DW_AT_producer{{.*}}("clang++")
+; DARWIN: DW_AT_APPLE_flags{{.*}}("-g -grecord-gcc-switches test.cc -S -emit-llvm -o -")
+
 target triple = "x86_64-unknown-linux-gnu"
 
 define i32 @main() !dbg !6 {
@@ -37,7 +41,7 @@ entry:
 !3 = !{i32 2, !"Dwarf Version", i32 4}
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{!"clang"}
-!6 = distinct !DISubprogram(name: "main", scope: !1, file: !1, line: 4, type: !7, isLocal: false, isDefinition: true, scopeLine: 4, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!6 = distinct !DISubprogram(name: "main", scope: !1, file: !1, line: 4, type: !7, isLocal: false, isDefinition: true, scopeLine: 4, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !7 = !DISubroutineType(types: !8)
 !8 = !{!9}
 !9 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)

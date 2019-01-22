@@ -13,13 +13,13 @@ declare i65 @llvm.ctpop.i65(i65) nounwind readnone
 declare i128 @llvm.ctpop.i128(i128) nounwind readnone
 
 ; FUNC-LABEL: {{^}}s_ctpop_i64:
-; SI: s_load_dwordx2 [[SVAL:s\[[0-9]+:[0-9]+\]]], s{{\[[0-9]+:[0-9]+\]}}, 0xb
-; VI: s_load_dwordx2 [[SVAL:s\[[0-9]+:[0-9]+\]]], s{{\[[0-9]+:[0-9]+\]}}, 0x2c
+; SI: s_load_dwordx2 [[SVAL:s\[[0-9]+:[0-9]+\]]], s{{\[[0-9]+:[0-9]+\]}}, 0x13
+; VI: s_load_dwordx2 [[SVAL:s\[[0-9]+:[0-9]+\]]], s{{\[[0-9]+:[0-9]+\]}}, 0x4c
 ; GCN: s_bcnt1_i32_b64 [[SRESULT:s[0-9]+]], [[SVAL]]
 ; GCN: v_mov_b32_e32 [[VRESULT:v[0-9]+]], [[SRESULT]]
 ; GCN: buffer_store_dword [[VRESULT]],
 ; GCN: s_endpgm
-define amdgpu_kernel void @s_ctpop_i64(i32 addrspace(1)* noalias %out, i64 %val) nounwind {
+define amdgpu_kernel void @s_ctpop_i64(i32 addrspace(1)* noalias %out, [8 x i32], i64 %val) nounwind {
   %ctpop = call i64 @llvm.ctpop.i64(i64 %val) nounwind readnone
   %truncctpop = trunc i64 %ctpop to i32
   store i32 %truncctpop, i32 addrspace(1)* %out, align 4
@@ -188,7 +188,7 @@ define amdgpu_kernel void @s_ctpop_i65(i32 addrspace(1)* noalias %out, i65 %val)
 ; GCN-DAG: v_bcnt_u32_b32{{(_e64)*}} [[MIDRESULT2:v[0-9]+]], v[[VAL0]], 0
 ; GCN-DAG: v_bcnt_u32_b32{{(_e32)*(_e64)*}} [[MIDRESULT3:v[0-9]+]], v{{[0-9]+}}, [[MIDRESULT2]]
 
-; GCN: v_add_i32_e32 [[RESULT:v[0-9]+]], vcc, [[MIDRESULT1]], [[MIDRESULT2]]
+; GCN: v_add_{{[iu]}}32_e32 [[RESULT:v[0-9]+]], vcc, [[MIDRESULT2]], [[MIDRESULT1]]
 
 ; GCN: buffer_store_dword [[RESULT]],
 ; GCN: s_endpgm

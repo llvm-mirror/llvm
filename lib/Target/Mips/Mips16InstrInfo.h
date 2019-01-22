@@ -1,9 +1,8 @@
 //===- Mips16InstrInfo.h - Mips16 Instruction Information -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -102,6 +101,14 @@ public:
 
   void BuildAddiuSpImm
     (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const;
+
+protected:
+  /// If the specific machine instruction is a instruction that moves/copies
+  /// value from one register to another register return true along with
+  /// @Source machine operand and @Destination machine operand.
+  bool isCopyInstrImpl(const MachineInstr &MI, const MachineOperand *&Source,
+                       const MachineOperand *&Destination) const override;
+
 private:
   unsigned getAnalyzableBrOpc(unsigned Opc) const override;
 

@@ -1,9 +1,8 @@
 //===-- MSP430RegisterInfo.cpp - MSP430 Register Information --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,7 +37,7 @@ MSP430RegisterInfo::MSP430RegisterInfo()
 const MCPhysReg*
 MSP430RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const MSP430FrameLowering *TFI = getFrameLowering(*MF);
-  const Function* F = MF->getFunction();
+  const Function* F = &MF->getFunction();
   static const MCPhysReg CalleeSavedRegs[] = {
     MSP430::FP, MSP430::R5, MSP430::R6, MSP430::R7,
     MSP430::R8, MSP430::R9, MSP430::R10,

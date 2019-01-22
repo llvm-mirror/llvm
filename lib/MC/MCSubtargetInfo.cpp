@@ -1,9 +1,8 @@
 //===- MCSubtargetInfo.cpp - Subtarget Information ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,8 +50,6 @@ MCSubtargetInfo::MCSubtargetInfo(
   InitMCProcessorInfo(CPU, FS);
 }
 
-/// ToggleFeature - Toggle a feature and returns the re-computed feature
-/// bits. This version does not change the implied bits.
 FeatureBitset MCSubtargetInfo::ToggleFeature(uint64_t FB) {
   FeatureBits.flip(FB);
   return FeatureBits;
@@ -63,8 +60,6 @@ FeatureBitset MCSubtargetInfo::ToggleFeature(const FeatureBitset &FB) {
   return FeatureBits;
 }
 
-/// ToggleFeature - Toggle a feature and returns the re-computed feature
-/// bits. This version will also change all implied bits.
 FeatureBitset MCSubtargetInfo::ToggleFeature(StringRef FS) {
   SubtargetFeatures::ToggleFeature(FeatureBits, FS, ProcFeatures);
   return FeatureBits;
@@ -118,7 +113,6 @@ MCSubtargetInfo::getInstrItineraryForCPU(StringRef CPU) const {
   return InstrItineraryData(SchedModel, Stages, OperandCycles, ForwardingPaths);
 }
 
-/// Initialize an InstrItineraryData instance.
 void MCSubtargetInfo::initInstrItins(InstrItineraryData &InstrItins) const {
   InstrItins = InstrItineraryData(getSchedModel(), Stages, OperandCycles,
                                   ForwardingPaths);

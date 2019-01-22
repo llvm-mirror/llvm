@@ -277,9 +277,10 @@ define void @test_04() {
 ; CHECK:       %tmp11 = add i64 %tmp10, undef
 ; CHECK-NEXT:  -->  ((sext i8 %tmp8 to i64) + {(-2 + undef),+,-1}<nw><%loop2>)
 ; CHECK:       %tmp13 = trunc i64 %tmp11 to i32
-; CHECK-NEXT:  -->  ((sext i8 %tmp8 to i32) + {(trunc i64 (-2 + undef) to i32),+,-1}<%loop2>)
+; CHECK-NEXT:  -->  ((sext i8 %tmp8 to i32) + {(-2 + (trunc i64 undef to i32)),+,-1}<%loop2>)
 ; CHECK:       %tmp14 = sub i32 %tmp13, %tmp2
-; CHECK-NEXT:  -->  ((sext i8 %tmp8 to i32) + {{{{}}(-2 + (trunc i64 (-2 + undef) to i32)),+,-1}<%loop1>,+,-1}<%loop2>)
+; `{{[{][{]}}` is the ugliness needed to match `{{`
+; CHECK-NEXT:  -->  ((sext i8 %tmp8 to i32) + {{[{][{]}}(-4 + (trunc i64 undef to i32)),+,-1}<%loop1>,+,-1}<%loop2>)
 ; CHECK:       %tmp15 = add nuw nsw i64 %tmp7, 1
 ; CHECK-NEXT:  -->  {3,+,1}<nuw><nsw><%loop2>
 
@@ -321,7 +322,7 @@ define void @test_05(i32 %N) {
 ; CHECK:       %SQ = mul i32 %i.0, %i.0
 ; CHECK-NEXT:  -->  {4,+,5,+,2}<%bb3>
 ; CHECK:       %tmp4 = mul i32 %i.0, 2
-; CHECK-NEXT:  -->  {4,+,2}<%bb3>
+; CHECK-NEXT:  -->  {4,+,2}<nuw><nsw><%bb3>
 ; CHECK:       %tmp5 = sub i32 %SQ, %tmp4
 ; CHECK-NEXT:  -->  {0,+,3,+,2}<%bb3>
 
@@ -462,9 +463,9 @@ define void @test_08() {
 ; CHECK:       %tmp11 = add i64 %iv.2.2, %iv.2.1
 ; CHECK-NEXT:  -->  ({0,+,-1}<nsw><%loop_2> + %iv.2.1)
 ; CHECK:       %tmp12 = trunc i64 %tmp11 to i32
-; CHECK-NEXT:  -->  (trunc i64 ({0,+,-1}<nsw><%loop_2> + %iv.2.1) to i32)
+; CHECK-NEXT:  -->  ((trunc i64 %iv.2.1 to i32) + {0,+,-1}<%loop_2>)
 ; CHECK:       %tmp14 = mul i32 %tmp12, %tmp7
-; CHECK-NEXT:  -->  ((trunc i64 ({0,+,-1}<nsw><%loop_2> + %iv.2.1) to i32) * {-1,+,-1}<%loop_1>)
+; CHECK-NEXT:  -->  (((trunc i64 %iv.2.1 to i32) + {0,+,-1}<%loop_2>) * {-1,+,-1}<%loop_1>)
 ; CHECK:       %tmp16 = mul i64 %iv.2.1, %iv.1.1
 ; CHECK-NEXT:  -->  ({2,+,1}<nuw><nsw><%loop_1> * %iv.2.1)
 
@@ -509,4 +510,123 @@ loop_2:
 exit:
   %tmp10 = add i32 %iv.1.2, 3
   ret void
+}
+
+define i64 @test_09(i32 %param) {
+
+; CHECK-LABEL: Classifying expressions for: @test_09
+; CHECK:       %iv1 = phi i64 [ %iv1.next, %guarded ], [ 0, %outer.loop ]
+; CHECK-NEXT:    -->  {0,+,1}<nuw><nsw><%loop1>
+; CHECK:       %iv1.trunc = trunc i64 %iv1 to i32
+; CHECK-NEXT:    -->  {0,+,1}<%loop1>
+; CHECK:       %iv1.next = add nuw nsw i64 %iv1, 1
+; CHECK-NEXT:    -->  {1,+,1}<nuw><nsw><%loop1>
+; CHECK:       %iv2 = phi i32 [ %iv2.next, %loop2 ], [ %param, %loop2.preheader ]
+; CHECK-NEXT:    -->  {%param,+,1}<%loop2>
+; CHECK:       %iv2.next = add i32 %iv2, 1
+; CHECK-NEXT:    -->  {(1 + %param),+,1}<%loop2>
+; CHECK:       %iv2.ext = sext i32 %iv2.next to i64
+; CHECK-NEXT:    -->  (sext i32 {(1 + %param),+,1}<%loop2> to i64)
+; CHECK:       %ret = mul i64 %iv1, %iv2.ext
+; CHECK-NEXT:    -->  ((sext i32 {(1 + %param),+,1}<%loop2> to i64) * {0,+,1}<nuw><nsw><%loop1>)
+
+entry:
+  br label %outer.loop
+
+outer.loop:                                 ; preds = %loop2.exit, %entry
+  br label %loop1
+
+loop1:                                           ; preds = %guarded, %outer.loop
+  %iv1 = phi i64 [ %iv1.next, %guarded ], [ 0, %outer.loop ]
+  %iv1.trunc = trunc i64 %iv1 to i32
+  %cond1 = icmp ult i64 %iv1, 100
+  br i1 %cond1, label %guarded, label %deopt
+
+guarded:                                          ; preds = %loop1
+  %iv1.next = add nuw nsw i64 %iv1, 1
+  %tmp16 = icmp slt i32 %iv1.trunc, 2
+  br i1 %tmp16, label %loop1, label %loop2.preheader
+
+deopt:                                            ; preds = %loop1
+  unreachable
+
+loop2.preheader:                                 ; preds = %guarded
+  br label %loop2
+
+loop2:                                           ; preds = %loop2, %loop2.preheader
+  %iv2 = phi i32 [ %iv2.next, %loop2 ], [ %param, %loop2.preheader ]
+  %iv2.next = add i32 %iv2, 1
+  %cond2 = icmp slt i32 %iv2, %iv1.trunc
+  br i1 %cond2, label %loop2, label %exit
+
+exit:                                          ; preds = %loop2.exit
+  %iv2.ext = sext i32 %iv2.next to i64
+  %ret = mul i64 %iv1, %iv2.ext
+  ret i64 %ret
+}
+
+define i64 @test_10(i32 %param) {
+
+; CHECK-LABEL: Classifying expressions for: @test_10
+; CHECK:       %uncle = phi i64 [ %uncle.outer.next, %uncle.loop.backedge ], [ 0, %outer.loop ]
+; CHECK-NEXT:  -->  {0,+,1}<%uncle.loop>
+; CHECK:       %iv1 = phi i64 [ %iv1.next, %guarded ], [ 0, %uncle.loop ]
+; CHECK-NEXT:  -->  {0,+,1}<nuw><nsw><%loop1>
+; CHECK:       %iv1.trunc = trunc i64 %iv1 to i32
+; CHECK-NEXT:  -->  {0,+,1}<%loop1>
+; CHECK:       %iv1.next = add nuw nsw i64 %iv1, 1
+; CHECK-NEXT:  -->  {1,+,1}<nuw><nsw><%loop1>
+; CHECK:       %uncle.outer.next = add i64 %uncle, 1
+; CHECK-NEXT:  -->  {1,+,1}<%uncle.loop>
+; CHECK:       %iv2 = phi i32 [ %iv2.next, %loop2 ], [ %param, %loop2.preheader ]
+; CHECK-NEXT:  -->  {%param,+,1}<%loop2>
+; CHECK:       %iv2.next = add i32 %iv2, 1
+; CHECK-NEXT:  -->  {(1 + %param),+,1}<%loop2>
+; CHECK:       %iv2.ext = sext i32 %iv2.next to i64
+; CHECK-NEXT:  -->  (sext i32 {(1 + %param),+,1}<%loop2> to i64)
+; CHECK:       %ret = mul i64 %iv1, %iv2.ext
+; CHECK-NEXT:  -->  ((sext i32 {(1 + %param),+,1}<%loop2> to i64) * {0,+,1}<nuw><nsw><%loop1>)
+
+entry:
+  br label %outer.loop
+
+outer.loop:                                       ; preds = %entry
+  br label %uncle.loop
+
+uncle.loop:                                       ; preds = %uncle.loop.backedge, %outer.loop
+  %uncle = phi i64 [ %uncle.outer.next, %uncle.loop.backedge ], [ 0, %outer.loop ]
+  br label %loop1
+
+loop1:                                            ; preds = %guarded, %uncle.loop
+  %iv1 = phi i64 [ %iv1.next, %guarded ], [ 0, %uncle.loop ]
+  %iv1.trunc = trunc i64 %iv1 to i32
+  %cond1 = icmp ult i64 %iv1, 100
+  br i1 %cond1, label %guarded, label %deopt
+
+guarded:                                          ; preds = %loop1
+  %iv1.next = add nuw nsw i64 %iv1, 1
+  %tmp16 = icmp slt i32 %iv1.trunc, 2
+  br i1 %tmp16, label %loop1, label %uncle.loop.backedge
+
+uncle.loop.backedge:                              ; preds = %guarded
+  %uncle.outer.next = add i64 %uncle, 1
+  %cond.uncle = icmp ult i64 %uncle, 120
+  br i1 %cond.uncle, label %loop2.preheader, label %uncle.loop
+
+deopt:                                            ; preds = %loop1
+  unreachable
+
+loop2.preheader:                                  ; preds = %uncle.loop.backedge
+  br label %loop2
+
+loop2:                                            ; preds = %loop2, %loop2.preheader
+  %iv2 = phi i32 [ %iv2.next, %loop2 ], [ %param, %loop2.preheader ]
+  %iv2.next = add i32 %iv2, 1
+  %cond2 = icmp slt i32 %iv2, %iv1.trunc
+  br i1 %cond2, label %loop2, label %exit
+
+exit:                                             ; preds = %loop2
+  %iv2.ext = sext i32 %iv2.next to i64
+  %ret = mul i64 %iv1, %iv2.ext
+  ret i64 %ret
 }

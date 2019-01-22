@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/AntiDepBreaker.h - Anti-Dependence Breaking -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,7 +45,7 @@ public:
                                          MachineBasicBlock::iterator End,
                                          unsigned InsertPosIndex,
                                          DbgValueVector &DbgValues) = 0;
-  
+
   /// Update liveness information to account for the current
   /// instruction, which will not be scheduled.
   virtual void Observe(MachineInstr &MI, unsigned Count,

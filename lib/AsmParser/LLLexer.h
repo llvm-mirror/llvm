@@ -1,9 +1,8 @@
 //===- LLLexer.h - Lexer for LLVM Assembly Files ----------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -42,6 +41,10 @@ namespace llvm {
     APFloat APFloatVal;
     APSInt  APSIntVal;
 
+    // When false (default), an identifier ending in ':' is a label token.
+    // When true, the ':' is treated as a separate token.
+    bool IgnoreColonInIdentifiers;
+
   public:
     explicit LLLexer(StringRef StartBuf, SourceMgr &SM, SMDiagnostic &,
                      LLVMContext &C);
@@ -59,8 +62,11 @@ namespace llvm {
     const APSInt &getAPSIntVal() const { return APSIntVal; }
     const APFloat &getAPFloatVal() const { return APFloatVal; }
 
+    void setIgnoreColonInIdentifiers(bool val) {
+      IgnoreColonInIdentifiers = val;
+    }
 
-    bool Error(LocTy L, const Twine &Msg) const;
+    bool Error(LocTy ErrorLoc, const Twine &Msg) const;
     bool Error(const Twine &Msg) const { return Error(getLoc(), Msg); }
 
     void Warning(LocTy WarningLoc, const Twine &Msg) const;
@@ -81,15 +87,17 @@ namespace llvm {
     lltok::Kind LexDollar();
     lltok::Kind LexExclaim();
     lltok::Kind LexPercent();
+    lltok::Kind LexUIntID(lltok::Kind Token);
     lltok::Kind LexVar(lltok::Kind Var, lltok::Kind VarID);
     lltok::Kind LexQuote();
     lltok::Kind Lex0x();
     lltok::Kind LexHash();
+    lltok::Kind LexCaret();
 
     uint64_t atoull(const char *Buffer, const char *End);
     uint64_t HexIntToVal(const char *Buffer, const char *End);
     void HexToIntPair(const char *Buffer, const char *End, uint64_t Pair[2]);
-    void FP80HexToIntPair(const char *Buff, const char *End, uint64_t Pair[2]);
+    void FP80HexToIntPair(const char *Buffer, const char *End, uint64_t Pair[2]);
   };
 } // end namespace llvm
 

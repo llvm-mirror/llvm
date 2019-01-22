@@ -1,9 +1,8 @@
 //===- lib/MC/MCDwarf.cpp - MCDwarf implementation ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +10,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -28,6 +27,7 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
@@ -44,6 +44,29 @@
 #include <vector>
 
 using namespace llvm;
+
+/// Manage the .debug_line_str section contents, if we use it.
+class llvm::MCDwarfLineStr {
+  MCSymbol *LineStrLabel = nullptr;
+  StringTableBuilder LineStrings{StringTableBuilder::DWARF};
+  bool UseRelocs = false;
+
+public:
+  /// Construct an instance that can emit .debug_line_str (for use in a normal
+  /// v5 line table).
+  explicit MCDwarfLineStr(MCContext &Ctx) {
+    UseRelocs = Ctx.getAsmInfo()->doesDwarfUseRelocationsAcrossSections();
+    if (UseRelocs)
+      LineStrLabel =
+          Ctx.getObjectFileInfo()->getDwarfLineStrSection()->getBeginSymbol();
+  }
+
+  /// Emit a reference to the string.
+  void emitRef(MCStreamer *MCOS, StringRef Path);
+
+  /// Emit the .debug_line_str section if appropriate.
+  void emitSection(MCStreamer *MCOS);
+};
 
 static inline uint64_t ScaleAddrDelta(MCContext &Context, uint64_t AddrDelta) {
   unsigned MinInsnLength = Context.getAsmInfo()->getMinInstAlignment();
@@ -105,6 +128,18 @@ static inline const MCExpr *MakeStartMinusEndExpr(const MCStreamer &MCOS,
   const MCExpr *Res3 =
     MCBinaryExpr::create(MCBinaryExpr::Sub, Res1, Res2, MCOS.getContext());
   return Res3;
+}
+
+//
+// This helper routine returns an expression of Start + IntVal .
+//
+static inline const MCExpr *
+makeStartPlusIntExpr(MCContext &Ctx, const MCSymbol &Start, int IntVal) {
+  MCSymbolRefExpr::VariantKind Variant = MCSymbolRefExpr::VK_None;
+  const MCExpr *LHS = MCSymbolRefExpr::create(&Start, Variant, Ctx);
+  const MCExpr *RHS = MCConstantExpr::create(IntVal, Ctx);
+  const MCExpr *Res = MCBinaryExpr::create(MCBinaryExpr::Add, LHS, RHS, Ctx);
+  return Res;
 }
 
 //
@@ -205,22 +240,35 @@ void MCDwarfLineTable::Emit(MCObjectStreamer *MCOS,
   if (LineTables.empty())
     return;
 
+  // In a v5 non-split line table, put the strings in a separate section.
+  Optional<MCDwarfLineStr> LineStr;
+  if (context.getDwarfVersion() >= 5)
+    LineStr = MCDwarfLineStr(context);
+
   // Switch to the section where the table will be emitted into.
   MCOS->SwitchSection(context.getObjectFileInfo()->getDwarfLineSection());
 
   // Handle the rest of the Compile Units.
-  for (const auto &CUIDTablePair : LineTables)
-    CUIDTablePair.second.EmitCU(MCOS, Params);
+  for (const auto &CUIDTablePair : LineTables) {
+    CUIDTablePair.second.EmitCU(MCOS, Params, LineStr);
+  }
+
+  if (LineStr)
+    LineStr->emitSection(MCOS);
 }
 
-void MCDwarfDwoLineTable::Emit(MCStreamer &MCOS,
-                               MCDwarfLineTableParams Params) const {
-  MCOS.EmitLabel(Header.Emit(&MCOS, Params, None).second);
+void MCDwarfDwoLineTable::Emit(MCStreamer &MCOS, MCDwarfLineTableParams Params,
+                               MCSection *Section) const {
+  if (Header.MCDwarfFiles.empty())
+    return;
+  Optional<MCDwarfLineStr> NoLineStr(None);
+  MCOS.SwitchSection(Section);
+  MCOS.EmitLabel(Header.Emit(&MCOS, Params, None, NoLineStr).second);
 }
 
 std::pair<MCSymbol *, MCSymbol *>
-MCDwarfLineTableHeader::Emit(MCStreamer *MCOS,
-                             MCDwarfLineTableParams Params) const {
+MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
+                             Optional<MCDwarfLineStr> &LineStr) const {
   static const char StandardOpcodeLengths[] = {
       0, // length of DW_LNS_copy
       1, // length of DW_LNS_advance_pc
@@ -237,8 +285,10 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS,
   };
   assert(array_lengthof(StandardOpcodeLengths) >=
          (Params.DWARF2LineOpcodeBase - 1U));
-  return Emit(MCOS, Params, makeArrayRef(StandardOpcodeLengths,
-                                         Params.DWARF2LineOpcodeBase - 1));
+  return Emit(
+      MCOS, Params,
+      makeArrayRef(StandardOpcodeLengths, Params.DWARF2LineOpcodeBase - 1),
+      LineStr);
 }
 
 static const MCExpr *forceExpAbs(MCStreamer &OS, const MCExpr* Expr) {
@@ -257,9 +307,143 @@ static void emitAbsValue(MCStreamer &OS, const MCExpr *Value, unsigned Size) {
   OS.EmitValue(ABS, Size);
 }
 
+void MCDwarfLineStr::emitSection(MCStreamer *MCOS) {
+  // Switch to the .debug_line_str section.
+  MCOS->SwitchSection(
+      MCOS->getContext().getObjectFileInfo()->getDwarfLineStrSection());
+  // Emit the strings without perturbing the offsets we used.
+  LineStrings.finalizeInOrder();
+  SmallString<0> Data;
+  Data.resize(LineStrings.getSize());
+  LineStrings.write((uint8_t *)Data.data());
+  MCOS->EmitBinaryData(Data.str());
+}
+
+void MCDwarfLineStr::emitRef(MCStreamer *MCOS, StringRef Path) {
+  int RefSize = 4; // FIXME: Support DWARF-64
+  size_t Offset = LineStrings.add(Path);
+  if (UseRelocs) {
+    MCContext &Ctx = MCOS->getContext();
+    MCOS->EmitValue(makeStartPlusIntExpr(Ctx, *LineStrLabel, Offset), RefSize);
+  } else
+    MCOS->EmitIntValue(Offset, RefSize);
+}
+
+void MCDwarfLineTableHeader::emitV2FileDirTables(MCStreamer *MCOS) const {
+  // First the directory table.
+  for (auto &Dir : MCDwarfDirs) {
+    MCOS->EmitBytes(Dir);                // The DirectoryName, and...
+    MCOS->EmitBytes(StringRef("\0", 1)); // its null terminator.
+  }
+  MCOS->EmitIntValue(0, 1); // Terminate the directory list.
+
+  // Second the file table.
+  for (unsigned i = 1; i < MCDwarfFiles.size(); i++) {
+    assert(!MCDwarfFiles[i].Name.empty());
+    MCOS->EmitBytes(MCDwarfFiles[i].Name); // FileName and...
+    MCOS->EmitBytes(StringRef("\0", 1));   // its null terminator.
+    MCOS->EmitULEB128IntValue(MCDwarfFiles[i].DirIndex); // Directory number.
+    MCOS->EmitIntValue(0, 1); // Last modification timestamp (always 0).
+    MCOS->EmitIntValue(0, 1); // File size (always 0).
+  }
+  MCOS->EmitIntValue(0, 1); // Terminate the file list.
+}
+
+static void emitOneV5FileEntry(MCStreamer *MCOS, const MCDwarfFile &DwarfFile,
+                               bool EmitMD5, bool HasSource,
+                               Optional<MCDwarfLineStr> &LineStr) {
+  assert(!DwarfFile.Name.empty());
+  if (LineStr)
+    LineStr->emitRef(MCOS, DwarfFile.Name);
+  else {
+    MCOS->EmitBytes(DwarfFile.Name);     // FileName and...
+    MCOS->EmitBytes(StringRef("\0", 1)); // its null terminator.
+  }
+  MCOS->EmitULEB128IntValue(DwarfFile.DirIndex); // Directory number.
+  if (EmitMD5) {
+    MD5::MD5Result *Cksum = DwarfFile.Checksum;
+    MCOS->EmitBinaryData(
+        StringRef(reinterpret_cast<const char *>(Cksum->Bytes.data()),
+                  Cksum->Bytes.size()));
+  }
+  if (HasSource) {
+    if (LineStr)
+      LineStr->emitRef(MCOS, DwarfFile.Source.getValueOr(StringRef()));
+    else {
+      MCOS->EmitBytes(
+          DwarfFile.Source.getValueOr(StringRef())); // Source and...
+      MCOS->EmitBytes(StringRef("\0", 1));           // its null terminator.
+    }
+  }
+}
+
+void MCDwarfLineTableHeader::emitV5FileDirTables(
+    MCStreamer *MCOS, Optional<MCDwarfLineStr> &LineStr,
+    StringRef CtxCompilationDir) const {
+  // The directory format, which is just a list of the directory paths.  In a
+  // non-split object, these are references to .debug_line_str; in a split
+  // object, they are inline strings.
+  MCOS->EmitIntValue(1, 1);
+  MCOS->EmitULEB128IntValue(dwarf::DW_LNCT_path);
+  MCOS->EmitULEB128IntValue(LineStr ? dwarf::DW_FORM_line_strp
+                                    : dwarf::DW_FORM_string);
+  MCOS->EmitULEB128IntValue(MCDwarfDirs.size() + 1);
+  // Try not to emit an empty compilation directory.
+  const StringRef CompDir =
+      CompilationDir.empty() ? CtxCompilationDir : StringRef(CompilationDir);
+  if (LineStr) {
+    // Record path strings, emit references here.
+    LineStr->emitRef(MCOS, CompDir);
+    for (const auto &Dir : MCDwarfDirs)
+      LineStr->emitRef(MCOS, Dir);
+  } else {
+    // The list of directory paths.  Compilation directory comes first.
+    MCOS->EmitBytes(CompDir);
+    MCOS->EmitBytes(StringRef("\0", 1));
+    for (const auto &Dir : MCDwarfDirs) {
+      MCOS->EmitBytes(Dir);                // The DirectoryName, and...
+      MCOS->EmitBytes(StringRef("\0", 1)); // its null terminator.
+    }
+  }
+
+  // The file format, which is the inline null-terminated filename and a
+  // directory index.  We don't track file size/timestamp so don't emit them
+  // in the v5 table.  Emit MD5 checksums and source if we have them.
+  uint64_t Entries = 2;
+  if (HasAllMD5)
+    Entries += 1;
+  if (HasSource)
+    Entries += 1;
+  MCOS->EmitIntValue(Entries, 1);
+  MCOS->EmitULEB128IntValue(dwarf::DW_LNCT_path);
+  MCOS->EmitULEB128IntValue(LineStr ? dwarf::DW_FORM_line_strp
+                                    : dwarf::DW_FORM_string);
+  MCOS->EmitULEB128IntValue(dwarf::DW_LNCT_directory_index);
+  MCOS->EmitULEB128IntValue(dwarf::DW_FORM_udata);
+  if (HasAllMD5) {
+    MCOS->EmitULEB128IntValue(dwarf::DW_LNCT_MD5);
+    MCOS->EmitULEB128IntValue(dwarf::DW_FORM_data16);
+  }
+  if (HasSource) {
+    MCOS->EmitULEB128IntValue(dwarf::DW_LNCT_LLVM_source);
+    MCOS->EmitULEB128IntValue(LineStr ? dwarf::DW_FORM_line_strp
+                                      : dwarf::DW_FORM_string);
+  }
+  // Then the counted list of files. The root file is file #0, then emit the
+  // files as provide by .file directives.  To accommodate assembler source
+  // written for DWARF v4 but trying to emit v5, if we didn't see a root file
+  // explicitly, replicate file #1.
+  MCOS->EmitULEB128IntValue(MCDwarfFiles.size());
+  emitOneV5FileEntry(MCOS, RootFile.Name.empty() ? MCDwarfFiles[1] : RootFile,
+                     HasAllMD5, HasSource, LineStr);
+  for (unsigned i = 1; i < MCDwarfFiles.size(); ++i)
+    emitOneV5FileEntry(MCOS, MCDwarfFiles[i], HasAllMD5, HasSource, LineStr);
+}
+
 std::pair<MCSymbol *, MCSymbol *>
 MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
-                             ArrayRef<char> StandardOpcodeLengths) const {
+                             ArrayRef<char> StandardOpcodeLengths,
+                             Optional<MCDwarfLineStr> &LineStr) const {
   MCContext &context = MCOS->getContext();
 
   // Create a symbol at the beginning of the line table.
@@ -277,22 +461,38 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
   emitAbsValue(*MCOS,
                MakeStartMinusEndExpr(*MCOS, *LineStartSym, *LineEndSym, 4), 4);
 
-  // Next 2 bytes is the Version, which is Dwarf 2.
-  MCOS->EmitIntValue(2, 2);
+  // Next 2 bytes is the Version.
+  unsigned LineTableVersion = context.getDwarfVersion();
+  MCOS->EmitIntValue(LineTableVersion, 2);
+
+  // Keep track of the bytes between the very start and where the header length
+  // comes out.
+  unsigned PreHeaderLengthBytes = 4 + 2;
+
+  // In v5, we get address info next.
+  if (LineTableVersion >= 5) {
+    MCOS->EmitIntValue(context.getAsmInfo()->getCodePointerSize(), 1);
+    MCOS->EmitIntValue(0, 1); // Segment selector; same as EmitGenDwarfAranges.
+    PreHeaderLengthBytes += 2;
+  }
 
   // Create a symbol for the end of the prologue (to be set when we get there).
   MCSymbol *ProEndSym = context.createTempSymbol(); // Lprologue_end
 
-  // Length of the prologue, is the next 4 bytes.  Which is the start of the
-  // section to the end of the prologue.  Not including the 4 bytes for the
-  // total length, the 2 bytes for the version, and these 4 bytes for the
-  // length of the prologue.
-  emitAbsValue(
-      *MCOS,
-      MakeStartMinusEndExpr(*MCOS, *LineStartSym, *ProEndSym, (4 + 2 + 4)), 4);
+  // Length of the prologue, is the next 4 bytes.  This is actually the length
+  // from after the length word, to the end of the prologue.
+  emitAbsValue(*MCOS,
+               MakeStartMinusEndExpr(*MCOS, *LineStartSym, *ProEndSym,
+                                     (PreHeaderLengthBytes + 4)),
+               4);
 
   // Parameters of the state machine, are next.
   MCOS->EmitIntValue(context.getAsmInfo()->getMinInstAlignment(), 1);
+  // maximum_operations_per_instruction
+  // For non-VLIW architectures this field is always 1.
+  // FIXME: VLIW architectures need to update this field accordingly.
+  if (LineTableVersion >= 4)
+    MCOS->EmitIntValue(1, 1);
   MCOS->EmitIntValue(DWARF2_LINE_DEFAULT_IS_STMT, 1);
   MCOS->EmitIntValue(Params.DWARF2LineBase, 1);
   MCOS->EmitIntValue(Params.DWARF2LineRange, 1);
@@ -302,26 +502,12 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
   for (char Length : StandardOpcodeLengths)
     MCOS->EmitIntValue(Length, 1);
 
-  // Put out the directory and file tables.
-
-  // First the directory table.
-  for (unsigned i = 0; i < MCDwarfDirs.size(); i++) {
-    MCOS->EmitBytes(MCDwarfDirs[i]); // the DirectoryName
-    MCOS->EmitBytes(StringRef("\0", 1)); // the null term. of the string
-  }
-  MCOS->EmitIntValue(0, 1); // Terminate the directory list
-
-  // Second the file table.
-  for (unsigned i = 1; i < MCDwarfFiles.size(); i++) {
-    assert(!MCDwarfFiles[i].Name.empty());
-    MCOS->EmitBytes(MCDwarfFiles[i].Name); // FileName
-    MCOS->EmitBytes(StringRef("\0", 1)); // the null term. of the string
-    // the Directory num
-    MCOS->EmitULEB128IntValue(MCDwarfFiles[i].DirIndex);
-    MCOS->EmitIntValue(0, 1); // last modification timestamp (always 0)
-    MCOS->EmitIntValue(0, 1); // filesize (always 0)
-  }
-  MCOS->EmitIntValue(0, 1); // Terminate the file list
+  // Put out the directory and file tables.  The formats vary depending on
+  // the version.
+  if (LineTableVersion >= 5)
+    emitV5FileDirTables(MCOS, LineStr, context.getCompilationDir());
+  else
+    emitV2FileDirTables(MCOS);
 
   // This is the end of the prologue, so set the value of the symbol at the
   // end of the prologue (that was used in a previous expression).
@@ -331,8 +517,9 @@ MCDwarfLineTableHeader::Emit(MCStreamer *MCOS, MCDwarfLineTableParams Params,
 }
 
 void MCDwarfLineTable::EmitCU(MCObjectStreamer *MCOS,
-                              MCDwarfLineTableParams Params) const {
-  MCSymbol *LineEndSym = Header.Emit(MCOS, Params).second;
+                              MCDwarfLineTableParams Params,
+                              Optional<MCDwarfLineStr> &LineStr) const {
+  MCSymbol *LineEndSym = Header.Emit(MCOS, Params, LineStr).second;
 
   // Put out the line tables.
   for (const auto &LineSec : MCLineSections.getMCLineEntries())
@@ -343,14 +530,20 @@ void MCDwarfLineTable::EmitCU(MCObjectStreamer *MCOS,
   MCOS->EmitLabel(LineEndSym);
 }
 
-unsigned MCDwarfLineTable::getFile(StringRef &Directory, StringRef &FileName,
-                                   unsigned FileNumber) {
-  return Header.getFile(Directory, FileName, FileNumber);
+Expected<unsigned> MCDwarfLineTable::tryGetFile(StringRef &Directory,
+                                                StringRef &FileName,
+                                                MD5::MD5Result *Checksum,
+                                                Optional<StringRef> Source,
+                                                unsigned FileNumber) {
+  return Header.tryGetFile(Directory, FileName, Checksum, Source, FileNumber);
 }
 
-unsigned MCDwarfLineTableHeader::getFile(StringRef &Directory,
-                                         StringRef &FileName,
-                                         unsigned FileNumber) {
+Expected<unsigned>
+MCDwarfLineTableHeader::tryGetFile(StringRef &Directory,
+                                   StringRef &FileName,
+                                   MD5::MD5Result *Checksum,
+                                   Optional<StringRef> &Source,
+                                   unsigned FileNumber) {
   if (Directory == CompilationDir)
     Directory = "";
   if (FileName.empty()) {
@@ -358,6 +551,12 @@ unsigned MCDwarfLineTableHeader::getFile(StringRef &Directory,
     Directory = "";
   }
   assert(!FileName.empty());
+  // Keep track of whether any or all files have an MD5 checksum.
+  // If any files have embedded source, they all must.
+  if (MCDwarfFiles.empty()) {
+    trackMD5Usage(Checksum);
+    HasSource = (Source != None);
+  }
   if (FileNumber == 0) {
     // File numbers start with 1 and/or after any file numbers
     // allocated by inline-assembler .file directives.
@@ -370,14 +569,21 @@ unsigned MCDwarfLineTableHeader::getFile(StringRef &Directory,
       return IterBool.first->second;
   }
   // Make space for this FileNumber in the MCDwarfFiles vector if needed.
-  MCDwarfFiles.resize(FileNumber + 1);
+  if (FileNumber >= MCDwarfFiles.size())
+    MCDwarfFiles.resize(FileNumber + 1);
 
   // Get the new MCDwarfFile slot for this FileNumber.
   MCDwarfFile &File = MCDwarfFiles[FileNumber];
 
-  // It is an error to use see the same number more than once.
+  // It is an error to see the same number more than once.
   if (!File.Name.empty())
-    return 0;
+    return make_error<StringError>("file number already allocated",
+                                   inconvertibleErrorCode());
+
+  // If any files have embedded source, they all must.
+  if (HasSource != (Source != None))
+    return make_error<StringError>("inconsistent use of embedded source",
+                                   inconvertibleErrorCode());
 
   if (Directory.empty()) {
     // Separate the directory part from the basename of the FileName.
@@ -412,6 +618,11 @@ unsigned MCDwarfLineTableHeader::getFile(StringRef &Directory,
 
   File.Name = FileName;
   File.DirIndex = DirIndex;
+  File.Checksum = Checksum;
+  trackMD5Usage(Checksum);
+  File.Source = Source;
+  if (Source)
+    HasSource = true;
 
   // return the allocated FileNumber.
   return FileNumber;
@@ -514,6 +725,57 @@ void MCDwarfLineAddr::Encode(MCContext &Context, MCDwarfLineTableParams Params,
     assert(Temp <= 255 && "Buggy special opcode encoding.");
     OS << char(Temp);
   }
+}
+
+bool MCDwarfLineAddr::FixedEncode(MCContext &Context,
+                                  MCDwarfLineTableParams Params,
+                                  int64_t LineDelta, uint64_t AddrDelta,
+                                  raw_ostream &OS,
+                                  uint32_t *Offset, uint32_t *Size) {
+  if (LineDelta != INT64_MAX) {
+    OS << char(dwarf::DW_LNS_advance_line);
+    encodeSLEB128(LineDelta, OS);
+  }
+
+  // Use address delta to adjust address or use absolute address to adjust
+  // address.
+  bool SetDelta;
+  // According to DWARF spec., the DW_LNS_fixed_advance_pc opcode takes a
+  // single uhalf (unencoded) operand. So, the maximum value of AddrDelta
+  // is 65535. We set a conservative upper bound for it for relaxation.
+  if (AddrDelta > 60000) {
+    const MCAsmInfo *asmInfo = Context.getAsmInfo();
+    unsigned AddrSize = asmInfo->getCodePointerSize();
+
+    OS << char(dwarf::DW_LNS_extended_op);
+    encodeULEB128(1 + AddrSize, OS);
+    OS << char(dwarf::DW_LNE_set_address);
+    // Generate fixup for the address.
+    *Offset = OS.tell();
+    *Size = AddrSize;
+    SetDelta = false;
+    std::vector<uint8_t> FillData;
+    FillData.insert(FillData.begin(), AddrSize, 0);
+    OS.write(reinterpret_cast<char *>(FillData.data()), AddrSize);
+  } else {
+    OS << char(dwarf::DW_LNS_fixed_advance_pc);
+    // Generate fixup for 2-bytes address delta.
+    *Offset = OS.tell();
+    *Size = 2;
+    SetDelta = true;
+    OS << char(0);
+    OS << char(0);
+  }
+
+  if (LineDelta == INT64_MAX) {
+    OS << char(dwarf::DW_LNS_extended_op);
+    OS << char(1);
+    OS << char(dwarf::DW_LNE_end_sequence);
+  } else {
+    OS << char(dwarf::DW_LNS_copy);
+  }
+
+  return SetDelta;
 }
 
 // Utility function to write a tuple for .debug_abbrev.
@@ -1057,8 +1319,8 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
     unsigned Reg1 = Instr.getRegister();
     unsigned Reg2 = Instr.getRegister2();
     if (!IsEH) {
-      Reg1 = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg1, true), false);
-      Reg2 = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg2, true), false);
+      Reg1 = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg1);
+      Reg2 = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg2);
     }
     Streamer.EmitIntValue(dwarf::DW_CFA_register, 1);
     Streamer.EmitULEB128IntValue(Reg1);
@@ -1067,6 +1329,10 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   }
   case MCCFIInstruction::OpWindowSave:
     Streamer.EmitIntValue(dwarf::DW_CFA_GNU_window_save, 1);
+    return;
+
+  case MCCFIInstruction::OpNegateRAState:
+    Streamer.EmitIntValue(dwarf::DW_CFA_AARCH64_negate_ra_state, 1);
     return;
 
   case MCCFIInstruction::OpUndefined: {
@@ -1094,7 +1360,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpDefCfa: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
     Streamer.EmitIntValue(dwarf::DW_CFA_def_cfa, 1);
     Streamer.EmitULEB128IntValue(Reg);
     CFAOffset = -Instr.getOffset();
@@ -1105,7 +1371,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpDefCfaRegister: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
     Streamer.EmitIntValue(dwarf::DW_CFA_def_cfa_register, 1);
     Streamer.EmitULEB128IntValue(Reg);
 
@@ -1118,7 +1384,7 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
 
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
 
     int Offset = Instr.getOffset();
     if (IsRelative)
@@ -1154,8 +1420,13 @@ void FrameEmitterImpl::EmitCFIInstruction(const MCCFIInstruction &Instr) {
   case MCCFIInstruction::OpRestore: {
     unsigned Reg = Instr.getRegister();
     if (!IsEH)
-      Reg = MRI->getDwarfRegNum(MRI->getLLVMRegNum(Reg, true), false);
-    Streamer.EmitIntValue(dwarf::DW_CFA_restore | Reg, 1);
+      Reg = MRI->getDwarfRegNumFromDwarfEHRegNum(Reg);
+    if (Reg < 64) {
+      Streamer.EmitIntValue(dwarf::DW_CFA_restore | Reg, 1);
+    } else {
+      Streamer.EmitIntValue(dwarf::DW_CFA_restore_extended, 1);
+      Streamer.EmitULEB128IntValue(Reg);
+    }
     return;
   }
   case MCCFIInstruction::OpGnuArgsSize:
@@ -1293,9 +1564,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
   uint8_t CIEVersion = getCIEVersion(IsEH, context.getDwarfVersion());
   Streamer.EmitIntValue(CIEVersion, 1);
 
-  // Augmentation String
-  SmallString<8> Augmentation;
   if (IsEH) {
+    SmallString<8> Augmentation;
     Augmentation += "z";
     if (Frame.Personality)
       Augmentation += "P";
@@ -1304,6 +1574,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
     Augmentation += "R";
     if (Frame.IsSignalFrame)
       Augmentation += "S";
+    if (Frame.IsBKeyFrame)
+      Augmentation += "B";
     Streamer.EmitBytes(Augmentation);
   }
   Streamer.EmitIntValue(0, 1);
@@ -1458,25 +1730,28 @@ namespace {
 
 struct CIEKey {
   static const CIEKey getEmptyKey() {
-    return CIEKey(nullptr, 0, -1, false, false, static_cast<unsigned>(INT_MAX));
+    return CIEKey(nullptr, 0, -1, false, false, static_cast<unsigned>(INT_MAX),
+                  false);
   }
 
   static const CIEKey getTombstoneKey() {
-    return CIEKey(nullptr, -1, 0, false, false, static_cast<unsigned>(INT_MAX));
+    return CIEKey(nullptr, -1, 0, false, false, static_cast<unsigned>(INT_MAX),
+                  false);
   }
 
   CIEKey(const MCSymbol *Personality, unsigned PersonalityEncoding,
          unsigned LSDAEncoding, bool IsSignalFrame, bool IsSimple,
-         unsigned RAReg)
+         unsigned RAReg, bool IsBKeyFrame)
       : Personality(Personality), PersonalityEncoding(PersonalityEncoding),
         LsdaEncoding(LSDAEncoding), IsSignalFrame(IsSignalFrame),
-        IsSimple(IsSimple), RAReg(RAReg) {}
+        IsSimple(IsSimple), RAReg(RAReg), IsBKeyFrame(IsBKeyFrame) {}
 
   explicit CIEKey(const MCDwarfFrameInfo &Frame)
       : Personality(Frame.Personality),
         PersonalityEncoding(Frame.PersonalityEncoding),
         LsdaEncoding(Frame.LsdaEncoding), IsSignalFrame(Frame.IsSignalFrame),
-        IsSimple(Frame.IsSimple), RAReg(Frame.RAReg) {}
+        IsSimple(Frame.IsSimple), RAReg(Frame.RAReg),
+        IsBKeyFrame(Frame.IsBKeyFrame) {}
 
   const MCSymbol *Personality;
   unsigned PersonalityEncoding;
@@ -1484,6 +1759,7 @@ struct CIEKey {
   bool IsSignalFrame;
   bool IsSimple;
   unsigned RAReg;
+  bool IsBKeyFrame;
 };
 
 } // end anonymous namespace
@@ -1495,9 +1771,9 @@ template <> struct DenseMapInfo<CIEKey> {
   static CIEKey getTombstoneKey() { return CIEKey::getTombstoneKey(); }
 
   static unsigned getHashValue(const CIEKey &Key) {
-    return static_cast<unsigned>(
-        hash_combine(Key.Personality, Key.PersonalityEncoding, Key.LsdaEncoding,
-                     Key.IsSignalFrame, Key.IsSimple, Key.RAReg));
+    return static_cast<unsigned>(hash_combine(
+        Key.Personality, Key.PersonalityEncoding, Key.LsdaEncoding,
+        Key.IsSignalFrame, Key.IsSimple, Key.RAReg, Key.IsBKeyFrame));
   }
 
   static bool isEqual(const CIEKey &LHS, const CIEKey &RHS) {
@@ -1505,8 +1781,8 @@ template <> struct DenseMapInfo<CIEKey> {
            LHS.PersonalityEncoding == RHS.PersonalityEncoding &&
            LHS.LsdaEncoding == RHS.LsdaEncoding &&
            LHS.IsSignalFrame == RHS.IsSignalFrame &&
-           LHS.IsSimple == RHS.IsSimple &&
-           LHS.RAReg == RHS.RAReg;
+           LHS.IsSimple == RHS.IsSimple && LHS.RAReg == RHS.RAReg &&
+           LHS.IsBKeyFrame == RHS.IsBKeyFrame;
   }
 };
 
@@ -1587,6 +1863,8 @@ void MCDwarfFrameEmitter::EncodeAdvanceLoc(MCContext &Context,
   // Scale the address delta by the minimum instruction length.
   AddrDelta = ScaleAddrDelta(Context, AddrDelta);
 
+  support::endianness E =
+      Context.getAsmInfo()->isLittleEndian() ? support::little : support::big;
   if (AddrDelta == 0) {
   } else if (isUIntN(6, AddrDelta)) {
     uint8_t Opcode = dwarf::DW_CFA_advance_loc | AddrDelta;
@@ -1596,16 +1874,10 @@ void MCDwarfFrameEmitter::EncodeAdvanceLoc(MCContext &Context,
     OS << uint8_t(AddrDelta);
   } else if (isUInt<16>(AddrDelta)) {
     OS << uint8_t(dwarf::DW_CFA_advance_loc2);
-    if (Context.getAsmInfo()->isLittleEndian())
-      support::endian::Writer<support::little>(OS).write<uint16_t>(AddrDelta);
-    else
-      support::endian::Writer<support::big>(OS).write<uint16_t>(AddrDelta);
+    support::endian::write<uint16_t>(OS, AddrDelta, E);
   } else {
     assert(isUInt<32>(AddrDelta));
     OS << uint8_t(dwarf::DW_CFA_advance_loc4);
-    if (Context.getAsmInfo()->isLittleEndian())
-      support::endian::Writer<support::little>(OS).write<uint32_t>(AddrDelta);
-    else
-      support::endian::Writer<support::big>(OS).write<uint32_t>(AddrDelta);
+    support::endian::write<uint32_t>(OS, AddrDelta, E);
   }
 }

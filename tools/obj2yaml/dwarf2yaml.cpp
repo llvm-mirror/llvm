@@ -1,9 +1,8 @@
 //===------ dwarf2yaml.cpp - obj2yaml conversion tool -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -81,8 +80,9 @@ void dumpDebugARanges(DWARFContext &DCtx, DWARFYAML::Data &Y) {
 }
 
 void dumpPubSection(DWARFContext &DCtx, DWARFYAML::PubSection &Y,
-                    StringRef Section) {
-  DataExtractor PubSectionData(Section, DCtx.isLittleEndian(), 0);
+                    DWARFSection Section) {
+  DWARFDataExtractor PubSectionData(DCtx.getDWARFObj(), Section,
+                                    DCtx.isLittleEndian(), 0);
   uint32_t Offset = 0;
   dumpInitialLength(PubSectionData, Offset, Y.Length);
   Y.Version = PubSectionData.getU16(&Offset);

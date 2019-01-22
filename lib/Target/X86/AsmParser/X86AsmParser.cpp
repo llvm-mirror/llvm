@@ -1,14 +1,14 @@
 //===-- X86AsmParser.cpp - Parse X86 assembly to MCInst instructions ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "InstPrinter/X86IntelInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86MCExpr.h"
 #include "MCTargetDesc/X86TargetStreamer.h"
 #include "X86AsmInstrumentation.h"
 #include "X86AsmParserCommon.h"
@@ -345,7 +345,7 @@ private:
   public:
     IntelExprStateMachine()
         : State(IES_INIT), PrevState(IES_ERROR), BaseReg(0), IndexReg(0),
-          TmpReg(0), Scale(1), Imm(0), Sym(nullptr), BracCount(0),
+          TmpReg(0), Scale(0), Imm(0), Sym(nullptr), BracCount(0),
           MemExpr(false) {}
 
     void addImm(int64_t imm) { Imm += imm; }
@@ -451,7 +451,7 @@ private:
         IC.pushOperator(IC_PLUS);
         if (CurrState == IES_REGISTER && PrevState != IES_MULTIPLY) {
           // If we already have a BaseReg, then assume this is the IndexReg with
-          // a scale of 1.
+          // no explicit scale.
           if (!BaseReg) {
             BaseReg = TmpReg;
           } else {
@@ -460,7 +460,7 @@ private:
               return true;
             }
             IndexReg = TmpReg;
-            Scale = 1;
+            Scale = 0;
           }
         }
         break;
@@ -504,7 +504,7 @@ private:
           IC.pushOperator(IC_NEG);
         if (CurrState == IES_REGISTER && PrevState != IES_MULTIPLY) {
           // If we already have a BaseReg, then assume this is the IndexReg with
-          // a scale of 1.
+          // no explicit scale.
           if (!BaseReg) {
             BaseReg = TmpReg;
           } else {
@@ -513,7 +513,7 @@ private:
               return true;
             }
             IndexReg = TmpReg;
-            Scale = 1;
+            Scale = 0;
           }
         }
         break;
@@ -736,13 +736,13 @@ private:
         State = IES_RBRAC;
         if (CurrState == IES_REGISTER && PrevState != IES_MULTIPLY) {
           // If we already have a BaseReg, then assume this is the IndexReg with
-          // a scale of 1.
+          // no explicit scale.
           if (!BaseReg) {
             BaseReg = TmpReg;
           } else {
             assert (!IndexReg && "BaseReg/IndexReg already set!");
             IndexReg = TmpReg;
-            Scale = 1;
+            Scale = 0;
           }
         }
         break;
@@ -803,8 +803,8 @@ private:
     return Parser.Error(L, Msg, Range);
   }
 
-  std::nullptr_t ErrorOperand(SMLoc Loc, StringRef Msg) {
-    Error(Loc, Msg);
+  std::nullptr_t ErrorOperand(SMLoc Loc, StringRef Msg, SMRange R = SMRange()) {
+    Error(Loc, Msg, R);
     return nullptr;
   }
 
@@ -825,7 +825,7 @@ private:
   bool ParseIntelDotOperator(IntelExprStateMachine &SM, SMLoc &End);
   unsigned IdentifyIntelInlineAsmOperator(StringRef Name);
   unsigned ParseIntelInlineAsmOperator(unsigned OpKind);
-  std::unique_ptr<X86Operand> ParseRoundingModeOp(SMLoc Start, SMLoc End);
+  std::unique_ptr<X86Operand> ParseRoundingModeOp(SMLoc Start);
   bool ParseIntelNamedOperator(StringRef Name, IntelExprStateMachine &SM);
   void RewriteIntelExpression(IntelExprStateMachine &SM, SMLoc Start,
                               SMLoc End);
@@ -834,7 +834,10 @@ private:
                                      InlineAsmIdentifierInfo &Info,
                                      bool IsUnevaluatedOperand, SMLoc &End);
 
-  std::unique_ptr<X86Operand> ParseMemOperand(unsigned SegReg, SMLoc StartLoc);
+  std::unique_ptr<X86Operand> ParseMemOperand(unsigned SegReg,
+                                              const MCExpr *&Disp,
+                                              const SMLoc &StartLoc,
+                                              SMLoc &EndLoc);
 
   bool ParseIntelMemoryOperandSize(unsigned &Size);
   std::unique_ptr<X86Operand>
@@ -844,7 +847,6 @@ private:
                         const InlineAsmIdentifierInfo &Info);
 
   bool parseDirectiveEven(SMLoc L);
-  bool ParseDirectiveWord(unsigned Size, SMLoc L);
   bool ParseDirectiveCode(StringRef IDVal, SMLoc L);
 
   /// CodeView FPO data directives.
@@ -852,6 +854,7 @@ private:
   bool parseDirectiveFPOSetFrame(SMLoc L);
   bool parseDirectiveFPOPushReg(SMLoc L);
   bool parseDirectiveFPOStackAlloc(SMLoc L);
+  bool parseDirectiveFPOStackAlign(SMLoc L);
   bool parseDirectiveFPOEndPrologue(SMLoc L);
   bool parseDirectiveFPOEndProc(SMLoc L);
   bool parseDirectiveFPOData(SMLoc L);
@@ -943,6 +946,8 @@ public:
       : MCTargetAsmParser(Options, sti, mii),  InstInfo(nullptr),
         Code16GCC(false) {
 
+    Parser.addAliasForDirective(".word", ".2byte");
+
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(getSTI().getFeatureBits()));
     Instrumentation.reset(
@@ -952,6 +957,8 @@ public:
   bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
 
   void SetFrameRegister(unsigned RegNo) override;
+
+  bool parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) override;
 
   bool ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
@@ -968,27 +975,67 @@ static unsigned MatchRegisterName(StringRef Name);
 /// }
 
 static bool CheckBaseRegAndIndexRegAndScale(unsigned BaseReg, unsigned IndexReg,
-                                            unsigned Scale, StringRef &ErrMsg) {
+                                            unsigned Scale, bool Is64BitMode,
+                                            StringRef &ErrMsg) {
   // If we have both a base register and an index register make sure they are
   // both 64-bit or 32-bit registers.
   // To support VSIB, IndexReg can be 128-bit or 256-bit registers.
 
-  if ((BaseReg == X86::RIP && IndexReg != 0) || (IndexReg == X86::RIP)) {
+  if (BaseReg != 0 &&
+      !(BaseReg == X86::RIP || BaseReg == X86::EIP ||
+        X86MCRegisterClasses[X86::GR16RegClassID].contains(BaseReg) ||
+        X86MCRegisterClasses[X86::GR32RegClassID].contains(BaseReg) ||
+        X86MCRegisterClasses[X86::GR64RegClassID].contains(BaseReg))) {
     ErrMsg = "invalid base+index expression";
     return true;
   }
+
+  if (IndexReg != 0 &&
+      !(IndexReg == X86::EIZ || IndexReg == X86::RIZ ||
+        X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::GR32RegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::GR64RegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::VR128XRegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::VR256XRegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::VR512RegClassID].contains(IndexReg))) {
+    ErrMsg = "invalid base+index expression";
+    return true;
+  }
+
+  if (((BaseReg == X86::RIP || BaseReg == X86::EIP) && IndexReg != 0) ||
+      IndexReg == X86::EIP || IndexReg == X86::RIP ||
+      IndexReg == X86::ESP || IndexReg == X86::RSP) {
+    ErrMsg = "invalid base+index expression";
+    return true;
+  }
+
+  // Check for use of invalid 16-bit registers. Only BX/BP/SI/DI are allowed,
+  // and then only in non-64-bit modes.
+  if (X86MCRegisterClasses[X86::GR16RegClassID].contains(BaseReg) &&
+      (Is64BitMode || (BaseReg != X86::BX && BaseReg != X86::BP &&
+                       BaseReg != X86::SI && BaseReg != X86::DI))) {
+    ErrMsg = "invalid 16-bit base register";
+    return true;
+  }
+
+  if (BaseReg == 0 &&
+      X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg)) {
+    ErrMsg = "16-bit memory operand may not include only index register";
+    return true;
+  }
+
   if (BaseReg != 0 && IndexReg != 0) {
     if (X86MCRegisterClasses[X86::GR64RegClassID].contains(BaseReg) &&
         (X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg) ||
-         X86MCRegisterClasses[X86::GR32RegClassID].contains(IndexReg)) &&
-        IndexReg != X86::RIZ) {
+         X86MCRegisterClasses[X86::GR32RegClassID].contains(IndexReg) ||
+         IndexReg == X86::EIZ)) {
       ErrMsg = "base register is 64-bit, but index register is not";
       return true;
     }
     if (X86MCRegisterClasses[X86::GR32RegClassID].contains(BaseReg) &&
         (X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg) ||
-         X86MCRegisterClasses[X86::GR64RegClassID].contains(IndexReg)) &&
-        IndexReg != X86::EIZ){
+         X86MCRegisterClasses[X86::GR64RegClassID].contains(IndexReg) ||
+         IndexReg == X86::RIZ)) {
       ErrMsg = "base register is 32-bit, but index register is not";
       return true;
     }
@@ -998,15 +1045,21 @@ static bool CheckBaseRegAndIndexRegAndScale(unsigned BaseReg, unsigned IndexReg,
         ErrMsg = "base register is 16-bit, but index register is not";
         return true;
       }
-      if (((BaseReg == X86::BX || BaseReg == X86::BP) &&
-           IndexReg != X86::SI && IndexReg != X86::DI) ||
-          ((BaseReg == X86::SI || BaseReg == X86::DI) &&
-           IndexReg != X86::BX && IndexReg != X86::BP)) {
+      if ((BaseReg != X86::BX && BaseReg != X86::BP) ||
+          (IndexReg != X86::SI && IndexReg != X86::DI)) {
         ErrMsg = "invalid 16-bit base/index register combination";
         return true;
       }
     }
   }
+
+  // RIP/EIP-relative addressing is only supported in 64-bit mode.
+  if (!Is64BitMode && BaseReg != 0 &&
+      (BaseReg == X86::RIP || BaseReg == X86::EIP)) {
+    ErrMsg = "IP-relative addressing requires 64-bit mode";
+    return true;
+  }
+
   return checkScale(Scale, ErrMsg);
 }
 
@@ -1048,18 +1101,16 @@ bool X86AsmParser::ParseRegister(unsigned &RegNo,
     // checked.
     // FIXME: Check AH, CH, DH, BH cannot be used in an instruction requiring a
     // REX prefix.
-    if (RegNo == X86::RIZ ||
+    if (RegNo == X86::RIZ || RegNo == X86::RIP ||
         X86MCRegisterClasses[X86::GR64RegClassID].contains(RegNo) ||
         X86II::isX86_64NonExtLowByteReg(RegNo) ||
-        X86II::isX86_64ExtendedReg(RegNo))
-      return Error(StartLoc, "register %"
-                   + Tok.getString() + " is only available in 64-bit mode",
+        X86II::isX86_64ExtendedReg(RegNo)) {
+      StringRef RegName = Tok.getString();
+      Parser.Lex(); // Eat register name.
+      return Error(StartLoc,
+                   "register %" + RegName + " is only available in 64-bit mode",
                    SMRange(StartLoc, EndLoc));
-  } else if (!getSTI().getFeatureBits()[X86::FeatureAVX512]) {
-    if (X86II::is32ExtendedReg(RegNo))
-      return Error(StartLoc, "register %"
-                   + Tok.getString() + " is only available with AVX512",
-                   SMRange(StartLoc, EndLoc));
+    }
   }
 
   // Parse "%st" as "%st(0)" and "%st(1)", which is multiple tokens.
@@ -1098,19 +1149,31 @@ bool X86AsmParser::ParseRegister(unsigned &RegNo,
 
   EndLoc = Parser.getTok().getEndLoc();
 
-  // If this is "db[0-7]", match it as an alias
-  // for dr[0-7].
-  if (RegNo == 0 && Tok.getString().size() == 3 &&
-      Tok.getString().startswith("db")) {
-    switch (Tok.getString()[2]) {
-    case '0': RegNo = X86::DR0; break;
-    case '1': RegNo = X86::DR1; break;
-    case '2': RegNo = X86::DR2; break;
-    case '3': RegNo = X86::DR3; break;
-    case '4': RegNo = X86::DR4; break;
-    case '5': RegNo = X86::DR5; break;
-    case '6': RegNo = X86::DR6; break;
-    case '7': RegNo = X86::DR7; break;
+  // If this is "db[0-15]", match it as an alias
+  // for dr[0-15].
+  if (RegNo == 0 && Tok.getString().startswith("db")) {
+    if (Tok.getString().size() == 3) {
+      switch (Tok.getString()[2]) {
+      case '0': RegNo = X86::DR0; break;
+      case '1': RegNo = X86::DR1; break;
+      case '2': RegNo = X86::DR2; break;
+      case '3': RegNo = X86::DR3; break;
+      case '4': RegNo = X86::DR4; break;
+      case '5': RegNo = X86::DR5; break;
+      case '6': RegNo = X86::DR6; break;
+      case '7': RegNo = X86::DR7; break;
+      case '8': RegNo = X86::DR8; break;
+      case '9': RegNo = X86::DR9; break;
+      }
+    } else if (Tok.getString().size() == 4 && Tok.getString()[2] == '1') {
+      switch (Tok.getString()[3]) {
+      case '0': RegNo = X86::DR10; break;
+      case '1': RegNo = X86::DR11; break;
+      case '2': RegNo = X86::DR12; break;
+      case '3': RegNo = X86::DR13; break;
+      case '4': RegNo = X86::DR14; break;
+      case '5': RegNo = X86::DR15; break;
+      }
     }
 
     if (RegNo != 0) {
@@ -1376,6 +1439,7 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
       if (ParseIntelDotOperator(SM, End))
         return true;
       break;
+    case AsmToken::At:
     case AsmToken::String:
     case AsmToken::Identifier: {
       SMLoc IdentLoc = Tok.getLoc();
@@ -1383,7 +1447,7 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
       UpdateLocLex = false;
       // Register
       unsigned Reg;
-      if (Tok.isNot(AsmToken::String) && !ParseRegister(Reg, IdentLoc, End)) {
+      if (Tok.is(AsmToken::Identifier) && !ParseRegister(Reg, IdentLoc, End)) {
         if (SM.onRegister(Reg, ErrMsg))
           return Error(Tok.getLoc(), ErrMsg);
         break;
@@ -1421,6 +1485,9 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
         break;
       }
       // MS InlineAsm identifier
+      // Call parseIdentifier() to combine @ with the identifier behind it.
+      if (TK == AsmToken::At && Parser.parseIdentifier(Identifier))
+        return Error(IdentLoc, "expected identifier");
       if (ParseIntelInlineAsmIdentifier(Val, Identifier, Info, false, End))
         return true;
       else if (SM.onIdentifierExpr(Val, Identifier, Info, true, ErrMsg))
@@ -1470,6 +1537,7 @@ bool X86AsmParser::ParseIntelExpression(IntelExprStateMachine &SM, SMLoc &End) {
     case AsmToken::Tilde:   SM.onNot(); break;
     case AsmToken::Star:    SM.onStar(); break;
     case AsmToken::Slash:   SM.onDivide(); break;
+    case AsmToken::Percent: SM.onMod(); break;
     case AsmToken::Pipe:    SM.onOr(); break;
     case AsmToken::Caret:   SM.onXor(); break;
     case AsmToken::Amp:     SM.onAnd(); break;
@@ -1582,7 +1650,7 @@ bool X86AsmParser::ParseIntelInlineAsmIdentifier(const MCExpr *&Val,
 
 //ParseRoundingModeOp - Parse AVX-512 rounding mode operand
 std::unique_ptr<X86Operand>
-X86AsmParser::ParseRoundingModeOp(SMLoc Start, SMLoc End) {
+X86AsmParser::ParseRoundingModeOp(SMLoc Start) {
   MCAsmParser &Parser = getParser();
   const AsmToken &Tok = Parser.getTok();
   // Eat "{" and mark the current place.
@@ -1603,6 +1671,7 @@ X86AsmParser::ParseRoundingModeOp(SMLoc Start, SMLoc End) {
     Parser.Lex();  // Eat the sae
     if (!getLexer().is(AsmToken::RCurly))
       return ErrorOperand(Tok.getLoc(), "Expected } at this point");
+    SMLoc End = Tok.getEndLoc();
     Parser.Lex();  // Eat "}"
     const MCExpr *RndModeOp =
       MCConstantExpr::create(rndMode, Parser.getContext());
@@ -1747,7 +1816,6 @@ bool X86AsmParser::ParseIntelMemoryOperandSize(unsigned &Size) {
     .Cases("XMMWORD", "xmmword", 128)
     .Cases("YMMWORD", "ymmword", 256)
     .Cases("ZMMWORD", "zmmword", 512)
-    .Cases("OPAQUE", "opaque", -1U) // needs to be non-zero, but doesn't matter
     .Default(0);
   if (Size) {
     const AsmToken &Tok = Lex(); // Eat operand size (e.g., byte, word).
@@ -1779,9 +1847,8 @@ std::unique_ptr<X86Operand> X86AsmParser::ParseIntelOperand() {
   Start = Tok.getLoc();
 
   // Rounding mode operand.
-  if (getSTI().getFeatureBits()[X86::FeatureAVX512] &&
-      getLexer().is(AsmToken::LCurly))
-    return ParseRoundingModeOp(Start, End);
+  if (getLexer().is(AsmToken::LCurly))
+    return ParseRoundingModeOp(Start);
 
   // Register operand.
   unsigned RegNo = 0;
@@ -1826,8 +1893,39 @@ std::unique_ptr<X86Operand> X86AsmParser::ParseIntelOperand() {
   unsigned IndexReg = SM.getIndexReg();
   unsigned Scale = SM.getScale();
 
+  if (Scale == 0 && BaseReg != X86::ESP && BaseReg != X86::RSP &&
+      (IndexReg == X86::ESP || IndexReg == X86::RSP))
+    std::swap(BaseReg, IndexReg);
+
+  // If BaseReg is a vector register and IndexReg is not, swap them unless
+  // Scale was specified in which case it would be an error.
+  if (Scale == 0 &&
+      !(X86MCRegisterClasses[X86::VR128XRegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::VR256XRegClassID].contains(IndexReg) ||
+        X86MCRegisterClasses[X86::VR512RegClassID].contains(IndexReg)) &&
+      (X86MCRegisterClasses[X86::VR128XRegClassID].contains(BaseReg) ||
+       X86MCRegisterClasses[X86::VR256XRegClassID].contains(BaseReg) ||
+       X86MCRegisterClasses[X86::VR512RegClassID].contains(BaseReg)))
+    std::swap(BaseReg, IndexReg);
+
+  if (Scale != 0 &&
+      X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg))
+    return ErrorOperand(Start, "16-bit addresses cannot have a scale");
+
+  // If there was no explicit scale specified, change it to 1.
+  if (Scale == 0)
+    Scale = 1;
+
+  // If this is a 16-bit addressing mode with the base and index in the wrong
+  // order, swap them so CheckBaseRegAndIndexRegAndScale doesn't fail. It is
+  // shared with att syntax where order matters.
+  if ((BaseReg == X86::SI || BaseReg == X86::DI) &&
+      (IndexReg == X86::BX || IndexReg == X86::BP))
+    std::swap(BaseReg, IndexReg);
+
   if ((BaseReg || IndexReg) &&
-      CheckBaseRegAndIndexRegAndScale(BaseReg, IndexReg, Scale, ErrMsg))
+      CheckBaseRegAndIndexRegAndScale(BaseReg, IndexReg, Scale, is64BitMode(),
+                                      ErrMsg))
     return ErrorOperand(Start, ErrMsg);
   if (isParsingInlineAsm())
     return CreateMemForInlineAsm(RegNo, Disp, BaseReg, IndexReg,
@@ -1842,50 +1940,60 @@ std::unique_ptr<X86Operand> X86AsmParser::ParseIntelOperand() {
 std::unique_ptr<X86Operand> X86AsmParser::ParseATTOperand() {
   MCAsmParser &Parser = getParser();
   switch (getLexer().getKind()) {
-  default:
-    // Parse a memory operand with no segment register.
-    return ParseMemOperand(0, Parser.getTok().getLoc());
-  case AsmToken::Percent: {
-    // Read the register.
-    unsigned RegNo;
-    SMLoc Start, End;
-    if (ParseRegister(RegNo, Start, End)) return nullptr;
-    if (RegNo == X86::EIZ || RegNo == X86::RIZ) {
-      Error(Start, "%eiz and %riz can only be used as index registers",
-            SMRange(Start, End));
-      return nullptr;
-    }
-    if (RegNo == X86::RIP) {
-      Error(Start, "%rip can only be used as a base register",
-            SMRange(Start, End));
-      return nullptr;
-    }
-
-    // If this is a segment register followed by a ':', then this is the start
-    // of a memory reference, otherwise this is a normal register reference.
-    if (getLexer().isNot(AsmToken::Colon))
-      return X86Operand::CreateReg(RegNo, Start, End);
-
-    if (!X86MCRegisterClasses[X86::SEGMENT_REGRegClassID].contains(RegNo))
-      return ErrorOperand(Start, "invalid segment register");
-
-    getParser().Lex(); // Eat the colon.
-    return ParseMemOperand(RegNo, Start);
-  }
   case AsmToken::Dollar: {
-    // $42 -> immediate.
+    // $42 or $ID -> immediate.
     SMLoc Start = Parser.getTok().getLoc(), End;
     Parser.Lex();
     const MCExpr *Val;
-    if (getParser().parseExpression(Val, End))
+    // This is an immediate, so we should not parse a register. Do a precheck
+    // for '%' to supercede intra-register parse errors.
+    SMLoc L = Parser.getTok().getLoc();
+    if (check(getLexer().is(AsmToken::Percent), L,
+              "expected immediate expression") ||
+        getParser().parseExpression(Val, End) ||
+        check(isa<X86MCExpr>(Val), L, "expected immediate expression"))
       return nullptr;
     return X86Operand::CreateImm(Val, Start, End);
   }
-  case AsmToken::LCurly:{
-    SMLoc Start = Parser.getTok().getLoc(), End;
-    if (getSTI().getFeatureBits()[X86::FeatureAVX512])
-      return ParseRoundingModeOp(Start, End);
-    return ErrorOperand(Start, "Unexpected '{' in expression");
+  case AsmToken::LCurly: {
+    SMLoc Start = Parser.getTok().getLoc();
+    return ParseRoundingModeOp(Start);
+  }
+  default: {
+    // This a memory operand or a register. We have some parsing complications
+    // as a '(' may be part of an immediate expression or the addressing mode
+    // block. This is complicated by the fact that an assembler-level variable
+    // may refer either to a register or an immediate expression.
+
+    SMLoc Loc = Parser.getTok().getLoc(), EndLoc;
+    const MCExpr *Expr = nullptr;
+    unsigned Reg = 0;
+    if (getLexer().isNot(AsmToken::LParen)) {
+      // No '(' so this is either a displacement expression or a register.
+      if (Parser.parseExpression(Expr, EndLoc))
+        return nullptr;
+      if (auto *RE = dyn_cast<X86MCExpr>(Expr)) {
+        // Segment Register. Reset Expr and copy value to register.
+        Expr = nullptr;
+        Reg = RE->getRegNo();
+
+        // Sanity check register.
+        if (Reg == X86::EIZ || Reg == X86::RIZ)
+          return ErrorOperand(
+              Loc, "%eiz and %riz can only be used as index registers",
+              SMRange(Loc, EndLoc));
+        if (Reg == X86::RIP)
+          return ErrorOperand(Loc, "%rip can only be used as a base register",
+                              SMRange(Loc, EndLoc));
+        // Return register that are not segment prefixes immediately.
+        if (!Parser.parseOptionalToken(AsmToken::Colon))
+          return X86Operand::CreateReg(Reg, Loc, EndLoc);
+        if (!X86MCRegisterClasses[X86::SEGMENT_REGRegClassID].contains(Reg))
+          return ErrorOperand(Loc, "invalid segment register");
+      }
+    }
+    // This is a Memory operand.
+    return ParseMemOperand(Reg, Expr, Loc, EndLoc);
   }
   }
 }
@@ -1915,271 +2023,281 @@ bool X86AsmParser::ParseZ(std::unique_ptr<X86Operand> &Z,
 bool X86AsmParser::HandleAVX512Operand(OperandVector &Operands,
                                        const MCParsedAsmOperand &Op) {
   MCAsmParser &Parser = getParser();
-  if(getSTI().getFeatureBits()[X86::FeatureAVX512]) {
-    if (getLexer().is(AsmToken::LCurly)) {
-      // Eat "{" and mark the current place.
-      const SMLoc consumedToken = consumeToken();
-      // Distinguish {1to<NUM>} from {%k<NUM>}.
-      if(getLexer().is(AsmToken::Integer)) {
-        // Parse memory broadcasting ({1to<NUM>}).
-        if (getLexer().getTok().getIntVal() != 1)
-          return TokError("Expected 1to<NUM> at this point");
-        Parser.Lex();  // Eat "1" of 1to8
-        if (!getLexer().is(AsmToken::Identifier) ||
-            !getLexer().getTok().getIdentifier().startswith("to"))
-          return TokError("Expected 1to<NUM> at this point");
-        // Recognize only reasonable suffixes.
-        const char *BroadcastPrimitive =
-          StringSwitch<const char*>(getLexer().getTok().getIdentifier())
-            .Case("to2",  "{1to2}")
-            .Case("to4",  "{1to4}")
-            .Case("to8",  "{1to8}")
-            .Case("to16", "{1to16}")
-            .Default(nullptr);
-        if (!BroadcastPrimitive)
-          return TokError("Invalid memory broadcast primitive.");
-        Parser.Lex();  // Eat "toN" of 1toN
-        if (!getLexer().is(AsmToken::RCurly))
-          return TokError("Expected } at this point");
-        Parser.Lex();  // Eat "}"
-        Operands.push_back(X86Operand::CreateToken(BroadcastPrimitive,
-                                                   consumedToken));
-        // No AVX512 specific primitives can pass
-        // after memory broadcasting, so return.
-        return false;
-      } else {
-        // Parse either {k}{z}, {z}{k}, {k} or {z}
-        // last one have no meaning, but GCC accepts it
-        // Currently, we're just pass a '{' mark
-        std::unique_ptr<X86Operand> Z;
-        if (ParseZ(Z, consumedToken))
-          return true;
-        // Reaching here means that parsing of the allegadly '{z}' mark yielded
-        // no errors.
-        // Query for the need of further parsing for a {%k<NUM>} mark
-        if (!Z || getLexer().is(AsmToken::LCurly)) {
-          SMLoc StartLoc = Z ? consumeToken() : consumedToken;
-          // Parse an op-mask register mark ({%k<NUM>}), which is now to be
-          // expected
-          unsigned RegNo;
-          SMLoc RegLoc;
-          if (!ParseRegister(RegNo, RegLoc, StartLoc) &&
-              X86MCRegisterClasses[X86::VK1RegClassID].contains(RegNo)) {
-            if (RegNo == X86::K0)
-              return Error(RegLoc, "Register k0 can't be used as write mask");
-            if (!getLexer().is(AsmToken::RCurly))
-              return Error(getLexer().getLoc(), "Expected } at this point");
-            Operands.push_back(X86Operand::CreateToken("{", StartLoc));
-            Operands.push_back(
-                X86Operand::CreateReg(RegNo, StartLoc, StartLoc));
-            Operands.push_back(X86Operand::CreateToken("}", consumeToken()));
-          } else
+  if (getLexer().is(AsmToken::LCurly)) {
+    // Eat "{" and mark the current place.
+    const SMLoc consumedToken = consumeToken();
+    // Distinguish {1to<NUM>} from {%k<NUM>}.
+    if(getLexer().is(AsmToken::Integer)) {
+      // Parse memory broadcasting ({1to<NUM>}).
+      if (getLexer().getTok().getIntVal() != 1)
+        return TokError("Expected 1to<NUM> at this point");
+      Parser.Lex();  // Eat "1" of 1to8
+      if (!getLexer().is(AsmToken::Identifier) ||
+          !getLexer().getTok().getIdentifier().startswith("to"))
+        return TokError("Expected 1to<NUM> at this point");
+      // Recognize only reasonable suffixes.
+      const char *BroadcastPrimitive =
+        StringSwitch<const char*>(getLexer().getTok().getIdentifier())
+          .Case("to2",  "{1to2}")
+          .Case("to4",  "{1to4}")
+          .Case("to8",  "{1to8}")
+          .Case("to16", "{1to16}")
+          .Default(nullptr);
+      if (!BroadcastPrimitive)
+        return TokError("Invalid memory broadcast primitive.");
+      Parser.Lex();  // Eat "toN" of 1toN
+      if (!getLexer().is(AsmToken::RCurly))
+        return TokError("Expected } at this point");
+      Parser.Lex();  // Eat "}"
+      Operands.push_back(X86Operand::CreateToken(BroadcastPrimitive,
+                                                 consumedToken));
+      // No AVX512 specific primitives can pass
+      // after memory broadcasting, so return.
+      return false;
+    } else {
+      // Parse either {k}{z}, {z}{k}, {k} or {z}
+      // last one have no meaning, but GCC accepts it
+      // Currently, we're just pass a '{' mark
+      std::unique_ptr<X86Operand> Z;
+      if (ParseZ(Z, consumedToken))
+        return true;
+      // Reaching here means that parsing of the allegadly '{z}' mark yielded
+      // no errors.
+      // Query for the need of further parsing for a {%k<NUM>} mark
+      if (!Z || getLexer().is(AsmToken::LCurly)) {
+        SMLoc StartLoc = Z ? consumeToken() : consumedToken;
+        // Parse an op-mask register mark ({%k<NUM>}), which is now to be
+        // expected
+        unsigned RegNo;
+        SMLoc RegLoc;
+        if (!ParseRegister(RegNo, RegLoc, StartLoc) &&
+            X86MCRegisterClasses[X86::VK1RegClassID].contains(RegNo)) {
+          if (RegNo == X86::K0)
+            return Error(RegLoc, "Register k0 can't be used as write mask");
+          if (!getLexer().is(AsmToken::RCurly))
+            return Error(getLexer().getLoc(), "Expected } at this point");
+          Operands.push_back(X86Operand::CreateToken("{", StartLoc));
+          Operands.push_back(
+              X86Operand::CreateReg(RegNo, StartLoc, StartLoc));
+          Operands.push_back(X86Operand::CreateToken("}", consumeToken()));
+        } else
+          return Error(getLexer().getLoc(),
+                        "Expected an op-mask register at this point");
+        // {%k<NUM>} mark is found, inquire for {z}
+        if (getLexer().is(AsmToken::LCurly) && !Z) {
+          // Have we've found a parsing error, or found no (expected) {z} mark
+          // - report an error
+          if (ParseZ(Z, consumeToken()) || !Z)
             return Error(getLexer().getLoc(),
-                          "Expected an op-mask register at this point");
-          // {%k<NUM>} mark is found, inquire for {z}
-          if (getLexer().is(AsmToken::LCurly) && !Z) {
-            // Have we've found a parsing error, or found no (expected) {z} mark
-            // - report an error
-            if (ParseZ(Z, consumeToken()) || !Z)
-              return Error(getLexer().getLoc(),
-                           "Expected a {z} mark at this point");
+                         "Expected a {z} mark at this point");
 
-          }
-          // '{z}' on its own is meaningless, hence should be ignored.
-          // on the contrary - have it been accompanied by a K register,
-          // allow it.
-          if (Z)
-            Operands.push_back(std::move(Z));
         }
+        // '{z}' on its own is meaningless, hence should be ignored.
+        // on the contrary - have it been accompanied by a K register,
+        // allow it.
+        if (Z)
+          Operands.push_back(std::move(Z));
       }
     }
   }
   return false;
 }
 
-/// ParseMemOperand: segment: disp(basereg, indexreg, scale).  The '%ds:' prefix
-/// has already been parsed if present.
+/// ParseMemOperand: 'seg : disp(basereg, indexreg, scale)'.  The '%ds:' prefix
+/// has already been parsed if present. disp may be provided as well.
 std::unique_ptr<X86Operand> X86AsmParser::ParseMemOperand(unsigned SegReg,
-                                                          SMLoc MemStart) {
-
+                                                          const MCExpr *&Disp,
+                                                          const SMLoc &StartLoc,
+                                                          SMLoc &EndLoc) {
   MCAsmParser &Parser = getParser();
-  // We have to disambiguate a parenthesized expression "(4+5)" from the start
-  // of a memory operand with a missing displacement "(%ebx)" or "(,%eax)".  The
-  // only way to do this without lookahead is to eat the '(' and see what is
-  // after it.
-  const MCExpr *Disp = MCConstantExpr::create(0, getParser().getContext());
-  if (getLexer().isNot(AsmToken::LParen)) {
-    SMLoc ExprEnd;
-    if (getParser().parseExpression(Disp, ExprEnd)) return nullptr;
+  SMLoc Loc;
+  // Based on the initial passed values, we may be in any of these cases, we are
+  // in one of these cases (with current position (*)):
 
-    // After parsing the base expression we could either have a parenthesized
-    // memory address or not.  If not, return now.  If so, eat the (.
-    if (getLexer().isNot(AsmToken::LParen)) {
-      // Unless we have a segment register, treat this as an immediate.
-      if (SegReg == 0)
-        return X86Operand::CreateMem(getPointerWidth(), Disp, MemStart, ExprEnd);
-      return X86Operand::CreateMem(getPointerWidth(), SegReg, Disp, 0, 0, 1,
-                                   MemStart, ExprEnd);
+  //   1. seg : * disp  (base-index-scale-expr)
+  //   2. seg : *(disp) (base-index-scale-expr)
+  //   3. seg :       *(base-index-scale-expr)
+  //   4.        disp  *(base-index-scale-expr)
+  //   5.      *(disp)  (base-index-scale-expr)
+  //   6.             *(base-index-scale-expr)
+  //   7.  disp *
+  //   8. *(disp)
+
+  // If we do not have an displacement yet, check if we're in cases 4 or 6 by
+  // checking if the first object after the parenthesis is a register (or an
+  // identifier referring to a register) and parse the displacement or default
+  // to 0 as appropriate.
+  auto isAtMemOperand = [this]() {
+    if (this->getLexer().isNot(AsmToken::LParen))
+      return false;
+    AsmToken Buf[2];
+    StringRef Id;
+    auto TokCount = this->getLexer().peekTokens(Buf, true);
+    if (TokCount == 0)
+      return false;
+    switch (Buf[0].getKind()) {
+    case AsmToken::Percent:
+    case AsmToken::Comma:
+      return true;
+    // These lower cases are doing a peekIdentifier.
+    case AsmToken::At:
+    case AsmToken::Dollar:
+      if ((TokCount > 1) &&
+          (Buf[1].is(AsmToken::Identifier) || Buf[1].is(AsmToken::String)) &&
+          (Buf[0].getLoc().getPointer() + 1 == Buf[1].getLoc().getPointer()))
+        Id = StringRef(Buf[0].getLoc().getPointer(),
+                       Buf[1].getIdentifier().size() + 1);
+      break;
+    case AsmToken::Identifier:
+    case AsmToken::String:
+      Id = Buf[0].getIdentifier();
+      break;
+    default:
+      return false;
     }
-
-    // Eat the '('.
-    Parser.Lex();
-  } else {
-    // Okay, we have a '('.  We don't know if this is an expression or not, but
-    // so we have to eat the ( to see beyond it.
-    SMLoc LParenLoc = Parser.getTok().getLoc();
-    Parser.Lex(); // Eat the '('.
-
-    if (getLexer().is(AsmToken::Percent) || getLexer().is(AsmToken::Comma)) {
-      // Nothing to do here, fall into the code below with the '(' part of the
-      // memory operand consumed.
-    } else {
-      SMLoc ExprEnd;
-      getLexer().UnLex(AsmToken(AsmToken::LParen, "("));
-
-      // It must be either an parenthesized expression, or an expression that
-      // begins from a parenthesized expression, parse it now. Example: (1+2) or
-      // (1+2)+3
-      if (getParser().parseExpression(Disp, ExprEnd))
-        return nullptr;
-
-      // After parsing the base expression we could either have a parenthesized
-      // memory address or not.  If not, return now.  If so, eat the (.
-      if (getLexer().isNot(AsmToken::LParen)) {
-        // Unless we have a segment register, treat this as an immediate.
-        if (SegReg == 0)
-          return X86Operand::CreateMem(getPointerWidth(), Disp, LParenLoc,
-                                       ExprEnd);
-        return X86Operand::CreateMem(getPointerWidth(), SegReg, Disp, 0, 0, 1,
-                                     MemStart, ExprEnd);
+    // We have an ID. Check if it is bound to a register.
+    if (!Id.empty()) {
+      MCSymbol *Sym = this->getContext().getOrCreateSymbol(Id);
+      if (Sym->isVariable()) {
+        auto V = Sym->getVariableValue(/*SetUsed*/ false);
+        return isa<X86MCExpr>(V);
       }
+    }
+    return false;
+  };
 
-      // Eat the '('.
-      Parser.Lex();
+  if (!Disp) {
+    // Parse immediate if we're not at a mem operand yet.
+    if (!isAtMemOperand()) {
+      if (Parser.parseTokenLoc(Loc) || Parser.parseExpression(Disp, EndLoc))
+        return nullptr;
+      assert(!isa<X86MCExpr>(Disp) && "Expected non-register here.");
+    } else {
+      // Disp is implicitly zero if we haven't parsed it yet.
+      Disp = MCConstantExpr::create(0, Parser.getContext());
     }
   }
 
-  // If we reached here, then we just ate the ( of the memory operand.  Process
+  // We are now either at the end of the operand or at the '(' at the start of a
+  // base-index-scale-expr.
+
+  if (!parseOptionalToken(AsmToken::LParen)) {
+    if (SegReg == 0)
+      return X86Operand::CreateMem(getPointerWidth(), Disp, StartLoc, EndLoc);
+    return X86Operand::CreateMem(getPointerWidth(), SegReg, Disp, 0, 0, 1,
+                                 StartLoc, EndLoc);
+  }
+
+  // If we reached here, then eat the '(' and Process
   // the rest of the memory operand.
   unsigned BaseReg = 0, IndexReg = 0, Scale = 1;
-  SMLoc IndexLoc, BaseLoc;
+  SMLoc BaseLoc = getLexer().getLoc();
+  const MCExpr *E;
+  StringRef ErrMsg;
 
-  if (getLexer().is(AsmToken::Percent)) {
-    SMLoc StartLoc, EndLoc;
-    BaseLoc = Parser.getTok().getLoc();
-    if (ParseRegister(BaseReg, StartLoc, EndLoc)) return nullptr;
-    if (BaseReg == X86::EIZ || BaseReg == X86::RIZ) {
-      Error(StartLoc, "eiz and riz can only be used as index registers",
-            SMRange(StartLoc, EndLoc));
+  // Parse BaseReg if one is provided.
+  if (getLexer().isNot(AsmToken::Comma) && getLexer().isNot(AsmToken::RParen)) {
+    if (Parser.parseExpression(E, EndLoc) ||
+        check(!isa<X86MCExpr>(E), BaseLoc, "expected register here"))
       return nullptr;
-    }
+
+    // Sanity check register.
+    BaseReg = cast<X86MCExpr>(E)->getRegNo();
+    if (BaseReg == X86::EIZ || BaseReg == X86::RIZ)
+      return ErrorOperand(BaseLoc,
+                          "eiz and riz can only be used as index registers",
+                          SMRange(BaseLoc, EndLoc));
   }
 
-  if (getLexer().is(AsmToken::Comma)) {
-    Parser.Lex(); // Eat the comma.
-    IndexLoc = Parser.getTok().getLoc();
-
+  if (parseOptionalToken(AsmToken::Comma)) {
     // Following the comma we should have either an index register, or a scale
     // value. We don't support the later form, but we want to parse it
     // correctly.
     //
-    // Not that even though it would be completely consistent to support syntax
-    // like "1(%eax,,1)", the assembler doesn't. Use "eiz" or "riz" for this.
-    if (getLexer().is(AsmToken::Percent)) {
-      SMLoc L;
-      if (ParseRegister(IndexReg, L, L))
+    // Even though it would be completely consistent to support syntax like
+    // "1(%eax,,1)", the assembler doesn't. Use "eiz" or "riz" for this.
+    if (getLexer().isNot(AsmToken::RParen)) {
+      if (Parser.parseTokenLoc(Loc) || Parser.parseExpression(E, EndLoc))
         return nullptr;
-      if (BaseReg == X86::RIP) {
-        Error(IndexLoc, "%rip as base register can not have an index register");
-        return nullptr;
-      }
-      if (IndexReg == X86::RIP) {
-        Error(IndexLoc, "%rip is not allowed as an index register");
-        return nullptr;
-      }
 
-      if (getLexer().isNot(AsmToken::RParen)) {
-        // Parse the scale amount:
-        //  ::= ',' [scale-expression]
-        if (getLexer().isNot(AsmToken::Comma)) {
-          Error(Parser.getTok().getLoc(),
-                "expected comma in scale expression");
-          return nullptr;
-        }
-        Parser.Lex(); // Eat the comma.
+      if (!isa<X86MCExpr>(E)) {
+        // We've parsed an unexpected Scale Value instead of an index
+        // register. Interpret it as an absolute.
+        int64_t ScaleVal;
+        if (!E->evaluateAsAbsolute(ScaleVal, getStreamer().getAssemblerPtr()))
+          return ErrorOperand(Loc, "expected absolute expression");
+        if (ScaleVal != 1)
+          Warning(Loc, "scale factor without index register is ignored");
+        Scale = 1;
+      } else { // IndexReg Found.
+        IndexReg = cast<X86MCExpr>(E)->getRegNo();
 
-        if (getLexer().isNot(AsmToken::RParen)) {
-          SMLoc Loc = Parser.getTok().getLoc();
+        if (BaseReg == X86::RIP)
+          return ErrorOperand(
+              Loc, "%rip as base register can not have an index register");
+        if (IndexReg == X86::RIP)
+          return ErrorOperand(Loc, "%rip is not allowed as an index register");
 
-          int64_t ScaleVal;
-          if (getParser().parseAbsoluteExpression(ScaleVal)){
-            Error(Loc, "expected scale expression");
-            return nullptr;
+        if (parseOptionalToken(AsmToken::Comma)) {
+          // Parse the scale amount:
+          //  ::= ',' [scale-expression]
+
+          // A scale amount without an index is ignored.
+          if (getLexer().isNot(AsmToken::RParen)) {
+            int64_t ScaleVal;
+            if (Parser.parseTokenLoc(Loc) ||
+                Parser.parseAbsoluteExpression(ScaleVal))
+              return ErrorOperand(Loc, "expected scale expression");
+            Scale = (unsigned)ScaleVal;
+            // Validate the scale amount.
+            if (X86MCRegisterClasses[X86::GR16RegClassID].contains(BaseReg) &&
+                Scale != 1)
+              return ErrorOperand(Loc,
+                                  "scale factor in 16-bit address must be 1");
+            if (checkScale(Scale, ErrMsg))
+              return ErrorOperand(Loc, ErrMsg);
           }
-
-          // Validate the scale amount.
-          if (X86MCRegisterClasses[X86::GR16RegClassID].contains(BaseReg) &&
-              ScaleVal != 1) {
-            Error(Loc, "scale factor in 16-bit address must be 1");
-            return nullptr;
-          }
-          if (ScaleVal != 1 && ScaleVal != 2 && ScaleVal != 4 &&
-              ScaleVal != 8) {
-            Error(Loc, "scale factor in address must be 1, 2, 4 or 8");
-            return nullptr;
-          }
-          Scale = (unsigned)ScaleVal;
         }
       }
-    } else if (getLexer().isNot(AsmToken::RParen)) {
-      // A scale amount without an index is ignored.
-      // index.
-      SMLoc Loc = Parser.getTok().getLoc();
-
-      int64_t Value;
-      if (getParser().parseAbsoluteExpression(Value))
-        return nullptr;
-
-      if (Value != 1)
-        Warning(Loc, "scale factor without index register is ignored");
-      Scale = 1;
     }
   }
 
   // Ok, we've eaten the memory operand, verify we have a ')' and eat it too.
-  if (getLexer().isNot(AsmToken::RParen)) {
-    Error(Parser.getTok().getLoc(), "unexpected token in memory operand");
+  if (parseToken(AsmToken::RParen, "unexpected token in memory operand"))
     return nullptr;
-  }
-  SMLoc MemEnd = Parser.getTok().getEndLoc();
-  Parser.Lex(); // Eat the ')'.
 
-  // Check for use of invalid 16-bit registers. Only BX/BP/SI/DI are allowed,
-  // and then only in non-64-bit modes. Except for DX, which is a special case
-  // because an unofficial form of in/out instructions uses it.
-  if (X86MCRegisterClasses[X86::GR16RegClassID].contains(BaseReg) &&
-      (is64BitMode() || (BaseReg != X86::BX && BaseReg != X86::BP &&
-                         BaseReg != X86::SI && BaseReg != X86::DI)) &&
-      BaseReg != X86::DX) {
-    Error(BaseLoc, "invalid 16-bit base register");
-    return nullptr;
-  }
-  if (BaseReg == 0 &&
-      X86MCRegisterClasses[X86::GR16RegClassID].contains(IndexReg)) {
-    Error(IndexLoc, "16-bit memory operand may not include only index register");
-    return nullptr;
-  }
+  // This is to support otherwise illegal operand (%dx) found in various
+  // unofficial manuals examples (e.g. "out[s]?[bwl]? %al, (%dx)") and must now
+  // be supported. Mark such DX variants separately fix only in special cases.
+  if (BaseReg == X86::DX && IndexReg == 0 && Scale == 1 && SegReg == 0 &&
+      isa<MCConstantExpr>(Disp) && cast<MCConstantExpr>(Disp)->getValue() == 0)
+    return X86Operand::CreateDXReg(BaseLoc, BaseLoc);
 
-  StringRef ErrMsg;
-  if (CheckBaseRegAndIndexRegAndScale(BaseReg, IndexReg, Scale, ErrMsg)) {
-    Error(BaseLoc, ErrMsg);
-    return nullptr;
-  }
+  if (CheckBaseRegAndIndexRegAndScale(BaseReg, IndexReg, Scale, is64BitMode(),
+                                      ErrMsg))
+    return ErrorOperand(BaseLoc, ErrMsg);
 
   if (SegReg || BaseReg || IndexReg)
     return X86Operand::CreateMem(getPointerWidth(), SegReg, Disp, BaseReg,
-                                 IndexReg, Scale, MemStart, MemEnd);
-  return X86Operand::CreateMem(getPointerWidth(), Disp, MemStart, MemEnd);
+                                 IndexReg, Scale, StartLoc, EndLoc);
+  return X86Operand::CreateMem(getPointerWidth(), Disp, StartLoc, EndLoc);
+}
+
+// Parse either a standard primary expression or a register.
+bool X86AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
+  MCAsmParser &Parser = getParser();
+  // See if this is a register first.
+  if (getTok().is(AsmToken::Percent) ||
+      (isParsingIntelSyntax() && getTok().is(AsmToken::Identifier) &&
+       MatchRegisterName(Parser.getTok().getString()))) {
+    SMLoc StartLoc = Parser.getTok().getLoc();
+    unsigned RegNo;
+    if (ParseRegister(RegNo, StartLoc, EndLoc))
+      return true;
+    Res = X86MCExpr::create(RegNo, Parser.getContext());
+    return false;
+  }
+  return Parser.parsePrimaryExpr(Res, EndLoc);
 }
 
 bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
@@ -2345,29 +2463,38 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
                       .Cases("acquire", "release", isParsingIntelSyntax())
                       .Default(false);
 
-  auto isLockRepeatPrefix = [](StringRef N) {
+  auto isLockRepeatNtPrefix = [](StringRef N) {
     return StringSwitch<bool>(N)
-        .Cases("lock", "rep", "repe", "repz", "repne", "repnz", true)
+        .Cases("lock", "rep", "repe", "repz", "repne", "repnz", "notrack", true)
         .Default(false);
   };
 
   bool CurlyAsEndOfStatement = false;
 
   unsigned Flags = X86::IP_NO_PREFIX;
-  while (isLockRepeatPrefix(Name.lower())) {
+  while (isLockRepeatNtPrefix(Name.lower())) {
     unsigned Prefix =
         StringSwitch<unsigned>(Name)
             .Cases("lock", "lock", X86::IP_HAS_LOCK)
             .Cases("rep", "repe", "repz", X86::IP_HAS_REPEAT)
             .Cases("repne", "repnz", X86::IP_HAS_REPEAT_NE)
+            .Cases("notrack", "notrack", X86::IP_HAS_NOTRACK)
             .Default(X86::IP_NO_PREFIX); // Invalid prefix (impossible)
     Flags |= Prefix;
+    if (getLexer().is(AsmToken::EndOfStatement)) {
+      // We don't have real instr with the given prefix
+      //  let's use the prefix as the instr.
+      // TODO: there could be several prefixes one after another
+      Flags = X86::IP_NO_PREFIX;
+      break;
+    }
     Name = Parser.getTok().getString();
     Parser.Lex(); // eat the prefix
-    // Hack: we could have something like
+    // Hack: we could have something like "rep # some comment" or
     //    "lock; cmpxchg16b $1" or "lock\0A\09incl" or "lock/incl"
     while (Name.startswith(";") || Name.startswith("\n") ||
-           Name.startswith("\t") || Name.startswith("/")) {
+           Name.startswith("#") || Name.startswith("\t") ||
+           Name.startswith("/")) {
       Name = Parser.getTok().getString();
       Parser.Lex(); // go to next prefix or instr
     }
@@ -2375,6 +2502,20 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
 
   if (Flags)
     PatchedName = Name;
+
+  // Hacks to handle 'data16' and 'data32'
+  if (PatchedName == "data16" && is16BitMode()) {
+    return Error(NameLoc, "redundant data16 prefix");
+  }
+  if (PatchedName == "data32") {
+    if (is32BitMode())
+      return Error(NameLoc, "redundant data32 prefix");
+    if (is64BitMode())
+      return Error(NameLoc, "'data32' is not supported in 64-bit mode");
+    // Hack to 'data16' for the table lookup.
+    PatchedName = "data16";
+  }
+
   Operands.push_back(X86Operand::CreateToken(PatchedName, NameLoc));
 
   // This does the actual operand parsing.  Don't parse any more if we have a
@@ -2409,7 +2550,7 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
         (getLexer().is(AsmToken::LCurly) || getLexer().is(AsmToken::RCurly));
     if (getLexer().isNot(AsmToken::EndOfStatement) && !CurlyAsEndOfStatement)
       return TokError("unexpected token in argument list");
-   }
+  }
 
   // Consume the EndOfStatement or the prefix separator Slash
   if (getLexer().is(AsmToken::EndOfStatement) ||
@@ -2465,37 +2606,29 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
        Name == "outl" || Name == "outsl" || Name == "out" || Name == "outs") &&
       Operands.size() == 3) {
     X86Operand &Op = (X86Operand &)*Operands.back();
-    if (Op.isMem() && Op.Mem.SegReg == 0 &&
-        isa<MCConstantExpr>(Op.Mem.Disp) &&
-        cast<MCConstantExpr>(Op.Mem.Disp)->getValue() == 0 &&
-        Op.Mem.BaseReg == MatchRegisterName("dx") && Op.Mem.IndexReg == 0) {
-      SMLoc Loc = Op.getEndLoc();
-      Operands.back() = X86Operand::CreateReg(Op.Mem.BaseReg, Loc, Loc);
-    }
+    if (Op.isDXReg())
+      Operands.back() = X86Operand::CreateReg(X86::DX, Op.getStartLoc(),
+                                              Op.getEndLoc());
   }
   // Same hack for "in[s]?[bwl]? (%dx), %al" -> "inb %dx, %al".
   if ((Name == "inb" || Name == "insb" || Name == "inw" || Name == "insw" ||
        Name == "inl" || Name == "insl" || Name == "in" || Name == "ins") &&
       Operands.size() == 3) {
     X86Operand &Op = (X86Operand &)*Operands[1];
-    if (Op.isMem() && Op.Mem.SegReg == 0 &&
-        isa<MCConstantExpr>(Op.Mem.Disp) &&
-        cast<MCConstantExpr>(Op.Mem.Disp)->getValue() == 0 &&
-        Op.Mem.BaseReg == MatchRegisterName("dx") && Op.Mem.IndexReg == 0) {
-      SMLoc Loc = Op.getEndLoc();
-      Operands[1] = X86Operand::CreateReg(Op.Mem.BaseReg, Loc, Loc);
-    }
+    if (Op.isDXReg())
+      Operands[1] = X86Operand::CreateReg(X86::DX, Op.getStartLoc(),
+                                          Op.getEndLoc());
   }
 
   SmallVector<std::unique_ptr<MCParsedAsmOperand>, 2> TmpOperands;
   bool HadVerifyError = false;
 
   // Append default arguments to "ins[bwld]"
-  if (Name.startswith("ins") && 
+  if (Name.startswith("ins") &&
       (Operands.size() == 1 || Operands.size() == 3) &&
       (Name == "insb" || Name == "insw" || Name == "insl" || Name == "insd" ||
        Name == "ins")) {
-    
+
     AddDefaultSrcDestOperands(TmpOperands,
                               X86Operand::CreateReg(X86::DX, NameLoc, NameLoc),
                               DefaultMemDIOperand(NameLoc));
@@ -2503,7 +2636,7 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
   }
 
   // Append default arguments to "outs[bwld]"
-  if (Name.startswith("outs") && 
+  if (Name.startswith("outs") &&
       (Operands.size() == 1 || Operands.size() == 3) &&
       (Name == "outsb" || Name == "outsw" || Name == "outsl" ||
        Name == "outsd" || Name == "outs")) {
@@ -2689,6 +2822,39 @@ bool X86AsmParser::validateInstruction(MCInst &Inst, const OperandVector &Ops) {
                                             "should be distinct");
     break;
   }
+  case X86::V4FMADDPSrm:
+  case X86::V4FMADDPSrmk:
+  case X86::V4FMADDPSrmkz:
+  case X86::V4FMADDSSrm:
+  case X86::V4FMADDSSrmk:
+  case X86::V4FMADDSSrmkz:
+  case X86::V4FNMADDPSrm:
+  case X86::V4FNMADDPSrmk:
+  case X86::V4FNMADDPSrmkz:
+  case X86::V4FNMADDSSrm:
+  case X86::V4FNMADDSSrmk:
+  case X86::V4FNMADDSSrmkz:
+  case X86::VP4DPWSSDSrm:
+  case X86::VP4DPWSSDSrmk:
+  case X86::VP4DPWSSDSrmkz:
+  case X86::VP4DPWSSDrm:
+  case X86::VP4DPWSSDrmk:
+  case X86::VP4DPWSSDrmkz: {
+    unsigned Src2 = Inst.getOperand(Inst.getNumOperands() -
+                                    X86::AddrNumOperands - 1).getReg();
+    unsigned Src2Enc = MRI->getEncodingValue(Src2);
+    if (Src2Enc % 4 != 0) {
+      StringRef RegName = X86IntelInstPrinter::getRegisterName(Src2);
+      unsigned GroupStart = (Src2Enc / 4) * 4;
+      unsigned GroupEnd = GroupStart + 3;
+      return Warning(Ops[0]->getStartLoc(),
+                     "source register '" + RegName + "' implicitly denotes '" +
+                     RegName.take_front(3) + Twine(GroupStart) + "' to '" +
+                     RegName.take_front(3) + Twine(GroupEnd) +
+                     "' source group");
+    }
+    break;
+  }
   }
 
   return false;
@@ -2698,8 +2864,9 @@ static const char *getSubtargetFeatureName(uint64_t Val);
 
 void X86AsmParser::EmitInstruction(MCInst &Inst, OperandVector &Operands,
                                    MCStreamer &Out) {
-  Instrumentation->InstrumentAndEmitInstruction(Inst, Operands, getContext(),
-                                                MII, Out);
+  Instrumentation->InstrumentAndEmitInstruction(
+      Inst, Operands, getContext(), MII, Out,
+      getParser().shouldPrintSchedInfo());
 }
 
 bool X86AsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
@@ -2790,7 +2957,7 @@ bool X86AsmParser::MatchAndEmitATTInstruction(SMLoc IDLoc, unsigned &Opcode,
                            isParsingIntelSyntax())) {
   default: llvm_unreachable("Unexpected match result!");
   case Match_Success:
-    if (validateInstruction(Inst, Operands))
+    if (!MatchingInlineAsm && validateInstruction(Inst, Operands))
       return true;
     // Some instructions need post-processing to, for example, tweak which
     // encoding is selected. Loop on it while changes happen so the
@@ -3081,7 +3248,7 @@ bool X86AsmParser::MatchAndEmitIntelInstruction(SMLoc IDLoc, unsigned &Opcode,
   // instruction will already have been filled in correctly, since the failing
   // matches won't have modified it).
   if (NumSuccessfulMatches == 1) {
-    if (validateInstruction(Inst, Operands))
+    if (!MatchingInlineAsm && validateInstruction(Inst, Operands))
       return true;
     // Some instructions need post-processing to, for example, tweak which
     // encoding is selected. Loop on it while changes happen so the individual
@@ -3131,12 +3298,9 @@ bool X86AsmParser::OmitRegisterFromClobberLists(unsigned RegNo) {
 bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
   MCAsmParser &Parser = getParser();
   StringRef IDVal = DirectiveID.getIdentifier();
-  if (IDVal == ".word")
-    return ParseDirectiveWord(2, DirectiveID.getLoc());
-  else if (IDVal.startswith(".code"))
+  if (IDVal.startswith(".code"))
     return ParseDirectiveCode(IDVal, DirectiveID.getLoc());
   else if (IDVal.startswith(".att_syntax")) {
-    getParser().setParsingInlineAsm(false);
     if (getLexer().isNot(AsmToken::EndOfStatement)) {
       if (Parser.getTok().getString() == "prefix")
         Parser.Lex();
@@ -3149,7 +3313,6 @@ bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
     return false;
   } else if (IDVal.startswith(".intel_syntax")) {
     getParser().setAssemblerDialect(1);
-    getParser().setParsingInlineAsm(true);
     if (getLexer().isNot(AsmToken::EndOfStatement)) {
       if (Parser.getTok().getString() == "noprefix")
         Parser.Lex();
@@ -3169,6 +3332,8 @@ bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
     return parseDirectiveFPOPushReg(DirectiveID.getLoc());
   else if (IDVal == ".cv_fpo_stackalloc")
     return parseDirectiveFPOStackAlloc(DirectiveID.getLoc());
+  else if (IDVal == ".cv_fpo_stackalign")
+    return parseDirectiveFPOStackAlign(DirectiveID.getLoc());
   else if (IDVal == ".cv_fpo_endprologue")
     return parseDirectiveFPOEndPrologue(DirectiveID.getLoc());
   else if (IDVal == ".cv_fpo_endproc")
@@ -3180,10 +3345,9 @@ bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
 /// parseDirectiveEven
 ///  ::= .even
 bool X86AsmParser::parseDirectiveEven(SMLoc L) {
-  if (getLexer().isNot(AsmToken::EndOfStatement)) {
-    TokError("unexpected token in directive");
-    return false;  
-  }
+  if (parseToken(AsmToken::EndOfStatement, "unexpected token in directive"))
+    return false;
+
   const MCSection *Section = getStreamer().getCurrentSectionOnly();
   if (!Section) {
     getStreamer().InitSections(false);
@@ -3193,42 +3357,6 @@ bool X86AsmParser::parseDirectiveEven(SMLoc L) {
     getStreamer().EmitCodeAlignment(2, 0);
   else
     getStreamer().EmitValueToAlignment(2, 0, 1, 0);
-  return false;
-}
-/// ParseDirectiveWord
-///  ::= .word [ expression (, expression)* ]
-bool X86AsmParser::ParseDirectiveWord(unsigned Size, SMLoc L) {
-  MCAsmParser &Parser = getParser();
-  if (getLexer().isNot(AsmToken::EndOfStatement)) {
-    for (;;) {
-      const MCExpr *Value;
-      SMLoc ExprLoc = getLexer().getLoc();
-      if (getParser().parseExpression(Value))
-        return false;
-
-      if (const auto *MCE = dyn_cast<MCConstantExpr>(Value)) {
-        assert(Size <= 8 && "Invalid size");
-        uint64_t IntValue = MCE->getValue();
-        if (!isUIntN(8 * Size, IntValue) && !isIntN(8 * Size, IntValue))
-          return Error(ExprLoc, "literal value out of range for directive");
-        getStreamer().EmitIntValue(IntValue, Size);
-      } else {
-        getStreamer().EmitValue(Value, Size, ExprLoc);
-      }
-
-      if (getLexer().is(AsmToken::EndOfStatement))
-        break;
-
-      // FIXME: Improve diagnostic.
-      if (getLexer().isNot(AsmToken::Comma)) {
-        Error(L, "unexpected token in directive");
-        return false;
-      }
-      Parser.Lex();
-    }
-  }
-
-  Parser.Lex();
   return false;
 }
 
@@ -3318,6 +3446,16 @@ bool X86AsmParser::parseDirectiveFPOStackAlloc(SMLoc L) {
       Parser.parseEOL("unexpected tokens"))
     return addErrorSuffix(" in '.cv_fpo_stackalloc' directive");
   return getTargetStreamer().emitFPOStackAlloc(Offset, L);
+}
+
+// .cv_fpo_stackalign 8
+bool X86AsmParser::parseDirectiveFPOStackAlign(SMLoc L) {
+  MCAsmParser &Parser = getParser();
+  int64_t Offset;
+  if (Parser.parseIntToken(Offset, "expected offset") ||
+      Parser.parseEOL("unexpected tokens"))
+    return addErrorSuffix(" in '.cv_fpo_stackalign' directive");
+  return getTargetStreamer().emitFPOStackAlign(Offset, L);
 }
 
 // .cv_fpo_endprologue

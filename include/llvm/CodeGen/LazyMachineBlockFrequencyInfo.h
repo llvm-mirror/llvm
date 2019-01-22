@@ -1,9 +1,8 @@
 ///===- LazyMachineBlockFrequencyInfo.h - Lazy Block Frequency -*- C++ -*--===//
 ///
-///                     The LLVM Compiler Infrastructure
-///
-/// This file is distributed under the University of Illinois Open Source
-/// License. See LICENSE.TXT for details.
+/// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+/// See https://llvm.org/LICENSE.txt for license information.
+/// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 ///
 ///===---------------------------------------------------------------------===//
 /// \file
@@ -23,7 +22,7 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 
 namespace llvm {
-/// \brief This is an alternative analysis pass to MachineBlockFrequencyInfo.
+/// This is an alternative analysis pass to MachineBlockFrequencyInfo.
 /// The difference is that with this pass, the block frequencies are not
 /// computed when the analysis pass is executed but rather when the BFI result
 /// is explicitly requested by the analysis client.
@@ -49,7 +48,7 @@ private:
   /// The function.
   MachineFunction *MF = nullptr;
 
-  /// \brief Calculate MBFI and all other analyses that's not available and
+  /// Calculate MBFI and all other analyses that's not available and
   /// required by BFI.
   MachineBlockFrequencyInfo &calculateIfNotAvailable() const;
 
@@ -58,10 +57,10 @@ public:
 
   LazyMachineBlockFrequencyInfoPass();
 
-  /// \brief Compute and return the block frequencies.
+  /// Compute and return the block frequencies.
   MachineBlockFrequencyInfo &getBFI() { return calculateIfNotAvailable(); }
 
-  /// \brief Compute and return the block frequencies.
+  /// Compute and return the block frequencies.
   const MachineBlockFrequencyInfo &getBFI() const {
     return calculateIfNotAvailable();
   }

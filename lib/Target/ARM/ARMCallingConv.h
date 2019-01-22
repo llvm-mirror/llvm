@@ -1,9 +1,8 @@
 //=== ARMCallingConv.h - ARM Custom Calling Convention Routines -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,8 +18,8 @@
 #include "ARMBaseInstrInfo.h"
 #include "ARMSubtarget.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/CallingConv.h"
-#include "llvm/Target/TargetInstrInfo.h"
 
 namespace llvm {
 
@@ -217,12 +216,15 @@ static bool CC_ARM_AAPCS_Custom_Aggregate(unsigned &ValNo, MVT &ValVT,
 
     break;
   }
+  case MVT::f16:
   case MVT::f32:
     RegList = SRegList;
     break;
+  case MVT::v4f16:
   case MVT::f64:
     RegList = DRegList;
     break;
+  case MVT::v8f16:
   case MVT::v2f64:
     RegList = QRegList;
     break;
@@ -266,14 +268,15 @@ static bool CC_ARM_AAPCS_Custom_Aggregate(unsigned &ValNo, MVT &ValVT,
   for (auto Reg : RegList)
     State.AllocateReg(Reg);
 
+  // After the first item has been allocated, the rest are packed as tightly as
+  // possible. (E.g. an incoming i64 would have starting Align of 8, but we'll
+  // be allocating a bunch of i32 slots).
+  unsigned RestAlign = std::min(Align, Size);
+
   for (auto &It : PendingMembers) {
     It.convertToMem(State.AllocateStack(Size, Align));
     State.addLoc(It);
-
-    // After the first item has been allocated, the rest are packed as tightly
-    // as possible. (E.g. an incoming i64 would have starting Align of 8, but
-    // we'll be allocating a bunch of i32 slots).
-    Align = Size;
+    Align = RestAlign;
   }
 
   // All pending members have now been allocated

@@ -1,9 +1,8 @@
 //===- ForceFunctionAttrs.cpp - Force function attrs for debugging --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -42,8 +41,10 @@ static Attribute::AttrKind parseAttrKind(StringRef Kind) {
       .Case("nonlazybind", Attribute::NonLazyBind)
       .Case("noredzone", Attribute::NoRedZone)
       .Case("noreturn", Attribute::NoReturn)
+      .Case("nocf_check", Attribute::NoCfCheck)
       .Case("norecurse", Attribute::NoRecurse)
       .Case("nounwind", Attribute::NoUnwind)
+      .Case("optforfuzzing", Attribute::OptForFuzzing)
       .Case("optnone", Attribute::OptimizeNone)
       .Case("optsize", Attribute::OptimizeForSize)
       .Case("readnone", Attribute::ReadNone)
@@ -51,9 +52,12 @@ static Attribute::AttrKind parseAttrKind(StringRef Kind) {
       .Case("argmemonly", Attribute::ArgMemOnly)
       .Case("returns_twice", Attribute::ReturnsTwice)
       .Case("safestack", Attribute::SafeStack)
+      .Case("shadowcallstack", Attribute::ShadowCallStack)
       .Case("sanitize_address", Attribute::SanitizeAddress)
+      .Case("sanitize_hwaddress", Attribute::SanitizeHWAddress)
       .Case("sanitize_memory", Attribute::SanitizeMemory)
       .Case("sanitize_thread", Attribute::SanitizeThread)
+      .Case("speculative_load_hardening", Attribute::SpeculativeLoadHardening)
       .Case("ssp", Attribute::StackProtect)
       .Case("sspreq", Attribute::StackProtectReq)
       .Case("sspstrong", Attribute::StackProtectStrong)
@@ -71,8 +75,8 @@ static void addForcedAttributes(Function &F) {
 
     auto Kind = parseAttrKind(KV.second);
     if (Kind == Attribute::None) {
-      DEBUG(dbgs() << "ForcedAttribute: " << KV.second
-                   << " unknown or not handled!\n");
+      LLVM_DEBUG(dbgs() << "ForcedAttribute: " << KV.second
+                        << " unknown or not handled!\n");
       continue;
     }
     if (F.hasFnAttribute(Kind))

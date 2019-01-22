@@ -1,9 +1,8 @@
 //===- llvm/ADT/GraphTraits.h - Graph traits template -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,6 +24,13 @@ namespace llvm {
 // GraphTraits - This class should be specialized by different graph types...
 // which is why the default version is empty.
 //
+// This template evolved from supporting `BasicBlock` to also later supporting
+// more complex types (e.g. CFG and DomTree).
+//
+// GraphTraits can be used to create a view over a graph interpreting it
+// differently without requiring a copy of the original graph. This could
+// be achieved by carrying more data in NodeRef. See LoopBodyTraits for one
+// example.
 template<class GraphType>
 struct GraphTraits {
   // Elements to provide:
@@ -46,6 +52,19 @@ struct GraphTraits {
   // static nodes_iterator nodes_begin(GraphType *G)
   // static nodes_iterator nodes_end  (GraphType *G)
   //    nodes_iterator/begin/end - Allow iteration over all nodes in the graph
+
+  // typedef EdgeRef           - Type of Edge token in the graph, which should
+  //                             be cheap to copy.
+  // typedef ChildEdgeIteratorType - Type used to iterate over children edges in
+  //                             graph, dereference to a EdgeRef.
+
+  // static ChildEdgeIteratorType child_edge_begin(NodeRef)
+  // static ChildEdgeIteratorType child_edge_end(NodeRef)
+  //     Return iterators that point to the beginning and ending of the
+  //     edge list for the given callgraph node.
+  //
+  // static NodeRef edge_dest(EdgeRef)
+  //     Return the destination node of an edge.
 
   // static unsigned       size       (GraphType *G)
   //    Return total number of nodes in the graph
@@ -109,6 +128,13 @@ iterator_range<typename GraphTraits<Inverse<GraphType>>::ChildIteratorType>
 inverse_children(const typename GraphTraits<GraphType>::NodeRef &G) {
   return make_range(GraphTraits<Inverse<GraphType>>::child_begin(G),
                     GraphTraits<Inverse<GraphType>>::child_end(G));
+}
+
+template <class GraphType>
+iterator_range<typename GraphTraits<GraphType>::ChildEdgeIteratorType>
+children_edges(const typename GraphTraits<GraphType>::NodeRef &G) {
+  return make_range(GraphTraits<GraphType>::child_edge_begin(G),
+                    GraphTraits<GraphType>::child_edge_end(G));
 }
 
 } // end namespace llvm

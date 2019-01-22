@@ -1,9 +1,8 @@
 //===-- Regex.cpp - Regular Expression matcher implementation -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,11 +11,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Regex.h"
-#include "regex_impl.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include <string>
+
+// Important this comes last because it defines "_REGEX_H_". At least on
+// Darwin, if included before any header that (transitively) includes
+// xlocale.h, this will cause trouble, because of missing regex-related types.
+#include "regex_impl.h"
+
 using namespace llvm;
 
 Regex::Regex() : preg(nullptr), error(REG_BADPAT) {}
@@ -25,7 +29,7 @@ Regex::Regex(StringRef regex, unsigned Flags) {
   unsigned flags = 0;
   preg = new llvm_regex();
   preg->re_endp = regex.end();
-  if (Flags & IgnoreCase) 
+  if (Flags & IgnoreCase)
     flags |= REG_ICASE;
   if (Flags & Newline)
     flags |= REG_NEWLINE;
@@ -51,9 +55,9 @@ Regex::~Regex() {
 bool Regex::isValid(std::string &Error) const {
   if (!error)
     return true;
-  
+
   size_t len = llvm_regerror(error, preg, nullptr, 0);
-  
+
   Error.resize(len - 1);
   llvm_regerror(error, preg, &Error[0], len);
   return false;
@@ -91,7 +95,7 @@ bool Regex::match(StringRef String, SmallVectorImpl<StringRef> *Matches){
 
   if (Matches) { // match position requested
     Matches->clear();
-    
+
     for (unsigned i = 0; i != nmatch; ++i) {
       if (pm[i].rm_so == -1) {
         // this group didn't match

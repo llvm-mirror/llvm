@@ -1,9 +1,8 @@
 //===- InstrProfReader.h - Instrumented profiling readers -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,7 +100,7 @@ protected:
     return make_error<InstrProfError>(Err);
   }
 
-  Error error(Error E) { return error(InstrProfError::take(std::move(E))); }
+  Error error(Error &&E) { return error(InstrProfError::take(std::move(E))); }
 
   /// Clear the current error and return a successful one.
   Error success() { return error(instrprof_error::success); }
@@ -198,8 +197,6 @@ private:
   const uint8_t *ValueDataStart;
   uint32_t ValueKindLast;
   uint32_t CurValueDataSize;
-
-  InstrProfRecord::ValueMapType FunctionPtrToNameMap;
 
 public:
   RawInstrProfReader(std::unique_ptr<MemoryBuffer> DataBuffer)
@@ -351,11 +348,16 @@ using OnDiskHashTableImplV3 =
     OnDiskIterableChainedHashTable<InstrProfLookupTrait>;
 
 template <typename HashTableImpl>
+class InstrProfReaderItaniumRemapper;
+
+template <typename HashTableImpl>
 class InstrProfReaderIndex : public InstrProfReaderIndexBase {
 private:
   std::unique_ptr<HashTableImpl> HashTable;
   typename HashTableImpl::data_iterator RecordIterator;
   uint64_t FormatVersion;
+
+  friend class InstrProfReaderItaniumRemapper<HashTableImpl>;
 
 public:
   InstrProfReaderIndex(const unsigned char *Buckets,
@@ -388,13 +390,26 @@ public:
   }
 };
 
+/// Name matcher supporting fuzzy matching of symbol names to names in profiles.
+class InstrProfReaderRemapper {
+public:
+  virtual ~InstrProfReaderRemapper() {}
+  virtual Error populateRemappings() { return Error::success(); }
+  virtual Error getRecords(StringRef FuncName,
+                           ArrayRef<NamedInstrProfRecord> &Data) = 0;
+};
+
 /// Reader for the indexed binary instrprof format.
 class IndexedInstrProfReader : public InstrProfReader {
 private:
   /// The profile data file contents.
   std::unique_ptr<MemoryBuffer> DataBuffer;
+  /// The profile remapping file contents.
+  std::unique_ptr<MemoryBuffer> RemappingBuffer;
   /// The index into the profile data.
   std::unique_ptr<InstrProfReaderIndexBase> Index;
+  /// The profile remapping file contents.
+  std::unique_ptr<InstrProfReaderRemapper> Remapper;
   /// Profile summary data.
   std::unique_ptr<ProfileSummary> Summary;
   // Index to the current record in the record array.
@@ -406,8 +421,11 @@ private:
                                    const unsigned char *Cur);
 
 public:
-  IndexedInstrProfReader(std::unique_ptr<MemoryBuffer> DataBuffer)
-      : DataBuffer(std::move(DataBuffer)), RecordIndex(0) {}
+  IndexedInstrProfReader(
+      std::unique_ptr<MemoryBuffer> DataBuffer,
+      std::unique_ptr<MemoryBuffer> RemappingBuffer = nullptr)
+      : DataBuffer(std::move(DataBuffer)),
+        RemappingBuffer(std::move(RemappingBuffer)), RecordIndex(0) {}
   IndexedInstrProfReader(const IndexedInstrProfReader &) = delete;
   IndexedInstrProfReader &operator=(const IndexedInstrProfReader &) = delete;
 
@@ -436,10 +454,11 @@ public:
 
   /// Factory method to create an indexed reader.
   static Expected<std::unique_ptr<IndexedInstrProfReader>>
-  create(const Twine &Path);
+  create(const Twine &Path, const Twine &RemappingPath = "");
 
   static Expected<std::unique_ptr<IndexedInstrProfReader>>
-  create(std::unique_ptr<MemoryBuffer> Buffer);
+  create(std::unique_ptr<MemoryBuffer> Buffer,
+         std::unique_ptr<MemoryBuffer> RemappingBuffer = nullptr);
 
   // Used for testing purpose only.
   void setValueProfDataEndianness(support::endianness Endianness) {

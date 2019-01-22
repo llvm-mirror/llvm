@@ -1,9 +1,8 @@
 //===- AArch64InstrInfo.h - AArch64 Instruction Information -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "AArch64GenInstrInfo.inc"
@@ -62,188 +61,60 @@ public:
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
 
-  /// Returns true if there is a shiftable register and that the shift value
-  /// is non-zero.
-  bool hasShiftedReg(const MachineInstr &MI) const;
+  /// Does this instruction set its full destination register to zero?
+  static bool isGPRZero(const MachineInstr &MI);
 
-  /// Returns true if there is an extendable register and that the extending
-  /// value is non-zero.
-  bool hasExtendedReg(const MachineInstr &MI) const;
+  /// Does this instruction rename a GPR without modifying bits?
+  static bool isGPRCopy(const MachineInstr &MI);
 
-  /// \brief Does this instruction set its full destination register to zero?
-  bool isGPRZero(const MachineInstr &MI) const;
-
-  /// \brief Does this instruction rename a GPR without modifying bits?
-  bool isGPRCopy(const MachineInstr &MI) const;
-
-  /// \brief Does this instruction rename an FPR without modifying bits?
-  bool isFPRCopy(const MachineInstr &MI) const;
-
-  /// Return true if this is load/store scales or extends its register offset.
-  /// This refers to scaling a dynamic index as opposed to scaled immediates.
-  /// MI should be a memory op that allows scaled addressing.
-  bool isScaledAddr(const MachineInstr &MI) const;
+  /// Does this instruction rename an FPR without modifying bits?
+  static bool isFPRCopy(const MachineInstr &MI);
 
   /// Return true if pairing the given load or store is hinted to be
   /// unprofitable.
-  bool isLdStPairSuppressed(const MachineInstr &MI) const;
+  static bool isLdStPairSuppressed(const MachineInstr &MI);
 
   /// Return true if the given load or store is a strided memory access.
-  bool isStridedAccess(const MachineInstr &MI) const;
+  static bool isStridedAccess(const MachineInstr &MI);
 
   /// Return true if this is an unscaled load/store.
-  bool isUnscaledLdSt(unsigned Opc) const;
-
-  /// Return true if this is an unscaled load/store.
-  bool isUnscaledLdSt(MachineInstr &MI) const;
-
-  static bool isPairableLdStInst(const MachineInstr &MI) {
-    switch (MI.getOpcode()) {
-    default:
-      return false;
-    // Scaled instructions.
-    case AArch64::STRSui:
-    case AArch64::STRDui:
-    case AArch64::STRQui:
-    case AArch64::STRXui:
-    case AArch64::STRWui:
-    case AArch64::LDRSui:
-    case AArch64::LDRDui:
-    case AArch64::LDRQui:
-    case AArch64::LDRXui:
-    case AArch64::LDRWui:
-    case AArch64::LDRSWui:
-    // Unscaled instructions.
-    case AArch64::STURSi:
-    case AArch64::STURDi:
-    case AArch64::STURQi:
-    case AArch64::STURWi:
-    case AArch64::STURXi:
-    case AArch64::LDURSi:
-    case AArch64::LDURDi:
-    case AArch64::LDURQi:
-    case AArch64::LDURWi:
-    case AArch64::LDURXi:
-    case AArch64::LDURSWi:
-      return true;
-    }
+  static bool isUnscaledLdSt(unsigned Opc);
+  static bool isUnscaledLdSt(MachineInstr &MI) {
+    return isUnscaledLdSt(MI.getOpcode());
   }
 
-  /// \brief Return the opcode that set flags when possible.  The caller is
+  /// Return true if pairing the given load or store may be paired with another.
+  static bool isPairableLdStInst(const MachineInstr &MI);
+
+  /// Return the opcode that set flags when possible.  The caller is
   /// responsible for ensuring the opc has a flag setting equivalent.
-  static unsigned convertToFlagSettingOpc(unsigned Opc, bool &Is64Bit) {
-    switch (Opc) {
-    default:
-      llvm_unreachable("Opcode has no flag setting equivalent!");
-    // 32-bit cases:
-    case AArch64::ADDWri:
-      Is64Bit = false;
-      return AArch64::ADDSWri;
-    case AArch64::ADDWrr:
-      Is64Bit = false;
-      return AArch64::ADDSWrr;
-    case AArch64::ADDWrs:
-      Is64Bit = false;
-      return AArch64::ADDSWrs;
-    case AArch64::ADDWrx:
-      Is64Bit = false;
-      return AArch64::ADDSWrx;
-    case AArch64::ANDWri:
-      Is64Bit = false;
-      return AArch64::ANDSWri;
-    case AArch64::ANDWrr:
-      Is64Bit = false;
-      return AArch64::ANDSWrr;
-    case AArch64::ANDWrs:
-      Is64Bit = false;
-      return AArch64::ANDSWrs;
-    case AArch64::BICWrr:
-      Is64Bit = false;
-      return AArch64::BICSWrr;
-    case AArch64::BICWrs:
-      Is64Bit = false;
-      return AArch64::BICSWrs;
-    case AArch64::SUBWri:
-      Is64Bit = false;
-      return AArch64::SUBSWri;
-    case AArch64::SUBWrr:
-      Is64Bit = false;
-      return AArch64::SUBSWrr;
-    case AArch64::SUBWrs:
-      Is64Bit = false;
-      return AArch64::SUBSWrs;
-    case AArch64::SUBWrx:
-      Is64Bit = false;
-      return AArch64::SUBSWrx;
-    // 64-bit cases:
-    case AArch64::ADDXri:
-      Is64Bit = true;
-      return AArch64::ADDSXri;
-    case AArch64::ADDXrr:
-      Is64Bit = true;
-      return AArch64::ADDSXrr;
-    case AArch64::ADDXrs:
-      Is64Bit = true;
-      return AArch64::ADDSXrs;
-    case AArch64::ADDXrx:
-      Is64Bit = true;
-      return AArch64::ADDSXrx;
-    case AArch64::ANDXri:
-      Is64Bit = true;
-      return AArch64::ANDSXri;
-    case AArch64::ANDXrr:
-      Is64Bit = true;
-      return AArch64::ANDSXrr;
-    case AArch64::ANDXrs:
-      Is64Bit = true;
-      return AArch64::ANDSXrs;
-    case AArch64::BICXrr:
-      Is64Bit = true;
-      return AArch64::BICSXrr;
-    case AArch64::BICXrs:
-      Is64Bit = true;
-      return AArch64::BICSXrs;
-    case AArch64::SUBXri:
-      Is64Bit = true;
-      return AArch64::SUBSXri;
-    case AArch64::SUBXrr:
-      Is64Bit = true;
-      return AArch64::SUBSXrr;
-    case AArch64::SUBXrs:
-      Is64Bit = true;
-      return AArch64::SUBSXrs;
-    case AArch64::SUBXrx:
-      Is64Bit = true;
-      return AArch64::SUBSXrx;
-    }
-  }
+  static unsigned convertToFlagSettingOpc(unsigned Opc, bool &Is64Bit);
 
   /// Return true if this is a load/store that can be potentially paired/merged.
   bool isCandidateToMergeOrPair(MachineInstr &MI) const;
 
   /// Hint that pairing the given load or store is unprofitable.
-  void suppressLdStPair(MachineInstr &MI) const;
+  static void suppressLdStPair(MachineInstr &MI);
 
-  bool getMemOpBaseRegImmOfs(MachineInstr &LdSt, unsigned &BaseReg,
-                             int64_t &Offset,
-                             const TargetRegisterInfo *TRI) const override;
+  bool getMemOperandWithOffset(MachineInstr &MI, MachineOperand *&BaseOp,
+                               int64_t &Offset,
+                               const TargetRegisterInfo *TRI) const override;
 
-  bool getMemOpBaseRegImmOfsWidth(MachineInstr &LdSt, unsigned &BaseReg,
-                                  int64_t &Offset, unsigned &Width,
-                                  const TargetRegisterInfo *TRI) const;
+  bool getMemOperandWithOffsetWidth(MachineInstr &MI, MachineOperand *&BaseOp,
+                                    int64_t &Offset, unsigned &Width,
+                                    const TargetRegisterInfo *TRI) const;
 
   /// Return the immediate offset of the base register in a load/store \p LdSt.
   MachineOperand &getMemOpBaseRegImmOfsOffsetOperand(MachineInstr &LdSt) const;
 
-  /// \brief Returns true if opcode \p Opc is a memory operation. If it is, set
+  /// Returns true if opcode \p Opc is a memory operation. If it is, set
   /// \p Scale, \p Width, \p MinOffset, and \p MaxOffset accordingly.
   ///
   /// For unscaled instructions, \p Scale is set to 1.
   bool getMemOpInfo(unsigned Opcode, unsigned &Scale, unsigned &Width,
                     int64_t &MinOffset, int64_t &MaxOffset) const;
 
-  bool shouldClusterMemOps(MachineInstr &FirstLdSt, unsigned BaseReg1,
-                           MachineInstr &SecondLdSt, unsigned BaseReg2,
+  bool shouldClusterMemOps(MachineOperand &BaseOp1, MachineOperand &BaseOp2,
                            unsigned NumLoads) const override;
 
   void copyPhysRegTuple(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
@@ -303,6 +174,10 @@ public:
                     unsigned FalseReg) const override;
   void getNoop(MCInst &NopInst) const override;
 
+  bool isSchedulingBoundary(const MachineInstr &MI,
+                            const MachineBasicBlock *MBB,
+                            const MachineFunction &MF) const override;
+
   /// analyzeCompare - For a comparison instruction, return the source registers
   /// in SrcReg and SrcReg2, and the value it compares against in CmpValue.
   /// Return true if the comparison instruction can be analyzed.
@@ -350,33 +225,33 @@ public:
   ArrayRef<std::pair<MachineMemOperand::Flags, const char *>>
   getSerializableMachineMemOperandTargetFlags() const override;
 
-  bool
-  canOutlineWithoutLRSave(MachineBasicBlock::iterator &CallInsertionPt) const;
   bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
                                    bool OutlineFromLinkOnceODRs) const override;
-  MachineOutlinerInfo getOutlininingCandidateInfo(
-      std::vector<
-          std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
-          &RepeatedSequenceLocs) const override;
-  AArch64GenInstrInfo::MachineOutlinerInstrType
-  getOutliningType(MachineInstr &MI) const override;
-  void insertOutlinerEpilogue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
-  void insertOutlinerPrologue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
+  outliner::OutlinedFunction getOutliningCandidateInfo(
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
+  outliner::InstrType
+  getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const override;
+  bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
+                              unsigned &Flags) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
   MachineBasicBlock::iterator
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
-                     const MachineOutlinerInfo &MInfo) const override;
-  /// Returns true if the instruction has a shift left that can be executed
-  /// more efficiently.
-  bool isExynosShiftLeftFast(const MachineInstr &MI) const;
+                     const outliner::Candidate &C) const override;
+  bool shouldOutlineFromFunctionByDefault(MachineFunction &MF) const override;
   /// Returns true if the instruction has a shift by immediate that can be
   /// executed in one cycle less.
-  bool isFalkorShiftExtFast(const MachineInstr &MI) const;
+  static bool isFalkorShiftExtFast(const MachineInstr &MI);
+  /// Return true if the instructions is a SEH instruciton used for unwinding
+  /// on Windows.
+  static bool isSEHInstruction(const MachineInstr &MI);
+
+#define GET_INSTRINFO_HELPER_DECLS
+#include "AArch64GenInstrInfo.inc"
 
 private:
-  /// \brief Sets the offsets on outlined instructions in \p MBB which use SP
+  /// Sets the offsets on outlined instructions in \p MBB which use SP
   /// so that they will be valid post-outlining.
   ///
   /// \param MBB A \p MachineBasicBlock in an outlined function.
@@ -387,6 +262,10 @@ private:
                              ArrayRef<MachineOperand> Cond) const;
   bool substituteCmpToZero(MachineInstr &CmpInstr, unsigned SrcReg,
                            const MachineRegisterInfo *MRI) const;
+
+  /// Returns an unused general-purpose register which can be used for
+  /// constructing an outlined call if one exists. Returns 0 otherwise.
+  unsigned findRegisterToSaveLRTo(const outliner::Candidate &C) const;
 };
 
 /// emitFrameOffset - Emit instructions as needed to set DestReg to SrcReg
@@ -397,7 +276,7 @@ void emitFrameOffset(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                      const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                      int Offset, const TargetInstrInfo *TII,
                      MachineInstr::MIFlag = MachineInstr::NoFlags,
-                     bool SetNZCV = false);
+                     bool SetNZCV = false,  bool NeedsWinCFI = false);
 
 /// rewriteAArch64FrameIndex - Rewrite MI to access 'Offset' bytes from the
 /// FP. Return false if the offset could not be handled directly in MI, and
@@ -406,14 +285,14 @@ bool rewriteAArch64FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
                               unsigned FrameReg, int &Offset,
                               const AArch64InstrInfo *TII);
 
-/// \brief Use to report the frame offset status in isAArch64FrameOffsetLegal.
+/// Use to report the frame offset status in isAArch64FrameOffsetLegal.
 enum AArch64FrameOffsetStatus {
   AArch64FrameOffsetCannotUpdate = 0x0, ///< Offset cannot apply.
   AArch64FrameOffsetIsLegal = 0x1,      ///< Offset is legal.
   AArch64FrameOffsetCanUpdate = 0x2     ///< Offset can apply, at least partly.
 };
 
-/// \brief Check if the @p Offset is a valid frame offset for @p MI.
+/// Check if the @p Offset is a valid frame offset for @p MI.
 /// The returned value reports the validity of the frame offset for @p MI.
 /// It uses the values defined by AArch64FrameOffsetStatus for that.
 /// If result == AArch64FrameOffsetCannotUpdate, @p MI cannot be updated to
@@ -453,6 +332,32 @@ static inline bool isCondBranchOpcode(int Opc) {
 
 static inline bool isIndirectBranchOpcode(int Opc) {
   return Opc == AArch64::BR;
+}
+
+// struct TSFlags {
+#define TSFLAG_ELEMENT_SIZE_TYPE(X)      (X)       // 3-bits
+#define TSFLAG_DESTRUCTIVE_INST_TYPE(X) ((X) << 3) // 1-bit
+// }
+
+namespace AArch64 {
+
+enum ElementSizeType {
+  ElementSizeMask = TSFLAG_ELEMENT_SIZE_TYPE(0x7),
+  ElementSizeNone = TSFLAG_ELEMENT_SIZE_TYPE(0x0),
+  ElementSizeB    = TSFLAG_ELEMENT_SIZE_TYPE(0x1),
+  ElementSizeH    = TSFLAG_ELEMENT_SIZE_TYPE(0x2),
+  ElementSizeS    = TSFLAG_ELEMENT_SIZE_TYPE(0x3),
+  ElementSizeD    = TSFLAG_ELEMENT_SIZE_TYPE(0x4),
+};
+
+enum DestructiveInstType {
+  DestructiveInstTypeMask = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
+  NotDestructive          = TSFLAG_DESTRUCTIVE_INST_TYPE(0x0),
+  Destructive             = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
+};
+
+#undef TSFLAG_ELEMENT_SIZE_TYPE
+#undef TSFLAG_DESTRUCTIVE_INST_TYPE
 }
 
 } // end namespace llvm

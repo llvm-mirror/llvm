@@ -1,14 +1,13 @@
 //===- AttributeImpl.h - Attribute Internals --------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file defines various helper methods and classes used by
+/// This file defines various helper methods and classes used by
 /// LLVMContextImpl for creating and managing attributes.
 ///
 //===----------------------------------------------------------------------===//
@@ -33,7 +32,7 @@ class LLVMContext;
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief This class represents a single, uniqued attribute. That attribute
+/// This class represents a single, uniqued attribute. That attribute
 /// could be a single enum, a tuple, or a string.
 class AttributeImpl : public FoldingSetNode {
   unsigned char KindID; ///< Holds the AttrEntryKind of the attribute
@@ -67,7 +66,7 @@ public:
   StringRef getKindAsString() const;
   StringRef getValueAsString() const;
 
-  /// \brief Used when sorting the attributes.
+  /// Used when sorting the attributes.
   bool operator<(const AttributeImpl &AI) const;
 
   void Profile(FoldingSetNodeID &ID) const {
@@ -93,7 +92,7 @@ public:
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief A set of classes that contain the value of the
+/// A set of classes that contain the value of the
 /// attribute object. There are three main categories: enum attribute entries,
 /// represented by Attribute::AttrKind; alignment attribute entries; and string
 /// attribute enties, which are for target-dependent attributes.
@@ -148,7 +147,7 @@ public:
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief This class represents a group of attributes that apply to one
+/// This class represents a group of attributes that apply to one
 /// element: function, return type, or parameter.
 class AttributeSetNode final
     : public FoldingSetNode,
@@ -172,7 +171,7 @@ public:
 
   static AttributeSetNode *get(LLVMContext &C, ArrayRef<Attribute> Attrs);
 
-  /// \brief Return the number of attributes this AttributeList contains.
+  /// Return the number of attributes this AttributeList contains.
   unsigned getNumAttributes() const { return NumAttrs; }
 
   bool hasAttribute(Attribute::AttrKind Kind) const {
@@ -210,7 +209,7 @@ using IndexAttrPair = std::pair<unsigned, AttributeSet>;
 
 //===----------------------------------------------------------------------===//
 /// \class
-/// \brief This class represents a set of attributes that apply to the function,
+/// This class represents a set of attributes that apply to the function,
 /// return type, and parameters.
 class AttributeListImpl final
     : public FoldingSetNode,
@@ -236,10 +235,10 @@ public:
 
   void operator delete(void *p) { ::operator delete(p); }
 
-  /// \brief Get the context that created this AttributeListImpl.
+  /// Get the context that created this AttributeListImpl.
   LLVMContext &getContext() { return Context; }
 
-  /// \brief Return true if the AttributeSet or the FunctionIndex has an
+  /// Return true if the AttributeSet or the FunctionIndex has an
   /// enum attribute of the given kind.
   bool hasFnAttribute(Attribute::AttrKind Kind) const {
     return AvailableFunctionAttrs & ((uint64_t)1) << Kind;

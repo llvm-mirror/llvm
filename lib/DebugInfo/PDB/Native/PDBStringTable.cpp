@@ -1,16 +1,14 @@
 //===- PDBStringTable.cpp - PDB String Table ---------------------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/Native/PDBStringTable.h"
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/DebugInfo/PDB/Native/Hash.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
 #include "llvm/DebugInfo/PDB/Native/RawTypes.h"
@@ -123,7 +121,10 @@ Expected<uint32_t> PDBStringTable::getIDForString(StringRef Str) const {
     // we iterate the entire array.
     uint32_t Index = (Start + I) % Count;
 
+    // If we find 0, it means the item isn't in the hash table.
     uint32_t ID = IDs[Index];
+    if (ID == 0)
+      return make_error<RawError>(raw_error_code::no_entry);
     auto ExpectedStr = getStringForID(ID);
     if (!ExpectedStr)
       return ExpectedStr.takeError();

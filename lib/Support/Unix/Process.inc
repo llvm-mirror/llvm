@@ -1,9 +1,8 @@
 //===- Unix/Process.cpp - Unix Process Implementation --------- -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 #include "Unix.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Config/config.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/MutexGuard.h"
@@ -78,7 +78,7 @@ unsigned Process::getPageSize() {
 #elif defined(HAVE_SYSCONF)
   static long page_size = ::sysconf(_SC_PAGE_SIZE);
 #else
-#warning Cannot get the page size on this machine
+#error Cannot get the page size on this machine
 #endif
   return static_cast<unsigned>(page_size);
 }
@@ -172,15 +172,6 @@ Optional<std::string> Process::GetEnv(StringRef Name) {
   return std::string(Val);
 }
 
-std::error_code
-Process::GetArgumentVector(SmallVectorImpl<const char *> &ArgsOut,
-                           ArrayRef<const char *> ArgsIn,
-                           SpecificBumpPtrAllocator<char> &) {
-  ArgsOut.append(ArgsIn.begin(), ArgsIn.end());
-
-  return std::error_code();
-}
-
 namespace {
 class FDCloser {
 public:
@@ -207,7 +198,7 @@ std::error_code Process::FixupStandardFileDescriptors() {
   for (int StandardFD : StandardFDs) {
     struct stat st;
     errno = 0;
-    if (RetryAfterSignal(-1, fstat, StandardFD, &st) < 0) {
+    if (RetryAfterSignal(-1, ::fstat, StandardFD, &st) < 0) {
       assert(errno && "expected errno to be set if fstat failed!");
       // fstat should return EBADF if the file descriptor is closed.
       if (errno != EBADF)
@@ -219,7 +210,10 @@ std::error_code Process::FixupStandardFileDescriptors() {
     assert(errno == EBADF && "expected errno to have EBADF at this point!");
 
     if (NullFD < 0) {
-      if ((NullFD = RetryAfterSignal(-1, open, "/dev/null", O_RDWR)) < 0)
+      // Call ::open in a lambda to avoid overload resolution in
+      // RetryAfterSignal when open is overloaded, such as in Bionic.
+      auto Open = [&]() { return ::open("/dev/null", O_RDWR); };
+      if ((NullFD = RetryAfterSignal(-1, Open)) < 0)
         return std::error_code(errno, std::generic_category());
     }
 
@@ -369,6 +363,21 @@ static bool terminalHasColors(int fd) {
   // Return true if we found a color capabilities for the current terminal.
   if (HasColors)
     return true;
+#else
+  // When the terminfo database is not available, check if the current terminal
+  // is one of terminals that are known to support ANSI color escape codes.
+  if (const char *TermStr = std::getenv("TERM")) {
+    return StringSwitch<bool>(TermStr)
+      .Case("ansi", true)
+      .Case("cygwin", true)
+      .Case("linux", true)
+      .StartsWith("screen", true)
+      .StartsWith("xterm", true)
+      .StartsWith("vt100", true)
+      .StartsWith("rxvt", true)
+      .EndsWith("color", true)
+      .Default(false);
+  }
 #endif
 
   // Otherwise, be conservative.

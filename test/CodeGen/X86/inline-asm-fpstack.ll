@@ -4,7 +4,7 @@
 ; There should be no stack manipulations between the inline asm and ret.
 define x86_fp80 @test1() {
 ; CHECK-LABEL: test1:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    fld0
 ; CHECK-NEXT:    ## InlineAsm End
@@ -15,7 +15,7 @@ define x86_fp80 @test1() {
 
 define double @test2() {
 ; CHECK-LABEL: test2:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    fld0
 ; CHECK-NEXT:    ## InlineAsm End
@@ -28,7 +28,7 @@ define double @test2() {
 ; Asm consumes stack, nothing should be popped.
 define void @test3(x86_fp80 %X) {
 ; CHECK-LABEL: test3:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    frob
@@ -40,7 +40,7 @@ define void @test3(x86_fp80 %X) {
 
 define void @test4(double %X) {
 ; CHECK-LABEL: test4:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    fldl {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    frob
@@ -54,7 +54,7 @@ define void @test4(double %X) {
 ; The fadd can be done in xmm or x87 regs - we don't test that.
 define void @test5(double %X) {
 ; CHECK-LABEL: test5:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    fldl {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fadds LCPI4_0
 ; CHECK-NEXT:    ## InlineAsm Start
@@ -68,7 +68,7 @@ define void @test5(double %X) {
 
 define void @test6(double %A, double %B, double %C, double %D, double %E) nounwind {
 ; CHECK-LABEL: test6:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldl {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fldl {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fldl {{[0-9]+}}(%esp)
@@ -113,7 +113,7 @@ entry:
 ; inline asm.
 define void @testPR4185() {
 ; CHECK-LABEL: testPR4185:
-; CHECK:       ## BB#0: ## %return
+; CHECK:       ## %bb.0: ## %return
 ; CHECK-NEXT:    flds LCPI6_0
 ; CHECK-NEXT:    fld %st(0)
 ; CHECK-NEXT:    ## InlineAsm Start
@@ -135,7 +135,7 @@ return:
 ; A valid alternative would be to remat the constant pool load before each inline asm.
 define void @testPR4185b() {
 ; CHECK-LABEL: testPR4185b:
-; CHECK:       ## BB#0: ## %return
+; CHECK:       ## %bb.0: ## %return
 ; CHECK-NEXT:    flds LCPI7_0
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    fistl %st(0)
@@ -154,13 +154,14 @@ return:
 ; The return value from ceil must be duped before being consumed by asm.
 define void @testPR4459(x86_fp80 %a) {
 ; CHECK-LABEL: testPR4459:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    subl $28, %esp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 32
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fstpt (%esp)
 ; CHECK-NEXT:    calll _ceil
 ; CHECK-NEXT:    fld %st(0)
+; CHECK-NEXT:    fxch %st(1)
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    fistpl %st(0)
 ; CHECK-NEXT:    ## InlineAsm End
@@ -182,7 +183,7 @@ declare x86_fp80 @ceil(x86_fp80)
 ; Set up call to test.
 define void @testPR4484(x86_fp80 %a) {
 ; CHECK-LABEL: testPR4484:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    subl $28, %esp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 32
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
@@ -206,7 +207,7 @@ entry:
 ; PR4485
 define void @testPR4485(x86_fp80* %a) {
 ; CHECK-LABEL: testPR4485:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    fldt (%eax)
 ; CHECK-NEXT:    flds LCPI10_0
@@ -247,7 +248,7 @@ entry:
 ;   }
 define void @fist1(x86_fp80 %x, i32* %p) nounwind ssp {
 ; CHECK-LABEL: fist1:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    ## InlineAsm Start
@@ -271,7 +272,7 @@ entry:
 ;   }
 define x86_fp80 @fist2(x86_fp80 %x, i32* %p) nounwind ssp {
 ; CHECK-LABEL: fist2:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    ## InlineAsm Start
@@ -291,7 +292,7 @@ entry:
 ;   }
 define void @fucomp1(x86_fp80 %x, x86_fp80 %y) nounwind ssp {
 ; CHECK-LABEL: fucomp1:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fxch %st(1)
@@ -318,7 +319,7 @@ entry:
 ;
 define void @fucomp2(x86_fp80 %x, x86_fp80 %y) nounwind ssp {
 ; CHECK-LABEL: fucomp2:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fxch %st(1)
@@ -335,7 +336,7 @@ entry:
 
 define void @fucomp3(x86_fp80 %x, x86_fp80 %y) nounwind ssp {
 ; CHECK-LABEL: fucomp3:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fldt {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fxch %st(1)
@@ -353,7 +354,7 @@ entry:
 %complex = type { float, float }
 define float @sincos1(float %x) nounwind ssp {
 ; CHECK-LABEL: sincos1:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    flds {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    sincos
@@ -370,7 +371,7 @@ entry:
 ; Same thing, swapped output operands.
 define float @sincos2(float %x) nounwind ssp {
 ; CHECK-LABEL: sincos2:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    flds {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    sincos
@@ -391,7 +392,7 @@ entry:
 ; Discard both results.
 define float @sincos3(float %x) nounwind ssp {
 ; CHECK-LABEL: sincos3:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    flds {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    fld %st(0)
 ; CHECK-NEXT:    ## InlineAsm Start
@@ -416,7 +417,7 @@ entry:
 ; Pass the same value in two fixed stack slots.
 define i32 @PR10602() nounwind ssp {
 ; CHECK-LABEL: PR10602:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    flds LCPI19_0
 ; CHECK-NEXT:    fld %st(0)
 ; CHECK-NEXT:    fxch %st(1)
@@ -437,9 +438,9 @@ entry:
 ; inline-asm instruction and the ST register was live across another
 ; inline-asm instruction.
 ;
-; INLINEASM <es:frndint> [sideeffect] [attdialect], $0:[regdef], %ST0<imp-def,tied5>, $1:[reguse tiedto:$0], %ST0<tied3>, $2:[clobber], %EFLAGS<earlyclobber,imp-def,dead>
-; INLINEASM <es:fldcw $0> [sideeffect] [mayload] [attdialect], $0:[mem], %EAX<undef>, 1, %noreg, 0, %noreg, $1:[clobber], %EFLAGS<earlyclobber,imp-def,dead>
-; %FP0<def> = COPY %ST0
+; INLINEASM $frndint [sideeffect] [attdialect], $0:[regdef], %st0<imp-def,tied5>, $1:[reguse tiedto:$0], %st0<tied3>, $2:[clobber], early-clobber implicit dead %eflags
+; INLINEASM $fldcw $0 [sideeffect] [mayload] [attdialect], $0:[mem], undef %eax, 1, %noreg, 0, %noreg, $1:[clobber], early-clobber implicit dead %eflags
+; %fp0 = COPY %st0
 
 %struct.fpu_t = type { [8 x x86_fp80], x86_fp80, %struct.anon1, %struct.anon2, i32, i8, [15 x i8] }
 %struct.anon1 = type { i32, i32, i32 }
@@ -450,13 +451,13 @@ entry:
 ; Function Attrs: ssp
 define void @test_live_st(i32 %a1) {
 ; CHECK-LABEL: test_live_st:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    subl $12, %esp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    fldt (%eax)
 ; CHECK-NEXT:    cmpl $1, {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    jne LBB20_2
-; CHECK-NEXT:  ## BB#1: ## %sw.bb4.i
+; CHECK-NEXT:  ## %bb.1: ## %sw.bb4.i
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    frndint
 ; CHECK-NEXT:    ## InlineAsm End
@@ -502,7 +503,7 @@ return:
 ; Check that x87 stackifier is correctly rewriting FP registers to ST registers.
 define double @test_operand_rewrite() {
 ; CHECK-LABEL: test_operand_rewrite:
-; CHECK:       ## BB#0: ## %entry
+; CHECK:       ## %bb.0: ## %entry
 ; CHECK-NEXT:    ## InlineAsm Start
 ; CHECK-NEXT:    foo %st(0), %st(1)
 ; CHECK-NEXT:    ## InlineAsm End

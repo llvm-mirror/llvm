@@ -6,12 +6,12 @@
 
 define <4 x float> @hadd_ps_test1(<4 x float> %A, <4 x float> %B) {
 ; SSE-LABEL: hadd_ps_test1:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddps %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hadd_ps_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x float> %A, i32 0
@@ -35,12 +35,12 @@ define <4 x float> @hadd_ps_test1(<4 x float> %A, <4 x float> %B) {
 
 define <4 x float> @hadd_ps_test2(<4 x float> %A, <4 x float> %B) {
 ; SSE-LABEL: hadd_ps_test2:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddps %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hadd_ps_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x float> %A, i32 2
@@ -64,12 +64,12 @@ define <4 x float> @hadd_ps_test2(<4 x float> %A, <4 x float> %B) {
 
 define <4 x float> @hsub_ps_test1(<4 x float> %A, <4 x float> %B) {
 ; SSE-LABEL: hsub_ps_test1:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubps %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hsub_ps_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x float> %A, i32 0
@@ -93,12 +93,12 @@ define <4 x float> @hsub_ps_test1(<4 x float> %A, <4 x float> %B) {
 
 define <4 x float> @hsub_ps_test2(<4 x float> %A, <4 x float> %B) {
 ; SSE-LABEL: hsub_ps_test2:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubps %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hsub_ps_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubps %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x float> %A, i32 2
@@ -122,7 +122,7 @@ define <4 x float> @hsub_ps_test2(<4 x float> %A, <4 x float> %B) {
 
 define <4 x i32> @phadd_d_test1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-LABEL: phadd_d_test1:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    movd %xmm0, %eax
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,2,3]
 ; SSE3-NEXT:    movd %xmm2, %ecx
@@ -151,12 +151,12 @@ define <4 x i32> @phadd_d_test1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: phadd_d_test1:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddd %xmm1, %xmm0
 ; SSSE3-NEXT:    retq
 ;
 ; AVX-LABEL: phadd_d_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vphaddd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x i32> %A, i32 0
@@ -180,7 +180,7 @@ define <4 x i32> @phadd_d_test1(<4 x i32> %A, <4 x i32> %B) {
 
 define <4 x i32> @phadd_d_test2(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-LABEL: phadd_d_test2:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[2,3,0,1]
 ; SSE3-NEXT:    movd %xmm2, %eax
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[3,1,2,3]
@@ -209,12 +209,12 @@ define <4 x i32> @phadd_d_test2(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: phadd_d_test2:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddd %xmm1, %xmm0
 ; SSSE3-NEXT:    retq
 ;
 ; AVX-LABEL: phadd_d_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vphaddd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x i32> %A, i32 2
@@ -238,7 +238,7 @@ define <4 x i32> @phadd_d_test2(<4 x i32> %A, <4 x i32> %B) {
 
 define <4 x i32> @phsub_d_test1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-LABEL: phsub_d_test1:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    movd %xmm0, %eax
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,2,3]
 ; SSE3-NEXT:    movd %xmm2, %ecx
@@ -267,12 +267,12 @@ define <4 x i32> @phsub_d_test1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: phsub_d_test1:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phsubd %xmm1, %xmm0
 ; SSSE3-NEXT:    retq
 ;
 ; AVX-LABEL: phsub_d_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vphsubd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x i32> %A, i32 0
@@ -296,7 +296,7 @@ define <4 x i32> @phsub_d_test1(<4 x i32> %A, <4 x i32> %B) {
 
 define <4 x i32> @phsub_d_test2(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-LABEL: phsub_d_test2:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[2,3,0,1]
 ; SSE3-NEXT:    movd %xmm2, %eax
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[3,1,2,3]
@@ -325,12 +325,12 @@ define <4 x i32> @phsub_d_test2(<4 x i32> %A, <4 x i32> %B) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: phsub_d_test2:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phsubd %xmm1, %xmm0
 ; SSSE3-NEXT:    retq
 ;
 ; AVX-LABEL: phsub_d_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vphsubd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x i32> %A, i32 2
@@ -354,12 +354,12 @@ define <4 x i32> @phsub_d_test2(<4 x i32> %A, <4 x i32> %B) {
 
 define <2 x double> @hadd_pd_test1(<2 x double> %A, <2 x double> %B) {
 ; SSE-LABEL: hadd_pd_test1:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddpd %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hadd_pd_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <2 x double> %A, i32 0
@@ -375,12 +375,12 @@ define <2 x double> @hadd_pd_test1(<2 x double> %A, <2 x double> %B) {
 
 define <2 x double> @hadd_pd_test2(<2 x double> %A, <2 x double> %B) {
 ; SSE-LABEL: hadd_pd_test2:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddpd %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hadd_pd_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <2 x double> %A, i32 1
@@ -396,12 +396,12 @@ define <2 x double> @hadd_pd_test2(<2 x double> %A, <2 x double> %B) {
 
 define <2 x double> @hsub_pd_test1(<2 x double> %A, <2 x double> %B) {
 ; SSE-LABEL: hsub_pd_test1:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubpd %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hsub_pd_test1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <2 x double> %A, i32 0
@@ -417,12 +417,12 @@ define <2 x double> @hsub_pd_test1(<2 x double> %A, <2 x double> %B) {
 
 define <2 x double> @hsub_pd_test2(<2 x double> %A, <2 x double> %B) {
 ; SSE-LABEL: hsub_pd_test2:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubpd %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: hsub_pd_test2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubpd %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <2 x double> %B, i32 0
@@ -438,14 +438,14 @@ define <2 x double> @hsub_pd_test2(<2 x double> %A, <2 x double> %B) {
 
 define <4 x double> @avx_vhadd_pd_test(<4 x double> %A, <4 x double> %B) {
 ; SSE-LABEL: avx_vhadd_pd_test:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddpd %xmm1, %xmm0
 ; SSE-NEXT:    haddpd %xmm3, %xmm2
 ; SSE-NEXT:    movapd %xmm2, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_vhadd_pd_test:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX-NEXT:    vhaddpd %xmm2, %xmm1, %xmm1
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm2
@@ -473,14 +473,14 @@ define <4 x double> @avx_vhadd_pd_test(<4 x double> %A, <4 x double> %B) {
 
 define <4 x double> @avx_vhsub_pd_test(<4 x double> %A, <4 x double> %B) {
 ; SSE-LABEL: avx_vhsub_pd_test:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubpd %xmm1, %xmm0
 ; SSE-NEXT:    hsubpd %xmm3, %xmm2
 ; SSE-NEXT:    movapd %xmm2, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_vhsub_pd_test:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX-NEXT:    vhsubpd %xmm2, %xmm1, %xmm1
 ; AVX-NEXT:    vextractf128 $1, %ymm0, %xmm2
@@ -508,7 +508,7 @@ define <4 x double> @avx_vhsub_pd_test(<4 x double> %A, <4 x double> %B) {
 
 define <8 x i32> @avx2_vphadd_d_test(<8 x i32> %A, <8 x i32> %B) {
 ; SSE3-LABEL: avx2_vphadd_d_test:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    movd %xmm0, %ecx
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm4 = xmm0[1,1,2,3]
 ; SSE3-NEXT:    movd %xmm4, %r8d
@@ -562,14 +562,14 @@ define <8 x i32> @avx2_vphadd_d_test(<8 x i32> %A, <8 x i32> %B) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: avx2_vphadd_d_test:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddd %xmm1, %xmm0
 ; SSSE3-NEXT:    phaddd %xmm3, %xmm2
 ; SSSE3-NEXT:    movdqa %xmm2, %xmm1
 ; SSSE3-NEXT:    retq
 ;
 ; AVX1-LABEL: avx2_vphadd_d_test:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX1-NEXT:    vphaddd %xmm2, %xmm1, %xmm1
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
@@ -578,7 +578,7 @@ define <8 x i32> @avx2_vphadd_d_test(<8 x i32> %A, <8 x i32> %B) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: avx2_vphadd_d_test:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vextracti128 $1, %ymm1, %xmm2
 ; AVX2-NEXT:    vphaddd %xmm2, %xmm1, %xmm1
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm2
@@ -620,35 +620,23 @@ define <8 x i32> @avx2_vphadd_d_test(<8 x i32> %A, <8 x i32> %B) {
   ret <8 x i32> %vecinit29
 }
 
-define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) {
+define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) nounwind {
 ; SSE3-LABEL: avx2_vphadd_w_test:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    pushq %rbp
-; SSE3-NEXT:    .cfi_def_cfa_offset 16
 ; SSE3-NEXT:    pushq %r15
-; SSE3-NEXT:    .cfi_def_cfa_offset 24
 ; SSE3-NEXT:    pushq %r14
-; SSE3-NEXT:    .cfi_def_cfa_offset 32
 ; SSE3-NEXT:    pushq %r13
-; SSE3-NEXT:    .cfi_def_cfa_offset 40
 ; SSE3-NEXT:    pushq %r12
-; SSE3-NEXT:    .cfi_def_cfa_offset 48
 ; SSE3-NEXT:    pushq %rbx
-; SSE3-NEXT:    .cfi_def_cfa_offset 56
-; SSE3-NEXT:    .cfi_offset %rbx, -56
-; SSE3-NEXT:    .cfi_offset %r12, -48
-; SSE3-NEXT:    .cfi_offset %r13, -40
-; SSE3-NEXT:    .cfi_offset %r14, -32
-; SSE3-NEXT:    .cfi_offset %r15, -24
-; SSE3-NEXT:    .cfi_offset %rbp, -16
 ; SSE3-NEXT:    movd %xmm0, %eax
 ; SSE3-NEXT:    pextrw $1, %xmm0, %ecx
 ; SSE3-NEXT:    addl %eax, %ecx
-; SSE3-NEXT:    movl %ecx, -{{[0-9]+}}(%rsp) # 4-byte Spill
+; SSE3-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; SSE3-NEXT:    pextrw $2, %xmm0, %eax
 ; SSE3-NEXT:    pextrw $3, %xmm0, %ecx
 ; SSE3-NEXT:    addl %eax, %ecx
-; SSE3-NEXT:    movl %ecx, -{{[0-9]+}}(%rsp) # 4-byte Spill
+; SSE3-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; SSE3-NEXT:    pextrw $4, %xmm0, %eax
 ; SSE3-NEXT:    pextrw $5, %xmm0, %r11d
 ; SSE3-NEXT:    addl %eax, %r11d
@@ -697,9 +685,9 @@ define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) {
 ; SSE3-NEXT:    movd %r13d, %xmm4
 ; SSE3-NEXT:    movd %r15d, %xmm10
 ; SSE3-NEXT:    movd %r11d, %xmm7
-; SSE3-NEXT:    movd -{{[0-9]+}}(%rsp), %xmm11 # 4-byte Folded Reload
+; SSE3-NEXT:    movd {{[-0-9]+}}(%r{{[sb]}}p), %xmm11 # 4-byte Folded Reload
 ; SSE3-NEXT:    # xmm11 = mem[0],zero,zero,zero
-; SSE3-NEXT:    movd -{{[0-9]+}}(%rsp), %xmm0 # 4-byte Folded Reload
+; SSE3-NEXT:    movd {{[-0-9]+}}(%r{{[sb]}}p), %xmm0 # 4-byte Folded Reload
 ; SSE3-NEXT:    # xmm0 = mem[0],zero,zero,zero
 ; SSE3-NEXT:    movd %eax, %xmm12
 ; SSE3-NEXT:    movd %ecx, %xmm6
@@ -732,14 +720,14 @@ define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: avx2_vphadd_w_test:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddw %xmm1, %xmm0
 ; SSSE3-NEXT:    phaddw %xmm3, %xmm2
 ; SSSE3-NEXT:    movdqa %xmm2, %xmm1
 ; SSSE3-NEXT:    retq
 ;
 ; AVX1-LABEL: avx2_vphadd_w_test:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX1-NEXT:    vphaddw %xmm2, %xmm1, %xmm1
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
@@ -748,7 +736,7 @@ define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: avx2_vphadd_w_test:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vextracti128 $1, %ymm1, %xmm2
 ; AVX2-NEXT:    vphaddw %xmm2, %xmm1, %xmm1
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm2
@@ -826,7 +814,7 @@ define <16 x i16> @avx2_vphadd_w_test(<16 x i16> %a, <16 x i16> %b) {
 
 define <4 x i32> @not_a_hsub_1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE-LABEL: not_a_hsub_1:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    movd %xmm0, %eax
 ; SSE-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,2,3]
 ; SSE-NEXT:    movd %xmm2, %ecx
@@ -855,7 +843,7 @@ define <4 x i32> @not_a_hsub_1(<4 x i32> %A, <4 x i32> %B) {
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: not_a_hsub_1:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovd %xmm0, %eax
 ; AVX-NEXT:    vpextrd $1, %xmm0, %ecx
 ; AVX-NEXT:    subl %ecx, %eax
@@ -894,41 +882,41 @@ define <4 x i32> @not_a_hsub_1(<4 x i32> %A, <4 x i32> %B) {
 
 define <4 x float> @not_a_hsub_2(<4 x float> %A, <4 x float> %B) {
 ; SSE-LABEL: not_a_hsub_2:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    movaps %xmm0, %xmm2
-; SSE-NEXT:    movhlps {{.*#+}} xmm2 = xmm2[1,1]
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm2 = xmm2[1],xmm0[1]
 ; SSE-NEXT:    movaps %xmm0, %xmm3
-; SSE-NEXT:    shufps {{.*#+}} xmm3 = xmm3[3,1,2,3]
+; SSE-NEXT:    shufps {{.*#+}} xmm3 = xmm3[3,1],xmm0[2,3]
 ; SSE-NEXT:    subss %xmm3, %xmm2
 ; SSE-NEXT:    movshdup {{.*#+}} xmm3 = xmm0[1,1,3,3]
 ; SSE-NEXT:    subss %xmm3, %xmm0
-; SSE-NEXT:    movaps %xmm1, %xmm3
-; SSE-NEXT:    shufps {{.*#+}} xmm3 = xmm3[3,1,2,3]
-; SSE-NEXT:    movaps %xmm1, %xmm4
-; SSE-NEXT:    movhlps {{.*#+}} xmm4 = xmm4[1,1]
-; SSE-NEXT:    subss %xmm4, %xmm3
-; SSE-NEXT:    movshdup {{.*#+}} xmm4 = xmm1[1,1,3,3]
-; SSE-NEXT:    subss %xmm4, %xmm1
-; SSE-NEXT:    unpcklps {{.*#+}} xmm1 = xmm1[0],xmm3[0],xmm1[1],xmm3[1]
 ; SSE-NEXT:    unpcklps {{.*#+}} xmm0 = xmm0[0],xmm2[0],xmm0[1],xmm2[1]
+; SSE-NEXT:    movaps %xmm1, %xmm2
+; SSE-NEXT:    shufps {{.*#+}} xmm2 = xmm2[3,1],xmm1[2,3]
+; SSE-NEXT:    movaps %xmm1, %xmm3
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm3 = xmm3[1],xmm1[1]
+; SSE-NEXT:    subss %xmm3, %xmm2
+; SSE-NEXT:    movshdup {{.*#+}} xmm3 = xmm1[1,1,3,3]
+; SSE-NEXT:    subss %xmm3, %xmm1
+; SSE-NEXT:    unpcklps {{.*#+}} xmm1 = xmm1[0],xmm2[0],xmm1[1],xmm2[1]
 ; SSE-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: not_a_hsub_2:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm2 = xmm0[1,0]
 ; AVX-NEXT:    vpermilps {{.*#+}} xmm3 = xmm0[3,1,2,3]
 ; AVX-NEXT:    vsubss %xmm3, %xmm2, %xmm2
 ; AVX-NEXT:    vmovshdup {{.*#+}} xmm3 = xmm0[1,1,3,3]
 ; AVX-NEXT:    vsubss %xmm3, %xmm0, %xmm0
-; AVX-NEXT:    vpermilps {{.*#+}} xmm3 = xmm1[3,1,2,3]
-; AVX-NEXT:    vpermilpd {{.*#+}} xmm4 = xmm1[1,0]
-; AVX-NEXT:    vsubss %xmm4, %xmm3, %xmm3
 ; AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0],xmm2[0],xmm0[2,3]
-; AVX-NEXT:    vmovshdup {{.*#+}} xmm2 = xmm1[1,1,3,3]
-; AVX-NEXT:    vsubss %xmm2, %xmm1, %xmm1
+; AVX-NEXT:    vpermilps {{.*#+}} xmm2 = xmm1[3,1,2,3]
+; AVX-NEXT:    vpermilpd {{.*#+}} xmm3 = xmm1[1,0]
+; AVX-NEXT:    vsubss %xmm3, %xmm2, %xmm2
+; AVX-NEXT:    vmovshdup {{.*#+}} xmm3 = xmm1[1,1,3,3]
+; AVX-NEXT:    vsubss %xmm3, %xmm1, %xmm1
 ; AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,1],xmm1[0],xmm0[3]
-; AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,1,2],xmm3[0]
+; AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,1,2],xmm2[0]
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x float> %A, i32 2
   %vecext1 = extractelement <4 x float> %A, i32 3
@@ -951,19 +939,19 @@ define <4 x float> @not_a_hsub_2(<4 x float> %A, <4 x float> %B) {
 
 define <2 x double> @not_a_hsub_3(<2 x double> %A, <2 x double> %B) {
 ; SSE-LABEL: not_a_hsub_3:
-; SSE:       # BB#0:
-; SSE-NEXT:    movaps %xmm1, %xmm2
-; SSE-NEXT:    movhlps {{.*#+}} xmm2 = xmm2[1,1]
+; SSE:       # %bb.0:
+; SSE-NEXT:    movapd %xmm1, %xmm2
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm2 = xmm2[1],xmm1[1]
 ; SSE-NEXT:    subsd %xmm2, %xmm1
-; SSE-NEXT:    movaps %xmm0, %xmm2
-; SSE-NEXT:    movhlps {{.*#+}} xmm2 = xmm2[1,1]
+; SSE-NEXT:    movapd %xmm0, %xmm2
+; SSE-NEXT:    unpckhpd {{.*#+}} xmm2 = xmm2[1],xmm0[1]
 ; SSE-NEXT:    subsd %xmm0, %xmm2
 ; SSE-NEXT:    unpcklpd {{.*#+}} xmm2 = xmm2[0],xmm1[0]
 ; SSE-NEXT:    movapd %xmm2, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: not_a_hsub_3:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm2 = xmm1[1,0]
 ; AVX-NEXT:    vsubsd %xmm2, %xmm1, %xmm1
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm2 = xmm0[1,0]
@@ -986,13 +974,13 @@ define <2 x double> @not_a_hsub_3(<2 x double> %A, <2 x double> %B) {
 
 define <8 x float> @avx_vhadd_ps(<8 x float> %a, <8 x float> %b) {
 ; SSE-LABEL: avx_vhadd_ps:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddps %xmm2, %xmm0
 ; SSE-NEXT:    haddps %xmm3, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_vhadd_ps:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddps %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <8 x float> %a, i32 0
@@ -1032,13 +1020,13 @@ define <8 x float> @avx_vhadd_ps(<8 x float> %a, <8 x float> %b) {
 
 define <8 x float> @avx_vhsub_ps(<8 x float> %a, <8 x float> %b) {
 ; SSE-LABEL: avx_vhsub_ps:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubps %xmm2, %xmm0
 ; SSE-NEXT:    hsubps %xmm3, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_vhsub_ps:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubps %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <8 x float> %a, i32 0
@@ -1078,13 +1066,13 @@ define <8 x float> @avx_vhsub_ps(<8 x float> %a, <8 x float> %b) {
 
 define <4 x double> @avx_hadd_pd(<4 x double> %a, <4 x double> %b) {
 ; SSE-LABEL: avx_hadd_pd:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    haddpd %xmm2, %xmm0
 ; SSE-NEXT:    haddpd %xmm3, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_hadd_pd:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhaddpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x double> %a, i32 0
@@ -1108,13 +1096,13 @@ define <4 x double> @avx_hadd_pd(<4 x double> %a, <4 x double> %b) {
 
 define <4 x double> @avx_hsub_pd(<4 x double> %a, <4 x double> %b) {
 ; SSE-LABEL: avx_hsub_pd:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    hsubpd %xmm2, %xmm0
 ; SSE-NEXT:    hsubpd %xmm3, %xmm1
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: avx_hsub_pd:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vhsubpd %ymm1, %ymm0, %ymm0
 ; AVX-NEXT:    retq
   %vecext = extractelement <4 x double> %a, i32 0
@@ -1140,7 +1128,7 @@ define <4 x double> @avx_hsub_pd(<4 x double> %a, <4 x double> %b) {
 
 define <8 x i32> @avx2_hadd_d(<8 x i32> %a, <8 x i32> %b) {
 ; SSE3-LABEL: avx2_hadd_d:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    movd %xmm0, %ecx
 ; SSE3-NEXT:    pshufd {{.*#+}} xmm4 = xmm0[1,1,2,3]
 ; SSE3-NEXT:    movd %xmm4, %r8d
@@ -1194,13 +1182,13 @@ define <8 x i32> @avx2_hadd_d(<8 x i32> %a, <8 x i32> %b) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: avx2_hadd_d:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddd %xmm2, %xmm0
 ; SSSE3-NEXT:    phaddd %xmm3, %xmm1
 ; SSSE3-NEXT:    retq
 ;
 ; AVX1-LABEL: avx2_hadd_d:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; AVX1-NEXT:    vphaddd %xmm2, %xmm3, %xmm2
@@ -1209,7 +1197,7 @@ define <8 x i32> @avx2_hadd_d(<8 x i32> %a, <8 x i32> %b) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: avx2_hadd_d:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vphaddd %ymm1, %ymm0, %ymm0
 ; AVX2-NEXT:    retq
   %vecext = extractelement <8 x i32> %a, i32 0
@@ -1247,27 +1235,15 @@ define <8 x i32> @avx2_hadd_d(<8 x i32> %a, <8 x i32> %b) {
   ret <8 x i32> %vecinit29
 }
 
-define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) {
+define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) nounwind {
 ; SSE3-LABEL: avx2_hadd_w:
-; SSE3:       # BB#0:
+; SSE3:       # %bb.0:
 ; SSE3-NEXT:    pushq %rbp
-; SSE3-NEXT:    .cfi_def_cfa_offset 16
 ; SSE3-NEXT:    pushq %r15
-; SSE3-NEXT:    .cfi_def_cfa_offset 24
 ; SSE3-NEXT:    pushq %r14
-; SSE3-NEXT:    .cfi_def_cfa_offset 32
 ; SSE3-NEXT:    pushq %r13
-; SSE3-NEXT:    .cfi_def_cfa_offset 40
 ; SSE3-NEXT:    pushq %r12
-; SSE3-NEXT:    .cfi_def_cfa_offset 48
 ; SSE3-NEXT:    pushq %rbx
-; SSE3-NEXT:    .cfi_def_cfa_offset 56
-; SSE3-NEXT:    .cfi_offset %rbx, -56
-; SSE3-NEXT:    .cfi_offset %r12, -48
-; SSE3-NEXT:    .cfi_offset %r13, -40
-; SSE3-NEXT:    .cfi_offset %r14, -32
-; SSE3-NEXT:    .cfi_offset %r15, -24
-; SSE3-NEXT:    .cfi_offset %rbp, -16
 ; SSE3-NEXT:    movd %xmm0, %eax
 ; SSE3-NEXT:    pextrw $1, %xmm0, %r10d
 ; SSE3-NEXT:    addl %eax, %r10d
@@ -1283,11 +1259,11 @@ define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) {
 ; SSE3-NEXT:    movd %xmm1, %eax
 ; SSE3-NEXT:    pextrw $1, %xmm1, %ecx
 ; SSE3-NEXT:    addl %eax, %ecx
-; SSE3-NEXT:    movl %ecx, -{{[0-9]+}}(%rsp) # 4-byte Spill
+; SSE3-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; SSE3-NEXT:    pextrw $2, %xmm1, %eax
 ; SSE3-NEXT:    pextrw $3, %xmm1, %ecx
 ; SSE3-NEXT:    addl %eax, %ecx
-; SSE3-NEXT:    movl %ecx, -{{[0-9]+}}(%rsp) # 4-byte Spill
+; SSE3-NEXT:    movl %ecx, {{[-0-9]+}}(%r{{[sb]}}p) # 4-byte Spill
 ; SSE3-NEXT:    pextrw $4, %xmm1, %eax
 ; SSE3-NEXT:    pextrw $5, %xmm1, %r14d
 ; SSE3-NEXT:    addl %eax, %r14d
@@ -1332,9 +1308,9 @@ define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) {
 ; SSE3-NEXT:    movd %r9d, %xmm5
 ; SSE3-NEXT:    movd %r15d, %xmm14
 ; SSE3-NEXT:    movd %r14d, %xmm2
-; SSE3-NEXT:    movd -{{[0-9]+}}(%rsp), %xmm15 # 4-byte Folded Reload
+; SSE3-NEXT:    movd {{[-0-9]+}}(%r{{[sb]}}p), %xmm15 # 4-byte Folded Reload
 ; SSE3-NEXT:    # xmm15 = mem[0],zero,zero,zero
-; SSE3-NEXT:    movd -{{[0-9]+}}(%rsp), %xmm1 # 4-byte Folded Reload
+; SSE3-NEXT:    movd {{[-0-9]+}}(%r{{[sb]}}p), %xmm1 # 4-byte Folded Reload
 ; SSE3-NEXT:    # xmm1 = mem[0],zero,zero,zero
 ; SSE3-NEXT:    punpcklwd {{.*#+}} xmm3 = xmm3[0],xmm8[0],xmm3[1],xmm8[1],xmm3[2],xmm8[2],xmm3[3],xmm8[3]
 ; SSE3-NEXT:    punpcklwd {{.*#+}} xmm4 = xmm4[0],xmm9[0],xmm4[1],xmm9[1],xmm4[2],xmm9[2],xmm4[3],xmm9[3]
@@ -1359,13 +1335,13 @@ define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) {
 ; SSE3-NEXT:    retq
 ;
 ; SSSE3-LABEL: avx2_hadd_w:
-; SSSE3:       # BB#0:
+; SSSE3:       # %bb.0:
 ; SSSE3-NEXT:    phaddw %xmm2, %xmm0
 ; SSSE3-NEXT:    phaddw %xmm3, %xmm1
 ; SSSE3-NEXT:    retq
 ;
 ; AVX1-LABEL: avx2_hadd_w:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vextractf128 $1, %ymm1, %xmm2
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm3
 ; AVX1-NEXT:    vphaddw %xmm2, %xmm3, %xmm2
@@ -1374,7 +1350,7 @@ define <16 x i16> @avx2_hadd_w(<16 x i16> %a, <16 x i16> %b) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: avx2_hadd_w:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vphaddw %ymm1, %ymm0, %ymm0
 ; AVX2-NEXT:    retq
   %vecext = extractelement <16 x i16> %a, i32 0

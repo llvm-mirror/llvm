@@ -1,9 +1,8 @@
 //===- RegisterPressure.h - Dynamic Register Pressure -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,8 +19,8 @@
 #include "llvm/ADT/SparseSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -132,10 +131,6 @@ public:
   }
 };
 
-template <> struct isPodLike<PressureChange> {
-   static const bool value = true;
-};
-
 /// List of PressureChanges in order of increasing, unique PSetID.
 ///
 /// Use a small fixed number, because we can fit more PressureChanges in an
@@ -171,10 +166,10 @@ class RegisterOperands {
 public:
   /// List of virtual registers and register units read by the instruction.
   SmallVector<RegisterMaskPair, 8> Uses;
-  /// \brief List of virtual registers and register units defined by the
+  /// List of virtual registers and register units defined by the
   /// instruction which are not dead.
   SmallVector<RegisterMaskPair, 8> Defs;
-  /// \brief List of virtual registers and register units defined by the
+  /// List of virtual registers and register units defined by the
   /// instruction but dead.
   SmallVector<RegisterMaskPair, 8> DeadDefs;
 
@@ -219,7 +214,7 @@ public:
     return const_cast<PressureDiffs*>(this)->operator[](Idx);
   }
 
-  /// \brief Record pressure difference induced by the given operand list to
+  /// Record pressure difference induced by the given operand list to
   /// node with index \p Idx.
   void addInstruction(unsigned Idx, const RegisterOperands &RegOpers,
                       const MachineRegisterInfo &MRI);
@@ -546,7 +541,7 @@ protected:
   /// Add Reg to the live in set and increase max pressure.
   void discoverLiveIn(RegisterMaskPair Pair);
 
-  /// \brief Get the SlotIndex for the first nondebug instruction including or
+  /// Get the SlotIndex for the first nondebug instruction including or
   /// after the current position.
   SlotIndex getCurrSlot() const;
 

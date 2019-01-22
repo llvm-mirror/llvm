@@ -1,9 +1,8 @@
 //===-- PPCScheduleG5.td - PPC G5 Scheduling Definitions ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -54,7 +53,6 @@ def G5Itineraries : ProcessorItineraries<
   InstrItinData<IIC_LdStLoadUpd , [InstrStage<3, [G5_SLU]>]>,
   InstrItinData<IIC_LdStLoadUpdX, [InstrStage<3, [G5_SLU]>]>,
   InstrItinData<IIC_LdStStore   , [InstrStage<3, [G5_SLU]>]>,
-  InstrItinData<IIC_LdStStoreUpd, [InstrStage<3, [G5_SLU]>]>,
   InstrItinData<IIC_LdStDSS     , [InstrStage<10, [G5_SLU]>]>,
   InstrItinData<IIC_LdStICBI    , [InstrStage<40, [G5_SLU]>]>,
   InstrItinData<IIC_LdStSTFD    , [InstrStage<4, [G5_SLU]>]>,
@@ -76,8 +74,8 @@ def G5Itineraries : ProcessorItineraries<
   InstrItinData<IIC_LdStSLBIA   , [InstrStage<40, [G5_SLU]>]>, // needs work
   InstrItinData<IIC_LdStSLBIE   , [InstrStage<2, [G5_SLU]>]>,
   InstrItinData<IIC_LdStSTD     , [InstrStage<3, [G5_SLU]>]>,
-  InstrItinData<IIC_LdStSTDU    , [InstrStage<3, [G5_SLU]>]>,
-  InstrItinData<IIC_LdStSTDUX   , [InstrStage<3, [G5_SLU]>]>,
+  InstrItinData<IIC_LdStSTU     , [InstrStage<3, [G5_SLU]>]>,
+  InstrItinData<IIC_LdStSTUX    , [InstrStage<3, [G5_SLU]>]>,
   InstrItinData<IIC_LdStSTDCX   , [InstrStage<11, [G5_SLU]>]>,
   InstrItinData<IIC_LdStSTVEBX  , [InstrStage<5, [G5_SLU]>]>,
   InstrItinData<IIC_LdStSTWCX   , [InstrStage<11, [G5_SLU]>]>,

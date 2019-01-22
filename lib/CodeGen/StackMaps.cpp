@@ -1,9 +1,8 @@
 //===- StackMaps.cpp ------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +15,9 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -27,9 +29,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -41,7 +40,7 @@ using namespace llvm;
 #define DEBUG_TYPE "stackmaps"
 
 static cl::opt<int> StackMapVersion(
-    "stackmap-version", cl::init(3),
+    "stackmap-version", cl::init(3), cl::Hidden,
     cl::desc("Specify the stackmap encoding version (default = 3)"));
 
 const char *StackMaps::WSMP = "Stack Maps: ";
@@ -193,14 +192,14 @@ void StackMaps::print(raw_ostream &OS) {
       case Location::Register:
         OS << "Register ";
         if (TRI)
-          OS << TRI->getName(Loc.Reg);
+          OS << printReg(Loc.Reg, TRI);
         else
           OS << Loc.Reg;
         break;
       case Location::Direct:
         OS << "Direct ";
         if (TRI)
-          OS << TRI->getName(Loc.Reg);
+          OS << printReg(Loc.Reg, TRI);
         else
           OS << Loc.Reg;
         if (Loc.Offset)
@@ -209,7 +208,7 @@ void StackMaps::print(raw_ostream &OS) {
       case Location::Indirect:
         OS << "Indirect ";
         if (TRI)
-          OS << TRI->getName(Loc.Reg);
+          OS << printReg(Loc.Reg, TRI);
         else
           OS << Loc.Reg;
         OS << "+" << Loc.Offset;
@@ -233,7 +232,7 @@ void StackMaps::print(raw_ostream &OS) {
     for (const auto &LO : LiveOuts) {
       OS << WSMP << "\t\tLO " << Idx << ": ";
       if (TRI)
-        OS << TRI->getName(LO.Reg);
+        OS << printReg(LO.Reg, TRI);
       else
         OS << LO.Reg;
       OS << "\t[encoding: .short " << LO.DwarfRegNum << ", .byte 0, .byte "
@@ -268,11 +267,10 @@ StackMaps::parseRegisterLiveOutMask(const uint32_t *Mask) const {
   // in the list. Merge entries that refer to the same dwarf register and use
   // the maximum size that needs to be spilled.
 
-  std::sort(LiveOuts.begin(), LiveOuts.end(),
-            [](const LiveOutReg &LHS, const LiveOutReg &RHS) {
-              // Only sort by the dwarf register number.
-              return LHS.DwarfRegNum < RHS.DwarfRegNum;
-            });
+  llvm::sort(LiveOuts, [](const LiveOutReg &LHS, const LiveOutReg &RHS) {
+    // Only sort by the dwarf register number.
+    return LHS.DwarfRegNum < RHS.DwarfRegNum;
+  });
 
   for (auto I = LiveOuts.begin(), E = LiveOuts.end(); I != E; ++I) {
     for (auto II = std::next(I); II != E; ++II) {
@@ -420,13 +418,13 @@ void StackMaps::emitStackmapHeader(MCStreamer &OS) {
   OS.EmitIntValue(0, 2);               // Reserved.
 
   // Num functions.
-  DEBUG(dbgs() << WSMP << "#functions = " << FnInfos.size() << '\n');
+  LLVM_DEBUG(dbgs() << WSMP << "#functions = " << FnInfos.size() << '\n');
   OS.EmitIntValue(FnInfos.size(), 4);
   // Num constants.
-  DEBUG(dbgs() << WSMP << "#constants = " << ConstPool.size() << '\n');
+  LLVM_DEBUG(dbgs() << WSMP << "#constants = " << ConstPool.size() << '\n');
   OS.EmitIntValue(ConstPool.size(), 4);
   // Num callsites.
-  DEBUG(dbgs() << WSMP << "#callsites = " << CSInfos.size() << '\n');
+  LLVM_DEBUG(dbgs() << WSMP << "#callsites = " << CSInfos.size() << '\n');
   OS.EmitIntValue(CSInfos.size(), 4);
 }
 
@@ -439,11 +437,11 @@ void StackMaps::emitStackmapHeader(MCStreamer &OS) {
 /// }
 void StackMaps::emitFunctionFrameRecords(MCStreamer &OS) {
   // Function Frame records.
-  DEBUG(dbgs() << WSMP << "functions:\n");
+  LLVM_DEBUG(dbgs() << WSMP << "functions:\n");
   for (auto const &FR : FnInfos) {
-    DEBUG(dbgs() << WSMP << "function addr: " << FR.first
-                 << " frame size: " << FR.second.StackSize
-                 << " callsite count: " << FR.second.RecordCount << '\n');
+    LLVM_DEBUG(dbgs() << WSMP << "function addr: " << FR.first
+                      << " frame size: " << FR.second.StackSize
+                      << " callsite count: " << FR.second.RecordCount << '\n');
     OS.EmitSymbolValue(FR.first, 8);
     OS.EmitIntValue(FR.second.StackSize, 8);
     OS.EmitIntValue(FR.second.RecordCount, 8);
@@ -455,9 +453,9 @@ void StackMaps::emitFunctionFrameRecords(MCStreamer &OS) {
 /// int64  : Constants[NumConstants]
 void StackMaps::emitConstantPoolEntries(MCStreamer &OS) {
   // Constant pool entries.
-  DEBUG(dbgs() << WSMP << "constants:\n");
+  LLVM_DEBUG(dbgs() << WSMP << "constants:\n");
   for (const auto &ConstEntry : ConstPool) {
-    DEBUG(dbgs() << WSMP << ConstEntry.second << '\n');
+    LLVM_DEBUG(dbgs() << WSMP << ConstEntry.second << '\n');
     OS.EmitIntValue(ConstEntry.second, 8);
   }
 }
@@ -492,7 +490,7 @@ void StackMaps::emitConstantPoolEntries(MCStreamer &OS) {
 ///   0x4, Constant, Offset              (small constant)
 ///   0x5, ConstIndex, Constants[Offset] (large constant)
 void StackMaps::emitCallsiteEntries(MCStreamer &OS) {
-  DEBUG(print(dbgs()));
+  LLVM_DEBUG(print(dbgs()));
   // Callsite entries.
   for (const auto &CSI : CSInfos) {
     const LocationVec &CSLocs = CSI.Locations;
@@ -569,7 +567,7 @@ void StackMaps::serializeToStackMapSection() {
   OS.EmitLabel(OutContext.getOrCreateSymbol(Twine("__LLVM_StackMaps")));
 
   // Serialize data.
-  DEBUG(dbgs() << "********** Stack Map Output **********\n");
+  LLVM_DEBUG(dbgs() << "********** Stack Map Output **********\n");
   emitStackmapHeader(OS);
   emitFunctionFrameRecords(OS);
   emitConstantPoolEntries(OS);

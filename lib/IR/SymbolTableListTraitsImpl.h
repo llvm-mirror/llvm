@@ -1,9 +1,8 @@
 //===-- llvm/SymbolTableListTraitsImpl.h - Implementation ------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -33,17 +32,17 @@ void SymbolTableListTraits<ValueSubClass>::setSymTabObject(TPtr *Dest,
 
   // Do it.
   *Dest = Src;
-  
+
   // Get the new SymTab object.
   ValueSymbolTable *NewST = getSymTab(getListOwner());
-  
+
   // If there is nothing to do, quick exit.
   if (OldST == NewST) return;
-  
+
   // Move all the elements from the old symtab to the new one.
   ListTy &ItemList = getList(getListOwner());
   if (ItemList.empty()) return;
-  
+
   if (OldST) {
     // Remove all entries from the previous symtab.
     for (auto I = ItemList.begin(); I != ItemList.end(); ++I)
@@ -57,7 +56,7 @@ void SymbolTableListTraits<ValueSubClass>::setSymTabObject(TPtr *Dest,
       if (I->hasName())
         NewST->reinsertValue(&*I);
   }
-  
+
 }
 
 template <typename ValueSubClass>

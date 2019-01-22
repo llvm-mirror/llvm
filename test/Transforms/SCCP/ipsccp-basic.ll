@@ -1,4 +1,5 @@
 ; RUN: opt < %s -ipsccp -S | FileCheck %s
+; RUN: opt < %s -enable-debugify -ipsccp -debugify-quiet -disable-output
 
 ;;======================== test1
 
@@ -246,13 +247,27 @@ define i64 @test11a() {
 ; CHECK: ret i64 0
 }
 
-define void @test11b() {
+define i64 @test11b() {
   %call1 = call i64 @test11a()
   %call2 = call i64 @llvm.ctpop.i64(i64 %call1)
-  ret void
-; CHECK-LABEL: define void @test11b
+  ret i64 %call2
+; CHECK-LABEL: define i64 @test11b
 ; CHECK: %[[call1:.*]] = call i64 @test11a()
-; CHECK: %[[call2:.*]] = call i64 @llvm.ctpop.i64(i64 0)
+; CHECK-NOT: call i64 @llvm.ctpop.i64
+; CHECK-NEXT: ret i64 0
 }
 
 declare i64 @llvm.ctpop.i64(i64)
+
+;;======================== test12
+;; Ensure that a struct as an arg to a potentially constant-foldable
+;; function does not crash SCCP (for now it'll just ignores it)
+
+define i1 @test12() {
+  %c = call i1 @llvm.is.constant.sl_i32i32s({i32, i32} {i32 -1, i32 32})
+  ret i1 %c
+; CHECK-LABEL: define i1 @test12
+; CHECK: ret i1 %c
+}
+
+declare i1 @llvm.is.constant.sl_i32i32s({i32, i32} %a)

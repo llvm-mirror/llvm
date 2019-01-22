@@ -1,9 +1,8 @@
 //===------- RPCUTils.h - Utilities for building RPC APIs -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,6 +24,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/Orc/OrcError.h"
 #include "llvm/ExecutionEngine/Orc/RPCSerialization.h"
+#include "llvm/Support/MSVCErrorWorkarounds.h"
 
 #include <future>
 
@@ -207,73 +207,6 @@ private:
 
 namespace detail {
 
-// FIXME: Remove MSVCPError/MSVCPExpected once MSVC's future implementation
-//        supports classes without default constructors.
-#ifdef _MSC_VER
-
-namespace msvc_hacks {
-
-// Work around MSVC's future implementation's use of default constructors:
-// A default constructed value in the promise will be overwritten when the
-// real error is set - so the default constructed Error has to be checked
-// already.
-class MSVCPError : public Error {
-public:
-  MSVCPError() { (void)!!*this; }
-
-  MSVCPError(MSVCPError &&Other) : Error(std::move(Other)) {}
-
-  MSVCPError &operator=(MSVCPError Other) {
-    Error::operator=(std::move(Other));
-    return *this;
-  }
-
-  MSVCPError(Error Err) : Error(std::move(Err)) {}
-};
-
-// Work around MSVC's future implementation, similar to MSVCPError.
-template <typename T> class MSVCPExpected : public Expected<T> {
-public:
-  MSVCPExpected()
-      : Expected<T>(make_error<StringError>("", inconvertibleErrorCode())) {
-    consumeError(this->takeError());
-  }
-
-  MSVCPExpected(MSVCPExpected &&Other) : Expected<T>(std::move(Other)) {}
-
-  MSVCPExpected &operator=(MSVCPExpected &&Other) {
-    Expected<T>::operator=(std::move(Other));
-    return *this;
-  }
-
-  MSVCPExpected(Error Err) : Expected<T>(std::move(Err)) {}
-
-  template <typename OtherT>
-  MSVCPExpected(
-      OtherT &&Val,
-      typename std::enable_if<std::is_convertible<OtherT, T>::value>::type * =
-          nullptr)
-      : Expected<T>(std::move(Val)) {}
-
-  template <class OtherT>
-  MSVCPExpected(
-      Expected<OtherT> &&Other,
-      typename std::enable_if<std::is_convertible<OtherT, T>::value>::type * =
-          nullptr)
-      : Expected<T>(std::move(Other)) {}
-
-  template <class OtherT>
-  explicit MSVCPExpected(
-      Expected<OtherT> &&Other,
-      typename std::enable_if<!std::is_convertible<OtherT, T>::value>::type * =
-          nullptr)
-      : Expected<T>(std::move(Other)) {}
-};
-
-} // end namespace msvc_hacks
-
-#endif // _MSC_VER
-
 /// Provides a typedef for a tuple containing the decayed argument types.
 template <typename T> class FunctionArgsTuple;
 
@@ -293,10 +226,10 @@ public:
 
 #ifdef _MSC_VER
   // The ErrorReturnType wrapped in a std::promise.
-  using ReturnPromiseType = std::promise<msvc_hacks::MSVCPExpected<RetT>>;
+  using ReturnPromiseType = std::promise<MSVCPExpected<RetT>>;
 
   // The ErrorReturnType wrapped in a std::future.
-  using ReturnFutureType = std::future<msvc_hacks::MSVCPExpected<RetT>>;
+  using ReturnFutureType = std::future<MSVCPExpected<RetT>>;
 #else
   // The ErrorReturnType wrapped in a std::promise.
   using ReturnPromiseType = std::promise<ErrorReturnType>;
@@ -325,10 +258,10 @@ public:
 
 #ifdef _MSC_VER
   // The ErrorReturnType wrapped in a std::promise.
-  using ReturnPromiseType = std::promise<msvc_hacks::MSVCPError>;
+  using ReturnPromiseType = std::promise<MSVCPError>;
 
   // The ErrorReturnType wrapped in a std::future.
-  using ReturnFutureType = std::future<msvc_hacks::MSVCPError>;
+  using ReturnFutureType = std::future<MSVCPError>;
 #else
   // The ErrorReturnType wrapped in a std::promise.
   using ReturnPromiseType = std::promise<ErrorReturnType>;
@@ -1631,7 +1564,7 @@ RPCAsyncDispatch<RPCEndpointT, Func> rpcAsyncDispatch(RPCEndpointT &Endpoint) {
   return RPCAsyncDispatch<RPCEndpointT, Func>(Endpoint);
 }
 
-/// \brief Allows a set of asynchrounous calls to be dispatched, and then
+/// Allows a set of asynchrounous calls to be dispatched, and then
 ///        waited on as a group.
 class ParallelCallGroup {
 public:
@@ -1640,7 +1573,7 @@ public:
   ParallelCallGroup(const ParallelCallGroup &) = delete;
   ParallelCallGroup &operator=(const ParallelCallGroup &) = delete;
 
-  /// \brief Make as asynchronous call.
+  /// Make as asynchronous call.
   template <typename AsyncDispatcher, typename HandlerT, typename... ArgTs>
   Error call(const AsyncDispatcher &AsyncDispatch, HandlerT Handler,
              const ArgTs &... Args) {
@@ -1669,7 +1602,7 @@ public:
     return AsyncDispatch(std::move(WrappedHandler), Args...);
   }
 
-  /// \brief Blocks until all calls have been completed and their return value
+  /// Blocks until all calls have been completed and their return value
   ///        handlers run.
   void wait() {
     std::unique_lock<std::mutex> Lock(M);
@@ -1683,21 +1616,21 @@ private:
   uint32_t NumOutstandingCalls = 0;
 };
 
-/// @brief Convenience class for grouping RPC Functions into APIs that can be
+/// Convenience class for grouping RPC Functions into APIs that can be
 ///        negotiated as a block.
 ///
 template <typename... Funcs>
 class APICalls {
 public:
 
-  /// @brief Test whether this API contains Function F.
+  /// Test whether this API contains Function F.
   template <typename F>
   class Contains {
   public:
     static const bool value = false;
   };
 
-  /// @brief Negotiate all functions in this API.
+  /// Negotiate all functions in this API.
   template <typename RPCEndpoint>
   static Error negotiate(RPCEndpoint &R) {
     return Error::success();

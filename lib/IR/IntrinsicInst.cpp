@@ -1,9 +1,8 @@
 //===-- InstrinsicInst.cpp - Intrinsic Instruction Wrappers ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,6 +23,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
@@ -31,10 +31,11 @@
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
-/// DbgInfoIntrinsic - This is the common base class for debug info intrinsics
+/// DbgVariableIntrinsic - This is the common base class for debug info
+/// intrinsics for variables.
 ///
 
-Value *DbgInfoIntrinsic::getVariableLocation(bool AllowNullOp) const {
+Value *DbgVariableIntrinsic::getVariableLocation(bool AllowNullOp) const {
   Value *Op = getArgOperand(0);
   if (AllowNullOp && !Op)
     return nullptr;
@@ -46,6 +47,12 @@ Value *DbgInfoIntrinsic::getVariableLocation(bool AllowNullOp) const {
   // When the value goes to null, it gets replaced by an empty MDNode.
   assert(!cast<MDNode>(MD)->getNumOperands() && "Expected an empty MDNode");
   return nullptr;
+}
+
+Optional<uint64_t> DbgVariableIntrinsic::getFragmentSizeInBits() const {
+  if (auto Fragment = getExpression()->getFragmentInfo())
+    return Fragment->SizeInBits;
+  return getVariable()->getSizeInBits();
 }
 
 int llvm::Intrinsic::lookupLLVMIntrinsicByName(ArrayRef<const char *> NameTable,
@@ -144,6 +151,10 @@ bool ConstrainedFPIntrinsic::isUnaryOp() const {
     case Intrinsic::experimental_constrained_log2:
     case Intrinsic::experimental_constrained_rint:
     case Intrinsic::experimental_constrained_nearbyint:
+    case Intrinsic::experimental_constrained_ceil:
+    case Intrinsic::experimental_constrained_floor:
+    case Intrinsic::experimental_constrained_round:
+    case Intrinsic::experimental_constrained_trunc:
       return true;
   }
 }

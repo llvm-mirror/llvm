@@ -1,9 +1,8 @@
 //===-- llvm/Support/Win64EH.h ---Win64 EH Constants-------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -33,7 +32,24 @@ enum UnwindOpcodes {
   UOP_SaveNonVolBig,
   UOP_SaveXMM128 = 8,
   UOP_SaveXMM128Big,
-  UOP_PushMachFrame
+  UOP_PushMachFrame,
+  // The following set of unwind opcodes is for ARM64.  They are documented at
+  // https://docs.microsoft.com/en-us/cpp/build/arm64-exception-handling
+  UOP_AllocMedium,
+  UOP_SaveFPLRX,
+  UOP_SaveFPLR,
+  UOP_SaveReg,
+  UOP_SaveRegX,
+  UOP_SaveRegP,
+  UOP_SaveRegPX,
+  UOP_SaveFReg,
+  UOP_SaveFRegX,
+  UOP_SaveFRegP,
+  UOP_SaveFRegPX,
+  UOP_SetFP,
+  UOP_AddFP,
+  UOP_Nop,
+  UOP_End
 };
 
 /// UnwindCode - This union describes a single operation in a function prolog,
@@ -101,40 +117,40 @@ struct UnwindInfo {
   // For more information please see MSDN at:
   // http://msdn.microsoft.com/en-us/library/ddssxxy8.aspx
 
-  /// \brief Return pointer to language specific data part of UnwindInfo.
+  /// Return pointer to language specific data part of UnwindInfo.
   void *getLanguageSpecificData() {
     return reinterpret_cast<void *>(&UnwindCodes[(NumCodes+1) & ~1]);
   }
 
-  /// \brief Return pointer to language specific data part of UnwindInfo.
+  /// Return pointer to language specific data part of UnwindInfo.
   const void *getLanguageSpecificData() const {
     return reinterpret_cast<const void *>(&UnwindCodes[(NumCodes + 1) & ~1]);
   }
 
-  /// \brief Return image-relative offset of language-specific exception handler.
+  /// Return image-relative offset of language-specific exception handler.
   uint32_t getLanguageSpecificHandlerOffset() const {
     return *reinterpret_cast<const support::ulittle32_t *>(
                getLanguageSpecificData());
   }
 
-  /// \brief Set image-relative offset of language-specific exception handler.
+  /// Set image-relative offset of language-specific exception handler.
   void setLanguageSpecificHandlerOffset(uint32_t offset) {
     *reinterpret_cast<support::ulittle32_t *>(getLanguageSpecificData()) =
         offset;
   }
 
-  /// \brief Return pointer to exception-specific data.
+  /// Return pointer to exception-specific data.
   void *getExceptionData() {
     return reinterpret_cast<void *>(reinterpret_cast<uint32_t *>(
                                                   getLanguageSpecificData())+1);
   }
 
-  /// \brief Return pointer to chained unwind info.
+  /// Return pointer to chained unwind info.
   RuntimeFunction *getChainedFunctionEntry() {
     return reinterpret_cast<RuntimeFunction *>(getLanguageSpecificData());
   }
 
-  /// \brief Return pointer to chained unwind info.
+  /// Return pointer to chained unwind info.
   const RuntimeFunction *getChainedFunctionEntry() const {
     return reinterpret_cast<const RuntimeFunction *>(getLanguageSpecificData());
   }

@@ -27,13 +27,13 @@
 ; This case will also produce multiple locations but only the debug range
 ; extension is tested here.
 
-; DBG_VALUE for variable "n" is extended into BB#5 from its predecessors BB#3
-; and BB#4.
+; DBG_VALUE for variable "n" is extended into %bb.5 from its predecessors %bb.3
+; and %bb.4.
 ; CHECK:       .LBB0_5:
-; CHECK-NEXT:  #DEBUG_VALUE: main:n <- %EBX
+; CHECK-NEXT:  #DEBUG_VALUE: main:n <- $ebx
 ;   Other register values have been clobbered.
 ; CHECK-NOT:   #DEBUG_VALUE:
-; CHECK:         movl    %ecx, m(%rip)
+; CHECK:         movl    %e{{..}}, m(%rip)
 
 ; ModuleID = 'LiveDebugValues.c'
 source_filename = "test/DebugInfo/X86/live-debug-values.ll"
@@ -117,7 +117,7 @@ attributes #2 = { nounwind readnone }
 !7 = !{i32 2, !"Dwarf Version", i32 4}
 !8 = !{i32 2, !"Debug Info Version", i32 3}
 !9 = !{!"clang version 3.8.0 (trunk 253049) "}
-!10 = distinct !DISubprogram(name: "main", scope: !3, file: !3, line: 6, type: !11, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !2, variables: !16)
+!10 = distinct !DISubprogram(name: "main", scope: !3, file: !3, line: 6, type: !11, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !2, retainedNodes: !16)
 !11 = !DISubroutineType(types: !12)
 !12 = !{!6, !6, !13}
 !13 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !14, size: 64, align: 64)

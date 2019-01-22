@@ -1,9 +1,8 @@
 //===-- SISchedule.td - SI Scheduling definitons -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,7 +45,7 @@ def Write64Bit : SchedWrite;
 // instructions)
 
 class SISchedMachineModel : SchedMachineModel {
-  let CompleteModel = 1;
+  let CompleteModel = 0;
   // MicroOpBufferSize = 1 means that instructions will always be added
   // the ready queue when they become available.  This exposes them
   // to the register pressure analysis.

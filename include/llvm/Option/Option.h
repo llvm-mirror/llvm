@@ -1,9 +1,8 @@
 //===- Option.h - Abstract Driver Options -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -95,7 +94,7 @@ public:
     return OptionClass(Info->Kind);
   }
 
-  /// \brief Get the name of this option without any prefix.
+  /// Get the name of this option without any prefix.
   StringRef getName() const {
     assert(Info && "Must have a valid info!");
     return Info->Name;
@@ -113,7 +112,7 @@ public:
     return Owner->getOption(Info->AliasID);
   }
 
-  /// \brief Get the alias arguments as a \0 separated list.
+  /// Get the alias arguments as a \0 separated list.
   /// E.g. ["foo", "bar"] would be returned as "foo\0bar\0".
   const char *getAliasArgs() const {
     assert(Info && "Must have a valid info!");
@@ -123,13 +122,13 @@ public:
     return Info->AliasArgs;
   }
 
-  /// \brief Get the default prefix for this option.
+  /// Get the default prefix for this option.
   StringRef getPrefix() const {
     const char *Prefix = *Info->Prefixes;
     return Prefix ? Prefix : StringRef();
   }
 
-  /// \brief Get the name of this option with the default prefix.
+  /// Get the name of this option with the default prefix.
   std::string getPrefixedName() const {
     std::string Ret = getPrefix();
     Ret += getName();

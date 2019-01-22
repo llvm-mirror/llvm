@@ -1,9 +1,8 @@
 //===-- ResourceScriptParser.cpp --------------------------------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
 //
@@ -66,18 +65,22 @@ RCParser::ParseType RCParser::parseSingleResource() {
 
   if (TypeToken->equalsLower("ACCELERATORS"))
     Result = parseAcceleratorsResource();
+  else if (TypeToken->equalsLower("BITMAP"))
+    Result = parseBitmapResource();
   else if (TypeToken->equalsLower("CURSOR"))
     Result = parseCursorResource();
   else if (TypeToken->equalsLower("DIALOG"))
     Result = parseDialogResource(false);
   else if (TypeToken->equalsLower("DIALOGEX"))
     Result = parseDialogResource(true);
-  else if (TypeToken->equalsLower("ICON"))
-    Result = parseIconResource();
   else if (TypeToken->equalsLower("HTML"))
     Result = parseHTMLResource();
+  else if (TypeToken->equalsLower("ICON"))
+    Result = parseIconResource();
   else if (TypeToken->equalsLower("MENU"))
     Result = parseMenuResource();
+  else if (TypeToken->equalsLower("RCDATA"))
+    Result = parseUserDefinedResource(RkRcData);
   else if (TypeToken->equalsLower("VERSIONINFO"))
     Result = parseVersionInfoResource();
   else
@@ -110,16 +113,23 @@ void RCParser::consume() {
 
 // An integer description might consist of a single integer or
 // an arithmetic expression evaluating to the integer. The expressions
-// can contain the following tokens: <int> ( ) + - | & ~. Their meaning
-// is the same as in C++.
+// can contain the following tokens: <int> ( ) + - | & ~ not. Their meaning
+// is the same as in C++ except for 'not' expression.
 // The operators in the original RC implementation have the following
 // precedence:
-//   1) Unary operators (- ~),
+//   1) Unary operators (- ~ not),
 //   2) Binary operators (+ - & |), with no precedence.
+//
+// 'not' expression is mostly useful for style values. It evaluates to 0,
+// but value given to the operator is stored separately from integer value.
+// It's mostly useful for control style expressions and causes bits from
+// default control style to be excluded from generated style. For binary
+// operators the mask from the right operand is applied to the left operand
+// and masks from both operands are combined in operator result.
 //
 // The following grammar is used to parse the expressions Exp1:
 //   Exp1 ::= Exp2 || Exp1 + Exp2 || Exp1 - Exp2 || Exp1 | Exp2 || Exp1 & Exp2
-//   Exp2 ::= -Exp2 || ~Exp2 || Int || (Exp1).
+//   Exp2 ::= -Exp2 || ~Exp2 || not Expr2 || Int || (Exp1).
 // (More conveniently, Exp1 is a non-empty sequence of Exp2 expressions,
 // separated by binary operators.)
 //
@@ -135,12 +145,15 @@ void RCParser::consume() {
 //    1 => 01 00, -1 => ff ff, --1 => 01 00, ---1 => ff ff;
 //    1 => 01 00, ~1 => fe ff, ~~1 => 01 00, ~~~1 => fe ff.
 
-Expected<RCInt> RCParser::readInt() { return parseIntExpr1(); }
+Expected<RCInt> RCParser::readInt() {
+  ASSIGN_OR_RETURN(Value, parseIntExpr1());
+  return (*Value).getValue();
+}
 
-Expected<RCInt> RCParser::parseIntExpr1() {
+Expected<IntWithNotMask> RCParser::parseIntExpr1() {
   // Exp1 ::= Exp2 || Exp1 + Exp2 || Exp1 - Exp2 || Exp1 | Exp2 || Exp1 & Exp2.
   ASSIGN_OR_RETURN(FirstResult, parseIntExpr2());
-  RCInt Result = *FirstResult;
+  IntWithNotMask Result = *FirstResult;
 
   while (!isEof() && look().isBinaryOp()) {
     auto OpToken = read();
@@ -171,8 +184,8 @@ Expected<RCInt> RCParser::parseIntExpr1() {
   return Result;
 }
 
-Expected<RCInt> RCParser::parseIntExpr2() {
-  // Exp2 ::= -Exp2 || ~Exp2 || Int || (Exp1).
+Expected<IntWithNotMask> RCParser::parseIntExpr2() {
+  // Exp2 ::= -Exp2 || ~Exp2 || not Expr2 || Int || (Exp1).
   static const char ErrorMsg[] = "'-', '~', integer or '('";
 
   if (isEof())
@@ -201,6 +214,13 @@ Expected<RCInt> RCParser::parseIntExpr2() {
     return *Result;
   }
 
+  case Kind::Identifier: {
+    if (!read().value().equals_lower("not"))
+      return getExpectedError(ErrorMsg, true);
+    ASSIGN_OR_RETURN(Result, parseIntExpr2());
+    return IntWithNotMask(0, (*Result).getValue());
+  }
+
   default:
     return getExpectedError(ErrorMsg);
   }
@@ -208,6 +228,12 @@ Expected<RCInt> RCParser::parseIntExpr2() {
 
 Expected<StringRef> RCParser::readString() {
   if (!isNextTokenKind(Kind::String))
+    return getExpectedError("string");
+  return read().value();
+}
+
+Expected<StringRef> RCParser::readFilename() {
+  if (!isNextTokenKind(Kind::String) && !isNextTokenKind(Kind::Identifier))
     return getExpectedError("string");
   return read().value();
 }
@@ -245,9 +271,7 @@ Error RCParser::consumeType(Kind TokenKind) {
 #define SHORT_TOKEN(TokenName, TokenCh)                                        \
   case Kind::TokenName:                                                        \
     return getExpectedError(#TokenCh);
-#include "ResourceScriptTokenList.h"
-#undef SHORT_TOKEN
-#undef TOKEN
+#include "ResourceScriptTokenList.def"
   }
 
   llvm_unreachable("All case options exhausted.");
@@ -321,6 +345,37 @@ Expected<uint32_t> RCParser::parseFlags(ArrayRef<StringRef> FlagDesc,
   return Result;
 }
 
+uint16_t RCParser::parseMemoryFlags(uint16_t Flags) {
+  while (!isEof()) {
+    const RCToken &Token = look();
+    if (Token.kind() != Kind::Identifier)
+      return Flags;
+    const StringRef Ident = Token.value();
+    if (Ident.equals_lower("PRELOAD"))
+      Flags |= MfPreload;
+    else if (Ident.equals_lower("LOADONCALL"))
+      Flags &= ~MfPreload;
+    else if (Ident.equals_lower("FIXED"))
+      Flags &= ~(MfMoveable | MfDiscardable);
+    else if (Ident.equals_lower("MOVEABLE"))
+      Flags |= MfMoveable;
+    else if (Ident.equals_lower("DISCARDABLE"))
+      Flags |= MfDiscardable | MfMoveable | MfPure;
+    else if (Ident.equals_lower("PURE"))
+      Flags |= MfPure;
+    else if (Ident.equals_lower("IMPURE"))
+      Flags &= ~(MfPure | MfDiscardable);
+    else if (Ident.equals_lower("SHARED"))
+      Flags |= MfPure;
+    else if (Ident.equals_lower("NONSHARED"))
+      Flags &= ~(MfPure | MfDiscardable);
+    else
+      return Flags;
+    consume();
+  }
+  return Flags;
+}
+
 Expected<OptionalStmtList>
 RCParser::parseOptionalStatements(OptStmtType StmtsType) {
   OptionalStmtList Result;
@@ -347,6 +402,10 @@ RCParser::parseSingleOptionalStatement(OptStmtType StmtsType) {
   if (StmtsType != OptStmtType::BasicStmt) {
     if (TypeToken->equals_lower("CAPTION"))
       return parseCaptionStmt();
+    if (TypeToken->equals_lower("CLASS"))
+      return parseClassStmt();
+    if (TypeToken->equals_lower("EXSTYLE"))
+      return parseExStyleStmt();
     if (TypeToken->equals_lower("FONT"))
       return parseFontStmt(StmtsType);
     if (TypeToken->equals_lower("STYLE"))
@@ -364,11 +423,13 @@ RCParser::ParseType RCParser::parseLanguageResource() {
 }
 
 RCParser::ParseType RCParser::parseAcceleratorsResource() {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(AcceleratorsResource::getDefaultMemoryFlags());
   ASSIGN_OR_RETURN(OptStatements, parseOptionalStatements());
   RETURN_IF_ERROR(consumeType(Kind::BlockBegin));
 
-  auto Accels =
-      llvm::make_unique<AcceleratorsResource>(std::move(*OptStatements));
+  auto Accels = llvm::make_unique<AcceleratorsResource>(
+      std::move(*OptStatements), MemoryFlags);
 
   while (!consumeOptionalType(Kind::BlockEnd)) {
     ASSIGN_OR_RETURN(EventResult, readIntOrString());
@@ -385,11 +446,15 @@ RCParser::ParseType RCParser::parseAcceleratorsResource() {
 }
 
 RCParser::ParseType RCParser::parseCursorResource() {
-  ASSIGN_OR_RETURN(Arg, readString());
-  return llvm::make_unique<CursorResource>(*Arg);
+  uint16_t MemoryFlags =
+      parseMemoryFlags(CursorResource::getDefaultMemoryFlags());
+  ASSIGN_OR_RETURN(Arg, readFilename());
+  return llvm::make_unique<CursorResource>(*Arg, MemoryFlags);
 }
 
 RCParser::ParseType RCParser::parseDialogResource(bool IsExtended) {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(DialogResource::getDefaultMemoryFlags());
   // Dialog resources have the following format of the arguments:
   //  DIALOG:   x, y, width, height [opt stmts...] {controls...}
   //  DIALOGEX: x, y, width, height [, helpID] [opt stmts...] {controls...}
@@ -412,7 +477,7 @@ RCParser::ParseType RCParser::parseDialogResource(bool IsExtended) {
 
   auto Dialog = llvm::make_unique<DialogResource>(
       (*LocResult)[0], (*LocResult)[1], (*LocResult)[2], (*LocResult)[3],
-      HelpID, std::move(*OptStatements), IsExtended);
+      HelpID, std::move(*OptStatements), IsExtended, MemoryFlags);
 
   while (!consumeOptionalType(Kind::BlockEnd)) {
     ASSIGN_OR_RETURN(ControlDefResult, parseControl());
@@ -423,12 +488,20 @@ RCParser::ParseType RCParser::parseDialogResource(bool IsExtended) {
 }
 
 RCParser::ParseType RCParser::parseUserDefinedResource(IntOrString Type) {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(UserDefinedResource::getDefaultMemoryFlags());
   if (isEof())
     return getExpectedError("filename, '{' or BEGIN");
 
   // Check if this is a file resource.
-  if (look().kind() == Kind::String)
-    return llvm::make_unique<UserDefinedResource>(Type, read().value());
+  switch (look().kind()) {
+  case Kind::String:
+  case Kind::Identifier:
+    return llvm::make_unique<UserDefinedResource>(Type, read().value(),
+                                                  MemoryFlags);
+  default:
+    break;
+  }
 
   RETURN_IF_ERROR(consumeType(Kind::BlockBegin));
   std::vector<IntOrString> Data;
@@ -444,14 +517,17 @@ RCParser::ParseType RCParser::parseUserDefinedResource(IntOrString Type) {
     Data.push_back(*Item);
   }
 
-  return llvm::make_unique<UserDefinedResource>(Type, std::move(Data));
+  return llvm::make_unique<UserDefinedResource>(Type, std::move(Data),
+                                                MemoryFlags);
 }
 
 RCParser::ParseType RCParser::parseVersionInfoResource() {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(VersionInfoResource::getDefaultMemoryFlags());
   ASSIGN_OR_RETURN(FixedResult, parseVersionInfoFixed());
   ASSIGN_OR_RETURN(BlockResult, parseVersionInfoBlockContents(StringRef()));
-  return llvm::make_unique<VersionInfoResource>(std::move(**BlockResult),
-                                                std::move(*FixedResult));
+  return llvm::make_unique<VersionInfoResource>(
+      std::move(**BlockResult), std::move(*FixedResult), MemoryFlags);
 }
 
 Expected<Control> RCParser::parseControl() {
@@ -475,32 +551,76 @@ Expected<Control> RCParser::parseControl() {
     Caption = *CaptionResult;
   }
 
-  ASSIGN_OR_RETURN(Args, readIntsWithCommas(5, 8));
+  ASSIGN_OR_RETURN(ID, readInt());
+  RETURN_IF_ERROR(consumeType(Kind::Comma));
 
-  auto TakeOptArg = [&Args](size_t Id) -> Optional<uint32_t> {
-    return Args->size() > Id ? (uint32_t)(*Args)[Id] : Optional<uint32_t>();
-  };
+  IntOrString Class;
+  Optional<IntWithNotMask> Style;
+  if (ClassUpper == "CONTROL") {
+    // CONTROL text, id, class, style, x, y, width, height [, exstyle] [, helpID]
+    ASSIGN_OR_RETURN(ClassStr, readString());
+    RETURN_IF_ERROR(consumeType(Kind::Comma));
+    Class = *ClassStr;
+    ASSIGN_OR_RETURN(StyleVal, parseIntExpr1());
+    RETURN_IF_ERROR(consumeType(Kind::Comma));
+    Style = *StyleVal;
+  } else {
+    Class = CtlInfo->getValue().CtlClass;
+  }
 
-  return Control(*ClassResult, Caption, (*Args)[0], (*Args)[1], (*Args)[2],
-                 (*Args)[3], (*Args)[4], TakeOptArg(5), TakeOptArg(6),
-                 TakeOptArg(7));
+  // x, y, width, height
+  ASSIGN_OR_RETURN(Args, readIntsWithCommas(4, 4));
+
+  if (ClassUpper != "CONTROL") {
+    if (consumeOptionalType(Kind::Comma)) {
+      ASSIGN_OR_RETURN(Val, parseIntExpr1());
+      Style = *Val;
+    }
+  }
+
+  Optional<uint32_t> ExStyle;
+  if (consumeOptionalType(Kind::Comma)) {
+    ASSIGN_OR_RETURN(Val, readInt());
+    ExStyle = *Val;
+  }
+  Optional<uint32_t> HelpID;
+  if (consumeOptionalType(Kind::Comma)) {
+    ASSIGN_OR_RETURN(Val, readInt());
+    HelpID = *Val;
+  }
+
+  return Control(*ClassResult, Caption, *ID, (*Args)[0], (*Args)[1],
+                 (*Args)[2], (*Args)[3], Style, ExStyle, HelpID, Class);
+}
+
+RCParser::ParseType RCParser::parseBitmapResource() {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(BitmapResource::getDefaultMemoryFlags());
+  ASSIGN_OR_RETURN(Arg, readFilename());
+  return llvm::make_unique<BitmapResource>(*Arg, MemoryFlags);
 }
 
 RCParser::ParseType RCParser::parseIconResource() {
-  ASSIGN_OR_RETURN(Arg, readString());
-  return llvm::make_unique<IconResource>(*Arg);
+  uint16_t MemoryFlags =
+      parseMemoryFlags(IconResource::getDefaultMemoryFlags());
+  ASSIGN_OR_RETURN(Arg, readFilename());
+  return llvm::make_unique<IconResource>(*Arg, MemoryFlags);
 }
 
 RCParser::ParseType RCParser::parseHTMLResource() {
-  ASSIGN_OR_RETURN(Arg, readString());
-  return llvm::make_unique<HTMLResource>(*Arg);
+  uint16_t MemoryFlags =
+      parseMemoryFlags(HTMLResource::getDefaultMemoryFlags());
+  ASSIGN_OR_RETURN(Arg, readFilename());
+  return llvm::make_unique<HTMLResource>(*Arg, MemoryFlags);
 }
 
 RCParser::ParseType RCParser::parseMenuResource() {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(MenuResource::getDefaultMemoryFlags());
   ASSIGN_OR_RETURN(OptStatements, parseOptionalStatements());
   ASSIGN_OR_RETURN(Items, parseMenuItemsList());
   return llvm::make_unique<MenuResource>(std::move(*OptStatements),
-                                         std::move(*Items));
+                                         std::move(*Items), MemoryFlags);
 }
 
 Expected<MenuDefinitionList> RCParser::parseMenuItemsList() {
@@ -563,11 +683,13 @@ Expected<MenuDefinitionList> RCParser::parseMenuItemsList() {
 }
 
 RCParser::ParseType RCParser::parseStringTableResource() {
+  uint16_t MemoryFlags =
+      parseMemoryFlags(StringTableResource::getDefaultMemoryFlags());
   ASSIGN_OR_RETURN(OptStatements, parseOptionalStatements());
   RETURN_IF_ERROR(consumeType(Kind::BlockBegin));
 
-  auto Table =
-      llvm::make_unique<StringTableResource>(std::move(*OptStatements));
+  auto Table = llvm::make_unique<StringTableResource>(std::move(*OptStatements),
+                                                      MemoryFlags);
 
   // Read strings until we reach the end of the block.
   while (!consumeOptionalType(Kind::BlockEnd)) {
@@ -575,6 +697,7 @@ RCParser::ParseType RCParser::parseStringTableResource() {
     // Some examples in documentation suggest that there might be a comma in
     // between, however we strictly adhere to the single statement definition.
     ASSIGN_OR_RETURN(IDResult, readInt());
+    consumeOptionalType(Kind::Comma);
     ASSIGN_OR_RETURN(StrResult, readString());
     Table->addString(*IDResult, *StrResult);
   }
@@ -676,6 +799,11 @@ RCParser::ParseOptionType RCParser::parseCaptionStmt() {
   return llvm::make_unique<CaptionStmt>(*Arg);
 }
 
+RCParser::ParseOptionType RCParser::parseClassStmt() {
+  ASSIGN_OR_RETURN(Arg, readIntOrString());
+  return llvm::make_unique<ClassStmt>(*Arg);
+}
+
 RCParser::ParseOptionType RCParser::parseFontStmt(OptStmtType DialogType) {
   assert(DialogType != OptStmtType::BasicStmt);
 
@@ -705,6 +833,11 @@ RCParser::ParseOptionType RCParser::parseFontStmt(OptStmtType DialogType) {
 RCParser::ParseOptionType RCParser::parseStyleStmt() {
   ASSIGN_OR_RETURN(Arg, readInt());
   return llvm::make_unique<StyleStmt>(*Arg);
+}
+
+RCParser::ParseOptionType RCParser::parseExStyleStmt() {
+  ASSIGN_OR_RETURN(Arg, readInt());
+  return llvm::make_unique<ExStyleStmt>(*Arg);
 }
 
 Error RCParser::getExpectedError(const Twine &Message, bool IsAlreadyRead) {

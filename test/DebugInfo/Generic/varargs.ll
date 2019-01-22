@@ -83,7 +83,7 @@ attributes #1 = { nounwind readnone }
 !8 = !{null, !9, !10, null}
 !9 = !DIDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !4)
 !10 = !DIBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
-!14 = distinct !DISubprogram(name: "b", linkageName: "_Z1biz", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 13, file: !1, scope: !15, type: !16, variables: !2)
+!14 = distinct !DISubprogram(name: "b", linkageName: "_Z1biz", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 13, file: !1, scope: !15, type: !16, retainedNodes: !2)
 !15 = !DIFile(filename: "llvm/tools/clang/test/CodeGenCXX/debug-info-varargs.cpp", directory: "radar/13690847")
 !16 = !DISubroutineType(types: !17)
 !17 = !{null, !10, null}
@@ -95,7 +95,7 @@ attributes #1 = { nounwind readnone }
 !23 = !DILocalVariable(name: "a", line: 16, scope: !14, file: !15, type: !4)
 !24 = !DILocation(line: 16, scope: !14)
 ; Manually modifed to avoid dependence on pointer size
-!25 = !DILocalVariable(name: "fptr", line: 18, scope: !14, file: !15, type: !16)
+!25 = !DILocalVariable(name: "fptr", line: 18, scope: !14, file: !15, type: !26)
 !26 = !DIDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !16)
 !27 = !DILocation(line: 18, scope: !14)
 !28 = !DILocation(line: 22, scope: !14)

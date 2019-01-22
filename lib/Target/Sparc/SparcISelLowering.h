@@ -1,9 +1,8 @@
 //===-- SparcISelLowering.h - Sparc DAG Lowering Interface ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,7 +15,7 @@
 #define LLVM_LIB_TARGET_SPARC_SPARCISELLOWERING_H
 
 #include "Sparc.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
   class SparcSubtarget;
@@ -32,9 +31,6 @@ namespace llvm {
       SELECT_ICC,  // Select between two values using the current ICC flags.
       SELECT_XCC,  // Select between two values using the current XCC flags.
       SELECT_FCC,  // Select between two values using the current FCC flags.
-
-      EH_SJLJ_SETJMP,  // builtin setjmp operation
-      EH_SJLJ_LONGJMP, // builtin longjmp operation
 
       Hi, Lo,      // Hi/Lo operations, typically on a global address.
 
@@ -59,9 +55,9 @@ namespace llvm {
   public:
     SparcTargetLowering(const TargetMachine &TM, const SparcSubtarget &STI);
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
-    
+
     bool useSoftFloat() const override;
-    
+
     /// computeKnownBitsForTargetNode - Determine which of the bits specified
     /// in Mask are known to be either zero or one and return them in the
     /// KnownZero/KnownOne bitsets.
@@ -171,12 +167,6 @@ namespace llvm {
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
 
-    SDValue LowerEH_SJLJ_SETJMP(SDValue Op, SelectionDAG &DAG,
-                                const SparcTargetLowering &TLI) const ;
-    SDValue LowerEH_SJLJ_LONGJMP(SDValue Op, SelectionDAG &DAG,
-                                 const SparcTargetLowering &TLI) const ;
-
-    unsigned getSRetArgSize(SelectionDAG &DAG, SDValue Callee) const;
     SDValue withTargetFlags(SDValue Op, unsigned TF, SelectionDAG &DAG) const;
     SDValue makeHiLoPair(SDValue Op, unsigned HiTF, unsigned LoTF,
                          SelectionDAG &DAG) const;
@@ -191,6 +181,13 @@ namespace llvm {
                              const SDLoc &DL, SelectionDAG &DAG) const;
 
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+
+    SDValue PerformBITCASTCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
+    SDValue bitcastConstantFPToInt(ConstantFPSDNode *C, const SDLoc &DL,
+                                   SelectionDAG &DAG) const;
+
+    SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
     bool ShouldShrinkFPConstant(EVT VT) const override {
       // Do not shrink FP constpool if VT == MVT::f128.
@@ -213,10 +210,6 @@ namespace llvm {
 
     MachineBasicBlock *expandSelectCC(MachineInstr &MI, MachineBasicBlock *BB,
                                       unsigned BROpcode) const;
-    MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr &MI,
-                                        MachineBasicBlock *MBB) const;
-    MachineBasicBlock *emitEHSjLjLongJmp(MachineInstr &MI,
-                                         MachineBasicBlock *MBB) const;
   };
 } // end namespace llvm
 

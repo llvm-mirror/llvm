@@ -1,9 +1,8 @@
 //===- llvm/Support/Mutex.h - Mutex Operating System Concept -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 #ifndef LLVM_SUPPORT_MUTEX_H
 #define LLVM_SUPPORT_MUTEX_H
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Threading.h"
 #include <cassert>
@@ -22,7 +22,7 @@ namespace llvm
 {
   namespace sys
   {
-    /// @brief Platform agnostic Mutex class.
+    /// Platform agnostic Mutex class.
     class MutexImpl
     {
     /// @name Constructors
@@ -33,11 +33,11 @@ namespace llvm
       /// to false, the lock will not be recursive which makes it cheaper but
       /// also more likely to deadlock (same thread can't acquire more than
       /// once).
-      /// @brief Default Constructor.
+      /// Default Constructor.
       explicit MutexImpl(bool recursive = true);
 
       /// Releases and removes the lock
-      /// @brief Destructor
+      /// Destructor
       ~MutexImpl();
 
     /// @}
@@ -48,14 +48,14 @@ namespace llvm
       /// Attempts to unconditionally acquire the lock. If the lock is held by
       /// another thread, this method will wait until it can acquire the lock.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally acquire the lock.
+      /// Unconditionally acquire the lock.
       bool acquire();
 
       /// Attempts to release the lock. If the lock is held by the current
       /// thread, the lock is released allowing other threads to acquire the
       /// lock.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally release the lock.
+      /// Unconditionally release the lock.
       bool release();
 
       /// Attempts to acquire the lock without blocking. If the lock is not
@@ -63,7 +63,7 @@ namespace llvm
       /// the lock is available, it is acquired.
       /// @returns false if any kind of error occurs or the lock is not
       /// available, true otherwise.
-      /// @brief Try to acquire the lock.
+      /// Try to acquire the lock.
       bool tryacquire();
 
     //@}

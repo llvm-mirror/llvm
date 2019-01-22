@@ -1,9 +1,8 @@
 //========- unittests/Support/Host.cpp - Host.cpp tests --------------========//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -139,6 +138,114 @@ Hardware        : Qualcomm Technologies, Inc MSM8992
 
   EXPECT_EQ(sys::detail::getHostCPUNameForARM(MSM8992ProcCpuInfo),
             "cortex-a53");
+
+  // Exynos big.LITTLE weirdness
+  const std::string ExynosProcCpuInfo = R"(
+processor       : 0
+Features        : fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer : 0x41
+CPU architecture: 8
+CPU variant     : 0x0
+CPU part        : 0xd03
+
+processor       : 1
+Features        : fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer : 0x53
+CPU architecture: 8
+)";
+
+  // Verify default for Exynos.
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ExynosProcCpuInfo +
+                                              "CPU variant     : 0xc\n"
+                                              "CPU part        : 0xafe"),
+            "exynos-m1");
+  // Verify Exynos M1.
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ExynosProcCpuInfo +
+                                              "CPU variant     : 0x1\n"
+                                              "CPU part        : 0x001"),
+            "exynos-m1");
+  // Verify Exynos M2.
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ExynosProcCpuInfo +
+                                              "CPU variant     : 0x4\n"
+                                              "CPU part        : 0x001"),
+            "exynos-m2");
+
+  const std::string ThunderX2T99ProcCpuInfo = R"(
+processor	: 0
+BogoMIPS	: 400.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics
+CPU implementer	: 0x43
+CPU architecture: 8
+CPU variant	: 0x1
+CPU part	: 0x0af
+)";
+
+  // Verify different versions of ThunderX2T99.
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x42\n"
+                                              "CPU part	: 0x516"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x42\n"
+                                              "CPU part	: 0x0516"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0x516"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0x0516"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x42\n"
+                                              "CPU part	: 0xaf"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x42\n"
+                                              "CPU part	: 0x0af"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0xaf"),
+            "thunderx2t99");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderX2T99ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0x0af"),
+            "thunderx2t99");
+
+  // Verify ThunderXT88.
+  const std::string ThunderXT88ProcCpuInfo = R"(
+processor	: 0
+BogoMIPS	: 200.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer	: 0x43
+CPU architecture: 8
+CPU variant	: 0x1
+CPU part	: 0x0a1
+)";
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderXT88ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0x0a1"),
+            "thunderxt88");
+
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM(ThunderXT88ProcCpuInfo +
+                                              "CPU implementer	: 0x43\n"
+                                              "CPU part	: 0xa1"),
+            "thunderxt88");
+
+  // Verify HiSilicon processors.
+  EXPECT_EQ(sys::detail::getHostCPUNameForARM("CPU implementer : 0x48\n"
+                                              "CPU part        : 0xd01"),
+            "tsv110");
 }
 
 #if defined(__APPLE__)
@@ -154,12 +261,12 @@ TEST_F(HostTest, getMacOSHostVersion) {
   path::append(OutputFile, "out");
 
   const char *SwVersPath = "/usr/bin/sw_vers";
-  const char *argv[] = {SwVersPath, "-productVersion", nullptr};
+  StringRef argv[] = {SwVersPath, "-productVersion"};
   StringRef OutputPath = OutputFile.str();
   const Optional<StringRef> Redirects[] = {/*STDIN=*/None,
                                            /*STDOUT=*/OutputPath,
                                            /*STDERR=*/None};
-  int RetCode = ExecuteAndWait(SwVersPath, argv, /*env=*/nullptr, Redirects);
+  int RetCode = ExecuteAndWait(SwVersPath, argv, /*env=*/llvm::None, Redirects);
   ASSERT_EQ(0, RetCode);
 
   int FD = 0;

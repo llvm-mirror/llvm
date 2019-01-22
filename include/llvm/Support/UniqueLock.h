@@ -1,9 +1,8 @@
 //===- Support/UniqueLock.h - Acquire/Release Mutex In Scope ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,7 +23,7 @@ namespace llvm {
   /// an associated mutex, which is guaranteed to be locked upon creation
   /// and unlocked after destruction. unique_lock can also unlock the mutex
   /// and re-lock it freely during its lifetime.
-  /// @brief Guard a section of code with a mutex.
+  /// Guard a section of code with a mutex.
   template<typename MutexT>
   class unique_lock {
     MutexT *M = nullptr;

@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/DIEHash.cpp - Dwarf Hashing Framework ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,7 +27,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "dwarfdebug"
 
-/// \brief Grabs the string in whichever attribute is passed in and returns
+/// Grabs the string in whichever attribute is passed in and returns
 /// a reference to it.
 static StringRef getDIEStringAttr(const DIE &Die, uint16_t Attr) {
   // Iterate through all the attributes until we find the one we're
@@ -40,10 +39,10 @@ static StringRef getDIEStringAttr(const DIE &Die, uint16_t Attr) {
   return StringRef("");
 }
 
-/// \brief Adds the string in \p Str to the hash. This also hashes
+/// Adds the string in \p Str to the hash. This also hashes
 /// a trailing NULL with the string.
 void DIEHash::addString(StringRef Str) {
-  DEBUG(dbgs() << "Adding string " << Str << " to hash.\n");
+  LLVM_DEBUG(dbgs() << "Adding string " << Str << " to hash.\n");
   Hash.update(Str);
   Hash.update(makeArrayRef((uint8_t)'\0'));
 }
@@ -51,9 +50,9 @@ void DIEHash::addString(StringRef Str) {
 // FIXME: The LEB128 routines are copied and only slightly modified out of
 // LEB128.h.
 
-/// \brief Adds the unsigned in \p Value to the hash encoded as a ULEB128.
+/// Adds the unsigned in \p Value to the hash encoded as a ULEB128.
 void DIEHash::addULEB128(uint64_t Value) {
-  DEBUG(dbgs() << "Adding ULEB128 " << Value << " to hash.\n");
+  LLVM_DEBUG(dbgs() << "Adding ULEB128 " << Value << " to hash.\n");
   do {
     uint8_t Byte = Value & 0x7f;
     Value >>= 7;
@@ -64,7 +63,7 @@ void DIEHash::addULEB128(uint64_t Value) {
 }
 
 void DIEHash::addSLEB128(int64_t Value) {
-  DEBUG(dbgs() << "Adding ULEB128 " << Value << " to hash.\n");
+  LLVM_DEBUG(dbgs() << "Adding ULEB128 " << Value << " to hash.\n");
   bool More;
   do {
     uint8_t Byte = Value & 0x7f;
@@ -77,10 +76,10 @@ void DIEHash::addSLEB128(int64_t Value) {
   } while (More);
 }
 
-/// \brief Including \p Parent adds the context of Parent to the hash..
+/// Including \p Parent adds the context of Parent to the hash..
 void DIEHash::addParentContext(const DIE &Parent) {
 
-  DEBUG(dbgs() << "Adding parent context to hash...\n");
+  LLVM_DEBUG(dbgs() << "Adding parent context to hash...\n");
 
   // [7.27.2] For each surrounding type or namespace beginning with the
   // outermost such construct...
@@ -108,7 +107,7 @@ void DIEHash::addParentContext(const DIE &Parent) {
 
     // ... Then the name, taken from the DW_AT_name attribute.
     StringRef Name = getDIEStringAttr(Die, dwarf::DW_AT_name);
-    DEBUG(dbgs() << "... adding context: " << Name << "\n");
+    LLVM_DEBUG(dbgs() << "... adding context: " << Name << "\n");
     if (!Name.empty())
       addString(Name);
   }
@@ -118,9 +117,9 @@ void DIEHash::addParentContext(const DIE &Parent) {
 void DIEHash::collectAttributes(const DIE &Die, DIEAttrs &Attrs) {
 
   for (const auto &V : Die.values()) {
-    DEBUG(dbgs() << "Attribute: "
-                 << dwarf::AttributeString(V.getAttribute())
-                 << " added.\n");
+    LLVM_DEBUG(dbgs() << "Attribute: "
+                      << dwarf::AttributeString(V.getAttribute())
+                      << " added.\n");
     switch (V.getAttribute()) {
 #define HANDLE_DIE_HASH_ATTR(NAME)                                             \
   case dwarf::NAME:                                                            \

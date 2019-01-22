@@ -1,9 +1,8 @@
 //===-- MipsMCAsmInfo.cpp - Mips Asm Properties ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,16 +20,13 @@ void MipsMCAsmInfo::anchor() { }
 MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple) {
   IsLittleEndian = TheTriple.isLittleEndian();
 
-  if ((TheTriple.getArch() == Triple::mips64el) ||
-      (TheTriple.getArch() == Triple::mips64)) {
+  if (TheTriple.isMIPS64() && TheTriple.getEnvironment() != Triple::GNUABIN32)
     CodePointerSize = CalleeSaveStackSlotSize = 8;
-  }
 
   // FIXME: This condition isn't quite right but it's the best we can do until
   //        this object can identify the ABI. It will misbehave when using O32
   //        on a mips64*-* triple.
-  if ((TheTriple.getArch() == Triple::mipsel) ||
-      (TheTriple.getArch() == Triple::mips)) {
+  if (TheTriple.isMIPS32()) {
     PrivateGlobalPrefix = "$";
     PrivateLabelPrefix = "$";
   }
@@ -52,17 +48,5 @@ MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   DwarfRegNumForCFI = true;
   HasMipsExpressions = true;
-
-  // Enable IAS by default for O32.
-  if (TheTriple.getArch() == Triple::mips ||
-      TheTriple.getArch() == Triple::mipsel)
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for Debian mips64/mips64el.
-  if (TheTriple.getEnvironment() == Triple::GNUABI64)
-    UseIntegratedAssembler = true;
-
-  // Enable IAS by default for Android mips64el that uses N64 ABI.
-  if (TheTriple.getArch() == Triple::mips64el && TheTriple.isAndroid())
-    UseIntegratedAssembler = true;
+  UseIntegratedAssembler = true;
 }

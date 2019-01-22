@@ -1,9 +1,8 @@
 //===-- MipsMCExpr.cpp - Mips specific MC expression classes --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -42,6 +41,9 @@ void MipsMCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
   case MEK_None:
   case MEK_Special:
     llvm_unreachable("MEK_None and MEK_Special are invalid");
+    break;
+  case MEK_DTPREL:
+    llvm_unreachable("MEK_DTPREL is used for TLS DIEExpr only");
     break;
   case MEK_CALL_HI16:
     OS << "%call_hi";
@@ -157,6 +159,8 @@ MipsMCExpr::evaluateAsRelocatableImpl(MCValue &Res,
     case MEK_None:
     case MEK_Special:
       llvm_unreachable("MEK_None and MEK_Special are invalid");
+    case MEK_DTPREL:
+      llvm_unreachable("MEK_DTPREL is used for TLS DIEExpr only");
     case MEK_DTPREL_HI:
     case MEK_DTPREL_LO:
     case MEK_GOT:
@@ -244,10 +248,11 @@ void MipsMCExpr::fixELFSymbolsInTLSFixups(MCAssembler &Asm) const {
   case MEK_Special:
     llvm_unreachable("MEK_None and MEK_Special are invalid");
     break;
+  case MEK_DTPREL:
+    llvm_unreachable("MEK_DTPREL is used for TLS DIEExpr only");
+    break;
   case MEK_CALL_HI16:
   case MEK_CALL_LO16:
-  case MEK_DTPREL_HI:
-  case MEK_DTPREL_LO:
   case MEK_GOT:
   case MEK_GOT_CALL:
   case MEK_GOT_DISP:
@@ -263,14 +268,16 @@ void MipsMCExpr::fixELFSymbolsInTLSFixups(MCAssembler &Asm) const {
   case MEK_NEG:
   case MEK_PCREL_HI16:
   case MEK_PCREL_LO16:
-  case MEK_TLSLDM:
     // If we do have nested target-specific expressions, they will be in
     // a consecutive chain.
     if (const MipsMCExpr *E = dyn_cast<const MipsMCExpr>(getSubExpr()))
       E->fixELFSymbolsInTLSFixups(Asm);
     break;
-  case MEK_GOTTPREL:
+  case MEK_DTPREL_HI:
+  case MEK_DTPREL_LO:
+  case MEK_TLSLDM:
   case MEK_TLSGD:
+  case MEK_GOTTPREL:
   case MEK_TPREL_HI:
   case MEK_TPREL_LO:
     fixELFSymbolsInTLSFixupsImpl(getSubExpr(), Asm);

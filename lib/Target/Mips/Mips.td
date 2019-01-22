@@ -1,9 +1,8 @@
 //===-- Mips.td - Describe the Mips Target Machine ---------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This is the top level entry point for the Mips target.
@@ -28,8 +27,10 @@ class PredicateControl {
   list<Predicate> PTRPredicates = [];
   // Predicates for the FGR size and layout such as IsFP64bit
   list<Predicate> FGRPredicates = [];
-  // Predicates for the instruction group membership such as ISA's and ASE's
+  // Predicates for the instruction group membership such as ISA's.
   list<Predicate> InsnPredicates = [];
+  // Predicate for the ASE that an instruction belongs to.
+  list<Predicate> ASEPredicate = [];
   // Predicate for marking the instruction as usable in hard-float mode only.
   list<Predicate> HardFloatPredicate = [];
   // Predicates for anything else
@@ -40,6 +41,7 @@ class PredicateControl {
                                            FGRPredicates,
                                            InsnPredicates,
                                            HardFloatPredicate,
+                                           ASEPredicate,
                                            AdditionalPredicates);
 }
 
@@ -56,6 +58,7 @@ include "MipsRegisterInfo.td"
 include "MipsSchedule.td"
 include "MipsInstrInfo.td"
 include "MipsCallingConv.td"
+include "MipsRegisterBanks.td"
 
 // Avoid forward declaration issues.
 include "MipsScheduleP5600.td"
@@ -173,6 +176,14 @@ def FeatureMSA : SubtargetFeature<"msa", "HasMSA", "true", "Mips MSA ASE">;
 
 def FeatureEVA : SubtargetFeature<"eva", "HasEVA", "true", "Mips EVA ASE">;
 
+def FeatureCRC : SubtargetFeature<"crc", "HasCRC", "true", "Mips R6 CRC ASE">;
+
+def FeatureVirt : SubtargetFeature<"virt", "HasVirt", "true",
+                                   "Mips Virtualization ASE">;
+
+def FeatureGINV : SubtargetFeature<"ginv", "HasGINV", "true",
+                                   "Mips Global Invalidate ASE">;
+
 def FeatureMicroMips  : SubtargetFeature<"micromips", "InMicroMipsMode", "true",
                                          "microMips mode">;
 
@@ -193,6 +204,10 @@ def FeatureMT : SubtargetFeature<"mt", "HasMT", "true", "Mips MT ASE">;
 def FeatureLongCalls : SubtargetFeature<"long-calls", "UseLongCalls", "true",
                                         "Disable use of the jal instruction">;
 
+def FeatureUseIndirectJumpsHazard : SubtargetFeature<"use-indirect-jump-hazard",
+                                                    "UseIndirectJumpsHazard",
+                                                    "true", "Use indirect jump"
+                        " guards to prevent certain speculation based attacks">;
 //===----------------------------------------------------------------------===//
 // Mips processors supported.
 //===----------------------------------------------------------------------===//
@@ -238,4 +253,5 @@ def Mips : Target {
   let InstructionSet = MipsInstrInfo;
   let AssemblyParsers = [MipsAsmParser];
   let AssemblyParserVariants = [MipsAsmParserVariant];
+  let AllowRegisterRenaming = 1;
 }

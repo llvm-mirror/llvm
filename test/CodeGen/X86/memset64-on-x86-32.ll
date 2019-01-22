@@ -5,7 +5,7 @@
 
 define void @bork() nounwind {
 ; FAST-LABEL: bork:
-; FAST:       # BB#0:
+; FAST:       # %bb.0:
 ; FAST-NEXT:    xorps %xmm0, %xmm0
 ; FAST-NEXT:    movups %xmm0, 64
 ; FAST-NEXT:    movups %xmm0, 48
@@ -15,7 +15,7 @@ define void @bork() nounwind {
 ; FAST-NEXT:    retl
 ;
 ; SLOW_32-LABEL: bork:
-; SLOW_32:       # BB#0:
+; SLOW_32:       # %bb.0:
 ; SLOW_32-NEXT:    movl $0, 4
 ; SLOW_32-NEXT:    movl $0, 0
 ; SLOW_32-NEXT:    movl $0, 12
@@ -39,7 +39,7 @@ define void @bork() nounwind {
 ; SLOW_32-NEXT:    retl
 ;
 ; SLOW_64-LABEL: bork:
-; SLOW_64:       # BB#0:
+; SLOW_64:       # %bb.0:
 ; SLOW_64-NEXT:    movq $0, 72
 ; SLOW_64-NEXT:    movq $0, 64
 ; SLOW_64-NEXT:    movq $0, 56
@@ -51,9 +51,9 @@ define void @bork() nounwind {
 ; SLOW_64-NEXT:    movq $0, 8
 ; SLOW_64-NEXT:    movq $0, 0
 ; SLOW_64-NEXT:    retq
-  call void @llvm.memset.p0i8.i64(i8* null, i8 0, i64 80, i32 4, i1 false)
+  call void @llvm.memset.p0i8.i64(i8* align 4 null, i8 0, i64 80, i1 false)
   ret void
 }
 
-declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1) nounwind
+declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i1) nounwind
 

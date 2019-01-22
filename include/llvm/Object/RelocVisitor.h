@@ -1,9 +1,8 @@
 //===- RelocVisitor.h - Visitor for object file relocations -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,6 +22,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Object/Wasm.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cstdint>
@@ -31,7 +31,7 @@
 namespace llvm {
 namespace object {
 
-/// @brief Base class for object file relocation visitors.
+/// Base class for object file relocation visitors.
 class RelocVisitor {
 public:
   explicit RelocVisitor(const ObjectFile &Obj) : ObjToVisit(Obj) {}
@@ -46,6 +46,8 @@ public:
       return visitCOFF(Rel, R, Value);
     if (isa<MachOObjectFile>(ObjToVisit))
       return visitMachO(Rel, R, Value);
+    if (isa<WasmObjectFile>(ObjToVisit))
+      return visitWasm(Rel, R, Value);
 
     HasError = true;
     return 0;
@@ -98,6 +100,8 @@ private:
     case Triple::arm:
     case Triple::armeb:
       return visitARM(Rel, R, Value);
+    case Triple::avr:
+      return visitAVR(Rel, R, Value);
     case Triple::lanai:
       return visitLanai(Rel, R, Value);
     case Triple::mipsel:
@@ -126,6 +130,8 @@ private:
     case ELF::R_X86_64_NONE:
       return 0;
     case ELF::R_X86_64_64:
+    case ELF::R_X86_64_DTPOFF32:
+    case ELF::R_X86_64_DTPOFF64:
       return Value + getELFAddend(R);
     case ELF::R_X86_64_PC32:
       return Value + getELFAddend(R) - R.getOffset();
@@ -254,6 +260,16 @@ private:
     return 0;
   }
 
+  uint64_t visitAVR(uint32_t Rel, RelocationRef R, uint64_t Value) {
+    if (Rel == ELF::R_AVR_16) {
+      return (Value + getELFAddend(R)) & 0xFFFF;
+    } else if (Rel == ELF::R_AVR_32) {
+      return (Value + getELFAddend(R)) & 0xFFFFFFFF;
+    }
+    HasError = true;
+    return 0;
+  }
+
   uint64_t visitLanai(uint32_t Rel, RelocationRef R, uint64_t Value) {
     if (Rel == ELF::R_LANAI_32)
       return (Value + getELFAddend(R)) & 0xFFFFFFFF;
@@ -302,6 +318,8 @@ private:
         return Value;
       }
       break;
+    default:
+      break;
     }
     HasError = true;
     return 0;
@@ -311,6 +329,28 @@ private:
     if (ObjToVisit.getArch() == Triple::x86_64 &&
         Rel == MachO::X86_64_RELOC_UNSIGNED)
       return Value;
+    HasError = true;
+    return 0;
+  }
+
+  uint64_t visitWasm(uint32_t Rel, RelocationRef R, uint64_t Value) {
+    if (ObjToVisit.getArch() == Triple::wasm32) {
+      switch (Rel) {
+      case wasm::R_WEBASSEMBLY_FUNCTION_INDEX_LEB:
+      case wasm::R_WEBASSEMBLY_TABLE_INDEX_SLEB:
+      case wasm::R_WEBASSEMBLY_TABLE_INDEX_I32:
+      case wasm::R_WEBASSEMBLY_MEMORY_ADDR_LEB:
+      case wasm::R_WEBASSEMBLY_MEMORY_ADDR_SLEB:
+      case wasm::R_WEBASSEMBLY_MEMORY_ADDR_I32:
+      case wasm::R_WEBASSEMBLY_TYPE_INDEX_LEB:
+      case wasm::R_WEBASSEMBLY_GLOBAL_INDEX_LEB:
+      case wasm::R_WEBASSEMBLY_FUNCTION_OFFSET_I32:
+      case wasm::R_WEBASSEMBLY_SECTION_OFFSET_I32:
+      case wasm::R_WEBASSEMBLY_EVENT_INDEX_LEB:
+        // For wasm section, its offset at 0 -- ignoring Value
+        return 0;
+      }
+    }
     HasError = true;
     return 0;
   }

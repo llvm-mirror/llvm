@@ -1,9 +1,8 @@
 //=- Mips64r6InstrInfo.td - Mips64r6 Instruction Information -*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -39,6 +38,8 @@ class DMULU_ENC   : SPECIAL_3R_FM<0b00010, 0b011101>;
 class LDPC_ENC    : PCREL18_FM<OPCODE3_LDPC>;
 class LLD_R6_ENC : SPECIAL3_LL_SC_FM<OPCODE6_LLD>;
 class SCD_R6_ENC : SPECIAL3_LL_SC_FM<OPCODE6_SCD>;
+class CRC32D_ENC  : SPECIAL3_2R_SZ_CRC<3,0>;
+class CRC32CD_ENC : SPECIAL3_2R_SZ_CRC<3,1>;
 
 //===----------------------------------------------------------------------===//
 //
@@ -71,7 +72,7 @@ class DMUHU_DESC   : MUL_R6_DESC_BASE<"dmuhu", GPR64Opnd, II_DMUHU, mulhu>;
 class DMUL_R6_DESC : MUL_R6_DESC_BASE<"dmul", GPR64Opnd, II_DMUL, mul>;
 class DMULU_DESC   : MUL_R6_DESC_BASE<"dmulu", GPR64Opnd, II_DMUL>;
 class LDPC_DESC    : PCREL_DESC_BASE<"ldpc", GPR64Opnd, simm18_lsl3, II_LDPC>;
-class LLD_R6_DESC   : LL_R6_DESC_BASE<"lld", GPR64Opnd, mem_simm16, II_LLD>;
+class LLD_R6_DESC   : LL_R6_DESC_BASE<"lld", GPR64Opnd, mem_simmptr, II_LLD>;
 class SCD_R6_DESC   : SC_R6_DESC_BASE<"scd", GPR64Opnd, II_SCD>;
 class SELEQZ64_DESC : SELEQNE_Z_DESC_BASE<"seleqz", GPR64Opnd>;
 class SELNEZ64_DESC : SELEQNE_Z_DESC_BASE<"selnez", GPR64Opnd>;
@@ -104,6 +105,20 @@ class JIC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jic", jmpoffset16, GPR64Opnd,
 
 class LL64_R6_DESC : LL_R6_DESC_BASE<"ll", GPR32Opnd, mem_simm9, II_LL>;
 class SC64_R6_DESC : SC_R6_DESC_BASE<"sc", GPR32Opnd, II_SC>;
+
+class JR_HB64_R6_DESC : JR_HB_DESC_BASE<"jr.hb", GPR64Opnd> {
+  bit isBranch = 1;
+  bit isIndirectBranch = 1;
+  bit hasDelaySlot = 1;
+  bit isTerminator=1;
+  bit isBarrier=1;
+  bit isCTI = 1;
+  InstrItinClass Itinerary = II_JR_HB;
+}
+
+class CRC32D_DESC  : CRC_DESC_BASE<"crc32d", GPR32Opnd, II_CRC32D>;
+class CRC32CD_DESC : CRC_DESC_BASE<"crc32cd", GPR32Opnd, II_CRC32CD>;
+
 //===----------------------------------------------------------------------===//
 //
 // Instruction Definitions
@@ -117,25 +132,26 @@ let AdditionalPredicates = [NotInMicroMips] in {
   }
   def DAUI : DAUI_ENC, DAUI_DESC, ISA_MIPS64R6;
   def DALIGN : DALIGN_ENC, DALIGN_DESC, ISA_MIPS64R6;
-  def DBITSWAP : R6MMR6Rel, DBITSWAP_ENC, DBITSWAP_DESC, ISA_MIPS64R6;
-  def DCLO_R6 : R6MMR6Rel, DCLO_R6_ENC, DCLO_R6_DESC, ISA_MIPS64R6;
-  def DCLZ_R6 : R6MMR6Rel, DCLZ_R6_ENC, DCLZ_R6_DESC, ISA_MIPS64R6;
+  def DBITSWAP : DBITSWAP_ENC, DBITSWAP_DESC, ISA_MIPS64R6;
+  def DCLO_R6 : DCLO_R6_ENC, DCLO_R6_DESC, ISA_MIPS64R6;
+  def DCLZ_R6 : DCLZ_R6_ENC, DCLZ_R6_DESC, ISA_MIPS64R6;
   def DDIV : DDIV_ENC, DDIV_DESC, ISA_MIPS64R6;
   def DDIVU : DDIVU_ENC, DDIVU_DESC, ISA_MIPS64R6;
   def DMOD : DMOD_ENC, DMOD_DESC, ISA_MIPS64R6;
   def DMODU : DMODU_ENC, DMODU_DESC, ISA_MIPS64R6;
-  def DLSA_R6 : R6MMR6Rel, DLSA_R6_ENC, DLSA_R6_DESC, ISA_MIPS64R6;
+  def DLSA_R6 : DLSA_R6_ENC, DLSA_R6_DESC, ISA_MIPS64R6;
   def DMUH: DMUH_ENC, DMUH_DESC, ISA_MIPS64R6;
   def DMUHU: DMUHU_ENC, DMUHU_DESC, ISA_MIPS64R6;
   def DMUL_R6: DMUL_R6_ENC, DMUL_R6_DESC, ISA_MIPS64R6;
   def DMULU: DMULU_ENC, DMULU_DESC, ISA_MIPS64R6;
-  def LLD_R6 : R6MMR6Rel, LLD_R6_ENC, LLD_R6_DESC, ISA_MIPS64R6;
+  def LLD_R6 : LLD_R6_ENC, LLD_R6_DESC, ISA_MIPS64R6;
 }
-def LDPC: R6MMR6Rel, LDPC_ENC, LDPC_DESC, ISA_MIPS64R6;
+def LDPC: LDPC_ENC, LDPC_DESC, ISA_MIPS64R6;
 def SCD_R6 : SCD_R6_ENC, SCD_R6_DESC, ISA_MIPS32R6;
 let DecoderNamespace = "Mips32r6_64r6_GP64" in {
   def SELEQZ64 : SELEQZ_ENC, SELEQZ64_DESC, ISA_MIPS32R6, GPR_64;
   def SELNEZ64 : SELNEZ_ENC, SELNEZ64_DESC, ISA_MIPS32R6, GPR_64;
+  def JR_HB64_R6 : JR_HB_R6_ENC, JR_HB64_R6_DESC, ISA_MIPS32R6;
 }
 let AdditionalPredicates = [NotInMicroMips],
     DecoderNamespace = "Mips32r6_64r6_PTR64" in {
@@ -162,6 +178,10 @@ def BNEZC64 : BNEZC_ENC, BNEZC64_DESC, ISA_MIPS64R6, GPR_64;
 let DecoderNamespace = "Mips32r6_64r6_BranchZero" in {
 def BLTZC64 : BLTZC_ENC, BLTZC64_DESC, ISA_MIPS64R6, GPR_64;
 def BGEZC64 : BGEZC_ENC, BGEZC64_DESC, ISA_MIPS64R6, GPR_64;
+}
+let AdditionalPredicates = [NotInMicroMips] in {
+  def CRC32D : R6MMR6Rel, CRC32D_ENC, CRC32D_DESC, ISA_MIPS64R6, ASE_CRC;
+  def CRC32CD : R6MMR6Rel, CRC32CD_ENC, CRC32CD_DESC, ISA_MIPS64R6, ASE_CRC;
 }
 
 //===----------------------------------------------------------------------===//
@@ -277,3 +297,40 @@ def : MipsPat<(select (i32 (setne i32:$cond, immz)), immz, i64:$f),
 def : MipsPat<(select (i32 (seteq i32:$cond, immz)), immz, i64:$f),
               (SELNEZ64 i64:$f, (SLL64_32 i32:$cond))>,
               ISA_MIPS64R6;
+
+// Patterns used for matching away redundant sign extensions.
+// MIPS32 arithmetic instructions sign extend their result implicitly.
+def : MipsPat<(i64 (sext (i32 (mul GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (MUL_R6 GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (sdiv GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (DIV GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (udiv GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (DIVU GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (srem GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (MOD GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+def : MipsPat<(i64 (sext (i32 (urem GPR32:$src, GPR32:$src2)))),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+              (MODU GPR32:$src, GPR32:$src2), sub_32)>, ISA_MIPS64R6;
+
+// Pseudo instructions
+
+let AdditionalPredicates = [NotInMips16Mode, NotInMicroMips,
+                            NoIndirectJumpGuards] in {
+  def TAILCALL64R6REG : TailCallRegR6<JALR64, ZERO_64, GPR64Opnd>, ISA_MIPS64R6;
+  def PseudoIndirectBranch64R6 : PseudoIndirectBranchBaseR6<JALR64, ZERO_64,
+                                                            GPR64Opnd>,
+                                 ISA_MIPS64R6;
+}
+
+let AdditionalPredicates = [NotInMips16Mode, NotInMicroMips,
+                            UseIndirectJumpsHazard] in {
+  def TAILCALLHB64R6REG : TailCallReg<JR_HB64_R6, GPR64Opnd>,
+                          ISA_MIPS64R6;
+  def PseudoIndrectHazardBranch64R6 : PseudoIndirectBranchBase<JR_HB64_R6,
+                                                                 GPR64Opnd>,
+                                      ISA_MIPS64R6;
+}

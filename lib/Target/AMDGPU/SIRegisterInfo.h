@@ -1,14 +1,13 @@
 //===-- SIRegisterInfo.h - SI Register Info Interface ----------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief Interface definition for SIRegisterInfo
+/// Interface definition for SIRegisterInfo
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,15 +15,14 @@
 #define LLVM_LIB_TARGET_AMDGPU_SIREGISTERINFO_H
 
 #include "AMDGPURegisterInfo.h"
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "SIDefines.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 namespace llvm {
 
+class GCNSubtarget;
 class LiveIntervals;
 class MachineRegisterInfo;
-class SISubtarget;
 class SIMachineFunctionInfo;
 
 class SIRegisterInfo final : public AMDGPURegisterInfo {
@@ -36,11 +34,10 @@ private:
   bool SpillSGPRToVGPR;
   bool SpillSGPRToSMEM;
 
-  void reserveRegisterTuples(BitVector &, unsigned Reg) const;
   void classifyPressureSet(unsigned PSetID, unsigned Reg,
                            BitVector &PressureSets) const;
 public:
-  SIRegisterInfo(const SISubtarget &ST);
+  SIRegisterInfo(const GCNSubtarget &ST);
 
   bool spillSGPRToVGPR() const {
     return SpillSGPRToVGPR;
@@ -126,7 +123,7 @@ public:
     return getEncodingValue(Reg) & 0xff;
   }
 
-  /// \brief Return the 'base' register class for this register.
+  /// Return the 'base' register class for this register.
   /// e.g. SGPR0 => SReg_32, VGPR => VGPR_32 SGPR0_SGPR1 -> SReg_32, etc.
   const TargetRegisterClass *getPhysRegClass(unsigned Reg) const;
 
@@ -224,10 +221,17 @@ public:
 
   const int *getRegUnitPressureSets(unsigned RegUnit) const override;
 
-  unsigned getReturnAddressReg(const MachineFunction &MF) const {
-    // Not a callee saved register.
-    return AMDGPU::SGPR30_SGPR31;
-  }
+  unsigned getReturnAddressReg(const MachineFunction &MF) const;
+
+  const TargetRegisterClass *
+  getConstrainedRegClassForOperand(const MachineOperand &MO,
+                                 const MachineRegisterInfo &MRI) const override;
+
+  // Find reaching register definition
+  MachineInstr *findReachingDef(unsigned Reg, unsigned SubReg,
+                                MachineInstr &Use,
+                                MachineRegisterInfo &MRI,
+                                LiveIntervals *LIS) const;
 
 private:
   void buildSpillLoadStore(MachineBasicBlock::iterator MI,

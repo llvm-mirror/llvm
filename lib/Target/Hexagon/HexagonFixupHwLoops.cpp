@@ -1,9 +1,8 @@
 //===---- HexagonFixupHwLoops.cpp - Fixup HW loops too far from LOOPn. ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // The loop start address in the LOOPn instruction is encoded as a distance
 // from the LOOPn instruction itself. If the start address is too far from
@@ -19,8 +18,9 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/PassSupport.h"
-#include "llvm/Target/TargetInstrInfo.h"
 
 using namespace llvm;
 
@@ -59,12 +59,12 @@ namespace {
     }
 
   private:
-    /// \brief Check the offset between each loop instruction and
+    /// Check the offset between each loop instruction and
     /// the loop basic block to determine if we can use the LOOP instruction
     /// or if we need to set the LC/SA registers explicitly.
     bool fixupLoopInstrs(MachineFunction &MF);
 
-    /// \brief Replace loop instruction with the constant extended
+    /// Replace loop instruction with the constant extended
     /// version if the loop label is too far from the loop instruction.
     void useExtLoopInstr(MachineFunction &MF,
                          MachineBasicBlock::iterator &MII);
@@ -80,7 +80,7 @@ FunctionPass *llvm::createHexagonFixupHwLoops() {
   return new HexagonFixupHwLoops();
 }
 
-/// \brief Returns true if the instruction is a hardware loop instruction.
+/// Returns true if the instruction is a hardware loop instruction.
 static bool isHardwareLoop(const MachineInstr &MI) {
   return MI.getOpcode() == Hexagon::J2_loop0r ||
          MI.getOpcode() == Hexagon::J2_loop0i ||
@@ -89,12 +89,12 @@ static bool isHardwareLoop(const MachineInstr &MI) {
 }
 
 bool HexagonFixupHwLoops::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
   return fixupLoopInstrs(MF);
 }
 
-/// \brief For Hexagon, if the loop label is to far from the
+/// For Hexagon, if the loop label is to far from the
 /// loop instruction then we need to set the LC0 and SA0 registers
 /// explicitly instead of using LOOP(start,count).  This function
 /// checks the distance, and generates register assignments if needed.
@@ -137,7 +137,7 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
     MachineBasicBlock::iterator MII = MBB.begin();
     MachineBasicBlock::iterator MIE = MBB.end();
     while (MII != MIE) {
-      InstOffset += HII->getSize(*MII);
+      unsigned InstSize = HII->getSize(*MII);
       if (MII->isMetaInstruction()) {
         ++MII;
         continue;
@@ -145,8 +145,10 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
       if (isHardwareLoop(*MII)) {
         assert(MII->getOperand(0).isMBB() &&
                "Expect a basic block as loop operand");
-        int diff = InstOffset - BlockToInstOffset[MII->getOperand(0).getMBB()];
-        if ((unsigned)abs(diff) > MaxLoopRange) {
+        MachineBasicBlock *TargetBB = MII->getOperand(0).getMBB();
+        unsigned Diff = AbsoluteDifference(InstOffset,
+                                           BlockToInstOffset[TargetBB]);
+        if (Diff > MaxLoopRange) {
           useExtLoopInstr(MF, MII);
           MII = MBB.erase(MII);
           Changed = true;
@@ -156,13 +158,14 @@ bool HexagonFixupHwLoops::fixupLoopInstrs(MachineFunction &MF) {
       } else {
         ++MII;
       }
+      InstOffset += InstSize;
     }
   }
 
   return Changed;
 }
 
-/// \brief Replace loop instructions with the constant extended version.
+/// Replace loop instructions with the constant extended version.
 void HexagonFixupHwLoops::useExtLoopInstr(MachineFunction &MF,
                                           MachineBasicBlock::iterator &MII) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();

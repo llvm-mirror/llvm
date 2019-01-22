@@ -1,9 +1,8 @@
 //===- SourceCoverageViewHTML.cpp - A html code coverage view -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -16,7 +15,6 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Path.h"
 
@@ -26,38 +24,36 @@ namespace {
 
 // Return a string with the special characters in \p Str escaped.
 std::string escape(StringRef Str, const CoverageViewOptions &Opts) {
-  std::string Result;
+  std::string TabExpandedResult;
   unsigned ColNum = 0; // Record the column number.
   for (char C : Str) {
-    ++ColNum;
-    if (C == '&')
-      Result += "&amp;";
-    else if (C == '<')
-      Result += "&lt;";
-    else if (C == '>')
-      Result += "&gt;";
-    else if (C == '\"')
-      Result += "&quot;";
-    else if (C == '\n' || C == '\r') {
-      Result += C;
-      ColNum = 0;
-    } else if (C == '\t') {
-      // Replace '\t' with TabSize spaces.
-      unsigned NumSpaces = Opts.TabSize - (--ColNum % Opts.TabSize);
+    if (C == '\t') {
+      // Replace '\t' with up to TabSize spaces.
+      unsigned NumSpaces = Opts.TabSize - (ColNum % Opts.TabSize);
       for (unsigned I = 0; I < NumSpaces; ++I)
-        Result += "&nbsp;";
+        TabExpandedResult += ' ';
       ColNum += NumSpaces;
-    } else
-      Result += C;
+    } else {
+      TabExpandedResult += C;
+      if (C == '\n' || C == '\r')
+        ColNum = 0;
+      else
+        ++ColNum;
+    }
   }
-  return Result;
+  std::string EscapedHTML;
+  {
+    raw_string_ostream OS{EscapedHTML};
+    printHTMLEscaped(TabExpandedResult, OS);
+  }
+  return EscapedHTML;
 }
 
 // Create a \p Name tag around \p Str, and optionally set its \p ClassName.
 std::string tag(const std::string &Name, const std::string &Str,
                 const std::string &ClassName = "") {
   std::string Tag = "<" + Name;
-  if (ClassName != "")
+  if (!ClassName.empty())
     Tag += " class='" + ClassName + "'";
   return Tag + ">" + Str + "</" + Name + ">";
 }
@@ -117,23 +113,38 @@ table {
   background: #ffffff;
   border: 1px solid #dbdbdb;
 }
-.column-entry {
-  text-align: right;
+.light-row-bold {
+  background: #ffffff;
+  border: 1px solid #dbdbdb;
+  font-weight: bold;
 }
-.column-entry-left {
+.column-entry {
+  text-align: left;
+}
+.column-entry-bold {
+  font-weight: bold;
   text-align: left;
 }
 .column-entry-yellow {
-  text-align: right;
+  text-align: left;
   background-color: #ffffd0;
 }
+.column-entry-yellow:hover {
+  background-color: #fffff0;
+}
 .column-entry-red {
-  text-align: right;
+  text-align: left;
   background-color: #ffd0d0;
 }
+.column-entry-red:hover {
+  background-color: #fff0f0;
+}
 .column-entry-green {
-  text-align: right;
+  text-align: left;
   background-color: #d0ffd0;
+}
+.column-entry-green:hover {
+  background-color: #f0fff0;
 }
 .line-number {
   text-align: right;
@@ -185,16 +196,23 @@ table {
 }
 th, td {
   vertical-align: top;
-  padding: 2px 5px;
+  padding: 2px 8px;
   border-collapse: collapse;
   border-right: solid 1px #eee;
   border-left: solid 1px #eee;
+  text-align: left;
+}
+td pre {
+  display: inline-block;
 }
 td:first-child {
   border-left: none;
 }
 td:last-child {
   border-right: none;
+}
+tr:hover {
+  background-color: #f0f0f0;
 }
 )";
 
@@ -288,13 +306,14 @@ void CoveragePrinterHTML::closeViewFile(OwnedStream OS) {
 static void emitColumnLabelsForIndex(raw_ostream &OS,
                                      const CoverageViewOptions &Opts) {
   SmallVector<std::string, 4> Columns;
-  Columns.emplace_back(tag("td", "Filename", "column-entry-left"));
-  Columns.emplace_back(tag("td", "Function Coverage", "column-entry"));
+  Columns.emplace_back(tag("td", "Filename", "column-entry-bold"));
+  Columns.emplace_back(tag("td", "Function Coverage", "column-entry-bold"));
   if (Opts.ShowInstantiationSummary)
-    Columns.emplace_back(tag("td", "Instantiation Coverage", "column-entry"));
-  Columns.emplace_back(tag("td", "Line Coverage", "column-entry"));
+    Columns.emplace_back(
+        tag("td", "Instantiation Coverage", "column-entry-bold"));
+  Columns.emplace_back(tag("td", "Line Coverage", "column-entry-bold"));
   if (Opts.ShowRegionSummary)
-    Columns.emplace_back(tag("td", "Region Coverage", "column-entry"));
+    Columns.emplace_back(tag("td", "Region Coverage", "column-entry-bold"));
   OS << tag("tr", join(Columns.begin(), Columns.end(), ""));
 }
 
@@ -340,7 +359,7 @@ void CoveragePrinterHTML::emitFileSummary(raw_ostream &OS, StringRef SF,
   // Simplify the display file path, and wrap it in a link if requested.
   std::string Filename;
   if (IsTotals) {
-    Filename = "TOTALS";
+    Filename = SF;
   } else {
     Filename = buildLinkToFile(SF, FCS);
   }
@@ -361,7 +380,10 @@ void CoveragePrinterHTML::emitFileSummary(raw_ostream &OS, StringRef SF,
                               FCS.RegionCoverage.getNumRegions(),
                               FCS.RegionCoverage.getPercentCovered());
 
-  OS << tag("tr", join(Columns.begin(), Columns.end(), ""), "light-row");
+  if (IsTotals)
+    OS << tag("tr", join(Columns.begin(), Columns.end(), ""), "light-row-bold");
+  else
+    OS << tag("tr", join(Columns.begin(), Columns.end(), ""), "light-row");
 }
 
 Error CoveragePrinterHTML::createIndexFile(
@@ -514,8 +536,9 @@ void SourceCoverageViewHTML::renderLine(raw_ostream &OS, LineRef L,
     return tag("span", Snippet, Color.getValue());
   };
 
-  auto CheckIfUncovered = [](const CoverageSegment *S) {
-    return S && S->HasCount && S->Count == 0;
+  auto CheckIfUncovered = [&](const CoverageSegment *S) {
+    return S && (!S->IsGapRegion || (Color && *Color == "red")) &&
+           S->HasCount && S->Count == 0;
   };
 
   if (CheckIfUncovered(LCS.getWrappedSegment())) {
@@ -526,11 +549,10 @@ void SourceCoverageViewHTML::renderLine(raw_ostream &OS, LineRef L,
 
   for (unsigned I = 0, E = Segments.size(); I < E; ++I) {
     const auto *CurSeg = Segments[I];
-    if (CurSeg->Col == ExpansionCol)
-      Color = "cyan";
-    else if ((!CurSeg->IsGapRegion || (Color && *Color == "red")) &&
-             CheckIfUncovered(CurSeg))
+    if (CheckIfUncovered(CurSeg))
       Color = "red";
+    else if (CurSeg->Col == ExpansionCol)
+      Color = "cyan";
     else
       Color = None;
 
@@ -556,7 +578,7 @@ void SourceCoverageViewHTML::renderLine(raw_ostream &OS, LineRef L,
   // 4. Snippets[1:N+1] correspond to \p Segments[0:N]: use these to generate
   //    sub-line region count tooltips if needed.
 
-  if (shouldRenderRegionMarkers(Segments)) {
+  if (shouldRenderRegionMarkers(LCS)) {
     // Just consider the segments which start *and* end on this line.
     for (unsigned I = 0, E = Segments.size() - 1; I < E; ++I) {
       const auto *CurSeg = Segments[I];

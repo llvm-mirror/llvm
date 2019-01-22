@@ -1,9 +1,8 @@
 //===- Thumb1FrameLowering.cpp - Thumb1 Frame Information -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -31,6 +30,9 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
@@ -38,9 +40,6 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <bitset>
 #include <cassert>
 #include <iterator>
@@ -127,7 +126,7 @@ void Thumb1FrameLowering::emitPrologue(MachineFunction &MF,
   // Debug location must be unknown since the first debug location is used
   // to determine the end of the prologue.
   DebugLoc dl;
-  
+
   unsigned FramePtr = RegInfo->getFrameRegister(MF);
   unsigned BasePtr = RegInfo->getBaseRegister();
   int CFAOffset = 0;
@@ -512,6 +511,26 @@ bool Thumb1FrameLowering::needPopSpecialFixUp(const MachineFunction &MF) const {
   return false;
 }
 
+static void findTemporariesForLR(const BitVector &GPRsNoLRSP,
+                                 const BitVector &PopFriendly,
+                                 const LivePhysRegs &UsedRegs, unsigned &PopReg,
+                                 unsigned &TmpReg) {
+  PopReg = TmpReg = 0;
+  for (auto Reg : GPRsNoLRSP.set_bits()) {
+    if (!UsedRegs.contains(Reg)) {
+      // Remember the first pop-friendly register and exit.
+      if (PopFriendly.test(Reg)) {
+        PopReg = Reg;
+        TmpReg = 0;
+        break;
+      }
+      // Otherwise, remember that the register will be available to
+      // save a pop-friendly register.
+      TmpReg = Reg;
+    }
+  }
+}
+
 bool Thumb1FrameLowering::emitPopSpecialFixUp(MachineBasicBlock &MBB,
                                               bool DoIt) const {
   MachineFunction &MF = *MBB.getParent();
@@ -591,6 +610,12 @@ bool Thumb1FrameLowering::emitPopSpecialFixUp(MachineBasicBlock &MBB,
   unsigned TemporaryReg = 0;
   BitVector PopFriendly =
       TRI.getAllocatableSet(MF, TRI.getRegClass(ARM::tGPRRegClassID));
+  // R7 may be used as a frame pointer, hence marked as not generally
+  // allocatable, however there's no reason to not use it as a temporary for
+  // restoring LR.
+  if (STI.useR7AsFramePointer())
+    PopFriendly.set(ARM::R7);
+
   assert(PopFriendly.any() && "No allocatable pop-friendly register?!");
   // Rebuild the GPRs from the high registers because they are removed
   // form the GPR reg class for thumb1.
@@ -600,17 +625,22 @@ bool Thumb1FrameLowering::emitPopSpecialFixUp(MachineBasicBlock &MBB,
   GPRsNoLRSP.reset(ARM::LR);
   GPRsNoLRSP.reset(ARM::SP);
   GPRsNoLRSP.reset(ARM::PC);
-  for (unsigned Register : GPRsNoLRSP.set_bits()) {
-    if (!UsedRegs.contains(Register)) {
-      // Remember the first pop-friendly register and exit.
-      if (PopFriendly.test(Register)) {
-        PopReg = Register;
-        TemporaryReg = 0;
-        break;
+  findTemporariesForLR(GPRsNoLRSP, PopFriendly, UsedRegs, PopReg, TemporaryReg);
+
+  // If we couldn't find a pop-friendly register, try restoring LR before
+  // popping the other callee-saved registers, so we could use one of them as a
+  // temporary.
+  bool UseLDRSP = false;
+  if (!PopReg && MBBI != MBB.begin()) {
+    auto PrevMBBI = MBBI;
+    PrevMBBI--;
+    if (PrevMBBI->getOpcode() == ARM::tPOP) {
+      UsedRegs.stepBackward(*PrevMBBI);
+      findTemporariesForLR(GPRsNoLRSP, PopFriendly, UsedRegs, PopReg, TemporaryReg);
+      if (PopReg) {
+        MBBI = PrevMBBI;
+        UseLDRSP = true;
       }
-      // Otherwise, remember that the register will be available to
-      // save a pop-friendly register.
-      TemporaryReg = Register;
     }
   }
 
@@ -618,6 +648,26 @@ bool Thumb1FrameLowering::emitPopSpecialFixUp(MachineBasicBlock &MBB,
     return false;
 
   assert((PopReg || TemporaryReg) && "Cannot get LR");
+
+  if (UseLDRSP) {
+    assert(PopReg && "Do not know how to get LR");
+    // Load the LR via LDR tmp, [SP, #off]
+    BuildMI(MBB, MBBI, dl, TII.get(ARM::tLDRspi))
+      .addReg(PopReg, RegState::Define)
+      .addReg(ARM::SP)
+      .addImm(MBBI->getNumExplicitOperands() - 2)
+      .add(predOps(ARMCC::AL));
+    // Move from the temporary register to the LR.
+    BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr))
+      .addReg(ARM::LR, RegState::Define)
+      .addReg(PopReg, RegState::Kill)
+      .add(predOps(ARMCC::AL));
+    // Advance past the pop instruction.
+    MBBI++;
+    // Increment the SP.
+    emitSPUpdate(MBB, MBBI, TII, dl, *RegInfo, ArgRegsSaveSize + 4);
+    return true;
+  }
 
   if (TemporaryReg) {
     assert(!PopReg && "Unnecessary MOV is about to be inserted");
@@ -911,33 +961,29 @@ restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
 
     if (Reg == ARM::LR) {
       Info.setRestored(false);
-      if (MBB.succ_empty()) {
-        // Special epilogue for vararg functions. See emitEpilogue
-        if (isVarArg)
-          continue;
-        // ARMv4T requires BX, see emitEpilogue
-        if (!STI.hasV5TOps())
-          continue;
-        // Tailcall optimization failed; change TCRETURN to a tBL
-        if (MI->getOpcode() == ARM::TCRETURNdi ||
-            MI->getOpcode() == ARM::TCRETURNri) {
-          unsigned Opcode = MI->getOpcode() == ARM::TCRETURNdi
-                            ? ARM::tBL : ARM::tBLXr;
-          MachineInstrBuilder BL = BuildMI(MF, DL, TII.get(Opcode));
-          BL.add(predOps(ARMCC::AL));
-          BL.add(MI->getOperand(0));
-          MBB.insert(MI, &*BL);
-        }
-        Reg = ARM::PC;
-        (*MIB).setDesc(TII.get(ARM::tPOP_RET));
-        if (MI != MBB.end())
-          MIB.copyImplicitOps(*MI);
-        MI = MBB.erase(MI);
-      } else
+      if (!MBB.succ_empty() ||
+          MI->getOpcode() == ARM::TCRETURNdi ||
+          MI->getOpcode() == ARM::TCRETURNri)
         // LR may only be popped into PC, as part of return sequence.
         // If this isn't the return sequence, we'll need emitPopSpecialFixUp
         // to restore LR the hard way.
+        // FIXME: if we don't pass any stack arguments it would be actually
+        // advantageous *and* correct to do the conversion to an ordinary call
+        // instruction here.
         continue;
+      // Special epilogue for vararg functions. See emitEpilogue
+      if (isVarArg)
+        continue;
+      // ARMv4T requires BX, see emitEpilogue
+      if (!STI.hasV5TOps())
+        continue;
+
+      // Pop LR into PC.
+      Reg = ARM::PC;
+      (*MIB).setDesc(TII.get(ARM::tPOP_RET));
+      if (MI != MBB.end())
+        MIB.copyImplicitOps(*MI);
+      MI = MBB.erase(MI);
     }
     MIB.addReg(Reg, getDefRegState(true));
     NeedsPop = true;

@@ -1,9 +1,8 @@
 //===- LibDriver.cpp - lib.exe-compatible driver --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -120,6 +119,12 @@ int llvm::libDriverMain(ArrayRef<const char *> ArgsArr) {
   }
   for (auto *Arg : Args.filtered(OPT_UNKNOWN))
     llvm::errs() << "ignoring unknown argument: " << Arg->getSpelling() << "\n";
+
+  // Handle /help
+  if (Args.hasArg(OPT_help)) {
+    Table.PrintHelp(outs(), "llvm-lib [options] file...", "LLVM Lib");
+    return 0;
+  }
 
   // If no input files, silently do nothing to match lib.exe.
   if (!Args.hasArgNoClaim(OPT_INPUT))

@@ -11,8 +11,10 @@ foreach(entry ${entries})
        (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/libunwind) AND
        (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/test-suite) AND
        (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/parallel-libs) AND
-       (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/openmp))
-      add_subdirectory(${entry})
+       (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/openmp) AND
+       (NOT ${entry} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR}/debuginfo-tests))
+      get_filename_component(entry_name "${entry}" NAME)
+      add_llvm_external_project(${entry_name})
     endif()
   endif()
 endforeach(entry)
@@ -29,6 +31,7 @@ if(${LLVM_BUILD_RUNTIME})
     # dependent projects can see the target names of their dependencies.
     add_llvm_external_project(libunwind)
     add_llvm_external_project(libcxxabi)
+    add_llvm_external_project(pstl)
     add_llvm_external_project(libcxx)
   endif()
   if(NOT LLVM_BUILD_EXTERNAL_COMPILER_RT)
@@ -39,3 +42,7 @@ endif()
 add_llvm_external_project(dragonegg)
 add_llvm_external_project(parallel-libs)
 add_llvm_external_project(openmp)
+
+if(LLVM_INCLUDE_TESTS)
+  add_llvm_external_project(debuginfo-tests)
+endif()

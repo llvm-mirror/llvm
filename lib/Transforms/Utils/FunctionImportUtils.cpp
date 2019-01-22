@@ -1,9 +1,8 @@
 //===- lib/Transforms/Utils/FunctionImportUtils.cpp - Importing utilities -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,9 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
-#include "llvm/Analysis/ModuleSummaryAnalysis.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/IR/Instructions.h"
 using namespace llvm;
 
 /// Checks if we should import SGV as a definition, otherwise import as a
@@ -126,7 +123,6 @@ FunctionImportGlobalProcessing::getLinkage(const GlobalValue *SGV,
     return SGV->getLinkage();
 
   switch (SGV->getLinkage()) {
-  case GlobalValue::LinkOnceAnyLinkage:
   case GlobalValue::LinkOnceODRLinkage:
   case GlobalValue::ExternalLinkage:
     // External and linkonce definitions are converted to available_externally
@@ -146,11 +142,13 @@ FunctionImportGlobalProcessing::getLinkage(const GlobalValue *SGV,
     // An imported available_externally declaration stays that way.
     return SGV->getLinkage();
 
+  case GlobalValue::LinkOnceAnyLinkage:
   case GlobalValue::WeakAnyLinkage:
-    // Can't import weak_any definitions correctly, or we might change the
-    // program semantics, since the linker will pick the first weak_any
-    // definition and importing would change the order they are seen by the
-    // linker. The module linking caller needs to enforce this.
+    // Can't import linkonce_any/weak_any definitions correctly, or we might
+    // change the program semantics, since the linker will pick the first
+    // linkonce_any/weak_any definition and importing would change the order
+    // they are seen by the linker. The module linking caller needs to enforce
+    // this.
     assert(!doImportAsDefinition(SGV));
     // If imported as a declaration, it becomes external_weak.
     return SGV->getLinkage();
@@ -203,6 +201,50 @@ FunctionImportGlobalProcessing::getLinkage(const GlobalValue *SGV,
 }
 
 void FunctionImportGlobalProcessing::processGlobalForThinLTO(GlobalValue &GV) {
+
+  ValueInfo VI;
+  if (GV.hasName()) {
+    VI = ImportIndex.getValueInfo(GV.getGUID());
+    // Set synthetic function entry counts.
+    if (VI && ImportIndex.hasSyntheticEntryCounts()) {
+      if (Function *F = dyn_cast<Function>(&GV)) {
+        if (!F->isDeclaration()) {
+          for (auto &S : VI.getSummaryList()) {
+            FunctionSummary *FS = dyn_cast<FunctionSummary>(S->getBaseObject());
+            if (FS->modulePath() == M.getModuleIdentifier()) {
+              F->setEntryCount(Function::ProfileCount(FS->entryCount(),
+                                                      Function::PCT_Synthetic));
+              break;
+            }
+          }
+        }
+      }
+    }
+    // Check the summaries to see if the symbol gets resolved to a known local
+    // definition.
+    if (VI && VI.isDSOLocal()) {
+      GV.setDSOLocal(true);
+      if (GV.hasDLLImportStorageClass())
+        GV.setDLLStorageClass(GlobalValue::DefaultStorageClass);
+    }
+  }
+
+  // Mark read-only variables which can be imported with specific attribute.
+  // We can't internalize them now because IRMover will fail to link variable
+  // definitions to their external declarations during ThinLTO import. We'll
+  // internalize read-only variables later, after import is finished.
+  // See internalizeImmutableGVs.
+  //
+  // If global value dead stripping is not enabled in summary then
+  // propagateConstants hasn't been run. We can't internalize GV
+  // in such case.
+  if (!GV.isDeclaration() && VI && ImportIndex.withGlobalValueDeadStripping()) {
+    const auto &SL = VI.getSummaryList();
+    auto *GVS = SL.empty() ? nullptr : dyn_cast<GlobalVarSummary>(SL[0].get());
+    if (GVS && GVS->isReadOnly())
+      cast<GlobalVariable>(&GV)->addAttribute("thinlto-internalize");
+  }
+
   bool DoPromote = false;
   if (GV.hasLocalLinkage() &&
       ((DoPromote = shouldPromoteLocalToGlobal(&GV)) || isPerformingImport())) {
@@ -220,7 +262,7 @@ void FunctionImportGlobalProcessing::processGlobalForThinLTO(GlobalValue &GV) {
   // Remove functions imported as available externally defs from comdats,
   // as this is a declaration for the linker, and will be dropped eventually.
   // It is illegal for comdats to contain declarations.
-  auto *GO = dyn_cast_or_null<GlobalObject>(&GV);
+  auto *GO = dyn_cast<GlobalObject>(&GV);
   if (GO && GO->isDeclarationForLinker() && GO->hasComdat()) {
     // The IRMover should not have placed any imported declarations in
     // a comdat, so the only declaration that should be in a comdat

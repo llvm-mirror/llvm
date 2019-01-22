@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/LiveInterval.h - Interval representation ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -326,7 +325,7 @@ namespace llvm {
     /// createDeadDef - Make sure the range has a value defined at Def.
     /// If one already exists, return it. Otherwise allocate a new value and
     /// add liveness for a dead def.
-    VNInfo *createDeadDef(SlotIndex Def, VNInfo::Allocator &VNInfoAllocator);
+    VNInfo *createDeadDef(SlotIndex Def, VNInfo::Allocator &VNIAlloc);
 
     /// Create a def of value @p VNI. Return @p VNI. If there already exists
     /// a definition at VNI->def, the value defined there must be @p VNI.
@@ -454,7 +453,7 @@ namespace llvm {
     /// overlapsFrom - Return true if the intersection of the two live ranges
     /// is not empty.  The specified iterator is a hint that we can begin
     /// scanning the Other range starting at I.
-    bool overlapsFrom(const LiveRange &Other, const_iterator I) const;
+    bool overlapsFrom(const LiveRange &Other, const_iterator StartPos) const;
 
     /// Returns true if all segments of the @p Other live range are completely
     /// covered by this live range.
@@ -482,7 +481,7 @@ namespace llvm {
     /// @p Use, return {nullptr, false}. If there is an "undef" before @p Use,
     /// return {nullptr, true}.
     std::pair<VNInfo*,bool> extendInBlock(ArrayRef<SlotIndex> Undefs,
-        SlotIndex StartIdx, SlotIndex Use);
+        SlotIndex StartIdx, SlotIndex Kill);
 
     /// Simplified version of the above "extendInBlock", which assumes that
     /// no register lanes are undefined by <def,read-undef> operands.
@@ -609,7 +608,7 @@ namespace llvm {
     void print(raw_ostream &OS) const;
     void dump() const;
 
-    /// \brief Walk the range and assert if any invariants fail to hold.
+    /// Walk the range and assert if any invariants fail to hold.
     ///
     /// Note that this is a no-op when asserts are disabled.
 #ifdef NDEBUG
@@ -791,7 +790,7 @@ namespace llvm {
     ///    L00E0 and L0010 and the L000F lane into L0007 and L0008. The Mod
     ///    function will be applied to the L0010 and L0008 subranges.
     void refineSubRanges(BumpPtrAllocator &Allocator, LaneBitmask LaneMask,
-                         std::function<void(LiveInterval::SubRange&)> Mod);
+                         std::function<void(LiveInterval::SubRange&)> Apply);
 
     bool operator<(const LiveInterval& other) const {
       const SlotIndex &thisIndex = beginIndex();
@@ -802,7 +801,7 @@ namespace llvm {
     void print(raw_ostream &OS) const;
     void dump() const;
 
-    /// \brief Walks the interval and assert if any invariants fail to hold.
+    /// Walks the interval and assert if any invariants fail to hold.
     ///
     /// Note that this is a no-op when asserts are disabled.
 #ifdef NDEBUG

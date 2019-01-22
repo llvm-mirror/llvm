@@ -1,9 +1,8 @@
 //==- TargetRegisterInfo.cpp - Target Register Information Implementation --==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,25 +10,27 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/VirtRegMap.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Printable.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <cassert>
 #include <utility>
 
@@ -68,8 +69,8 @@ bool TargetRegisterInfo::checkAllSuperRegsMarked(const BitVector &RegisterSet,
       continue;
     for (MCSuperRegIterator SR(Reg, this); SR.isValid(); ++SR) {
       if (!RegisterSet[*SR] && !is_contained(Exceptions, Reg)) {
-        dbgs() << "Error: Super register " << PrintReg(*SR, this)
-               << " of reserved register " << PrintReg(Reg, this)
+        dbgs() << "Error: Super register " << printReg(*SR, this)
+               << " of reserved register " << printReg(Reg, this)
                << " is not reserved.\n";
         return false;
       }
@@ -84,19 +85,29 @@ bool TargetRegisterInfo::checkAllSuperRegsMarked(const BitVector &RegisterSet,
 
 namespace llvm {
 
-Printable PrintReg(unsigned Reg, const TargetRegisterInfo *TRI,
-                   unsigned SubIdx) {
-  return Printable([Reg, TRI, SubIdx](raw_ostream &OS) {
+Printable printReg(unsigned Reg, const TargetRegisterInfo *TRI,
+                   unsigned SubIdx, const MachineRegisterInfo *MRI) {
+  return Printable([Reg, TRI, SubIdx, MRI](raw_ostream &OS) {
     if (!Reg)
-      OS << "%noreg";
+      OS << "$noreg";
     else if (TargetRegisterInfo::isStackSlot(Reg))
       OS << "SS#" << TargetRegisterInfo::stackSlot2Index(Reg);
-    else if (TargetRegisterInfo::isVirtualRegister(Reg))
-      OS << "%vreg" << TargetRegisterInfo::virtReg2Index(Reg);
-    else if (TRI && Reg < TRI->getNumRegs())
-      OS << '%' << TRI->getName(Reg);
-    else
-      OS << "%physreg" << Reg;
+    else if (TargetRegisterInfo::isVirtualRegister(Reg)) {
+      StringRef Name = MRI ? MRI->getVRegName(Reg) : "";
+      if (Name != "") {
+        OS << '%' << Name;
+      } else {
+        OS << '%' << TargetRegisterInfo::virtReg2Index(Reg);
+      }
+    }
+    else if (!TRI)
+      OS << '$' << "physreg" << Reg;
+    else if (Reg < TRI->getNumRegs()) {
+      OS << '$';
+      printLowerCase(TRI->getName(Reg), OS);
+    } else
+      llvm_unreachable("Register kind is unsupported.");
+
     if (SubIdx) {
       if (TRI)
         OS << ':' << TRI->getSubRegIndexName(SubIdx);
@@ -106,7 +117,7 @@ Printable PrintReg(unsigned Reg, const TargetRegisterInfo *TRI,
   });
 }
 
-Printable PrintRegUnit(unsigned Unit, const TargetRegisterInfo *TRI) {
+Printable printRegUnit(unsigned Unit, const TargetRegisterInfo *TRI) {
   return Printable([Unit, TRI](raw_ostream &OS) {
     // Generic printout when TRI is missing.
     if (!TRI) {
@@ -129,12 +140,27 @@ Printable PrintRegUnit(unsigned Unit, const TargetRegisterInfo *TRI) {
   });
 }
 
-Printable PrintVRegOrUnit(unsigned Unit, const TargetRegisterInfo *TRI) {
+Printable printVRegOrUnit(unsigned Unit, const TargetRegisterInfo *TRI) {
   return Printable([Unit, TRI](raw_ostream &OS) {
     if (TRI && TRI->isVirtualRegister(Unit)) {
-      OS << "%vreg" << TargetRegisterInfo::virtReg2Index(Unit);
+      OS << '%' << TargetRegisterInfo::virtReg2Index(Unit);
     } else {
-      OS << PrintRegUnit(Unit, TRI);
+      OS << printRegUnit(Unit, TRI);
+    }
+  });
+}
+
+Printable printRegClassOrBank(unsigned Reg, const MachineRegisterInfo &RegInfo,
+                              const TargetRegisterInfo *TRI) {
+  return Printable([Reg, &RegInfo, TRI](raw_ostream &OS) {
+    if (RegInfo.getRegClassOrNull(Reg))
+      OS << StringRef(TRI->getRegClassName(RegInfo.getRegClass(Reg))).lower();
+    else if (RegInfo.getRegBankOrNull(Reg))
+      OS << StringRef(RegInfo.getRegBankOrNull(Reg)->getName()).lower();
+    else {
+      OS << "_";
+      assert((RegInfo.def_empty(Reg) || RegInfo.getType(Reg).isValid()) &&
+             "Generic registers must have a valid type");
     }
   });
 }
@@ -318,7 +344,7 @@ getCommonSuperRegClass(const TargetRegisterClass *RCA, unsigned SubA,
   return BestRC;
 }
 
-/// \brief Check if the registers defined by the pair (RegisterClass, SubReg)
+/// Check if the registers defined by the pair (RegisterClass, SubReg)
 /// share the same register file.
 static bool shareSameRegisterFile(const TargetRegisterInfo &TRI,
                                   const TargetRegisterClass *DefRC,
@@ -360,7 +386,7 @@ bool TargetRegisterInfo::shouldRewriteCopySrc(const TargetRegisterClass *DefRC,
 }
 
 // Compute target-independent register allocator hints to help eliminate copies.
-void
+bool
 TargetRegisterInfo::getRegAllocationHints(unsigned VirtReg,
                                           ArrayRef<MCPhysReg> Order,
                                           SmallVectorImpl<MCPhysReg> &Hints,
@@ -368,49 +394,56 @@ TargetRegisterInfo::getRegAllocationHints(unsigned VirtReg,
                                           const VirtRegMap *VRM,
                                           const LiveRegMatrix *Matrix) const {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
-  std::pair<unsigned, unsigned> Hint = MRI.getRegAllocationHint(VirtReg);
+  const std::pair<unsigned, SmallVector<unsigned, 4>> &Hints_MRI =
+    MRI.getRegAllocationHints(VirtReg);
 
-  // Hints with HintType != 0 were set by target-dependent code.
-  // Such targets must provide their own implementation of
-  // TRI::getRegAllocationHints to interpret those hint types.
-  assert(Hint.first == 0 && "Target must implement TRI::getRegAllocationHints");
+  // First hint may be a target hint.
+  bool Skip = (Hints_MRI.first != 0);
+  for (auto Reg : Hints_MRI.second) {
+    if (Skip) {
+      Skip = false;
+      continue;
+    }
 
-  // Target-independent hints are either a physical or a virtual register.
-  unsigned Phys = Hint.second;
-  if (VRM && isVirtualRegister(Phys))
-    Phys = VRM->getPhys(Phys);
+    // Target-independent hints are either a physical or a virtual register.
+    unsigned Phys = Reg;
+    if (VRM && isVirtualRegister(Phys))
+      Phys = VRM->getPhys(Phys);
 
-  // Check that Phys is a valid hint in VirtReg's register class.
-  if (!isPhysicalRegister(Phys))
-    return;
-  if (MRI.isReserved(Phys))
-    return;
-  // Check that Phys is in the allocation order. We shouldn't heed hints
-  // from VirtReg's register class if they aren't in the allocation order. The
-  // target probably has a reason for removing the register.
-  if (!is_contained(Order, Phys))
-    return;
+    // Check that Phys is a valid hint in VirtReg's register class.
+    if (!isPhysicalRegister(Phys))
+      continue;
+    if (MRI.isReserved(Phys))
+      continue;
+    // Check that Phys is in the allocation order. We shouldn't heed hints
+    // from VirtReg's register class if they aren't in the allocation order. The
+    // target probably has a reason for removing the register.
+    if (!is_contained(Order, Phys))
+      continue;
 
-  // All clear, tell the register allocator to prefer this register.
-  Hints.push_back(Phys);
+    // All clear, tell the register allocator to prefer this register.
+    Hints.push_back(Phys);
+  }
+  return false;
 }
 
 bool TargetRegisterInfo::canRealignStack(const MachineFunction &MF) const {
-  return !MF.getFunction()->hasFnAttribute("no-realign-stack");
+  return !MF.getFunction().hasFnAttribute("no-realign-stack");
 }
 
 bool TargetRegisterInfo::needsStackRealignment(
     const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
-  const Function *F = MF.getFunction();
+  const Function &F = MF.getFunction();
   unsigned StackAlign = TFI->getStackAlignment();
   bool requiresRealignment = ((MFI.getMaxAlignment() > StackAlign) ||
-                              F->hasFnAttribute(Attribute::StackAlignment));
-  if (MF.getFunction()->hasFnAttribute("stackrealign") || requiresRealignment) {
+                              F.hasFnAttribute(Attribute::StackAlignment));
+  if (F.hasFnAttribute("stackrealign") || requiresRealignment) {
     if (canRealignStack(MF))
       return true;
-    DEBUG(dbgs() << "Can't realign function's stack: " << F->getName() << "\n");
+    LLVM_DEBUG(dbgs() << "Can't realign function's stack: " << F.getName()
+                      << "\n");
   }
   return false;
 }
@@ -424,10 +457,55 @@ bool TargetRegisterInfo::regmaskSubsetEqual(const uint32_t *mask0,
   return true;
 }
 
+unsigned TargetRegisterInfo::getRegSizeInBits(unsigned Reg,
+                                         const MachineRegisterInfo &MRI) const {
+  const TargetRegisterClass *RC{};
+  if (isPhysicalRegister(Reg)) {
+    // The size is not directly available for physical registers.
+    // Instead, we need to access a register class that contains Reg and
+    // get the size of that register class.
+    RC = getMinimalPhysRegClass(Reg);
+  } else {
+    LLT Ty = MRI.getType(Reg);
+    unsigned RegSize = Ty.isValid() ? Ty.getSizeInBits() : 0;
+    // If Reg is not a generic register, query the register class to
+    // get its size.
+    if (RegSize)
+      return RegSize;
+    // Since Reg is not a generic register, it must have a register class.
+    RC = MRI.getRegClass(Reg);
+  }
+  assert(RC && "Unable to deduce the register class");
+  return getRegSizeInBits(*RC);
+}
+
+unsigned
+TargetRegisterInfo::lookThruCopyLike(unsigned SrcReg,
+                                     const MachineRegisterInfo *MRI) const {
+  while (true) {
+    const MachineInstr *MI = MRI->getVRegDef(SrcReg);
+    if (!MI->isCopyLike())
+      return SrcReg;
+
+    unsigned CopySrcReg;
+    if (MI->isCopy())
+      CopySrcReg = MI->getOperand(1).getReg();
+    else {
+      assert(MI->isSubregToReg() && "Bad opcode for lookThruCopyLike");
+      CopySrcReg = MI->getOperand(2).getReg();
+    }
+
+    if (!isVirtualRegister(CopySrcReg))
+      return CopySrcReg;
+
+    SrcReg = CopySrcReg;
+  }
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD
 void TargetRegisterInfo::dumpReg(unsigned Reg, unsigned SubRegIndex,
                                  const TargetRegisterInfo *TRI) {
-  dbgs() << PrintReg(Reg, TRI, SubRegIndex) << "\n";
+  dbgs() << printReg(Reg, TRI, SubRegIndex) << "\n";
 }
 #endif

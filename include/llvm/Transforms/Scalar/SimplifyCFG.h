@@ -1,9 +1,8 @@
 //===- SimplifyCFG.h - Simplify and canonicalize the CFG --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -15,9 +14,9 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_SIMPLIFYCFG_H
 #define LLVM_TRANSFORMS_SCALAR_SIMPLIFYCFG_H
 
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Transforms/Utils/Local.h"
 
 namespace llvm {
 
@@ -39,13 +38,14 @@ public:
       : SimplifyCFGPass(SimplifyCFGOptions()
                             .forwardSwitchCondToPhi(false)
                             .convertSwitchToLookupTable(false)
-                            .needCanonicalLoops(true)) {}
+                            .needCanonicalLoops(true)
+                            .sinkCommonInsts(false)) {}
 
 
   /// Construct a pass with optional optimizations.
   SimplifyCFGPass(const SimplifyCFGOptions &PassOptions);
 
-  /// \brief Run the pass over the function.
+  /// Run the pass over the function.
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 

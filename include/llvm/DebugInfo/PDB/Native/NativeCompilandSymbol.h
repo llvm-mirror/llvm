@@ -1,9 +1,8 @@
 //===- NativeCompilandSymbol.h - native impl for compiland syms -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,11 +20,12 @@ public:
   NativeCompilandSymbol(NativeSession &Session, SymIndexId SymbolId,
                         DbiModuleDescriptor MI);
 
-  std::unique_ptr<NativeRawSymbol> clone() const override;
+  void dump(raw_ostream &OS, int Indent, PdbSymbolIdField ShowIdFields,
+            PdbSymbolIdField RecurseIdFields) const override;
 
   PDB_SymType getSymTag() const override;
   bool isEditAndContinueEnabled() const override;
-  uint32_t getLexicalParentId() const override;
+  SymIndexId getLexicalParentId() const override;
   std::string getLibraryName() const override;
   std::string getName() const override;
 

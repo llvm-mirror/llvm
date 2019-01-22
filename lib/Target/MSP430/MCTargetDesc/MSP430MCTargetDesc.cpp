@@ -1,9 +1,8 @@
 //===-- MSP430MCTargetDesc.cpp - MSP430 Target Descriptions ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -58,22 +57,15 @@ static MCInstPrinter *createMSP430MCInstPrinter(const Triple &T,
 }
 
 extern "C" void LLVMInitializeMSP430TargetMC() {
-  // Register the MC asm info.
-  RegisterMCAsmInfo<MSP430MCAsmInfo> X(getTheMSP430Target());
+  Target &T = getTheMSP430Target();
 
-  // Register the MC instruction info.
-  TargetRegistry::RegisterMCInstrInfo(getTheMSP430Target(),
-                                      createMSP430MCInstrInfo);
-
-  // Register the MC register info.
-  TargetRegistry::RegisterMCRegInfo(getTheMSP430Target(),
-                                    createMSP430MCRegisterInfo);
-
-  // Register the MC subtarget info.
-  TargetRegistry::RegisterMCSubtargetInfo(getTheMSP430Target(),
-                                          createMSP430MCSubtargetInfo);
-
-  // Register the MCInstPrinter.
-  TargetRegistry::RegisterMCInstPrinter(getTheMSP430Target(),
-                                        createMSP430MCInstPrinter);
+  RegisterMCAsmInfo<MSP430MCAsmInfo> X(T);
+  TargetRegistry::RegisterMCInstrInfo(T, createMSP430MCInstrInfo);
+  TargetRegistry::RegisterMCRegInfo(T, createMSP430MCRegisterInfo);
+  TargetRegistry::RegisterMCSubtargetInfo(T, createMSP430MCSubtargetInfo);
+  TargetRegistry::RegisterMCInstPrinter(T, createMSP430MCInstPrinter);
+  TargetRegistry::RegisterMCCodeEmitter(T, createMSP430MCCodeEmitter);
+  TargetRegistry::RegisterMCAsmBackend(T, createMSP430MCAsmBackend);
+  TargetRegistry::RegisterObjectTargetStreamer(
+      T, createMSP430ObjectTargetStreamer);
 }

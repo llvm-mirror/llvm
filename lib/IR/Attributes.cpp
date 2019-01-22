@@ -1,14 +1,13 @@
 //===- Attributes.cpp - Implement AttributesList --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 // \file
-// \brief This file implements the Attribute, AttributeImpl, AttrBuilder,
+// This file implements the Attribute, AttributeImpl, AttrBuilder,
 // AttributeListImpl, and AttributeList classes.
 //
 //===----------------------------------------------------------------------===//
@@ -24,6 +23,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
@@ -38,7 +38,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <map>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -186,14 +185,14 @@ uint64_t Attribute::getValueAsInt() const {
 }
 
 StringRef Attribute::getKindAsString() const {
-  if (!pImpl) return StringRef();
+  if (!pImpl) return {};
   assert(isStringAttribute() &&
          "Invalid attribute type to get the kind as a string!");
   return pImpl->getKindAsString();
 }
 
 StringRef Attribute::getValueAsString() const {
-  if (!pImpl) return StringRef();
+  if (!pImpl) return {};
   assert(isStringAttribute() &&
          "Invalid attribute type to get the value as a string!");
   return pImpl->getValueAsString();
@@ -241,10 +240,12 @@ std::pair<unsigned, Optional<unsigned>> Attribute::getAllocSizeArgs() const {
 }
 
 std::string Attribute::getAsString(bool InAttrGrp) const {
-  if (!pImpl) return "";
+  if (!pImpl) return {};
 
   if (hasAttribute(Attribute::SanitizeAddress))
     return "sanitize_address";
+  if (hasAttribute(Attribute::SanitizeHWAddress))
+    return "sanitize_hwaddress";
   if (hasAttribute(Attribute::AlwaysInline))
     return "alwaysinline";
   if (hasAttribute(Attribute::ArgMemOnly))
@@ -297,10 +298,14 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "noredzone";
   if (hasAttribute(Attribute::NoReturn))
     return "noreturn";
+  if (hasAttribute(Attribute::NoCfCheck))
+    return "nocf_check";
   if (hasAttribute(Attribute::NoRecurse))
     return "norecurse";
   if (hasAttribute(Attribute::NoUnwind))
     return "nounwind";
+  if (hasAttribute(Attribute::OptForFuzzing))
+    return "optforfuzzing";
   if (hasAttribute(Attribute::OptimizeNone))
     return "optnone";
   if (hasAttribute(Attribute::OptimizeForSize))
@@ -317,6 +322,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "returns_twice";
   if (hasAttribute(Attribute::SExt))
     return "signext";
+  if (hasAttribute(Attribute::SpeculativeLoadHardening))
+    return "speculative_load_hardening";
   if (hasAttribute(Attribute::Speculatable))
     return "speculatable";
   if (hasAttribute(Attribute::StackProtect))
@@ -327,6 +334,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "sspstrong";
   if (hasAttribute(Attribute::SafeStack))
     return "safestack";
+  if (hasAttribute(Attribute::ShadowCallStack))
+    return "shadowcallstack";
   if (hasAttribute(Attribute::StrictFP))
     return "strictfp";
   if (hasAttribute(Attribute::StructRet))
@@ -411,7 +420,7 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     {
       raw_string_ostream OS(Result);
       OS << "=\"";
-      PrintEscapedString(AttrVal, OS);
+      printEscapedString(AttrVal, OS);
       OS << "\"";
     }
     return Result;
@@ -532,7 +541,7 @@ AttributeSet AttributeSet::addAttributes(LLVMContext &C,
     return *this;
 
   AttrBuilder B(AS);
-  for (Attribute I : *this)
+  for (const auto I : *this)
     B.addAttribute(I);
 
  return get(C, B);
@@ -541,26 +550,21 @@ AttributeSet AttributeSet::addAttributes(LLVMContext &C,
 AttributeSet AttributeSet::removeAttribute(LLVMContext &C,
                                              Attribute::AttrKind Kind) const {
   if (!hasAttribute(Kind)) return *this;
-  AttrBuilder B;
-  B.addAttribute(Kind);
-  return removeAttributes(C, B);
+  AttrBuilder B(*this);
+  B.removeAttribute(Kind);
+  return get(C, B);
 }
 
 AttributeSet AttributeSet::removeAttribute(LLVMContext &C,
                                              StringRef Kind) const {
   if (!hasAttribute(Kind)) return *this;
-  AttrBuilder B;
-  B.addAttribute(Kind);
-  return removeAttributes(C, B);
+  AttrBuilder B(*this);
+  B.removeAttribute(Kind);
+  return get(C, B);
 }
 
 AttributeSet AttributeSet::removeAttributes(LLVMContext &C,
                                               const AttrBuilder &Attrs) const {
-
-  // FIXME it is not obvious how this should work for alignment.
-  // For now, say we can't pass in alignment, which no current use does.
-  assert(!Attrs.hasAlignmentAttr() && "Attempt to change alignment!");
-
   AttrBuilder B(*this);
   B.remove(Attrs);
   return get(C, B);
@@ -634,9 +638,9 @@ LLVM_DUMP_METHOD void AttributeSet::dump() const {
 AttributeSetNode::AttributeSetNode(ArrayRef<Attribute> Attrs)
     : AvailableAttrs(0), NumAttrs(Attrs.size()) {
   // There's memory after the node where we can store the entries in.
-  std::copy(Attrs.begin(), Attrs.end(), getTrailingObjects<Attribute>());
+  llvm::copy(Attrs, getTrailingObjects<Attribute>());
 
-  for (Attribute I : *this) {
+  for (const auto I : *this) {
     if (!I.isStringAttribute()) {
       AvailableAttrs |= ((uint64_t)1) << I.getKindAsEnum();
     }
@@ -653,9 +657,9 @@ AttributeSetNode *AttributeSetNode::get(LLVMContext &C,
   FoldingSetNodeID ID;
 
   SmallVector<Attribute, 8> SortedAttrs(Attrs.begin(), Attrs.end());
-  std::sort(SortedAttrs.begin(), SortedAttrs.end());
+  llvm::sort(SortedAttrs);
 
-  for (Attribute Attr : SortedAttrs)
+  for (const auto Attr : SortedAttrs)
     Attr.Profile(ID);
 
   void *InsertPoint;
@@ -718,7 +722,7 @@ AttributeSetNode *AttributeSetNode::get(LLVMContext &C, const AttrBuilder &B) {
 }
 
 bool AttributeSetNode::hasAttribute(StringRef Kind) const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Kind))
       return true;
   return false;
@@ -726,43 +730,43 @@ bool AttributeSetNode::hasAttribute(StringRef Kind) const {
 
 Attribute AttributeSetNode::getAttribute(Attribute::AttrKind Kind) const {
   if (hasAttribute(Kind)) {
-    for (Attribute I : *this)
+    for (const auto I : *this)
       if (I.hasAttribute(Kind))
         return I;
   }
-  return Attribute();
+  return {};
 }
 
 Attribute AttributeSetNode::getAttribute(StringRef Kind) const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Kind))
       return I;
-  return Attribute();
+  return {};
 }
 
 unsigned AttributeSetNode::getAlignment() const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Attribute::Alignment))
       return I.getAlignment();
   return 0;
 }
 
 unsigned AttributeSetNode::getStackAlignment() const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Attribute::StackAlignment))
       return I.getStackAlignment();
   return 0;
 }
 
 uint64_t AttributeSetNode::getDereferenceableBytes() const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Attribute::Dereferenceable))
       return I.getDereferenceableBytes();
   return 0;
 }
 
 uint64_t AttributeSetNode::getDereferenceableOrNullBytes() const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Attribute::DereferenceableOrNull))
       return I.getDereferenceableOrNullBytes();
   return 0;
@@ -770,7 +774,7 @@ uint64_t AttributeSetNode::getDereferenceableOrNullBytes() const {
 
 std::pair<unsigned, Optional<unsigned>>
 AttributeSetNode::getAllocSizeArgs() const {
-  for (Attribute I : *this)
+  for (const auto I : *this)
     if (I.hasAttribute(Attribute::AllocSize))
       return I.getAllocSizeArgs();
   return std::make_pair(0, 0);
@@ -804,7 +808,7 @@ AttributeListImpl::AttributeListImpl(LLVMContext &C,
   assert(!Sets.empty() && "pointless AttributeListImpl");
 
   // There's memory after the node where we can store the entries in.
-  std::copy(Sets.begin(), Sets.end(), getTrailingObjects<AttributeSet>());
+  llvm::copy(Sets, getTrailingObjects<AttributeSet>());
 
   // Initialize AvailableFunctionAttrs summary bitset.
   static_assert(Attribute::EndAttrKinds <=
@@ -812,7 +816,7 @@ AttributeListImpl::AttributeListImpl(LLVMContext &C,
                 "Too many attributes");
   static_assert(attrIdxToArrayIdx(AttributeList::FunctionIndex) == 0U,
                 "function should be stored in slot 0");
-  for (Attribute I : Sets[0]) {
+  for (const auto I : Sets[0]) {
     if (!I.isStringAttribute())
       AvailableFunctionAttrs |= 1ULL << I.getKindAsEnum();
   }
@@ -869,17 +873,17 @@ AttributeList::get(LLVMContext &C,
                    ArrayRef<std::pair<unsigned, Attribute>> Attrs) {
   // If there are no attributes then return a null AttributesList pointer.
   if (Attrs.empty())
-    return AttributeList();
+    return {};
 
   assert(std::is_sorted(Attrs.begin(), Attrs.end(),
                         [](const std::pair<unsigned, Attribute> &LHS,
                            const std::pair<unsigned, Attribute> &RHS) {
                           return LHS.first < RHS.first;
                         }) && "Misordered Attributes list!");
-  assert(none_of(Attrs,
-                 [](const std::pair<unsigned, Attribute> &Pair) {
-                   return Pair.second.hasAttribute(Attribute::None);
-                 }) &&
+  assert(llvm::none_of(Attrs,
+                       [](const std::pair<unsigned, Attribute> &Pair) {
+                         return Pair.second.hasAttribute(Attribute::None);
+                       }) &&
          "Pointless attribute!");
 
   // Create a vector if (unsigned, AttributeSetNode*) pairs from the attributes
@@ -905,7 +909,7 @@ AttributeList::get(LLVMContext &C,
                    ArrayRef<std::pair<unsigned, AttributeSet>> Attrs) {
   // If there are no attributes then return a null AttributesList pointer.
   if (Attrs.empty())
-    return AttributeList();
+    return {};
 
   assert(std::is_sorted(Attrs.begin(), Attrs.end(),
                         [](const std::pair<unsigned, AttributeSet> &LHS,
@@ -913,16 +917,20 @@ AttributeList::get(LLVMContext &C,
                           return LHS.first < RHS.first;
                         }) &&
          "Misordered Attributes list!");
-  assert(none_of(Attrs,
-                 [](const std::pair<unsigned, AttributeSet> &Pair) {
-                   return !Pair.second.hasAttributes();
-                 }) &&
+  assert(llvm::none_of(Attrs,
+                       [](const std::pair<unsigned, AttributeSet> &Pair) {
+                         return !Pair.second.hasAttributes();
+                       }) &&
          "Pointless attribute!");
 
   unsigned MaxIndex = Attrs.back().first;
+  // If the MaxIndex is FunctionIndex and there are other indices in front
+  // of it, we need to use the largest of those to get the right size.
+  if (MaxIndex == FunctionIndex && Attrs.size() > 1)
+    MaxIndex = Attrs[Attrs.size() - 2].first;
 
   SmallVector<AttributeSet, 4> AttrVec(attrIdxToArrayIdx(MaxIndex) + 1);
-  for (auto Pair : Attrs)
+  for (const auto Pair : Attrs)
     AttrVec[attrIdxToArrayIdx(Pair.first)] = Pair.second;
 
   return getImpl(C, AttrVec);
@@ -952,7 +960,7 @@ AttributeList AttributeList::get(LLVMContext &C, AttributeSet FnAttrs,
 
   // If all attribute sets were empty, we can use the empty attribute list.
   if (NumSets == 0)
-    return AttributeList();
+    return {};
 
   SmallVector<AttributeSet, 8> AttrSets;
   AttrSets.reserve(NumSets);
@@ -972,7 +980,7 @@ AttributeList AttributeList::get(LLVMContext &C, AttributeSet FnAttrs,
 AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
                                  const AttrBuilder &B) {
   if (!B.hasAttributes())
-    return AttributeList();
+    return {};
   Index = attrIdxToArrayIdx(Index);
   SmallVector<AttributeSet, 8> AttrSets(Index + 1);
   AttrSets[Index] = AttributeSet::get(C, B);
@@ -982,7 +990,7 @@ AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
 AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
                                  ArrayRef<Attribute::AttrKind> Kinds) {
   SmallVector<std::pair<unsigned, Attribute>, 8> Attrs;
-  for (Attribute::AttrKind K : Kinds)
+  for (const auto K : Kinds)
     Attrs.emplace_back(Index, Attribute::get(C, K));
   return get(C, Attrs);
 }
@@ -990,7 +998,7 @@ AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
 AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
                                  ArrayRef<StringRef> Kinds) {
   SmallVector<std::pair<unsigned, Attribute>, 8> Attrs;
-  for (StringRef K : Kinds)
+  for (const auto K : Kinds)
     Attrs.emplace_back(Index, Attribute::get(C, K));
   return get(C, Attrs);
 }
@@ -998,22 +1006,22 @@ AttributeList AttributeList::get(LLVMContext &C, unsigned Index,
 AttributeList AttributeList::get(LLVMContext &C,
                                  ArrayRef<AttributeList> Attrs) {
   if (Attrs.empty())
-    return AttributeList();
+    return {};
   if (Attrs.size() == 1)
     return Attrs[0];
 
   unsigned MaxSize = 0;
-  for (AttributeList List : Attrs)
+  for (const auto List : Attrs)
     MaxSize = std::max(MaxSize, List.getNumAttrSets());
 
   // If every list was empty, there is no point in merging the lists.
   if (MaxSize == 0)
-    return AttributeList();
+    return {};
 
   SmallVector<AttributeSet, 8> NewAttrSets(MaxSize);
   for (unsigned I = 0; I < MaxSize; ++I) {
     AttrBuilder CurBuilder;
-    for (AttributeList List : Attrs)
+    for (const auto List : Attrs)
       CurBuilder.merge(List.getAttributes(I - 1));
     NewAttrSets[I] = AttributeSet::get(C, CurBuilder);
   }
@@ -1096,37 +1104,41 @@ AttributeList AttributeList::addParamAttribute(LLVMContext &C,
 AttributeList AttributeList::removeAttribute(LLVMContext &C, unsigned Index,
                                              Attribute::AttrKind Kind) const {
   if (!hasAttribute(Index, Kind)) return *this;
-  AttrBuilder B;
-  B.addAttribute(Kind);
-  return removeAttributes(C, Index, B);
+
+  Index = attrIdxToArrayIdx(Index);
+  SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
+  assert(Index < AttrSets.size());
+
+  AttrSets[Index] = AttrSets[Index].removeAttribute(C, Kind);
+
+  return getImpl(C, AttrSets);
 }
 
 AttributeList AttributeList::removeAttribute(LLVMContext &C, unsigned Index,
                                              StringRef Kind) const {
   if (!hasAttribute(Index, Kind)) return *this;
-  AttrBuilder B;
-  B.addAttribute(Kind);
-  return removeAttributes(C, Index, B);
+
+  Index = attrIdxToArrayIdx(Index);
+  SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
+  assert(Index < AttrSets.size());
+
+  AttrSets[Index] = AttrSets[Index].removeAttribute(C, Kind);
+
+  return getImpl(C, AttrSets);
 }
 
 AttributeList
 AttributeList::removeAttributes(LLVMContext &C, unsigned Index,
                                 const AttrBuilder &AttrsToRemove) const {
   if (!pImpl)
-    return AttributeList();
-
-  // FIXME it is not obvious how this should work for alignment.
-  // For now, say we can't pass in alignment, which no current use does.
-  assert(!AttrsToRemove.hasAlignmentAttr() && "Attempt to change alignment!");
+    return {};
 
   Index = attrIdxToArrayIdx(Index);
   SmallVector<AttributeSet, 4> AttrSets(this->begin(), this->end());
   if (Index >= AttrSets.size())
     AttrSets.resize(Index + 1);
 
-  AttrBuilder B(AttrSets[Index]);
-  B.remove(AttrsToRemove);
-  AttrSets[Index] = AttributeSet::get(C, B);
+  AttrSets[Index] = AttrSets[Index].removeAttributes(C, AttrsToRemove);
 
   return getImpl(C, AttrSets);
 }
@@ -1134,7 +1146,7 @@ AttributeList::removeAttributes(LLVMContext &C, unsigned Index,
 AttributeList AttributeList::removeAttributes(LLVMContext &C,
                                               unsigned WithoutIndex) const {
   if (!pImpl)
-    return AttributeList();
+    return {};
   WithoutIndex = attrIdxToArrayIdx(WithoutIndex);
   if (WithoutIndex >= getNumAttrSets())
     return *this;
@@ -1268,7 +1280,7 @@ std::string AttributeList::getAsString(unsigned Index, bool InAttrGrp) const {
 AttributeSet AttributeList::getAttributes(unsigned Index) const {
   Index = attrIdxToArrayIdx(Index);
   if (!pImpl || Index >= getNumAttrSets())
-    return AttributeSet();
+    return {};
   return pImpl->begin()[Index];
 }
 
@@ -1308,12 +1320,12 @@ LLVM_DUMP_METHOD void AttributeList::dump() const {
 // FIXME: Remove this ctor, use AttributeSet.
 AttrBuilder::AttrBuilder(AttributeList AL, unsigned Index) {
   AttributeSet AS = AL.getAttributes(Index);
-  for (const Attribute &A : AS)
+  for (const auto &A : AS)
     addAttribute(A);
 }
 
 AttrBuilder::AttrBuilder(AttributeSet AS) {
-  for (const Attribute &A : AS)
+  for (const auto &A : AS)
     addAttribute(A);
 }
 
@@ -1384,7 +1396,7 @@ AttrBuilder &AttrBuilder::removeAttributes(AttributeList A, uint64_t Index) {
 }
 
 AttrBuilder &AttrBuilder::removeAttribute(StringRef A) {
-  std::map<std::string, std::string>::iterator I = TargetDepAttrs.find(A);
+  auto I = TargetDepAttrs.find(A);
   if (I != TargetDepAttrs.end())
     TargetDepAttrs.erase(I);
   return *this;
@@ -1524,7 +1536,7 @@ bool AttrBuilder::hasAttributes() const {
 bool AttrBuilder::hasAttributes(AttributeList AL, uint64_t Index) const {
   AttributeSet AS = AL.getAttributes(Index);
 
-  for (Attribute Attr : AS) {
+  for (const auto Attr : AS) {
     if (Attr.isEnumAttribute() || Attr.isIntAttribute()) {
       if (contains(Attr.getKindAsEnum()))
         return true;
@@ -1558,7 +1570,7 @@ bool AttrBuilder::operator==(const AttrBuilder &B) {
 // AttributeFuncs Function Defintions
 //===----------------------------------------------------------------------===//
 
-/// \brief Which attributes cannot be applied to a type.
+/// Which attributes cannot be applied to a type.
 AttrBuilder AttributeFuncs::typeIncompatible(Type *Ty) {
   AttrBuilder Incompatible;
 
@@ -1590,7 +1602,7 @@ static bool isEqual(const Function &Caller, const Function &Callee) {
          Callee.getFnAttribute(AttrClass::getKind());
 }
 
-/// \brief Compute the logical AND of the attributes of the caller and the
+/// Compute the logical AND of the attributes of the caller and the
 /// callee.
 ///
 /// This function sets the caller's attribute to false if the callee's attribute
@@ -1602,7 +1614,7 @@ static void setAND(Function &Caller, const Function &Callee) {
     AttrClass::set(Caller, AttrClass::getKind(), false);
 }
 
-/// \brief Compute the logical OR of the attributes of the caller and the
+/// Compute the logical OR of the attributes of the caller and the
 /// callee.
 ///
 /// This function sets the caller's attribute to true if the callee's attribute
@@ -1614,7 +1626,7 @@ static void setOR(Function &Caller, const Function &Callee) {
     AttrClass::set(Caller, AttrClass::getKind(), true);
 }
 
-/// \brief If the inlined function had a higher stack protection level than the
+/// If the inlined function had a higher stack protection level than the
 /// calling function, then bump up the caller's stack protection level.
 static void adjustCallerSSPLevel(Function &Caller, const Function &Callee) {
   // If upgrading the SSP attribute, clear out the old SSP Attributes first.
@@ -1638,7 +1650,7 @@ static void adjustCallerSSPLevel(Function &Caller, const Function &Callee) {
     Caller.addFnAttr(Attribute::StackProtect);
 }
 
-/// \brief If the inlined function required stack probes, then ensure that
+/// If the inlined function required stack probes, then ensure that
 /// the calling function has those too.
 static void adjustCallerStackProbes(Function &Caller, const Function &Callee) {
   if (!Caller.hasFnAttribute("probe-stack") &&
@@ -1647,7 +1659,7 @@ static void adjustCallerStackProbes(Function &Caller, const Function &Callee) {
   }
 }
 
-/// \brief If the inlined function defines the size of guard region
+/// If the inlined function defines the size of guard region
 /// on the stack, then ensure that the calling function defines a guard region
 /// that is no larger.
 static void
@@ -1668,6 +1680,46 @@ adjustCallerStackProbeSize(Function &Caller, const Function &Callee) {
     } else {
       Caller.addFnAttr(Callee.getFnAttribute("stack-probe-size"));
     }
+  }
+}
+
+/// If the inlined function defines a min legal vector width, then ensure
+/// the calling function has the same or larger min legal vector width. If the
+/// caller has the attribute, but the callee doesn't, we need to remove the
+/// attribute from the caller since we can't make any guarantees about the
+/// caller's requirements.
+/// This function is called after the inlining decision has been made so we have
+/// to merge the attribute this way. Heuristics that would use
+/// min-legal-vector-width to determine inline compatibility would need to be
+/// handled as part of inline cost analysis.
+static void
+adjustMinLegalVectorWidth(Function &Caller, const Function &Callee) {
+  if (Caller.hasFnAttribute("min-legal-vector-width")) {
+    if (Callee.hasFnAttribute("min-legal-vector-width")) {
+      uint64_t CallerVectorWidth;
+      Caller.getFnAttribute("min-legal-vector-width")
+            .getValueAsString()
+            .getAsInteger(0, CallerVectorWidth);
+      uint64_t CalleeVectorWidth;
+      Callee.getFnAttribute("min-legal-vector-width")
+            .getValueAsString()
+            .getAsInteger(0, CalleeVectorWidth);
+      if (CallerVectorWidth < CalleeVectorWidth)
+        Caller.addFnAttr(Callee.getFnAttribute("min-legal-vector-width"));
+    } else {
+      // If the callee doesn't have the attribute then we don't know anything
+      // and must drop the attribute from the caller.
+      Caller.removeFnAttr("min-legal-vector-width");
+    }
+  }
+}
+
+/// If the inlined function has "null-pointer-is-valid=true" attribute,
+/// set this attribute in the caller post inlining.
+static void
+adjustNullPointerValidAttr(Function &Caller, const Function &Callee) {
+  if (Callee.nullPointerIsDefined() && !Caller.nullPointerIsDefined()) {
+    Caller.addFnAttr(Callee.getFnAttribute("null-pointer-is-valid"));
   }
 }
 

@@ -68,7 +68,7 @@ macro(llvm_config executable)
   cmake_parse_arguments(ARG "USE_SHARED" "" "" ${ARGN})
   set(link_components ${ARG_UNPARSED_ARGUMENTS})
 
-  if(USE_SHARED)
+  if(ARG_USE_SHARED)
     # If USE_SHARED is specified, then we link against libLLVM,
     # but also against the component libraries below. This is
     # done in case libLLVM does not contain all of the components
@@ -87,7 +87,7 @@ macro(llvm_config executable)
       endif()
     endif()
 
-    target_link_libraries(${executable} LLVM)
+    target_link_libraries(${executable} PRIVATE LLVM)
   endif()
 
   explicit_llvm_config(${executable} ${link_components})
@@ -99,9 +99,9 @@ function(explicit_llvm_config executable)
 
   llvm_map_components_to_libnames(LIBRARIES ${link_components})
   get_target_property(t ${executable} TYPE)
-  if("x${t}" STREQUAL "xSTATIC_LIBRARY")
+  if(t STREQUAL "STATIC_LIBRARY")
     target_link_libraries(${executable} INTERFACE ${LIBRARIES})
-  elseif("x${t}" STREQUAL "xSHARED_LIBRARY" OR "x${t}" STREQUAL "xMODULE_LIBRARY")
+  elseif(t STREQUAL "EXECUTABLE" OR t STREQUAL "SHARED_LIBRARY" OR t STREQUAL "MODULE_LIBRARY")
     target_link_libraries(${executable} PRIVATE ${LIBRARIES})
   else()
     # Use plain form for legacy user.
@@ -302,7 +302,9 @@ function(llvm_expand_dependencies out_libs)
     expand_topologically(${lib} "${required_libs}" "${visited_libs}")
   endforeach()
 
-  list(REVERSE required_libs)
+  if(required_libs)
+    list(REVERSE required_libs)
+  endif()
   set(${out_libs} ${required_libs} PARENT_SCOPE)
 endfunction()
 

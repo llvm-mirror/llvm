@@ -1,9 +1,8 @@
 //===- InstrProf.h - Instrumented profiling format support ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -425,9 +424,20 @@ private:
   // A map from function runtime address to function name MD5 hash.
   // This map is only populated and used by raw instr profile reader.
   AddrHashMap AddrToMD5Map;
+  bool Sorted = false;
+
+  static StringRef getExternalSymbol() {
+    return "** External Symbol **";
+  }
+
+  // If the symtab is created by a series of calls to \c addFuncName, \c
+  // finalizeSymtab needs to be called before looking up function names.
+  // This is required because the underlying map is a vector (for space
+  // efficiency) which needs to be sorted.
+  inline void finalizeSymtab();
 
 public:
-  InstrProfSymtab() = default; 
+  InstrProfSymtab() = default;
 
   /// Create InstrProfSymtab from an object file section which
   /// contains function PGO names. When section may contain raw
@@ -456,21 +466,17 @@ public:
   /// \p IterRange. This interface is used by IndexedProfReader.
   template <typename NameIterRange> Error create(const NameIterRange &IterRange);
 
-  // If the symtab is created by a series of calls to \c addFuncName, \c
-  // finalizeSymtab needs to be called before looking up function names.
-  // This is required because the underlying map is a vector (for space
-  // efficiency) which needs to be sorted.
-  inline void finalizeSymtab();
-
   /// Update the symtab by adding \p FuncName to the table. This interface
   /// is used by the raw and text profile readers.
   Error addFuncName(StringRef FuncName) {
     if (FuncName.empty())
       return make_error<InstrProfError>(instrprof_error::malformed);
     auto Ins = NameTab.insert(FuncName);
-    if (Ins.second)
+    if (Ins.second) {
       MD5NameMap.push_back(std::make_pair(
           IndexedInstrProf::ComputeHash(FuncName), Ins.first->getKey()));
+      Sorted = false;
+    }
     return Error::success();
   }
 
@@ -480,7 +486,8 @@ public:
     AddrToMD5Map.push_back(std::make_pair(Addr, MD5Val));
   }
 
-  AddrHashMap &getAddrHashMap() { return AddrToMD5Map; }
+  /// Return a function's hash, or 0, if the function isn't in this SymTab.
+  uint64_t getFunctionHashFromAddress(uint64_t Address);
 
   /// Return function's PGO name from the function name's symbol
   /// address in the object file. If an error occurs, return
@@ -490,6 +497,16 @@ public:
   /// Return function's PGO name from the name's md5 hash value.
   /// If not found, return an empty string.
   inline StringRef getFuncName(uint64_t FuncMD5Hash);
+
+  /// Just like getFuncName, except that it will return a non-empty StringRef
+  /// if the function is external to this symbol table. All such cases
+  /// will be represented using the same StringRef value.
+  inline StringRef getFuncNameOrExternalSymbol(uint64_t FuncMD5Hash);
+
+  /// True if Symbol is the value used to represent external symbols.
+  static bool isExternalSymbol(const StringRef &Symbol) {
+    return Symbol == InstrProfSymtab::getExternalSymbol();
+  }
 
   /// Return function from the name's md5 hash. Return nullptr if not found.
   inline Function *getFunction(uint64_t FuncMD5Hash);
@@ -524,14 +541,25 @@ Error InstrProfSymtab::create(const NameIterRange &IterRange) {
 }
 
 void InstrProfSymtab::finalizeSymtab() {
-  std::sort(MD5NameMap.begin(), MD5NameMap.end(), less_first());
-  std::sort(MD5FuncMap.begin(), MD5FuncMap.end(), less_first());
-  std::sort(AddrToMD5Map.begin(), AddrToMD5Map.end(), less_first());
+  if (Sorted)
+    return;
+  llvm::sort(MD5NameMap, less_first());
+  llvm::sort(MD5FuncMap, less_first());
+  llvm::sort(AddrToMD5Map, less_first());
   AddrToMD5Map.erase(std::unique(AddrToMD5Map.begin(), AddrToMD5Map.end()),
                      AddrToMD5Map.end());
+  Sorted = true;
+}
+
+StringRef InstrProfSymtab::getFuncNameOrExternalSymbol(uint64_t FuncMD5Hash) {
+  StringRef ret = getFuncName(FuncMD5Hash);
+  if (ret.empty())
+    return InstrProfSymtab::getExternalSymbol();
+  return ret;
 }
 
 StringRef InstrProfSymtab::getFuncName(uint64_t FuncMD5Hash) {
+  finalizeSymtab();
   auto Result =
       std::lower_bound(MD5NameMap.begin(), MD5NameMap.end(), FuncMD5Hash,
                        [](const std::pair<uint64_t, std::string> &LHS,
@@ -542,6 +570,7 @@ StringRef InstrProfSymtab::getFuncName(uint64_t FuncMD5Hash) {
 }
 
 Function* InstrProfSymtab::getFunction(uint64_t FuncMD5Hash) {
+  finalizeSymtab();
   auto Result =
       std::lower_bound(MD5FuncMap.begin(), MD5FuncMap.end(), FuncMD5Hash,
                        [](const std::pair<uint64_t, Function*> &LHS,
@@ -614,8 +643,6 @@ struct InstrProfRecord {
     return *this;
   }
 
-  using ValueMapType = std::vector<std::pair<uint64_t, uint64_t>>;
-
   /// Return the number of value profile kinds with non-zero number
   /// of profile sites.
   inline uint32_t getNumValueKinds() const;
@@ -649,7 +676,7 @@ struct InstrProfRecord {
   /// Add ValueData for ValueKind at value Site.
   void addValueData(uint32_t ValueKind, uint32_t Site,
                     InstrProfValueData *VData, uint32_t N,
-                    ValueMapType *ValueMap);
+                    InstrProfSymtab *SymTab);
 
   /// Merge the counts in \p Other into this one.
   /// Optionally scale merged counts by \p Weight.
@@ -723,7 +750,7 @@ private:
 
   // Map indirect call target name hash to name string.
   uint64_t remapValue(uint64_t Value, uint32_t ValueKind,
-                      ValueMapType *HashKeys);
+                      InstrProfSymtab *SymTab);
 
   // Merge Value Profile data from Src record to this record for ValueKind.
   // Scale merged value counts by \p Weight.
@@ -859,7 +886,9 @@ enum ProfVersion {
   // In this version, profile summary data \c IndexedInstrProf::Summary is
   // stored after the profile header.
   Version4 = 4,
-  // The current version is 4.
+  // In this version, the frontend PGO stable hash algorithm defaults to V2.
+  Version5 = 5,
+  // The current version is 5.
   CurrentVersion = INSTR_PROF_INDEX_VERSION
 };
 const uint64_t Version = ProfVersion::CurrentVersion;
@@ -991,7 +1020,7 @@ template <> inline uint64_t getMagic<uint32_t>() {
 // compiler-rt/lib/profile/InstrProfiling.h.
 // It should also match the synthesized type in
 // Transforms/Instrumentation/InstrProfiling.cpp:getOrCreateRegionCounters.
-template <class IntPtrT> struct LLVM_ALIGNAS(8) ProfileData {
+template <class IntPtrT> struct alignas(8) ProfileData {
   #define INSTR_PROF_DATA(Type, LLVMType, Name, Init) Type Name;
   #include "llvm/ProfileData/InstrProfData.inc"
 };

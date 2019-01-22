@@ -1,4 +1,5 @@
 ; RUN: opt -irce -S < %s 2>&1 | FileCheck %s
+; RUN: opt -passes='require<branch-prob>,loop(irce)' -S < %s 2>&1 | FileCheck %s
 
 ; test that the pre and post loops have loop metadata which disables any further
 ; loop optimizations.
@@ -38,7 +39,7 @@ exit:                                             ; preds = %in.bounds, %entry
 define void @single_access_with_preloop(i32 *%arr, i32 *%a_len_ptr, i32 %n, i32 %offset) {
 ; CHECK-LABEL: @single_access_with_preloop(
 ; CHECK-LABEL: in.bounds.preloop
-; CHECK: br i1 %14, label %loop.preloop, label %preloop.exit.selector, !llvm.loop !8, !irce.loop.clone !7
+; CHECK: br i1 [[COND:%[^ ]+]], label %loop.preloop, label %preloop.exit.selector, !llvm.loop !8, !irce.loop.clone !7
 ; CHECK-LABEL: in.bounds.postloop
 ; CHECK: br i1 %next.postloop, label %loop.postloop, label %exit.loopexit.loopexit, !llvm.loop !9, !irce.loop.clone !7
  entry:

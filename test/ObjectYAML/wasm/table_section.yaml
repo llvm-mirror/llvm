@@ -5,9 +5,9 @@ FileHeader:
 Sections:
   - Type:            TABLE
     Tables:         
-      - ElemType:        ANYFUNC
+      - ElemType:        FUNCREF
         Limits:
-          Flags:           0x00000001
+          Flags:           [ HAS_MAX ]
           Initial:         0x00000010
           Maximum:         0x00000011
 ...
@@ -17,9 +17,9 @@ Sections:
 # CHECK: Sections:
 # CHECK:  - Type:            TABLE
 # CHECK:    Tables:         
-# CHECK:      - ElemType:        ANYFUNC
+# CHECK:      - ElemType:        FUNCREF
 # CHECK:        Limits:
-# CHECK:          Flags:           0x00000001
+# CHECK:          Flags:           [ HAS_MAX ]
 # CHECK:          Initial:         0x00000010
 # CHECK:          Maximum:         0x00000011
 # CHECK: ...

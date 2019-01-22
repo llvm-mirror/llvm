@@ -1,9 +1,8 @@
 //===-- ARMInstrVFP.td - VFP support for ARM ---------------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,11 +16,19 @@ def SDT_VMOVDRR : SDTypeProfile<1, 2, [SDTCisVT<0, f64>, SDTCisVT<1, i32>,
 def SDT_VMOVRRD : SDTypeProfile<2, 1, [SDTCisVT<0, i32>, SDTCisSameAs<0, 1>,
                                        SDTCisVT<2, f64>]>;
 
+def SDT_VMOVSR : SDTypeProfile<1, 1, [SDTCisVT<0, f32>, SDTCisVT<1, i32>]>;
+
 def arm_fmstat : SDNode<"ARMISD::FMSTAT",  SDTNone, [SDNPInGlue, SDNPOutGlue]>;
 def arm_cmpfp  : SDNode<"ARMISD::CMPFP",   SDT_ARMFCmp, [SDNPOutGlue]>;
 def arm_cmpfp0 : SDNode<"ARMISD::CMPFPw0", SDT_CMPFP0, [SDNPOutGlue]>;
 def arm_fmdrr  : SDNode<"ARMISD::VMOVDRR", SDT_VMOVDRR>;
 def arm_fmrrd  : SDNode<"ARMISD::VMOVRRD", SDT_VMOVRRD>;
+def arm_vmovsr  : SDNode<"ARMISD::VMOVSR", SDT_VMOVSR>;
+
+def SDT_VMOVhr : SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisVT<1, i32>] >;
+def SDT_VMOVrh : SDTypeProfile<1, 1, [SDTCisVT<0, i32>, SDTCisFP<1>] >;
+def arm_vmovhr : SDNode<"ARMISD::VMOVhr", SDT_VMOVhr>;
+def arm_vmovrh : SDNode<"ARMISD::VMOVrh", SDT_VMOVrh>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions.
@@ -39,7 +46,7 @@ def vfp_f16imm : Operand<f16>,
     }], SDNodeXForm<fpimm, [{
       APFloat InVal = N->getValueAPF();
       uint32_t enc = ARM_AM::getFP16Imm(InVal);
-      return CurDAG->getTargetConstant(enc, MVT::i32);
+      return CurDAG->getTargetConstant(enc, SDLoc(N), MVT::i32);
     }]>> {
   let PrintMethod = "printFPImmOperand";
   let ParserMatchClass = FPImmOperand;
@@ -69,8 +76,17 @@ def vfp_f64imm : Operand<f64>,
   let ParserMatchClass = FPImmOperand;
 }
 
+def alignedload16 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+  return cast<LoadSDNode>(N)->getAlignment() >= 2;
+}]>;
+
 def alignedload32 : PatFrag<(ops node:$ptr), (load node:$ptr), [{
   return cast<LoadSDNode>(N)->getAlignment() >= 4;
+}]>;
+
+def alignedstore16 : PatFrag<(ops node:$val, node:$ptr),
+                             (store node:$val, node:$ptr), [{
+  return cast<StoreSDNode>(N)->getAlignment() >= 2;
 }]>;
 
 def alignedstore32 : PatFrag<(ops node:$val, node:$ptr),
@@ -113,9 +129,9 @@ def VLDRS : ASI5<0b1101, 0b01, (outs SPR:$Sd), (ins addrmode5:$addr),
   let D = VFPNeonDomain;
 }
 
-def VLDRH : AHI5<0b1101, 0b01, (outs SPR:$Sd), (ins addrmode5fp16:$addr),
+def VLDRH : AHI5<0b1101, 0b01, (outs HPR:$Sd), (ins addrmode5fp16:$addr),
                  IIC_fpLoad16, "vldr", ".16\t$Sd, $addr",
-                 []>,
+                 [(set HPR:$Sd, (alignedload16 addrmode5fp16:$addr))]>,
             Requires<[HasFullFP16]>;
 
 } // End of 'let canFoldAsLoad = 1, isReMaterializable = 1 in'
@@ -132,9 +148,9 @@ def VSTRS : ASI5<0b1101, 0b00, (outs), (ins SPR:$Sd, addrmode5:$addr),
   let D = VFPNeonDomain;
 }
 
-def VSTRH : AHI5<0b1101, 0b00, (outs), (ins SPR:$Sd, addrmode5fp16:$addr),
+def VSTRH : AHI5<0b1101, 0b00, (outs), (ins HPR:$Sd, addrmode5fp16:$addr),
                  IIC_fpStore16, "vstr", ".16\t$Sd, $addr",
-                 []>,
+                 [(alignedstore16 HPR:$Sd, addrmode5fp16:$addr)]>,
             Requires<[HasFullFP16]>;
 
 //===----------------------------------------------------------------------===//
@@ -255,28 +271,6 @@ def VLSTM : AXSI4<(outs), (ins GPRnopc:$Rn, pred:$p), IndexModeNone,
     let mayStore    = 1;
 }
 
-
-// FLDM/FSTM - Load / Store multiple single / double precision registers for
-// pre-ARMv6 cores.
-// These instructions are deprecated!
-def : VFP2MnemonicAlias<"fldmias", "vldmia">;
-def : VFP2MnemonicAlias<"fldmdbs", "vldmdb">;
-def : VFP2MnemonicAlias<"fldmeas", "vldmdb">;
-def : VFP2MnemonicAlias<"fldmfds", "vldmia">;
-def : VFP2MnemonicAlias<"fldmiad", "vldmia">;
-def : VFP2MnemonicAlias<"fldmdbd", "vldmdb">;
-def : VFP2MnemonicAlias<"fldmead", "vldmdb">;
-def : VFP2MnemonicAlias<"fldmfdd", "vldmia">;
-
-def : VFP2MnemonicAlias<"fstmias", "vstmia">;
-def : VFP2MnemonicAlias<"fstmdbs", "vstmdb">;
-def : VFP2MnemonicAlias<"fstmeas", "vstmia">;
-def : VFP2MnemonicAlias<"fstmfds", "vstmdb">;
-def : VFP2MnemonicAlias<"fstmiad", "vstmia">;
-def : VFP2MnemonicAlias<"fstmdbd", "vstmdb">;
-def : VFP2MnemonicAlias<"fstmead", "vstmia">;
-def : VFP2MnemonicAlias<"fstmfdd", "vstmdb">;
-
 def : InstAlias<"vpush${p} $r", (VSTMDDB_UPD SP, pred:$p, dpr_reglist:$r), 0>,
                 Requires<[HasVFP2]>;
 def : InstAlias<"vpush${p} $r", (VSTMSDB_UPD SP, pred:$p, spr_reglist:$r), 0>,
@@ -297,6 +291,8 @@ defm : VFPDTAnyInstAlias<"vpop${p}", "$r",
 // FLDMX, FSTMX - Load and store multiple unknown precision registers for
 // pre-armv6 cores.
 // These instruction are deprecated so we don't want them to get selected.
+// However, there is no UAL syntax for them, so we keep them around for
+// (dis)assembly only.
 multiclass vfp_ldstx_mult<string asm, bit L_bit> {
   // Unknown precision
   def XIA :
@@ -355,9 +351,9 @@ def VADDS  : ASbIn<0b11100, 0b11, 0, 0,
 
 let TwoOperandAliasConstraint = "$Sn = $Sd" in
 def VADDH  : AHbI<0b11100, 0b11, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                   IIC_fpALU16, "vadd", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fadd HPR:$Sn, HPR:$Sm))]>,
              Sched<[WriteFPALU32]>;
 
 let TwoOperandAliasConstraint = "$Dn = $Dd" in
@@ -380,9 +376,9 @@ def VSUBS  : ASbIn<0b11100, 0b11, 1, 0,
 
 let TwoOperandAliasConstraint = "$Sn = $Sd" in
 def VSUBH  : AHbI<0b11100, 0b11, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                   IIC_fpALU16, "vsub", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fsub HPR:$Sn, HPR:$Sm))]>,
             Sched<[WriteFPALU32]>;
 
 let TwoOperandAliasConstraint = "$Dn = $Dd" in
@@ -401,9 +397,9 @@ def VDIVS  : ASbI<0b11101, 0b00, 0, 0,
 
 let TwoOperandAliasConstraint = "$Sn = $Sd" in
 def VDIVH  : AHbI<0b11101, 0b00, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                   IIC_fpDIV16, "vdiv", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fdiv HPR:$Sn, HPR:$Sm))]>,
              Sched<[WriteFPDIV32]>;
 
 let TwoOperandAliasConstraint = "$Dn = $Dd" in
@@ -426,9 +422,9 @@ def VMULS  : ASbIn<0b11100, 0b10, 0, 0,
 
 let TwoOperandAliasConstraint = "$Sn = $Sd" in
 def VMULH  : AHbI<0b11100, 0b10, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                   IIC_fpMUL16, "vmul", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fmul HPR:$Sn, HPR:$Sm))]>,
              Sched<[WriteFPMUL32, ReadFPMUL, ReadFPMUL]>;
 
 def VNMULD : ADbI<0b11100, 0b10, 1, 0,
@@ -448,18 +444,18 @@ def VNMULS : ASbI<0b11100, 0b10, 1, 0,
 }
 
 def VNMULH : AHbI<0b11100, 0b10, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                   IIC_fpMUL16, "vnmul", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fneg (fmul HPR:$Sn, HPR:$Sm)))]>,
              Sched<[WriteFPMUL32, ReadFPMUL, ReadFPMUL]>;
 
 multiclass vsel_inst<string op, bits<2> opc, int CC> {
   let DecoderNamespace = "VFPV8", PostEncoderMethod = "",
       Uses = [CPSR], AddedComplexity = 4 in {
     def H : AHbInp<0b11100, opc, 0,
-                   (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                   (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                    NoItinerary, !strconcat("vsel", op, ".f16\t$Sd, $Sn, $Sm"),
-                   []>,
+                   [(set HPR:$Sd, (ARMcmov HPR:$Sm, HPR:$Sn, CC))]>,
                    Requires<[HasFullFP16]>;
 
     def S : ASbInp<0b11100, opc, 0,
@@ -485,9 +481,9 @@ defm VSELVS : vsel_inst<"vs", 0b01, 6>;
 multiclass vmaxmin_inst<string op, bit opc, SDNode SD> {
   let DecoderNamespace = "VFPV8", PostEncoderMethod = "" in {
     def H : AHbInp<0b11101, 0b00, opc,
-                   (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                   (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                    NoItinerary, !strconcat(op, ".f16\t$Sd, $Sn, $Sm"),
-                   []>,
+                   [(set HPR:$Sd, (SD HPR:$Sn, HPR:$Sm))]>,
                    Requires<[HasFullFP16]>;
 
     def S : ASbInp<0b11101, 0b00, opc,
@@ -531,9 +527,9 @@ def VCMPES : ASuI<0b11101, 0b11, 0b0100, 0b11, 0,
 }
 
 def VCMPEH : AHuI<0b11101, 0b11, 0b0100, 0b11, 0,
-                  (outs), (ins SPR:$Sd, SPR:$Sm),
+                  (outs), (ins HPR:$Sd, HPR:$Sm),
                   IIC_fpCMP16, "vcmpe", ".f16\t$Sd, $Sm",
-                  []>;
+                  [(arm_cmpfp HPR:$Sd, HPR:$Sm, (i32 1))]>;
 
 def VCMPD  : ADuI<0b11101, 0b11, 0b0100, 0b01, 0,
                   (outs), (ins DPR:$Dd, DPR:$Dm),
@@ -550,9 +546,9 @@ def VCMPS  : ASuI<0b11101, 0b11, 0b0100, 0b01, 0,
 }
 
 def VCMPH  : AHuI<0b11101, 0b11, 0b0100, 0b01, 0,
-                  (outs), (ins SPR:$Sd, SPR:$Sm),
+                  (outs), (ins HPR:$Sd, HPR:$Sm),
                   IIC_fpCMP16, "vcmp", ".f16\t$Sd, $Sm",
-                  []>;
+                  [(arm_cmpfp HPR:$Sd, HPR:$Sm, (i32 0))]>;
 } // Defs = [FPSCR_NZCV]
 
 //===----------------------------------------------------------------------===//
@@ -600,9 +596,9 @@ def VCMPEZS : ASuI<0b11101, 0b11, 0b0101, 0b11, 0,
 }
 
 def VCMPEZH : AHuI<0b11101, 0b11, 0b0101, 0b11, 0,
-                   (outs), (ins SPR:$Sd),
+                   (outs), (ins HPR:$Sd),
                    IIC_fpCMP16, "vcmpe", ".f16\t$Sd, #0",
-                   []> {
+                   [(arm_cmpfp0 HPR:$Sd, (i32 1))]> {
   let Inst{3-0} = 0b0000;
   let Inst{5}   = 0;
 }
@@ -628,9 +624,9 @@ def VCMPZS  : ASuI<0b11101, 0b11, 0b0101, 0b01, 0,
 }
 
 def VCMPZH  : AHuI<0b11101, 0b11, 0b0101, 0b01, 0,
-                   (outs), (ins SPR:$Sd),
+                   (outs), (ins HPR:$Sd),
                    IIC_fpCMP16, "vcmp", ".f16\t$Sd, #0",
-                   []> {
+                   [(arm_cmpfp0 HPR:$Sd, (i32 0))]> {
   let Inst{3-0} = 0b0000;
   let Inst{5}   = 0;
 }
@@ -678,19 +674,28 @@ def VCVTSD  : VFPAI<(outs SPR:$Sd), (ins DPR:$Dm), VFPUnaryFrm,
   let Predicates = [HasVFP2, HasDPVFP];
 }
 
-// Between half, single and double-precision.  For disassembly only.
-
+// Between half, single and double-precision.
 def VCVTBHS: ASuI<0b11101, 0b11, 0b0010, 0b01, 0, (outs SPR:$Sd), (ins SPR:$Sm),
                  /* FIXME */ IIC_fpCVTSH, "vcvtb", ".f32.f16\t$Sd, $Sm",
-                 [/* For disassembly only; pattern left blank */]>,
+                 [/* Intentionally left blank, see patterns below */]>,
                  Requires<[HasFP16]>,
              Sched<[WriteFPCVT]>;
+
+def : FullFP16Pat<(f32 (fpextend HPR:$Sm)),
+                  (VCVTBHS (COPY_TO_REGCLASS HPR:$Sm, SPR))>;
+def : FP16Pat<(f16_to_fp GPR:$a),
+              (VCVTBHS (COPY_TO_REGCLASS GPR:$a, SPR))>;
 
 def VCVTBSH: ASuI<0b11101, 0b11, 0b0011, 0b01, 0, (outs SPR:$Sd), (ins SPR:$Sm),
                  /* FIXME */ IIC_fpCVTHS, "vcvtb", ".f16.f32\t$Sd, $Sm",
-                 [/* For disassembly only; pattern left blank */]>,
+                 [/* Intentionally left blank, see patterns below */]>,
                  Requires<[HasFP16]>,
              Sched<[WriteFPCVT]>;
+
+def : FullFP16Pat<(f16 (fpround SPR:$Sm)),
+                  (COPY_TO_REGCLASS (VCVTBSH SPR:$Sm), HPR)>;
+def : FP16Pat<(fp_to_f16 SPR:$a),
+              (i32 (COPY_TO_REGCLASS (VCVTBSH SPR:$a), GPR))>;
 
 def VCVTTHS: ASuI<0b11101, 0b11, 0b0010, 0b11, 0, (outs SPR:$Sd), (ins SPR:$Sm),
                  /* FIXME */ IIC_fpCVTSH, "vcvtt", ".f32.f16\t$Sd, $Sm",
@@ -707,7 +712,8 @@ def VCVTTSH: ASuI<0b11101, 0b11, 0b0011, 0b11, 0, (outs SPR:$Sd), (ins SPR:$Sm),
 def VCVTBHD : ADuI<0b11101, 0b11, 0b0010, 0b01, 0,
                    (outs DPR:$Dd), (ins SPR:$Sm),
                    NoItinerary, "vcvtb", ".f64.f16\t$Dd, $Sm",
-                   []>, Requires<[HasFPARMv8, HasDPVFP]>,
+                   [/* Intentionally left blank, see patterns below */]>,
+                   Requires<[HasFPARMv8, HasDPVFP]>,
               Sched<[WriteFPCVT]> {
   // Instruction operands.
   bits<5> Sm;
@@ -717,10 +723,18 @@ def VCVTBHD : ADuI<0b11101, 0b11, 0b0010, 0b01, 0,
   let Inst{5}   = Sm{0};
 }
 
+def : FullFP16Pat<(f64 (fpextend HPR:$Sm)),
+                  (VCVTBHD (COPY_TO_REGCLASS HPR:$Sm, SPR))>,
+                  Requires<[HasFPARMv8, HasDPVFP]>;
+def : FP16Pat<(f64 (f16_to_fp GPR:$a)),
+              (VCVTBHD (COPY_TO_REGCLASS GPR:$a, SPR))>,
+              Requires<[HasFPARMv8, HasDPVFP]>;
+
 def VCVTBDH : ADuI<0b11101, 0b11, 0b0011, 0b01, 0,
                    (outs SPR:$Sd), (ins DPR:$Dm),
                    NoItinerary, "vcvtb", ".f16.f64\t$Sd, $Dm",
-                   []>, Requires<[HasFPARMv8, HasDPVFP]> {
+                   [/* Intentionally left blank, see patterns below */]>,
+                   Requires<[HasFPARMv8, HasDPVFP]> {
   // Instruction operands.
   bits<5> Sd;
   bits<5> Dm;
@@ -731,6 +745,13 @@ def VCVTBDH : ADuI<0b11101, 0b11, 0b0011, 0b01, 0,
   let Inst{15-12}   = Sd{4-1};
   let Inst{22}      = Sd{0};
 }
+
+def : FullFP16Pat<(f16 (fpround DPR:$Dm)),
+                  (COPY_TO_REGCLASS (VCVTBDH DPR:$Dm), HPR)>,
+                  Requires<[HasFPARMv8, HasDPVFP]>;
+def : FP16Pat<(fp_to_f16 (f64 DPR:$a)),
+              (i32 (COPY_TO_REGCLASS (VCVTBDH DPR:$a), GPR))>,
+                   Requires<[HasFPARMv8, HasDPVFP]>;
 
 def VCVTTHD : ADuI<0b11101, 0b11, 0b0010, 0b11, 0,
                    (outs DPR:$Dd), (ins SPR:$Sm),
@@ -759,23 +780,11 @@ def VCVTTDH : ADuI<0b11101, 0b11, 0b0011, 0b11, 0,
   let Inst{5}     = Dm{4};
 }
 
-def : Pat<(fp_to_f16 SPR:$a),
-          (i32 (COPY_TO_REGCLASS (VCVTBSH SPR:$a), GPR))>;
-
-def : Pat<(fp_to_f16 (f64 DPR:$a)),
-          (i32 (COPY_TO_REGCLASS (VCVTBDH DPR:$a), GPR))>;
-
-def : Pat<(f16_to_fp GPR:$a),
-          (VCVTBHS (COPY_TO_REGCLASS GPR:$a, SPR))>;
-
-def : Pat<(f64 (f16_to_fp GPR:$a)),
-          (VCVTBHD (COPY_TO_REGCLASS GPR:$a, SPR))>;
-
 multiclass vcvt_inst<string opc, bits<2> rm,
                      SDPatternOperator node = null_frag> {
   let PostEncoderMethod = "", DecoderNamespace = "VFPV8" in {
     def SH : AHuInp<0b11101, 0b11, 0b1100, 0b11, 0,
-                    (outs SPR:$Sd), (ins SPR:$Sm),
+                    (outs SPR:$Sd), (ins HPR:$Sm),
                     NoItinerary, !strconcat("vcvt", opc, ".s32.f16\t$Sd, $Sm"),
                     []>,
                     Requires<[HasFullFP16]> {
@@ -783,7 +792,7 @@ multiclass vcvt_inst<string opc, bits<2> rm,
     }
 
     def UH : AHuInp<0b11101, 0b11, 0b1100, 0b01, 0,
-                    (outs SPR:$Sd), (ins SPR:$Sm),
+                    (outs SPR:$Sd), (ins HPR:$Sm),
                     NoItinerary, !strconcat("vcvt", opc, ".u32.f16\t$Sd, $Sm"),
                     []>,
                     Requires<[HasFullFP16]> {
@@ -838,6 +847,17 @@ multiclass vcvt_inst<string opc, bits<2> rm,
   }
 
   let Predicates = [HasFPARMv8] in {
+    let Predicates = [HasFullFP16] in {
+    def : Pat<(i32 (fp_to_sint (node HPR:$a))),
+              (COPY_TO_REGCLASS
+                (!cast<Instruction>(NAME#"SH") HPR:$a),
+                GPR)>;
+
+    def : Pat<(i32 (fp_to_uint (node HPR:$a))),
+              (COPY_TO_REGCLASS
+                (!cast<Instruction>(NAME#"UH") HPR:$a),
+                GPR)>;
+    }
     def : Pat<(i32 (fp_to_sint (node SPR:$a))),
               (COPY_TO_REGCLASS
                 (!cast<Instruction>(NAME#"SS") SPR:$a),
@@ -879,9 +899,9 @@ def VNEGS  : ASuIn<0b11101, 0b11, 0b0001, 0b01, 0,
 }
 
 def VNEGH  : AHuI<0b11101, 0b11, 0b0001, 0b01, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sm),
                   IIC_fpUNA16, "vneg", ".f16\t$Sd, $Sm",
-                  []>;
+                  [(set HPR:$Sd, (fneg HPR:$Sm))]>;
 
 multiclass vrint_inst_zrx<string opc, bit op, bit op2, SDPatternOperator node> {
   def H : AHuI<0b11101, 0b11, 0b0110, 0b11, 0,
@@ -960,7 +980,7 @@ multiclass vrint_inst_anpm<string opc, bits<2> rm,
 }
 
 defm VRINTA : vrint_inst_anpm<"a", 0b00, fround>;
-defm VRINTN : vrint_inst_anpm<"n", 0b01>;
+defm VRINTN : vrint_inst_anpm<"n", 0b01, int_arm_neon_vrintn>;
 defm VRINTP : vrint_inst_anpm<"p", 0b10, fceil>;
 defm VRINTM : vrint_inst_anpm<"m", 0b11, ffloor>;
 
@@ -982,6 +1002,7 @@ def VSQRTH : AHuI<0b11101, 0b11, 0b0001, 0b11, 0,
                   []>;
 
 let hasSideEffects = 0 in {
+let isMoveReg = 1 in {
 def VMOVD  : ADuI<0b11101, 0b11, 0b0000, 0b01, 0,
                   (outs DPR:$Dd), (ins DPR:$Dm),
                   IIC_fpUNA64, "vmov", ".f64\t$Dd, $Dm", []>;
@@ -989,6 +1010,7 @@ def VMOVD  : ADuI<0b11101, 0b11, 0b0000, 0b01, 0,
 def VMOVS  : ASuI<0b11101, 0b11, 0b0000, 0b01, 0,
                   (outs SPR:$Sd), (ins SPR:$Sm),
                   IIC_fpUNA32, "vmov", ".f32\t$Sd, $Sm", []>;
+} // isMoveReg
 
 let PostEncoderMethod = "", DecoderNamespace = "VFPV8" in {
 def VMOVH  : ASuInp<0b11101, 0b11, 0b0000, 0b01, 0,
@@ -1007,6 +1029,7 @@ def VINSH  : ASuInp<0b11101, 0b11, 0b0000, 0b11, 0,
 // FP <-> GPR Copies.  Int <-> FP Conversions.
 //
 
+let isMoveReg = 1 in {
 def VMOVRS : AVConv2I<0b11100001, 0b1010,
                       (outs GPR:$Rt), (ins SPR:$Sn),
                       IIC_fpMOVSI, "vmov", "\t$Rt, $Sn",
@@ -1052,6 +1075,8 @@ def VMOVSR : AVConv4I<0b11100000, 0b1010,
   // pipelines.
   let D = VFPNeonDomain;
 }
+} // isMoveReg
+def : Pat<(arm_vmovsr GPR:$Rt), (VMOVSR GPR:$Rt)>, Requires<[HasVFP2, UseVMOVSR]>;
 
 let hasSideEffects = 0 in {
 def VMOVRRD  : AVConv3I<0b11000101, 0b1011,
@@ -1180,9 +1205,9 @@ def VMOVSRR : AVConv5I<0b11000100, 0b1010,
 
 // Move H->R, clearing top 16 bits
 def VMOVRH : AVConv2I<0b11100001, 0b1001,
-                      (outs GPR:$Rt), (ins SPR:$Sn),
+                      (outs GPR:$Rt), (ins HPR:$Sn),
                       IIC_fpMOVSI, "vmov", ".f16\t$Rt, $Sn",
-                      []>,
+                      [(set GPR:$Rt, (arm_vmovrh HPR:$Sn))]>,
              Requires<[HasFullFP16]>,
              Sched<[WriteFPMOV]> {
   // Instruction operands.
@@ -1200,9 +1225,9 @@ def VMOVRH : AVConv2I<0b11100001, 0b1001,
 
 // Move R->H, clearing top 16 bits
 def VMOVHR : AVConv4I<0b11100000, 0b1001,
-                      (outs SPR:$Sn), (ins GPR:$Rt),
+                      (outs HPR:$Sn), (ins GPR:$Rt),
                       IIC_fpMOVIS, "vmov", ".f16\t$Sn, $Rt",
-                      []>,
+                      [(set HPR:$Sn, (arm_vmovhr GPR:$Rt))]>,
              Requires<[HasFullFP16]>,
              Sched<[WriteFPMOV]> {
   // Instruction operands.
@@ -1317,12 +1342,15 @@ def : VFPNoNEONPat<(f32 (sint_to_fp (i32 (alignedload32 addrmode5:$a)))),
                    (VSITOS (VLDRS addrmode5:$a))>;
 
 def VSITOH : AVConv1IHs_Encode<0b11101, 0b11, 0b1000, 0b1001,
-                               (outs SPR:$Sd), (ins SPR:$Sm),
+                               (outs HPR:$Sd), (ins SPR:$Sm),
                                IIC_fpCVTIH, "vcvt", ".f16.s32\t$Sd, $Sm",
                                []>,
              Sched<[WriteFPCVT]> {
   let Inst{7} = 1; // s32
 }
+
+def : VFPNoNEONPat<(f16 (sint_to_fp GPR:$a)),
+                   (VSITOH (COPY_TO_REGCLASS GPR:$a, SPR))>;
 
 def VUITOD : AVConv1IDs_Encode<0b11101, 0b11, 0b1000, 0b1011,
                                (outs DPR:$Dd), (ins SPR:$Sm),
@@ -1359,12 +1387,15 @@ def : VFPNoNEONPat<(f32 (uint_to_fp (i32 (alignedload32 addrmode5:$a)))),
                    (VUITOS (VLDRS addrmode5:$a))>;
 
 def VUITOH : AVConv1IHs_Encode<0b11101, 0b11, 0b1000, 0b1001,
-                                (outs SPR:$Sd), (ins SPR:$Sm),
+                                (outs HPR:$Sd), (ins SPR:$Sm),
                                 IIC_fpCVTIH, "vcvt", ".f16.u32\t$Sd, $Sm",
                                 []>,
              Sched<[WriteFPCVT]> {
   let Inst{7} = 0; // u32
 }
+
+def : VFPNoNEONPat<(f16 (uint_to_fp GPR:$a)),
+                   (VUITOH (COPY_TO_REGCLASS GPR:$a, SPR))>;
 
 // FP -> Int:
 
@@ -1460,12 +1491,15 @@ def : VFPNoNEONPat<(alignedstore32 (i32 (fp_to_sint (f32 SPR:$a))),
                    (VSTRS (VTOSIZS SPR:$a), addrmode5:$ptr)>;
 
 def VTOSIZH : AVConv1IsH_Encode<0b11101, 0b11, 0b1101, 0b1001,
-                                 (outs SPR:$Sd), (ins SPR:$Sm),
+                                 (outs SPR:$Sd), (ins HPR:$Sm),
                                  IIC_fpCVTHI, "vcvt", ".s32.f16\t$Sd, $Sm",
                                  []>,
               Sched<[WriteFPCVT]> {
   let Inst{7} = 1; // Z bit
 }
+
+def : VFPNoNEONPat<(i32 (fp_to_sint HPR:$a)),
+                   (COPY_TO_REGCLASS (VTOSIZH HPR:$a), GPR)>;
 
 def VTOUIZD : AVConv1IsD_Encode<0b11101, 0b11, 0b1100, 0b1011,
                                (outs SPR:$Sd), (ins DPR:$Dm),
@@ -1503,12 +1537,15 @@ def : VFPNoNEONPat<(alignedstore32 (i32 (fp_to_uint (f32 SPR:$a))),
                   (VSTRS (VTOUIZS SPR:$a), addrmode5:$ptr)>;
 
 def VTOUIZH : AVConv1IsH_Encode<0b11101, 0b11, 0b1100, 0b1001,
-                                 (outs SPR:$Sd), (ins SPR:$Sm),
+                                 (outs SPR:$Sd), (ins HPR:$Sm),
                                  IIC_fpCVTHI, "vcvt", ".u32.f16\t$Sd, $Sm",
                                  []>,
               Sched<[WriteFPCVT]> {
   let Inst{7} = 1; // Z bit
 }
+
+def : VFPNoNEONPat<(i32 (fp_to_uint HPR:$a)),
+                   (COPY_TO_REGCLASS (VTOUIZH HPR:$a), GPR)>;
 
 // And the Z bit '0' variants, i.e. use the rounding mode specified by FPSCR.
 let Uses = [FPSCR] in {
@@ -1776,7 +1813,7 @@ def VMLAD : ADbI<0b11100, 0b00, 0, 0,
                  [(set DPR:$Dd, (fadd_mlx (fmul_su DPR:$Dn, DPR:$Dm),
                                           (f64 DPR:$Ddin)))]>,
               RegConstraint<"$Ddin = $Dd">,
-              Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>,
+              Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>,
               Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VMLAS : ASbIn<0b11100, 0b00, 0, 0,
@@ -1785,7 +1822,7 @@ def VMLAS : ASbIn<0b11100, 0b00, 0, 0,
                   [(set SPR:$Sd, (fadd_mlx (fmul_su SPR:$Sn, SPR:$Sm),
                                            SPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>,
+              Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>,
               Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines on A8.
@@ -1793,18 +1830,23 @@ def VMLAS : ASbIn<0b11100, 0b00, 0, 0,
 }
 
 def VMLAH : AHbI<0b11100, 0b00, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpMAC16, "vmla", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fadd_mlx (fmul_su HPR:$Sn, HPR:$Sm),
+                                           HPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasFullFP16,UseFPVMLx,DontUseFusedMAC]>;
+              Requires<[HasFullFP16,UseFPVMLx]>;
 
 def : Pat<(fadd_mlx DPR:$dstin, (fmul_su DPR:$a, (f64 DPR:$b))),
           (VMLAD DPR:$dstin, DPR:$a, DPR:$b)>,
-          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>;
 def : Pat<(fadd_mlx SPR:$dstin, (fmul_su SPR:$a, SPR:$b)),
           (VMLAS SPR:$dstin, SPR:$a, SPR:$b)>,
-          Requires<[HasVFP2,DontUseNEONForFP, UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,DontUseNEONForFP, UseFPVMLx]>;
+def : Pat<(fadd_mlx HPR:$dstin, (fmul_su HPR:$a, HPR:$b)),
+          (VMLAH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP, UseFPVMLx]>;
+
 
 def VMLSD : ADbI<0b11100, 0b00, 1, 0,
                  (outs DPR:$Dd), (ins DPR:$Ddin, DPR:$Dn, DPR:$Dm),
@@ -1812,7 +1854,7 @@ def VMLSD : ADbI<0b11100, 0b00, 1, 0,
                  [(set DPR:$Dd, (fadd_mlx (fneg (fmul_su DPR:$Dn,DPR:$Dm)),
                                           (f64 DPR:$Ddin)))]>,
               RegConstraint<"$Ddin = $Dd">,
-              Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>,
+              Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>,
               Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VMLSS : ASbIn<0b11100, 0b00, 1, 0,
@@ -1821,7 +1863,7 @@ def VMLSS : ASbIn<0b11100, 0b00, 1, 0,
                   [(set SPR:$Sd, (fadd_mlx (fneg (fmul_su SPR:$Sn, SPR:$Sm)),
                                            SPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>,
+              Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>,
               Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines on A8.
@@ -1829,18 +1871,22 @@ def VMLSS : ASbIn<0b11100, 0b00, 1, 0,
 }
 
 def VMLSH : AHbI<0b11100, 0b00, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpMAC16, "vmls", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fadd_mlx (fneg (fmul_su HPR:$Sn, HPR:$Sm)),
+                                           HPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
-              Requires<[HasFullFP16,UseFPVMLx,DontUseFusedMAC]>;
+              Requires<[HasFullFP16,UseFPVMLx]>;
 
 def : Pat<(fsub_mlx DPR:$dstin, (fmul_su DPR:$a, (f64 DPR:$b))),
           (VMLSD DPR:$dstin, DPR:$a, DPR:$b)>,
-          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>;
 def : Pat<(fsub_mlx SPR:$dstin, (fmul_su SPR:$a, SPR:$b)),
           (VMLSS SPR:$dstin, SPR:$a, SPR:$b)>,
-          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>;
+def : Pat<(fsub_mlx HPR:$dstin, (fmul_su HPR:$a, HPR:$b)),
+          (VMLSH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFPVMLx]>;
 
 def VNMLAD : ADbI<0b11100, 0b01, 1, 0,
                   (outs DPR:$Dd), (ins DPR:$Ddin, DPR:$Dn, DPR:$Dm),
@@ -1848,7 +1894,7 @@ def VNMLAD : ADbI<0b11100, 0b01, 1, 0,
                   [(set DPR:$Dd,(fsub_mlx (fneg (fmul_su DPR:$Dn,DPR:$Dm)),
                                           (f64 DPR:$Ddin)))]>,
                 RegConstraint<"$Ddin = $Dd">,
-                Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>,
+                Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>,
                 Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VNMLAS : ASbI<0b11100, 0b01, 1, 0,
@@ -1857,7 +1903,7 @@ def VNMLAS : ASbI<0b11100, 0b01, 1, 0,
                   [(set SPR:$Sd, (fsub_mlx (fneg (fmul_su SPR:$Sn, SPR:$Sm)),
                                            SPR:$Sdin))]>,
                 RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>,
+                Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>,
                 Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines on A8.
@@ -1865,27 +1911,34 @@ def VNMLAS : ASbI<0b11100, 0b01, 1, 0,
 }
 
 def VNMLAH : AHbI<0b11100, 0b01, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpMAC16, "vnmla", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fsub_mlx (fneg (fmul_su HPR:$Sn, HPR:$Sm)),
+                                           HPR:$Sdin))]>,
                 RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasFullFP16,UseFPVMLx,DontUseFusedMAC]>;
+                Requires<[HasFullFP16,UseFPVMLx]>;
 
 // (-(a * b) - dst) -> -(dst + (a * b))
 def : Pat<(fsub_mlx (fneg (fmul_su DPR:$a, (f64 DPR:$b))), DPR:$dstin),
           (VNMLAD DPR:$dstin, DPR:$a, DPR:$b)>,
-          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>;
 def : Pat<(fsub_mlx (fneg (fmul_su SPR:$a, SPR:$b)), SPR:$dstin),
           (VNMLAS SPR:$dstin, SPR:$a, SPR:$b)>,
-          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>;
+def : Pat<(fsub_mlx (fneg (fmul_su HPR:$a, HPR:$b)), HPR:$dstin),
+          (VNMLAH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFPVMLx]>;
 
 // (-dst - (a * b)) -> -(dst + (a * b))
 def : Pat<(fsub_mlx (fneg DPR:$dstin), (fmul_su DPR:$a, (f64 DPR:$b))),
           (VNMLAD DPR:$dstin, DPR:$a, DPR:$b)>,
-          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>;
 def : Pat<(fsub_mlx (fneg SPR:$dstin), (fmul_su SPR:$a, SPR:$b)),
           (VNMLAS SPR:$dstin, SPR:$a, SPR:$b)>,
-          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>;
+def : Pat<(fsub_mlx (fneg HPR:$dstin), (fmul_su HPR:$a, HPR:$b)),
+          (VNMLAH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFPVMLx]>;
 
 def VNMLSD : ADbI<0b11100, 0b01, 0, 0,
                   (outs DPR:$Dd), (ins DPR:$Ddin, DPR:$Dn, DPR:$Dm),
@@ -1893,7 +1946,7 @@ def VNMLSD : ADbI<0b11100, 0b01, 0, 0,
                   [(set DPR:$Dd, (fsub_mlx (fmul_su DPR:$Dn, DPR:$Dm),
                                            (f64 DPR:$Ddin)))]>,
                RegConstraint<"$Ddin = $Dd">,
-               Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>,
+               Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>,
                Sched<[WriteFPMAC64, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
 
 def VNMLSS : ASbI<0b11100, 0b01, 0, 0,
@@ -1901,7 +1954,7 @@ def VNMLSS : ASbI<0b11100, 0b01, 0, 0,
                   IIC_fpMAC32, "vnmls", ".f32\t$Sd, $Sn, $Sm",
              [(set SPR:$Sd, (fsub_mlx (fmul_su SPR:$Sn, SPR:$Sm), SPR:$Sdin))]>,
                          RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>,
+                Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>,
              Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]> {
   // Some single precision VFP instructions may be executed on both NEON and
   // VFP pipelines on A8.
@@ -1909,18 +1962,21 @@ def VNMLSS : ASbI<0b11100, 0b01, 0, 0,
 }
 
 def VNMLSH : AHbI<0b11100, 0b01, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpMAC16, "vnmls", ".f16\t$Sd, $Sn, $Sm",
-             []>,
+             [(set HPR:$Sd, (fsub_mlx (fmul_su HPR:$Sn, HPR:$Sm), HPR:$Sdin))]>,
                          RegConstraint<"$Sdin = $Sd">,
-                Requires<[HasFullFP16,UseFPVMLx,DontUseFusedMAC]>;
+                Requires<[HasFullFP16,UseFPVMLx]>;
 
 def : Pat<(fsub_mlx (fmul_su DPR:$a, (f64 DPR:$b)), DPR:$dstin),
           (VNMLSD DPR:$dstin, DPR:$a, DPR:$b)>,
-          Requires<[HasVFP2,HasDPVFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,HasDPVFP,UseFPVMLx]>;
 def : Pat<(fsub_mlx (fmul_su SPR:$a, SPR:$b), SPR:$dstin),
           (VNMLSS SPR:$dstin, SPR:$a, SPR:$b)>,
-          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx,DontUseFusedMAC]>;
+          Requires<[HasVFP2,DontUseNEONForFP,UseFPVMLx]>;
+def : Pat<(fsub_mlx (fmul_su HPR:$a, HPR:$b), HPR:$dstin),
+          (VNMLSH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFPVMLx]>;
 
 //===----------------------------------------------------------------------===//
 // Fused FP Multiply-Accumulate Operations.
@@ -1947,9 +2003,10 @@ def VFMAS : ASbIn<0b11101, 0b10, 0, 0,
 }
 
 def VFMAH : AHbI<0b11101, 0b10, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpFMAC16, "vfma", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fadd_mlx (fmul_su HPR:$Sn, HPR:$Sm),
+                                           HPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
               Requires<[HasFullFP16,UseFusedMAC]>,
             Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
@@ -1960,6 +2017,9 @@ def : Pat<(fadd_mlx DPR:$dstin, (fmul_su DPR:$a, (f64 DPR:$b))),
 def : Pat<(fadd_mlx SPR:$dstin, (fmul_su SPR:$a, SPR:$b)),
           (VFMAS SPR:$dstin, SPR:$a, SPR:$b)>,
           Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]>;
+def : Pat<(fadd_mlx HPR:$dstin, (fmul_su HPR:$a, HPR:$b)),
+          (VFMAH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFusedMAC]>;
 
 // Match @llvm.fma.* intrinsics
 // (fma x, y, z) -> (vfms z, x, y)
@@ -1992,9 +2052,10 @@ def VFMSS : ASbIn<0b11101, 0b10, 1, 0,
 }
 
 def VFMSH : AHbI<0b11101, 0b10, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpFMAC16, "vfms", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fadd_mlx (fneg (fmul_su HPR:$Sn, HPR:$Sm)),
+                                           HPR:$Sdin))]>,
               RegConstraint<"$Sdin = $Sd">,
               Requires<[HasFullFP16,UseFusedMAC]>,
               Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
@@ -2005,6 +2066,9 @@ def : Pat<(fsub_mlx DPR:$dstin, (fmul_su DPR:$a, (f64 DPR:$b))),
 def : Pat<(fsub_mlx SPR:$dstin, (fmul_su SPR:$a, SPR:$b)),
           (VFMSS SPR:$dstin, SPR:$a, SPR:$b)>,
           Requires<[HasVFP4,DontUseNEONForFP,UseFusedMAC]>;
+def : Pat<(fsub_mlx HPR:$dstin, (fmul_su HPR:$a, HPR:$b)),
+          (VFMSH HPR:$dstin, HPR:$a, HPR:$b)>,
+          Requires<[HasFullFP16,DontUseNEONForFP,UseFusedMAC]>;
 
 // Match @llvm.fma.* intrinsics
 // (fma (fneg x), y, z) -> (vfms z, x, y)
@@ -2044,9 +2108,10 @@ def VFNMAS : ASbI<0b11101, 0b01, 1, 0,
 }
 
 def VFNMAH : AHbI<0b11101, 0b01, 1, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpFMAC16, "vfnma", ".f16\t$Sd, $Sn, $Sm",
-                  []>,
+                  [(set HPR:$Sd, (fsub_mlx (fneg (fmul_su HPR:$Sn, HPR:$Sm)),
+                                           HPR:$Sdin))]>,
                 RegConstraint<"$Sdin = $Sd">,
                 Requires<[HasFullFP16,UseFusedMAC]>,
                 Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
@@ -2095,9 +2160,9 @@ def VFNMSS : ASbI<0b11101, 0b01, 0, 0,
 }
 
 def VFNMSH : AHbI<0b11101, 0b01, 0, 0,
-                  (outs SPR:$Sd), (ins SPR:$Sdin, SPR:$Sn, SPR:$Sm),
+                  (outs HPR:$Sd), (ins HPR:$Sdin, HPR:$Sn, HPR:$Sm),
                   IIC_fpFMAC16, "vfnms", ".f16\t$Sd, $Sn, $Sm",
-             []>,
+             [(set HPR:$Sd, (fsub_mlx (fmul_su HPR:$Sn, HPR:$Sm), HPR:$Sdin))]>,
                          RegConstraint<"$Sdin = $Sd">,
                   Requires<[HasFullFP16,UseFusedMAC]>,
                   Sched<[WriteFPMAC32, ReadFPMAC, ReadFPMUL, ReadFPMUL]>;
@@ -2289,10 +2354,11 @@ def FCONSTS : VFPAI<(outs SPR:$Sd), (ins vfp_f32imm:$imm),
   let Inst{3-0}   = imm{3-0};
 }
 
-def FCONSTH : VFPAI<(outs SPR:$Sd), (ins vfp_f16imm:$imm),
+def FCONSTH : VFPAI<(outs HPR:$Sd), (ins vfp_f16imm:$imm),
                      VFPMiscFrm, IIC_fpUNA16,
                      "vmov", ".f16\t$Sd, $imm",
-                     []>, Requires<[HasFullFP16]> {
+                     [(set HPR:$Sd, vfp_f16imm:$imm)]>,
+              Requires<[HasFullFP16]> {
   bits<5> Sd;
   bits<8> imm;
 

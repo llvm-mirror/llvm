@@ -6,21 +6,21 @@
 
 define i64 @Test_get_quotient(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: Test_get_quotient:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    orq %rsi, %rax
-; CHECK-NEXT:    shrq $32, %rax
+; CHECK-NEXT:    movq %rdi, %rcx
+; CHECK-NEXT:    orq %rsi, %rcx
+; CHECK-NEXT:    shrq $32, %rcx
 ; CHECK-NEXT:    je .LBB0_1
-; CHECK-NEXT:  # BB#2:
-; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    cqto
 ; CHECK-NEXT:    idivq %rsi
 ; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB0_1:
+; CHECK-NEXT:    # kill: def $eax killed $eax killed $rax
 ; CHECK-NEXT:    xorl %edx, %edx
-; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    divl %esi
-; CHECK-NEXT:    # kill: %EAX<def> %EAX<kill> %RAX<def>
+; CHECK-NEXT:    # kill: def $eax killed $eax def $rax
 ; CHECK-NEXT:    retq
   %result = sdiv i64 %a, %b
   ret i64 %result
@@ -28,23 +28,22 @@ define i64 @Test_get_quotient(i64 %a, i64 %b) nounwind {
 
 define i64 @Test_get_remainder(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: Test_get_remainder:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    orq %rsi, %rax
-; CHECK-NEXT:    shrq $32, %rax
+; CHECK-NEXT:    movq %rdi, %rcx
+; CHECK-NEXT:    orq %rsi, %rcx
+; CHECK-NEXT:    shrq $32, %rcx
 ; CHECK-NEXT:    je .LBB1_1
-; CHECK-NEXT:  # BB#2:
-; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    cqto
 ; CHECK-NEXT:    idivq %rsi
 ; CHECK-NEXT:    movq %rdx, %rax
 ; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB1_1:
+; CHECK-NEXT:    # kill: def $eax killed $eax killed $rax
 ; CHECK-NEXT:    xorl %edx, %edx
-; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    divl %esi
-; CHECK-NEXT:    # kill: %EDX<def> %EDX<kill> %RDX<def>
-; CHECK-NEXT:    movq %rdx, %rax
+; CHECK-NEXT:    movl %edx, %eax
 ; CHECK-NEXT:    retq
   %result = srem i64 %a, %b
   ret i64 %result
@@ -52,23 +51,23 @@ define i64 @Test_get_remainder(i64 %a, i64 %b) nounwind {
 
 define i64 @Test_get_quotient_and_remainder(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: Test_get_quotient_and_remainder:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
-; CHECK-NEXT:    orq %rsi, %rax
-; CHECK-NEXT:    shrq $32, %rax
+; CHECK-NEXT:    movq %rdi, %rcx
+; CHECK-NEXT:    orq %rsi, %rcx
+; CHECK-NEXT:    shrq $32, %rcx
 ; CHECK-NEXT:    je .LBB2_1
-; CHECK-NEXT:  # BB#2:
-; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:  # %bb.2:
 ; CHECK-NEXT:    cqto
 ; CHECK-NEXT:    idivq %rsi
 ; CHECK-NEXT:    addq %rdx, %rax
 ; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB2_1:
+; CHECK-NEXT:    # kill: def $eax killed $eax killed $rax
 ; CHECK-NEXT:    xorl %edx, %edx
-; CHECK-NEXT:    movl %edi, %eax
 ; CHECK-NEXT:    divl %esi
-; CHECK-NEXT:    # kill: %EDX<def> %EDX<kill> %RDX<def>
-; CHECK-NEXT:    # kill: %EAX<def> %EAX<kill> %RAX<def>
+; CHECK-NEXT:    # kill: def $edx killed $edx def $rdx
+; CHECK-NEXT:    # kill: def $eax killed $eax def $rax
 ; CHECK-NEXT:    addq %rdx, %rax
 ; CHECK-NEXT:    retq
   %resultdiv = sdiv i64 %a, %b

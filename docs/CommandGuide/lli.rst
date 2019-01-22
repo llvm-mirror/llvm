@@ -122,9 +122,10 @@ CODE GENERATION OPTIONS
 
  Choose the code model from:
 
- .. code-block:: perl
+ .. code-block:: text
 
       default: Target default code model
+      tiny: Tiny code model
       small: Small code model
       kernel: Kernel code model
       medium: Medium code model
@@ -154,7 +155,7 @@ CODE GENERATION OPTIONS
 
  Instruction schedulers available (before register allocation):
 
- .. code-block:: perl
+ .. code-block:: text
 
       =default: Best scheduler for the target
       =none: No scheduling: breadth first sequencing
@@ -168,7 +169,7 @@ CODE GENERATION OPTIONS
 
  Register allocator to use (default=linearscan)
 
- .. code-block:: perl
+ .. code-block:: text
 
       =bigblock: Big-block register allocator
       =linearscan: linear scan register allocator =local -   local register allocator
@@ -178,7 +179,7 @@ CODE GENERATION OPTIONS
 
  Choose relocation model from:
 
- .. code-block:: perl
+ .. code-block:: text
 
       =default: Target default relocation model
       =static: Non-relocatable code =pic -   Fully relocatable, position independent code
@@ -188,7 +189,7 @@ CODE GENERATION OPTIONS
 
  Spiller to use (default=local)
 
- .. code-block:: perl
+ .. code-block:: text
 
       =simple: simple spiller
       =local: local spiller
@@ -197,7 +198,7 @@ CODE GENERATION OPTIONS
 
  Choose style of code to emit from X86 backend:
 
- .. code-block:: perl
+ .. code-block:: text
 
       =att: Emit AT&T-style assembly
       =intel: Emit Intel-style assembly

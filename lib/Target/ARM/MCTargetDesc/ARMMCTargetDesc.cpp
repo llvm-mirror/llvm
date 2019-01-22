@@ -1,9 +1,8 @@
 //===-- ARMMCTargetDesc.cpp - ARM Target Descriptions ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,6 +20,7 @@
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -140,17 +140,21 @@ std::string ARM_MC::ParseARMTriple(const Triple &TT, StringRef CPU) {
     ARMArchFeature = (ARMArchFeature + "+" + ARM::getArchName(ArchID)).str();
 
   if (TT.isThumb()) {
-    if (ARMArchFeature.empty())
-      ARMArchFeature = "+thumb-mode,+v4t";
-    else
-      ARMArchFeature += ",+thumb-mode,+v4t";
+    if (!ARMArchFeature.empty())
+      ARMArchFeature += ",";
+    ARMArchFeature += "+thumb-mode,+v4t";
   }
 
   if (TT.isOSNaCl()) {
-    if (ARMArchFeature.empty())
-      ARMArchFeature = "+nacl-trap";
-    else
-      ARMArchFeature += ",+nacl-trap";
+    if (!ARMArchFeature.empty())
+      ARMArchFeature += ",";
+    ARMArchFeature += "+nacl-trap";
+  }
+
+  if (TT.isOSWindows()) {
+    if (!ARMArchFeature.empty())
+      ARMArchFeature += ",";
+    ARMArchFeature += "+noarm";
   }
 
   return ARMArchFeature;
@@ -201,21 +205,21 @@ static MCAsmInfo *createARMMCAsmInfo(const MCRegisterInfo &MRI,
 
 static MCStreamer *createELFStreamer(const Triple &T, MCContext &Ctx,
                                      std::unique_ptr<MCAsmBackend> &&MAB,
-                                     raw_pwrite_stream &OS,
+                                     std::unique_ptr<MCObjectWriter> &&OW,
                                      std::unique_ptr<MCCodeEmitter> &&Emitter,
                                      bool RelaxAll) {
   return createARMELFStreamer(
-      Ctx, std::move(MAB), OS, std::move(Emitter), false,
+      Ctx, std::move(MAB), std::move(OW), std::move(Emitter), false,
       (T.getArch() == Triple::thumb || T.getArch() == Triple::thumbeb));
 }
 
 static MCStreamer *
 createARMMachOStreamer(MCContext &Ctx, std::unique_ptr<MCAsmBackend> &&MAB,
-                       raw_pwrite_stream &OS,
+                       std::unique_ptr<MCObjectWriter> &&OW,
                        std::unique_ptr<MCCodeEmitter> &&Emitter, bool RelaxAll,
                        bool DWARFMustBeAtTheEnd) {
-  return createMachOStreamer(Ctx, std::move(MAB), OS, std::move(Emitter), false,
-                             DWARFMustBeAtTheEnd);
+  return createMachOStreamer(Ctx, std::move(MAB), std::move(OW),
+                             std::move(Emitter), false, DWARFMustBeAtTheEnd);
 }
 
 static MCInstPrinter *createARMMCInstPrinter(const Triple &T,
@@ -338,19 +342,12 @@ extern "C" void LLVMInitializeARMTargetMC() {
   for (Target *T : {&getTheThumbLETarget(), &getTheThumbBETarget()})
     TargetRegistry::RegisterMCInstrAnalysis(*T, createThumbMCInstrAnalysis);
 
-  // Register the MC Code Emitter
-  for (Target *T : {&getTheARMLETarget(), &getTheThumbLETarget()})
+  for (Target *T : {&getTheARMLETarget(), &getTheThumbLETarget()}) {
     TargetRegistry::RegisterMCCodeEmitter(*T, createARMLEMCCodeEmitter);
-  for (Target *T : {&getTheARMBETarget(), &getTheThumbBETarget()})
+    TargetRegistry::RegisterMCAsmBackend(*T, createARMLEAsmBackend);
+  }
+  for (Target *T : {&getTheARMBETarget(), &getTheThumbBETarget()}) {
     TargetRegistry::RegisterMCCodeEmitter(*T, createARMBEMCCodeEmitter);
-
-  // Register the asm backend.
-  TargetRegistry::RegisterMCAsmBackend(getTheARMLETarget(),
-                                       createARMLEAsmBackend);
-  TargetRegistry::RegisterMCAsmBackend(getTheARMBETarget(),
-                                       createARMBEAsmBackend);
-  TargetRegistry::RegisterMCAsmBackend(getTheThumbLETarget(),
-                                       createThumbLEAsmBackend);
-  TargetRegistry::RegisterMCAsmBackend(getTheThumbBETarget(),
-                                       createThumbBEAsmBackend);
+    TargetRegistry::RegisterMCAsmBackend(*T, createARMBEAsmBackend);
+  }
 }

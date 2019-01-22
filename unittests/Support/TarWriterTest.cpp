@@ -1,9 +1,8 @@
 //===- llvm/unittest/Support/TarWriterTest.cpp ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -120,4 +119,60 @@ TEST_F(TarWriterTest, Pax) {
   StringRef Pax = StringRef((char *)(Buf.data() + 512), 512);
   EXPECT_TRUE(Pax.startswith("211 path=/" + std::string(200, 'x')));
 }
+
+TEST_F(TarWriterTest, SingleFile) {
+  SmallString<128> Path;
+  std::error_code EC =
+      sys::fs::createTemporaryFile("TarWriterTest", "tar", Path);
+  EXPECT_FALSE((bool)EC);
+
+  Expected<std::unique_ptr<TarWriter>> TarOrErr = TarWriter::create(Path, "");
+  EXPECT_TRUE((bool)TarOrErr);
+  std::unique_ptr<TarWriter> Tar = std::move(*TarOrErr);
+  Tar->append("FooPath", "foo");
+  Tar.reset();
+
+  uint64_t TarSize;
+  EC = sys::fs::file_size(Path, TarSize);
+  EXPECT_FALSE((bool)EC);
+  EXPECT_EQ(TarSize, 2048ULL);
 }
+
+TEST_F(TarWriterTest, NoDuplicate) {
+  SmallString<128> Path;
+  std::error_code EC =
+      sys::fs::createTemporaryFile("TarWriterTest", "tar", Path);
+  EXPECT_FALSE((bool)EC);
+
+  Expected<std::unique_ptr<TarWriter>> TarOrErr = TarWriter::create(Path, "");
+  EXPECT_TRUE((bool)TarOrErr);
+  std::unique_ptr<TarWriter> Tar = std::move(*TarOrErr);
+  Tar->append("FooPath", "foo");
+  Tar->append("BarPath", "bar");
+  Tar.reset();
+
+  uint64_t TarSize;
+  EC = sys::fs::file_size(Path, TarSize);
+  EXPECT_FALSE((bool)EC);
+  EXPECT_EQ(TarSize, 3072ULL);
+}
+
+TEST_F(TarWriterTest, Duplicate) {
+  SmallString<128> Path;
+  std::error_code EC =
+      sys::fs::createTemporaryFile("TarWriterTest", "tar", Path);
+  EXPECT_FALSE((bool)EC);
+
+  Expected<std::unique_ptr<TarWriter>> TarOrErr = TarWriter::create(Path, "");
+  EXPECT_TRUE((bool)TarOrErr);
+  std::unique_ptr<TarWriter> Tar = std::move(*TarOrErr);
+  Tar->append("FooPath", "foo");
+  Tar->append("FooPath", "bar");
+  Tar.reset();
+
+  uint64_t TarSize;
+  EC = sys::fs::file_size(Path, TarSize);
+  EXPECT_FALSE((bool)EC);
+  EXPECT_EQ(TarSize, 2048ULL);
+}
+} // namespace

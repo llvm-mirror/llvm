@@ -3,7 +3,7 @@
 
 # CHECK: Position + Size is out of range!
 
-# Check that the machine verifier checks the pos + size  is in range 0..32
+# Check that the machine verifier checks the pos + size is in the range 1..32
 ---
 name:            f
 alignment:       2
@@ -16,7 +16,7 @@ registers:
   - { id: 0, class: gpr32, preferred-register: '' }
   - { id: 1, class: gpr32, preferred-register: '' }
 liveins:
-  - { reg: '%a0', virtual-reg: '%0' }
+  - { reg: '$a0', virtual-reg: '%0' }
 frameInfo:
   isFrameAddressTaken: false
   isReturnAddressTaken: false
@@ -39,11 +39,11 @@ stack:
 constants:
 body:             |
   bb.0.entry:
-    liveins: %a0
+    liveins: $a0
 
-    %0 = COPY %a0
+    %0 = COPY $a0
     %1 = EXT %0, 17, 17
-    %v0 = COPY %1
-    RetRA implicit %v0
+    $v0 = COPY %1
+    RetRA implicit $v0
 
 ...

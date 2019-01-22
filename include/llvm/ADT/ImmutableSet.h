@@ -1,9 +1,8 @@
 //===--- ImmutableSet.h - Immutable (functional) set interface --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1017,7 +1016,7 @@ public:
     ///  of this operation is logarithmic in the size of the original set.
     ///  The memory allocated to represent the set is released when the
     ///  factory object that created the set is destroyed.
-    ImmutableSet add(ImmutableSet Old, value_type_ref V) {
+    LLVM_NODISCARD ImmutableSet add(ImmutableSet Old, value_type_ref V) {
       TreeTy *NewT = F.add(Old.Root, V);
       return ImmutableSet(Canonicalize ? F.getCanonicalTree(NewT) : NewT);
     }
@@ -1029,7 +1028,7 @@ public:
     ///  of this operation is logarithmic in the size of the original set.
     ///  The memory allocated to represent the set is released when the
     ///  factory object that created the set is destroyed.
-    ImmutableSet remove(ImmutableSet Old, value_type_ref V) {
+    LLVM_NODISCARD ImmutableSet remove(ImmutableSet Old, value_type_ref V) {
       TreeTy *NewT = F.remove(Old.Root, V);
       return ImmutableSet(Canonicalize ? F.getCanonicalTree(NewT) : NewT);
     }

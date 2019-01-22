@@ -1,19 +1,18 @@
 //===- DemoteRegToStack.cpp - Move a virtual register to the stack --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Analysis/CFG.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 
 /// DemoteRegToStack - This function takes a virtual register computed by an
@@ -90,7 +89,7 @@ AllocaInst *llvm::DemoteRegToStack(Instruction &I, bool VolatileLoads,
   // careful if I is an invoke instruction, because we can't insert the store
   // AFTER the terminator instruction.
   BasicBlock::iterator InsertPt;
-  if (!isa<TerminatorInst>(I)) {
+  if (!I.isTerminator()) {
     InsertPt = ++I.getIterator();
     for (; isa<PHINode>(InsertPt) || InsertPt->isEHPad(); ++InsertPt)
       /* empty */;   // Don't insert before PHI nodes or landingpad instrs.

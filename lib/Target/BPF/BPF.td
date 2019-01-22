@@ -1,9 +1,8 @@
 //===-- BPF.td - Describe the BPF Target Machine -----------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,6 +24,12 @@ def : Proc<"probe", []>;
 
 def DummyFeature : SubtargetFeature<"dummy", "isDummyMode",
                                     "true", "unused feature">;
+
+def ALU32 : SubtargetFeature<"alu32", "HasAlu32", "true",
+                             "Enable ALU32 instructions">;
+
+def DwarfRIS: SubtargetFeature<"dwarfris", "UseDwarfRIS", "true",
+                               "Disable MCAsmInfo DwarfUsesRelocationsAcrossSections">;
 
 def BPFInstPrinter : AsmWriter {
   string AsmWriterClassName  = "InstPrinter";

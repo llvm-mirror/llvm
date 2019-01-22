@@ -1,9 +1,8 @@
 //===-- MipsMCTargetDesc.cpp - Mips Target Descriptions -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,6 +22,7 @@
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
@@ -46,10 +46,17 @@ using namespace llvm;
 /// FIXME: Merge with the copy in MipsSubtarget.cpp
 StringRef MIPS_MC::selectMipsCPU(const Triple &TT, StringRef CPU) {
   if (CPU.empty() || CPU == "generic") {
-    if (TT.getArch() == Triple::mips || TT.getArch() == Triple::mipsel)
-      CPU = "mips32";
-    else
-      CPU = "mips64";
+    if (TT.getSubArch() == llvm::Triple::MipsSubArch_r6) {
+      if (TT.isMIPS32())
+        CPU = "mips32r6";
+      else
+        CPU = "mips64r6";
+    } else {
+      if (TT.isMIPS32())
+        CPU = "mips32";
+      else
+        CPU = "mips64";
+    }
   }
   return CPU;
 }
@@ -93,15 +100,15 @@ static MCInstPrinter *createMipsMCInstPrinter(const Triple &T,
 
 static MCStreamer *createMCStreamer(const Triple &T, MCContext &Context,
                                     std::unique_ptr<MCAsmBackend> &&MAB,
-                                    raw_pwrite_stream &OS,
+                                    std::unique_ptr<MCObjectWriter> &&OW,
                                     std::unique_ptr<MCCodeEmitter> &&Emitter,
                                     bool RelaxAll) {
   MCStreamer *S;
   if (!T.isOSNaCl())
-    S = createMipsELFStreamer(Context, std::move(MAB), OS, std::move(Emitter),
-                              RelaxAll);
+    S = createMipsELFStreamer(Context, std::move(MAB), std::move(OW),
+                              std::move(Emitter), RelaxAll);
   else
-    S = createMipsNaClELFStreamer(Context, std::move(MAB), OS,
+    S = createMipsNaClELFStreamer(Context, std::move(MAB), std::move(OW),
                                   std::move(Emitter), RelaxAll);
   return S;
 }

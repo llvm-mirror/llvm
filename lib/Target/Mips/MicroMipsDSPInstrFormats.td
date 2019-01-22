@@ -1,16 +1,15 @@
 //===-- MicroMipsDSPInstrFormats.td - Instruction Formats --*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 class MMDSPInst<string opstr = "">
-    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther>, PredicateControl {
-  let InsnPredicates = [HasDSP];
-  let AdditionalPredicates = [InMicroMips];
+    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther> {
+  let ASEPredicate = [HasDSP];
+  let EncodingPredicates = [InMicroMips];
   string BaseOpcode = opstr;
   string Arch = "mmdsp";
   let DecoderNamespace = "MicroMips";
@@ -18,7 +17,7 @@ class MMDSPInst<string opstr = "">
 
 class MMDSPInstAlias<string Asm, dag Result, bit Emit = 0b1>
     : InstAlias<Asm, Result, Emit>, PredicateControl {
-  let InsnPredicates = [HasDSP];
+  let ASEPredicate = [HasDSP];
   let AdditionalPredicates = [InMicroMips];
 }
 

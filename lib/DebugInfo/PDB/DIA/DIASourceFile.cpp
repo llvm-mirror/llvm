@@ -1,19 +1,17 @@
 //===- DIASourceFile.cpp - DIA implementation of IPDBSourceFile -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/PDB/DIA/DIASourceFile.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/DebugInfo/PDB/ConcreteSymbolEnumerator.h"
 #include "llvm/DebugInfo/PDB/DIA/DIAEnumSymbols.h"
 #include "llvm/DebugInfo/PDB/DIA/DIASession.h"
+#include "llvm/DebugInfo/PDB/DIA/DIAUtils.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolCompiland.h"
-#include "llvm/Support/ConvertUTF.h"
 
 using namespace llvm;
 using namespace llvm::pdb;
@@ -23,16 +21,7 @@ DIASourceFile::DIASourceFile(const DIASession &PDBSession,
     : Session(PDBSession), SourceFile(DiaSourceFile) {}
 
 std::string DIASourceFile::getFileName() const {
-  CComBSTR FileName16;
-  HRESULT Result = SourceFile->get_fileName(&FileName16);
-  if (S_OK != Result)
-    return std::string();
-
-  std::string FileName8;
-  llvm::ArrayRef<char> FileNameBytes(reinterpret_cast<char *>(FileName16.m_str),
-                                     FileName16.ByteLength());
-  llvm::convertUTF16ToUTF8String(FileNameBytes, FileName8);
-  return FileName8;
+  return invokeBstrMethod(*SourceFile, &IDiaSourceFile::get_fileName);
 }
 
 uint32_t DIASourceFile::getUniqueId() const {

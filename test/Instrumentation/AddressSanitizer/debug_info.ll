@@ -24,9 +24,9 @@ entry:
 ;   CHECK: entry:
 ; Verify that llvm.dbg.declare calls are in the entry basic block.
 ;   CHECK-NOT: %entry
-;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[ARG_ID:[0-9]+]], metadata !DIExpression())
+;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[ARG_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 32))
 ;   CHECK-NOT: %entry
-;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[VAR_ID:[0-9]+]], metadata !DIExpression())
+;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[VAR_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 48))
 
 declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
@@ -35,7 +35,7 @@ declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 !0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.3 (trunk 169314)", isOptimized: true, emissionKind: FullDebug, file: !16, enums: !1, retainedTypes: !1, globals: !1)
 !1 = !{}
-!5 = distinct !DISubprogram(name: "zzz", linkageName: "_Z3zzzi", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 1, file: !16, scope: !6, type: !7, variables: !1)
+!5 = distinct !DISubprogram(name: "zzz", linkageName: "_Z3zzzi", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 1, file: !16, scope: !6, type: !7, retainedNodes: !1)
 !6 = !DIFile(filename: "a.cc", directory: "/usr/local/google/llvm_cmake_clang/tmp/debuginfo")
 !7 = !DISubroutineType(types: !8)
 !8 = !{!9, !9}

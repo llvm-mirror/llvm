@@ -1,9 +1,8 @@
 //===- RegisterInfoEmitter.cpp - Generate a Register File Desc. -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,19 +14,19 @@
 
 #include "CodeGenRegisters.h"
 #include "CodeGenTarget.h"
-#include "Types.h"
 #include "SequenceToOffsetTable.h"
+#include "Types.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SparseBitVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
@@ -203,11 +202,11 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "  static const RegClassWeight RCWeightTable[] = {\n";
   for (const auto &RC : RegBank.getRegClasses()) {
     const CodeGenRegister::Vec &Regs = RC.getMembers();
-    if (Regs.empty())
+    if (Regs.empty() || RC.Artificial)
       OS << "    {0, 0";
     else {
       std::vector<unsigned> RegUnits;
-      RC.buildRegUnitSet(RegUnits);
+      RC.buildRegUnitSet(RegBank, RegUnits);
       OS << "    {" << (*Regs.begin())->getWeight(RegBank)
          << ", " << RegBank.getRegUnitSetWeight(RegUnits);
     }
@@ -296,7 +295,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
            PSetE = PSetIDs.end(); PSetI != PSetE; ++PSetI) {
       PSets[i].push_back(RegBank.getRegPressureSet(*PSetI).Order);
     }
-    std::sort(PSets[i].begin(), PSets[i].end());
+    llvm::sort(PSets[i]);
     PSetsSeqs.add(PSets[i]);
   }
 
@@ -340,11 +339,38 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "}\n\n";
 }
 
+using DwarfRegNumsMapPair = std::pair<Record*, std::vector<int64_t>>;
+using DwarfRegNumsVecTy = std::vector<DwarfRegNumsMapPair>;
+
+void finalizeDwarfRegNumsKeys(DwarfRegNumsVecTy &DwarfRegNums) {
+  // Sort and unique to get a map-like vector. We want the last assignment to
+  // match previous behaviour.
+  std::stable_sort(DwarfRegNums.begin(), DwarfRegNums.end(),
+                   on_first<LessRecordRegister>());
+  // Warn about duplicate assignments.
+  const Record *LastSeenReg = nullptr;
+  for (const auto &X : DwarfRegNums) {
+    const auto &Reg = X.first;
+    // The only way LessRecordRegister can return equal is if they're the same
+    // string. Use simple equality instead.
+    if (LastSeenReg && Reg->getName() == LastSeenReg->getName())
+      PrintWarning(Reg->getLoc(), Twine("DWARF numbers for register ") +
+                                      getQualifiedName(Reg) +
+                                      "specified multiple times");
+    LastSeenReg = Reg;
+  }
+  auto Last = std::unique(
+      DwarfRegNums.begin(), DwarfRegNums.end(),
+      [](const DwarfRegNumsMapPair &A, const DwarfRegNumsMapPair &B) {
+        return A.first->getName() == B.first->getName();
+      });
+  DwarfRegNums.erase(Last, DwarfRegNums.end());
+}
+
 void RegisterInfoEmitter::EmitRegMappingTables(
     raw_ostream &OS, const std::deque<CodeGenRegister> &Regs, bool isCtor) {
   // Collect all information about dwarf register numbers
-  typedef std::map<Record*, std::vector<int64_t>, LessRecordRegister> DwarfRegNumsMapTy;
-  DwarfRegNumsMapTy DwarfRegNums;
+  DwarfRegNumsVecTy DwarfRegNums;
 
   // First, just pull all provided information to the map
   unsigned maxLength = 0;
@@ -352,18 +378,17 @@ void RegisterInfoEmitter::EmitRegMappingTables(
     Record *Reg = RE.TheDef;
     std::vector<int64_t> RegNums = Reg->getValueAsListOfInts("DwarfNumbers");
     maxLength = std::max((size_t)maxLength, RegNums.size());
-    if (DwarfRegNums.count(Reg))
-      PrintWarning(Reg->getLoc(), Twine("DWARF numbers for register ") +
-                   getQualifiedName(Reg) + "specified multiple times");
-    DwarfRegNums[Reg] = RegNums;
+    DwarfRegNums.emplace_back(Reg, std::move(RegNums));
   }
+  finalizeDwarfRegNumsKeys(DwarfRegNums);
 
   if (!maxLength)
     return;
 
   // Now we know maximal length of number list. Append -1's, where needed
-  for (DwarfRegNumsMapTy::iterator
-       I = DwarfRegNums.begin(), E = DwarfRegNums.end(); I != E; ++I)
+  for (DwarfRegNumsVecTy::iterator I = DwarfRegNums.begin(),
+                                   E = DwarfRegNums.end();
+       I != E; ++I)
     for (unsigned i = I->second.size(), e = maxLength; i != e; ++i)
       I->second.push_back(-1);
 
@@ -384,7 +409,7 @@ void RegisterInfoEmitter::EmitRegMappingTables(
         // Store the mapping sorted by the LLVM reg num so lookup can be done
         // with a binary search.
         std::map<uint64_t, Record*> Dwarf2LMap;
-        for (DwarfRegNumsMapTy::iterator
+        for (DwarfRegNumsVecTy::iterator
                I = DwarfRegNums.begin(), E = DwarfRegNums.end(); I != E; ++I) {
           int DwarfRegNo = I->second[i];
           if (DwarfRegNo < 0)
@@ -423,7 +448,21 @@ void RegisterInfoEmitter::EmitRegMappingTables(
 
     DefInit *DI = cast<DefInit>(V->getValue());
     Record *Alias = DI->getDef();
-    DwarfRegNums[Reg] = DwarfRegNums[Alias];
+    const auto &AliasIter =
+        std::lower_bound(DwarfRegNums.begin(), DwarfRegNums.end(), Alias,
+                         [](const DwarfRegNumsMapPair &A, const Record *B) {
+                           return LessRecordRegister()(A.first, B);
+                         });
+    assert(AliasIter != DwarfRegNums.end() && AliasIter->first == Alias &&
+           "Expected Alias to be present in map");
+    const auto &RegIter =
+        std::lower_bound(DwarfRegNums.begin(), DwarfRegNums.end(), Reg,
+                         [](const DwarfRegNumsMapPair &A, const Record *B) {
+                           return LessRecordRegister()(A.first, B);
+                         });
+    assert(RegIter != DwarfRegNums.end() && RegIter->first == Reg &&
+           "Expected Reg to be present in map");
+    RegIter->second = AliasIter->second;
   }
 
   // Emit information about the dwarf register numbers.
@@ -436,7 +475,7 @@ void RegisterInfoEmitter::EmitRegMappingTables(
         OS << " = {\n";
         // Store the mapping sorted by the Dwarf reg num so lookup can be done
         // with a binary search.
-        for (DwarfRegNumsMapTy::iterator
+        for (DwarfRegNumsVecTy::iterator
                I = DwarfRegNums.begin(), E = DwarfRegNums.end(); I != E; ++I) {
           int RegNo = I->second[i];
           if (RegNo == -1) // -1 is the default value, don't emit a mapping.
@@ -1035,14 +1074,10 @@ RegisterInfoEmitter::runMCDesc(raw_ostream &OS, CodeGenTarget &Target,
 
   for (const auto &RC : RegisterClasses) {
     assert(isInt<8>(RC.CopyCost) && "Copy cost too large.");
-    uint32_t RegSize = 0;
-    if (RC.RSI.isSimple())
-      RegSize = RC.RSI.getSimple().RegSize;
     OS << "  { " << RC.getName() << ", " << RC.getName() << "Bits, "
        << RegClassStrings.get(RC.getName()) << ", "
        << RC.getOrder().size() << ", sizeof(" << RC.getName() << "Bits), "
        << RC.getQualifiedName() + "RegClassID" << ", "
-       << RegSize/8 << ", "
        << RC.CopyCost << ", "
        << ( RC.Allocatable ? "true" : "false" ) << " },\n";
   }
@@ -1102,7 +1137,7 @@ RegisterInfoEmitter::runTargetHeader(raw_ostream &OS, CodeGenTarget &Target,
   const std::string &TargetName = Target.getName();
   std::string ClassName = TargetName + "GenRegisterInfo";
 
-  OS << "#include \"llvm/Target/TargetRegisterInfo.h\"\n\n";
+  OS << "#include \"llvm/CodeGen/TargetRegisterInfo.h\"\n\n";
 
   OS << "namespace llvm {\n\n";
 

@@ -1,9 +1,8 @@
 //===-- RISCVTargetMachine.cpp - Define TargetMachine for RISCV -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,6 +12,7 @@
 
 #include "RISCV.h"
 #include "RISCVTargetMachine.h"
+#include "RISCVTargetObjectFile.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -26,11 +26,13 @@ using namespace llvm;
 extern "C" void LLVMInitializeRISCVTarget() {
   RegisterTargetMachine<RISCVTargetMachine> X(getTheRISCV32Target());
   RegisterTargetMachine<RISCVTargetMachine> Y(getTheRISCV64Target());
+  auto PR = PassRegistry::getPassRegistry();
+  initializeRISCVExpandPseudoPass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT) {
   if (TT.isArch64Bit()) {
-    return "e-m:e-i64:64-n32:64-S128";
+    return "e-m:e-p:64:64-i64:64-i128:128-n64-S128";
   } else {
     assert(TT.isArch32Bit() && "only RV32 and RV64 are currently supported");
     return "e-m:e-p:32:32-i64:64-n32-S128";
@@ -44,12 +46,6 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   return *RM;
 }
 
-static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM) {
-  if (CM)
-    return *CM;
-  return CodeModel::Small;
-}
-
 RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
@@ -58,8 +54,8 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
                                        CodeGenOpt::Level OL, bool JIT)
     : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options,
                         getEffectiveRelocModel(TT, RM),
-                        getEffectiveCodeModel(CM), OL),
-      TLOF(make_unique<TargetLoweringObjectFileELF>()),
+                        getEffectiveCodeModel(CM, CodeModel::Small), OL),
+      TLOF(make_unique<RISCVELFTargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();
 }
@@ -74,7 +70,11 @@ public:
     return getTM<RISCVTargetMachine>();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreEmitPass() override;
+  void addPreEmitPass2() override;
+  void addPreRegAlloc() override;
 };
 }
 
@@ -82,8 +82,26 @@ TargetPassConfig *RISCVTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new RISCVPassConfig(*this, PM);
 }
 
+void RISCVPassConfig::addIRPasses() {
+  addPass(createAtomicExpandPass());
+  TargetPassConfig::addIRPasses();
+}
+
 bool RISCVPassConfig::addInstSelector() {
   addPass(createRISCVISelDag(getRISCVTargetMachine()));
 
   return false;
+}
+
+void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
+
+void RISCVPassConfig::addPreEmitPass2() {
+  // Schedule the expansion of AMOs at the last possible moment, avoiding the
+  // possibility for other passes to break the requirements for forward
+  // progress in the LR/SC block.
+  addPass(createRISCVExpandPseudoPass());
+}
+
+void RISCVPassConfig::addPreRegAlloc() {
+  addPass(createRISCVMergeBaseOffsetOptPass());
 }

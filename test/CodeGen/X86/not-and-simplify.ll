@@ -6,10 +6,10 @@
 
 define i32 @shrink_xor_constant1(i32 %x) {
 ; ALL-LABEL: shrink_xor_constant1:
-; ALL:       # BB#0:
-; ALL-NEXT:    shrl $31, %edi
-; ALL-NEXT:    xorl $1, %edi
+; ALL:       # %bb.0:
 ; ALL-NEXT:    movl %edi, %eax
+; ALL-NEXT:    notl %eax
+; ALL-NEXT:    shrl $31, %eax
 ; ALL-NEXT:    retq
   %sh = lshr i32 %x, 31
   %not = xor i32 %sh, -1
@@ -19,9 +19,9 @@ define i32 @shrink_xor_constant1(i32 %x) {
 
 define <4 x i32> @shrink_xor_constant1_splat(<4 x i32> %x) {
 ; ALL-LABEL: shrink_xor_constant1_splat:
-; ALL:       # BB#0:
+; ALL:       # %bb.0:
 ; ALL-NEXT:    psrld $31, %xmm0
-; ALL-NEXT:    pandn {{.*}}(%rip), %xmm0
+; ALL-NEXT:    pxor {{.*}}(%rip), %xmm0
 ; ALL-NEXT:    retq
   %sh = lshr <4 x i32> %x, <i32 31, i32 31, i32 31, i32 31>
   %not = xor <4 x i32> %sh, <i32 -1, i32 -1, i32 -1, i32 -1>
@@ -33,10 +33,11 @@ define <4 x i32> @shrink_xor_constant1_splat(<4 x i32> %x) {
 
 define i8 @shrink_xor_constant2(i8 %x) {
 ; ALL-LABEL: shrink_xor_constant2:
-; ALL:       # BB#0:
-; ALL-NEXT:    shlb $5, %dil
-; ALL-NEXT:    xorb $-32, %dil
+; ALL:       # %bb.0:
 ; ALL-NEXT:    movl %edi, %eax
+; ALL-NEXT:    notb %al
+; ALL-NEXT:    shlb $5, %al
+; ALL-NEXT:    # kill: def $al killed $al killed $eax
 ; ALL-NEXT:    retq
   %sh = shl i8 %x, 5
   %not = xor i8 %sh, -1
@@ -46,7 +47,7 @@ define i8 @shrink_xor_constant2(i8 %x) {
 
 define <16 x i8> @shrink_xor_constant2_splat(<16 x i8> %x) {
 ; ALL-LABEL: shrink_xor_constant2_splat:
-; ALL:       # BB#0:
+; ALL:       # %bb.0:
 ; ALL-NEXT:    movaps {{.*#+}} xmm0 = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ; ALL-NEXT:    retq
   %sh = shl <16 x i8> %x, <i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5, i8 5>

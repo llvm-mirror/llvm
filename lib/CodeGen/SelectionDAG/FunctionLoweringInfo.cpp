@@ -1,9 +1,8 @@
 //===-- FunctionLoweringInfo.cpp ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,11 +16,15 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/WasmEHFuncInfo.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -32,12 +35,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -90,10 +88,12 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(Fn->getReturnType(), Fn->getAttributes(), Outs, *TLI,
+  CallingConv::ID CC = Fn->getCallingConv();
+
+  GetReturnInfo(CC, Fn->getReturnType(), Fn->getAttributes(), Outs, *TLI,
                 mf.getDataLayout());
-  CanLowerReturn = TLI->CanLowerReturn(Fn->getCallingConv(), *MF,
-                                       Fn->isVarArg(), Outs, Fn->getContext());
+  CanLowerReturn =
+      TLI->CanLowerReturn(CC, *MF, Fn->isVarArg(), Outs, Fn->getContext());
 
   // If this personality uses funclets, we need to do a bit more work.
   DenseMap<const AllocaInst *, TinyPtrVector<int *>> CatchObjects;
@@ -119,6 +119,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
           H.CatchObj.FrameIndex = INT_MAX;
       }
     }
+  }
+  if (Personality == EHPersonality::Wasm_CXX) {
+    WasmEHFuncInfo &EHInfo = *MF->getWasmEHFuncInfo();
+    calculateWasmEHInfo(&fn, EHInfo);
   }
 
   // Initialize the mapping of values to registers.  This is only set up for
@@ -228,9 +232,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       const Instruction *PadInst = BB.getFirstNonPHI();
       // If this is a non-landingpad EH pad, mark this function as using
       // funclets.
-      // FIXME: SEH catchpads do not create funclets, so we could avoid setting
-      // this in such cases in order to improve frame layout.
+      // FIXME: SEH catchpads do not create EH scope/funclets, so we could avoid
+      // setting this in such cases in order to improve frame layout.
       if (!isa<LandingPadInst>(PadInst)) {
+        MF->setHasEHScopes(true);
         MF->setHasEHFunclets(true);
         MF->getFrameInfo().setHasOpaqueSPAdjustment(true);
       }
@@ -259,20 +264,20 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
 
     // Create Machine PHI nodes for LLVM PHI nodes, lowering them as
     // appropriate.
-    for (BasicBlock::const_iterator I = BB.begin();
-         const PHINode *PN = dyn_cast<PHINode>(I); ++I) {
-      if (PN->use_empty()) continue;
-
-      // Skip empty types
-      if (PN->getType()->isEmptyTy())
+    for (const PHINode &PN : BB.phis()) {
+      if (PN.use_empty())
         continue;
 
-      DebugLoc DL = PN->getDebugLoc();
-      unsigned PHIReg = ValueMap[PN];
+      // Skip empty types
+      if (PN.getType()->isEmptyTy())
+        continue;
+
+      DebugLoc DL = PN.getDebugLoc();
+      unsigned PHIReg = ValueMap[&PN];
       assert(PHIReg && "PHI node does not have an assigned virtual register!");
 
       SmallVector<EVT, 4> ValueVTs;
-      ComputeValueVTs(*TLI, MF->getDataLayout(), PN->getType(), ValueVTs);
+      ComputeValueVTs(*TLI, MF->getDataLayout(), PN.getType(), ValueVTs);
       for (EVT VT : ValueVTs) {
         unsigned NumRegisters = TLI->getNumRegisters(Fn->getContext(), VT);
         const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
@@ -283,28 +288,46 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
     }
   }
 
-  if (!isFuncletEHPersonality(Personality))
-    return;
+  if (isFuncletEHPersonality(Personality)) {
+    WinEHFuncInfo &EHInfo = *MF->getWinEHFuncInfo();
 
-  WinEHFuncInfo &EHInfo = *MF->getWinEHFuncInfo();
-
-  // Map all BB references in the WinEH data to MBBs.
-  for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
-    for (WinEHHandlerType &H : TBME.HandlerArray) {
-      if (H.Handler)
-        H.Handler = MBBMap[H.Handler.get<const BasicBlock *>()];
+    // Map all BB references in the WinEH data to MBBs.
+    for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
+      for (WinEHHandlerType &H : TBME.HandlerArray) {
+        if (H.Handler)
+          H.Handler = MBBMap[H.Handler.get<const BasicBlock *>()];
+      }
+    }
+    for (CxxUnwindMapEntry &UME : EHInfo.CxxUnwindMap)
+      if (UME.Cleanup)
+        UME.Cleanup = MBBMap[UME.Cleanup.get<const BasicBlock *>()];
+    for (SEHUnwindMapEntry &UME : EHInfo.SEHUnwindMap) {
+      const auto *BB = UME.Handler.get<const BasicBlock *>();
+      UME.Handler = MBBMap[BB];
+    }
+    for (ClrEHUnwindMapEntry &CME : EHInfo.ClrEHUnwindMap) {
+      const auto *BB = CME.Handler.get<const BasicBlock *>();
+      CME.Handler = MBBMap[BB];
     }
   }
-  for (CxxUnwindMapEntry &UME : EHInfo.CxxUnwindMap)
-    if (UME.Cleanup)
-      UME.Cleanup = MBBMap[UME.Cleanup.get<const BasicBlock *>()];
-  for (SEHUnwindMapEntry &UME : EHInfo.SEHUnwindMap) {
-    const BasicBlock *BB = UME.Handler.get<const BasicBlock *>();
-    UME.Handler = MBBMap[BB];
-  }
-  for (ClrEHUnwindMapEntry &CME : EHInfo.ClrEHUnwindMap) {
-    const BasicBlock *BB = CME.Handler.get<const BasicBlock *>();
-    CME.Handler = MBBMap[BB];
+
+  else if (Personality == EHPersonality::Wasm_CXX) {
+    WasmEHFuncInfo &EHInfo = *MF->getWasmEHFuncInfo();
+    // Map all BB references in the WinEH data to MBBs.
+    DenseMap<BBOrMBB, BBOrMBB> NewMap;
+    for (auto &KV : EHInfo.EHPadUnwindMap) {
+      const auto *Src = KV.first.get<const BasicBlock *>();
+      const auto *Dst = KV.second.get<const BasicBlock *>();
+      NewMap[MBBMap[Src]] = MBBMap[Dst];
+    }
+    EHInfo.EHPadUnwindMap = std::move(NewMap);
+    NewMap.clear();
+    for (auto &KV : EHInfo.ThrowUnwindMap) {
+      const auto *Src = KV.first.get<const BasicBlock *>();
+      const auto *Dst = KV.second.get<const BasicBlock *>();
+      NewMap[MBBMap[Src]] = MBBMap[Dst];
+    }
+    EHInfo.ThrowUnwindMap = std::move(NewMap);
   }
 }
 
@@ -314,12 +337,14 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
 void FunctionLoweringInfo::clear() {
   MBBMap.clear();
   ValueMap.clear();
+  VirtReg2Value.clear();
   StaticAllocaMap.clear();
   LiveOutRegInfo.clear();
   VisitedBBs.clear();
   ArgDbgValues.clear();
   ByValArgFrameIndexMap.clear();
   RegFixups.clear();
+  RegsWithFixups.clear();
   StatepointStackSlots.clear();
   StatepointSpillMaps.clear();
   PreferredExtendType.clear();
@@ -485,7 +510,7 @@ int FunctionLoweringInfo::getArgumentFrameIndex(const Argument *A) {
   auto I = ByValArgFrameIndexMap.find(A);
   if (I != ByValArgFrameIndexMap.end())
     return I->second;
-  DEBUG(dbgs() << "Argument does not have assigned frame index!\n");
+  LLVM_DEBUG(dbgs() << "Argument does not have assigned frame index!\n");
   return INT_MAX;
 }
 
@@ -548,4 +573,23 @@ FunctionLoweringInfo::getOrCreateSwiftErrorVRegUseAt(const Instruction *I, const
     return std::make_pair(VReg, true);
   }
   return std::make_pair(It->second, false);
+}
+
+const Value *
+FunctionLoweringInfo::getValueFromVirtualReg(unsigned Vreg) {
+  if (VirtReg2Value.empty()) {
+    SmallVector<EVT, 4> ValueVTs;
+    for (auto &P : ValueMap) {
+      ValueVTs.clear();
+      ComputeValueVTs(*TLI, Fn->getParent()->getDataLayout(),
+                      P.first->getType(), ValueVTs);
+      unsigned Reg = P.second;
+      for (EVT VT : ValueVTs) {
+        unsigned NumRegisters = TLI->getNumRegisters(Fn->getContext(), VT);
+        for (unsigned i = 0, e = NumRegisters; i != e; ++i)
+          VirtReg2Value[Reg++] = P.first;
+      }
+    }
+  }
+  return VirtReg2Value.lookup(Vreg);
 }

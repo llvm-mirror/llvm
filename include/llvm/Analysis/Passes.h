@@ -1,9 +1,8 @@
 //===-- llvm/Analysis/Passes.h - Constructors for analyses ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -61,10 +60,10 @@ namespace llvm {
 
   //===--------------------------------------------------------------------===//
   //
-  // createDivergenceAnalysisPass - This pass determines which branches in a GPU
+  // createLegacyDivergenceAnalysisPass - This pass determines which branches in a GPU
   // program are divergent.
   //
-  FunctionPass *createDivergenceAnalysisPass();
+  FunctionPass *createLegacyDivergenceAnalysisPass();
 
   //===--------------------------------------------------------------------===//
   //
@@ -95,6 +94,14 @@ namespace llvm {
   // information and prints it with -analyze.
   //
   FunctionPass *createMemDerefPrinter();
+
+  //===--------------------------------------------------------------------===//
+  //
+  // createMustExecutePrinter - This pass collects information about which
+  // instructions within a loop are guaranteed to execute if the loop header is
+  // entered and prints it with -analyze.
+  //
+  FunctionPass *createMustExecutePrinter();
 
 }
 

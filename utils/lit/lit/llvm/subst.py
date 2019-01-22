@@ -12,9 +12,14 @@ class FindTool(object):
         self.name = name
 
     def resolve(self, config, dirs):
-        command = lit.util.which(self.name, dirs)
-        if not command:
-            return None
+        # Check for a user explicitely overriding a tool.  This allows:
+        #     llvm-lit -D llc="llc -enable-misched -verify-machineinstrs"
+        command = config.lit_config.params.get(self.name)
+        if command is None:
+            # Then check out search paths.
+            command = lit.util.which(self.name, dirs)
+            if not command:
+                return None
 
         if self.name == 'llc' and os.environ.get('LLVM_ENABLE_MACHINE_VERIFIER') == '1':
             command += ' -verify-machineinstrs'
@@ -75,6 +80,7 @@ class ToolSubst(object):
         self.extra_args = extra_args
         self.key = key
         self.command = command if command is not None else FindTool(key)
+        self.was_resolved = False
         if verbatim:
             self.regex = key
             return
@@ -136,5 +142,6 @@ class ToolSubst(object):
                 return None
             else:
                 raise 'Unexpected value for ToolSubst.unresolved'
-
+        if command_str:
+            self.was_resolved = True
         return (self.regex, tool_pipe, command_str)

@@ -4,35 +4,28 @@
 
 define i32 @t(i8* %ref_frame_ptr, i32 %ref_frame_stride, i32 %idxX, i32 %idxY) nounwind  {
 ; X32-LABEL: t:
-; X32:       ## BB#0: ## %entry
+; X32:       ## %bb.0: ## %entry
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    imull {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    addl {{[0-9]+}}(%esp), %ecx
-; X32-NEXT:    movzwl 4(%eax,%ecx), %edx
-; X32-NEXT:    movd {{.*#+}} xmm0 = mem[0],zero,zero,zero
-; X32-NEXT:    movd %edx, %xmm1
-; X32-NEXT:    punpckldq {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
-; X32-NEXT:    pshuflw {{.*#+}} xmm0 = xmm0[0,1,1,2,4,5,6,7]
-; X32-NEXT:    movd %xmm0, %eax
+; X32-NEXT:    movl (%eax,%ecx), %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t:
-; X64:       ## BB#0: ## %entry
-; X64-NEXT:    ## kill: %EDX<def> %EDX<kill> %RDX<def>
-; X64-NEXT:    ## kill: %ESI<def> %ESI<kill> %RSI<def>
+; X64:       ## %bb.0: ## %entry
+; X64-NEXT:    ## kill: def $edx killed $edx def $rdx
+; X64-NEXT:    ## kill: def $esi killed $esi def $rsi
 ; X64-NEXT:    imull %ecx, %esi
 ; X64-NEXT:    leal (%rsi,%rdx), %eax
 ; X64-NEXT:    cltq
+; X64-NEXT:    movl (%rdi,%rax), %eax
 ; X64-NEXT:    leal 4(%rsi,%rdx), %ecx
 ; X64-NEXT:    movslq %ecx, %rcx
 ; X64-NEXT:    movzwl (%rdi,%rcx), %ecx
 ; X64-NEXT:    shlq $32, %rcx
-; X64-NEXT:    movl (%rdi,%rax), %eax
-; X64-NEXT:    orq %rcx, %rax
-; X64-NEXT:    movq %rax, %xmm0
-; X64-NEXT:    movq {{.*#+}} xmm0 = xmm0[0],zero
-; X64-NEXT:    pshuflw {{.*#+}} xmm0 = xmm0[0,1,1,2,4,5,6,7]
+; X64-NEXT:    orq %rax, %rcx
+; X64-NEXT:    movq %rcx, %xmm0
 ; X64-NEXT:    movd %xmm0, %eax
 ; X64-NEXT:    retq
 entry:

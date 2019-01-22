@@ -1,9 +1,8 @@
 //===- AMDGPUAliasAnalysis --------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -33,14 +32,12 @@ class AMDGPUAAResult : public AAResultBase<AMDGPUAAResult> {
   friend AAResultBase<AMDGPUAAResult>;
 
   const DataLayout &DL;
-  AMDGPUAS AS;
 
 public:
   explicit AMDGPUAAResult(const DataLayout &DL, Triple T) : AAResultBase(),
-    DL(DL), AS(AMDGPU::getAMDGPUAS(T)), ASAliasRules(AS, T.getArch()) {}
+    DL(DL) {}
   AMDGPUAAResult(AMDGPUAAResult &&Arg)
-      : AAResultBase(std::move(Arg)), DL(Arg.DL), AS(Arg.AS),
-        ASAliasRules(Arg.ASAliasRules){}
+      : AAResultBase(std::move(Arg)), DL(Arg.DL) {}
 
   /// Handle invalidation events from the new pass manager.
   ///
@@ -53,18 +50,6 @@ public:
 private:
   bool Aliases(const MDNode *A, const MDNode *B) const;
   bool PathAliases(const MDNode *A, const MDNode *B) const;
-
-  class ASAliasRulesTy {
-  public:
-    ASAliasRulesTy(AMDGPUAS AS_, Triple::ArchType Arch_);
-
-    AliasResult getAliasResult(unsigned AS1, unsigned AS2) const;
-
-  private:
-    Triple::ArchType Arch;
-    AMDGPUAS AS;
-    const AliasResult (*ASAliasRules)[6][6];
-  } ASAliasRules;
 };
 
 /// Analysis pass providing a never-invalidated alias analysis result.
@@ -108,6 +93,19 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
+};
+
+// Wrapper around ExternalAAWrapperPass so that the default constructor gets the
+// callback.
+class AMDGPUExternalAAWrapper : public ExternalAAWrapperPass {
+public:
+  static char ID;
+
+  AMDGPUExternalAAWrapper() : ExternalAAWrapperPass(
+    [](Pass &P, Function &, AAResults &AAR) {
+      if (auto *WrapperPass = P.getAnalysisIfAvailable<AMDGPUAAWrapperPass>())
+        AAR.addAAResult(WrapperPass->getResult());
+    }) {}
 };
 
 } // end namespace llvm

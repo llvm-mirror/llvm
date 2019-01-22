@@ -1,9 +1,8 @@
 //===-lto.cpp - LLVM Link Time Optimizer ----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,7 +14,7 @@
 #include "llvm-c/lto.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Bitcode/BitcodeReader.h"
-#include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/CodeGen/CommandFlags.inc"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
@@ -96,7 +95,7 @@ struct LTOToolDiagnosticHandler : public DiagnosticHandler {
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
   if (!initialized) {
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
     // Dialog box on crash disabling doesn't work across DLL boundaries, so do
     // it here.
     llvm::sys::DisableSystemDialogsOnCrash();
@@ -584,6 +583,23 @@ void thinlto_codegen_set_cache_entry_expiration(thinlto_code_gen_t cg,
 void thinlto_codegen_set_final_cache_size_relative_to_available_space(
     thinlto_code_gen_t cg, unsigned Percentage) {
   return unwrap(cg)->setMaxCacheSizeRelativeToAvailableSpace(Percentage);
+}
+
+void thinlto_codegen_set_cache_size_bytes(
+    thinlto_code_gen_t cg, unsigned MaxSizeBytes) {
+  return unwrap(cg)->setCacheMaxSizeBytes(MaxSizeBytes);
+}
+
+void thinlto_codegen_set_cache_size_megabytes(
+    thinlto_code_gen_t cg, unsigned MaxSizeMegabytes) {
+  uint64_t MaxSizeBytes = MaxSizeMegabytes;
+  MaxSizeBytes *= 1024 * 1024;
+  return unwrap(cg)->setCacheMaxSizeBytes(MaxSizeBytes);
+}
+
+void thinlto_codegen_set_cache_size_files(
+    thinlto_code_gen_t cg, unsigned MaxSizeFiles) {
+  return unwrap(cg)->setCacheMaxSizeFiles(MaxSizeFiles);
 }
 
 void thinlto_codegen_set_savetemps_dir(thinlto_code_gen_t cg,

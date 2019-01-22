@@ -6,7 +6,7 @@
 
 define void @foo(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 {
 ; X64-LABEL: foo:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movl 16(%rdi), %eax
 ; X64-NEXT:    movl (%rdi), %ecx
 ; X64-NEXT:    addl %eax, %ecx
@@ -20,7 +20,7 @@ define void @foo(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 {
 ; X64-NEXT:    retq
 ;
 ; X86-LABEL: foo:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    pushl %esi
 ; X86-NEXT:    .cfi_def_cfa_offset 8
 ; X86-NEXT:    .cfi_offset %esi, -8
@@ -36,6 +36,7 @@ define void @foo(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 {
 ; X86-NEXT:    leal 1(%ecx,%edx), %ecx
 ; X86-NEXT:    movl %ecx, 16(%eax)
 ; X86-NEXT:    popl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 4
 ; X86-NEXT:    retl
  entry:
    %h0 = getelementptr inbounds %struct.SA, %struct.SA* %ctx, i64 0, i32 0
@@ -58,7 +59,7 @@ define void @foo(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 {
 
 define void @foo_loop(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 {
 ; X64-LABEL: foo_loop:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    .p2align 4, 0x90
 ; X64-NEXT:  .LBB1_1: # %loop
 ; X64-NEXT:    # =>This Inner Loop Header: Depth=1
@@ -68,7 +69,7 @@ define void @foo_loop(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 
 ; X64-NEXT:    movl %edx, 12(%rdi)
 ; X64-NEXT:    decl %esi
 ; X64-NEXT:    jne .LBB1_1
-; X64-NEXT:  # BB#2: # %exit
+; X64-NEXT:  # %bb.2: # %exit
 ; X64-NEXT:    addl %eax, %ecx
 ; X64-NEXT:    leal 1(%rax,%rcx), %ecx
 ; X64-NEXT:    addl %eax, %ecx
@@ -81,7 +82,7 @@ define void @foo_loop(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 
 ; X64-NEXT:    retq
 ;
 ; X86-LABEL: foo_loop:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    pushl %edi
 ; X86-NEXT:    .cfi_def_cfa_offset 8
 ; X86-NEXT:    pushl %esi
@@ -99,7 +100,7 @@ define void @foo_loop(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 
 ; X86-NEXT:    movl %edi, 12(%eax)
 ; X86-NEXT:    decl %edx
 ; X86-NEXT:    jne .LBB1_1
-; X86-NEXT:  # BB#2: # %exit
+; X86-NEXT:  # %bb.2: # %exit
 ; X86-NEXT:    addl %ecx, %esi
 ; X86-NEXT:    leal 1(%ecx,%esi), %edx
 ; X86-NEXT:    addl %ecx, %edx
@@ -110,7 +111,9 @@ define void @foo_loop(%struct.SA* nocapture %ctx, i32 %n) local_unnamed_addr #0 
 ; X86-NEXT:    addl %ecx, %edx
 ; X86-NEXT:    movl %edx, 16(%eax)
 ; X86-NEXT:    popl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 8
 ; X86-NEXT:    popl %edi
+; X86-NEXT:    .cfi_def_cfa_offset 4
 ; X86-NEXT:    retl
  entry:
    br label %loop

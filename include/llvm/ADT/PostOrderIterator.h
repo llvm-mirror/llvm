@@ -1,9 +1,8 @@
 //===- llvm/ADT/PostOrderIterator.h - PostOrder iterator --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -296,12 +295,15 @@ class ReversePostOrderTraversal {
 
 public:
   using rpo_iterator = typename std::vector<NodeRef>::reverse_iterator;
+  using const_rpo_iterator = typename std::vector<NodeRef>::const_reverse_iterator;
 
   ReversePostOrderTraversal(GraphT G) { Initialize(GT::getEntryNode(G)); }
 
   // Because we want a reverse post order, use reverse iterators from the vector
   rpo_iterator begin() { return Blocks.rbegin(); }
+  const_rpo_iterator begin() const { return Blocks.crbegin(); }
   rpo_iterator end() { return Blocks.rend(); }
+  const_rpo_iterator end() const { return Blocks.crend(); }
 };
 
 } // end namespace llvm

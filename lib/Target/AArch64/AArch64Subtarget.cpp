@@ -1,9 +1,8 @@
 //===-- AArch64Subtarget.cpp - AArch64 Subtarget Information ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,20 +13,17 @@
 #include "AArch64Subtarget.h"
 
 #include "AArch64.h"
-#include "AArch64InstrInfo.h"
-#include "AArch64PBQPRegAlloc.h"
-#include "AArch64TargetMachine.h"
-
 #include "AArch64CallLowering.h"
+#include "AArch64InstrInfo.h"
 #include "AArch64LegalizerInfo.h"
+#include "AArch64PBQPRegAlloc.h"
 #include "AArch64RegisterBankInfo.h"
-#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "AArch64TargetMachine.h"
+#include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
-#include "llvm/CodeGen/GlobalISel/Legalizer.h"
-#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetParser.h"
 
 using namespace llvm;
 
@@ -70,21 +66,41 @@ void AArch64Subtarget::initializeProperties() {
   // this in the future so we can specify it together with the subtarget
   // features.
   switch (ARMProcFamily) {
+  case Others:
+    break;
+  case CortexA35:
+    break;
+  case CortexA53:
+    PrefFunctionAlignment = 3;
+    break;
+  case CortexA55:
+    break;
+  case CortexA57:
+    MaxInterleaveFactor = 4;
+    PrefFunctionAlignment = 4;
+    break;
+  case CortexA72:
+  case CortexA73:
+  case CortexA75:
+    PrefFunctionAlignment = 4;
+    break;
   case Cyclone:
     CacheLineSize = 64;
     PrefetchDistance = 280;
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 3;
     break;
-  case CortexA57:
-    MaxInterleaveFactor = 4;
-    PrefFunctionAlignment = 4;
-    break;
   case ExynosM1:
     MaxInterleaveFactor = 4;
     MaxJumpTableSize = 8;
     PrefFunctionAlignment = 4;
     PrefLoopAlignment = 3;
+    break;
+  case ExynosM3:
+    MaxInterleaveFactor = 4;
+    MaxJumpTableSize = 20;
+    PrefFunctionAlignment = 5;
+    PrefLoopAlignment = 4;
     break;
   case Falkor:
     MaxInterleaveFactor = 4;
@@ -95,11 +111,6 @@ void AArch64Subtarget::initializeProperties() {
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 8;
     break;
-  case Saphira:
-    MaxInterleaveFactor = 4;
-    // FIXME: remove this to enable 64-bit SLP if performance looks good.
-    MinVectorRegisterBitWidth = 128;
-    break;
   case Kryo:
     MaxInterleaveFactor = 4;
     VectorInsertExtractBaseCost = 2;
@@ -107,6 +118,11 @@ void AArch64Subtarget::initializeProperties() {
     PrefetchDistance = 740;
     MinPrefetchStride = 1024;
     MaxPrefetchIterationsAhead = 11;
+    // FIXME: remove this to enable 64-bit SLP if performance looks good.
+    MinVectorRegisterBitWidth = 128;
+    break;
+  case Saphira:
+    MaxInterleaveFactor = 4;
     // FIXME: remove this to enable 64-bit SLP if performance looks good.
     MinVectorRegisterBitWidth = 128;
     break;
@@ -131,17 +147,11 @@ void AArch64Subtarget::initializeProperties() {
     // FIXME: remove this to enable 64-bit SLP if performance looks good.
     MinVectorRegisterBitWidth = 128;
     break;
-  case CortexA35: break;
-  case CortexA53:
-    PrefFunctionAlignment = 3;
-    break;
-  case CortexA55: break;
-  case CortexA72:
-  case CortexA73:
-  case CortexA75:
+  case TSV110:
+    CacheLineSize = 64;
     PrefFunctionAlignment = 4;
+    PrefLoopAlignment = 2;
     break;
-  case Others: break;
   }
 }
 
@@ -149,12 +159,17 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
                                    const std::string &FS,
                                    const TargetMachine &TM, bool LittleEndian)
     : AArch64GenSubtargetInfo(TT, CPU, FS),
-      ReserveX18(TT.isOSDarwin() || TT.isOSWindows()), IsLittle(LittleEndian),
+      ReserveXRegister(AArch64::GPR64commonRegClass.getNumRegs()),
+      CustomCallSavedXRegs(AArch64::GPR64commonRegClass.getNumRegs()),
+      IsLittle(LittleEndian),
       TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this) {
+  if (AArch64::isX18ReservedByDefault(TT))
+    ReserveXRegister.set(18);
+
   CallLoweringInfo.reset(new AArch64CallLowering(*getTargetLowering()));
-  Legalizer.reset(new AArch64LegalizerInfo());
+  Legalizer.reset(new AArch64LegalizerInfo(*this));
 
   auto *RBI = new AArch64RegisterBankInfo(*getRegisterInfo());
 
@@ -193,12 +208,19 @@ AArch64Subtarget::ClassifyGlobalReference(const GlobalValue *GV,
   if (TM.getCodeModel() == CodeModel::Large && isTargetMachO())
     return AArch64II::MO_GOT;
 
-  if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
+  if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV)) {
+    if (GV->hasDLLImportStorageClass())
+      return AArch64II::MO_GOT | AArch64II::MO_DLLIMPORT;
+    if (getTargetTriple().isOSWindows())
+      return AArch64II::MO_GOT | AArch64II::MO_COFFSTUB;
     return AArch64II::MO_GOT;
+  }
 
   // The small code model's direct accesses use ADRP, which cannot
   // necessarily produce the value 0 (if the code is above 4GB).
-  if (useSmallAddressing() && GV->hasExternalWeakLinkage())
+  // Same for the tiny code model, where we have a pc relative LDR.
+  if ((useSmallAddressing() || TM.getCodeModel() == CodeModel::Tiny) &&
+      GV->hasExternalWeakLinkage())
     return AArch64II::MO_GOT;
 
   return AArch64II::MO_NO_FLAG;
@@ -219,19 +241,6 @@ unsigned char AArch64Subtarget::classifyGlobalFunctionReference(
     return AArch64II::MO_GOT;
 
   return AArch64II::MO_NO_FLAG;
-}
-
-/// This function returns the name of a function which has an interface
-/// like the non-standard bzero function, if such a function exists on
-/// the current subtarget and it is considered prefereable over
-/// memset with zero passed as the second argument. Otherwise it
-/// returns null.
-const char *AArch64Subtarget::getBZeroEntry() const {
-  // Prefer bzero on Darwin only.
-  if(isTargetDarwin())
-    return "bzero";
-
-  return nullptr;
 }
 
 void AArch64Subtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
@@ -266,4 +275,14 @@ bool AArch64Subtarget::supportsAddressTopByteIgnored() const {
 std::unique_ptr<PBQPRAConstraint>
 AArch64Subtarget::getCustomPBQPConstraints() const {
   return balanceFPOps() ? llvm::make_unique<A57ChainingConstraint>() : nullptr;
+}
+
+void AArch64Subtarget::mirFileLoaded(MachineFunction &MF) const {
+  // We usually compute max call frame size after ISel. Do the computation now
+  // if the .mir file didn't specify it. Note that this will probably give you
+  // bogus values after PEI has eliminated the callframe setup/destroy pseudo
+  // instructions, specify explicitly if you need it to be correct.
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (!MFI.isMaxCallFrameSizeComputed())
+    MFI.computeMaxCallFrameSize(MF);
 }

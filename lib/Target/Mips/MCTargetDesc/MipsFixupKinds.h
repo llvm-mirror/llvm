@@ -1,9 +1,8 @@
 //===-- MipsFixupKinds.h - Mips Specific Fixup Entries ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -96,10 +95,14 @@ namespace Mips {
     fixup_Mips_Branch_PCRel,
 
     // resulting in - R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16
+    //                R_MICROMIPS_GPREL16/R_MICROMIPS_SUB/R_MICROMIPS_HI16
     fixup_Mips_GPOFF_HI,
+    fixup_MICROMIPS_GPOFF_HI,
 
     // resulting in - R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16
+    //                R_MICROMIPS_GPREL16/R_MICROMIPS_SUB/R_MICROMIPS_LO16
     fixup_Mips_GPOFF_LO,
+    fixup_MICROMIPS_GPOFF_LO,
 
     // resulting in - R_MIPS_PAGE
     fixup_Mips_GOT_PAGE,
@@ -110,11 +113,13 @@ namespace Mips {
     // resulting in - R_MIPS_GOT_DISP
     fixup_Mips_GOT_DISP,
 
-    // resulting in - R_MIPS_GOT_HIGHER
+    // resulting in - R_MIPS_HIGHER/R_MICROMIPS_HIGHER
     fixup_Mips_HIGHER,
+    fixup_MICROMIPS_HIGHER,
 
-    // resulting in - R_MIPS_HIGHEST
+    // resulting in - R_MIPS_HIGHEST/R_MICROMIPS_HIGHEST
     fixup_Mips_HIGHEST,
+    fixup_MICROMIPS_HIGHEST,
 
     // resulting in - R_MIPS_GOT_HI16
     fixup_Mips_GOT_HI16,
@@ -215,6 +220,10 @@ namespace Mips {
     // resulting in - R_MIPS_SUB/R_MICROMIPS_SUB
     fixup_Mips_SUB,
     fixup_MICROMIPS_SUB,
+
+    // resulting in - R_MIPS_JALR/R_MICROMIPS_JALR
+    fixup_Mips_JALR,
+    fixup_MICROMIPS_JALR,
 
     // Marker
     LastTargetFixupKind,

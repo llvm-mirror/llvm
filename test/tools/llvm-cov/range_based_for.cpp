@@ -20,10 +20,10 @@
 
 int main(int argc, const char *argv[]) { // GCOV: 1:    [[@LINE]]:int main(
   int V[] = {1, 2};                      // GCOV: 1:    [[@LINE]]:  int V[]
-  for (int &I : V) {                     // GCOV: 10:   [[@LINE]]:  for (
+  for (int &I : V) {                     // GCOV: 5:    [[@LINE]]:  for (
   }                                      // GCOV: 2:    [[@LINE]]:  }
   return 0;                              // GCOV: 1:    [[@LINE]]:  return
 }                                        // GCOV: -:    [[@LINE]]:}
 
 // llvm-cov doesn't work on big endian yet
-// XFAIL: powerpc64-, s390x, mips-, mips64-, sparc
+// XFAIL: powerpc-, powerpc64-, s390x, mips-, mips64-, sparc

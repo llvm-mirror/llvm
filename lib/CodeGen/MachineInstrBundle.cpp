@@ -1,9 +1,8 @@
 //===-- lib/CodeGen/MachineInstrBundle.cpp --------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,10 +12,10 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <utility>
 using namespace llvm;
 
@@ -105,6 +104,16 @@ bool FinalizeMachineBundles::runOnMachineFunction(MachineFunction &MF) {
   return llvm::finalizeBundles(MF);
 }
 
+/// Return the first found DebugLoc that has a DILocation, given a range of
+/// instructions. The search range is from FirstMI to LastMI (exclusive). If no
+/// DILocation is found, then an empty location is returned.
+static DebugLoc getDebugLoc(MachineBasicBlock::instr_iterator FirstMI,
+                            MachineBasicBlock::instr_iterator LastMI) {
+  for (auto MII = FirstMI; MII != LastMI; ++MII)
+    if (MII->getDebugLoc().get())
+      return MII->getDebugLoc();
+  return DebugLoc();
+}
 
 /// finalizeBundle - Finalize a machine instruction bundle which includes
 /// a sequence of instructions starting from FirstMI to LastMI (exclusive).
@@ -123,7 +132,7 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
 
   MachineInstrBuilder MIB =
-      BuildMI(MF, FirstMI->getDebugLoc(), TII->get(TargetOpcode::BUNDLE));
+      BuildMI(MF, getDebugLoc(FirstMI, LastMI), TII->get(TargetOpcode::BUNDLE));
   Bundle.prepend(MIB);
 
   SmallVector<unsigned, 32> LocalDefs;
@@ -135,9 +144,9 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
   SmallSet<unsigned, 8> KilledUseSet;
   SmallSet<unsigned, 8> UndefUseSet;
   SmallVector<MachineOperand*, 4> Defs;
-  for (; FirstMI != LastMI; ++FirstMI) {
-    for (unsigned i = 0, e = FirstMI->getNumOperands(); i != e; ++i) {
-      MachineOperand &MO = FirstMI->getOperand(i);
+  for (auto MII = FirstMI; MII != LastMI; ++MII) {
+    for (unsigned i = 0, e = MII->getNumOperands(); i != e; ++i) {
+      MachineOperand &MO = MII->getOperand(i);
       if (!MO.isReg())
         continue;
       if (MO.isDef()) {
@@ -214,6 +223,15 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
     bool isUndef = UndefUseSet.count(Reg);
     MIB.addReg(Reg, getKillRegState(isKill) | getUndefRegState(isUndef) |
                getImplRegState(true));
+  }
+
+  // Set FrameSetup/FrameDestroy for the bundle. If any of the instructions got
+  // the property, then also set it on the bundle.
+  for (auto MII = FirstMI; MII != LastMI; ++MII) {
+    if (MII->getFlag(MachineInstr::FrameSetup))
+      MIB.setMIFlag(MachineInstr::FrameSetup);
+    if (MII->getFlag(MachineInstr::FrameDestroy))
+      MIB.setMIFlag(MachineInstr::FrameDestroy);
   }
 }
 

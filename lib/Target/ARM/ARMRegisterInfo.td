@@ -1,9 +1,8 @@
 //===-- ARMRegisterInfo.td - ARM Register defs -------------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -301,6 +300,18 @@ def SPR : RegisterClass<"ARM", [f32], 32, (sequence "S%u", 0, 31)> {
                         (decimate SPR, 2),
                         (decimate (rotl SPR, 1), 4),
                         (decimate (rotl SPR, 1), 2))];
+  let AltOrderSelect = [{
+    return 1 + MF.getSubtarget<ARMSubtarget>().useStride4VFPs(MF);
+  }];
+  let DiagnosticString = "operand must be a register in range [s0, s31]";
+}
+
+def HPR : RegisterClass<"ARM", [f16], 32, (sequence "S%u", 0, 31)> {
+  let AltOrders = [(add (decimate HPR, 2), SPR),
+                   (add (decimate HPR, 4),
+                        (decimate HPR, 2),
+                        (decimate (rotl HPR, 1), 4),
+                        (decimate (rotl HPR, 1), 2))];
   let AltOrderSelect = [{
     return 1 + MF.getSubtarget<ARMSubtarget>().useStride4VFPs(MF);
   }];

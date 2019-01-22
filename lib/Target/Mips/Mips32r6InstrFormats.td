@@ -1,9 +1,8 @@
 //=- Mips32r6InstrFormats.td - Mips32r6 Instruction Formats -*- tablegen -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -30,8 +29,7 @@ class MipsR6Arch<string opstr> {
   string BaseOpcode = opstr;
 }
 
-class MipsR6Inst : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther>,
-                   PredicateControl {
+class MipsR6Inst : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther> {
   let DecoderNamespace = "Mips32r6_64r6";
   let EncodingPredicates = [HasStdEnc];
 }
@@ -88,6 +86,7 @@ def OPCODE5_BC1NEZ : OPCODE5<0b01101>;
 def OPCODE5_BC2EQZ : OPCODE5<0b01001>;
 def OPCODE5_BC2NEZ : OPCODE5<0b01101>;
 def OPCODE5_BGEZAL : OPCODE5<0b10001>;
+def OPCODE5_SIGRIE : OPCODE5<0b10111>;
 // The next four constants are unnamed in the spec. These names are taken from
 // the OPGROUP names they are used with.
 def OPCODE5_LDC2   : OPCODE5<0b01110>;
@@ -575,4 +574,40 @@ class COP2LDST_FM<OPCODE5 Operation> : MipsR6Inst {
   let Inst{20-16} = rt;
   let Inst{15-11} = base;
   let Inst{10-0}  = offset;
+}
+
+class SPECIAL3_2R_SZ_CRC<bits<2> sz, bits<3> direction> : MipsR6Inst {
+  bits<5> rs;
+  bits<5> rt;
+
+  let Inst{31-26} = OPGROUP_SPECIAL3.Value;
+  let Inst{25-21} = rs;
+  let Inst{20-16} = rt;
+  let Inst{15-11} = 0b00000;
+  let Inst{10-8} = direction;
+  let Inst{7-6} = sz;
+  let Inst{5-0} = 0b001111;
+
+  string DecoderMethod = "DecodeCRC";
+}
+
+class SPECIAL3_GINV<bits<2> ginv> : MipsR6Inst {
+  bits<5> rs;
+  bits<2> type_;
+
+  let Inst{31-26} = OPGROUP_SPECIAL3.Value;
+  let Inst{25-21} = rs;
+  let Inst{20-10} = 0x0;
+  let Inst{9-8}   = type_;
+  let Inst{7-6}   = ginv;
+  let Inst{5-0}   = 0b111101;
+}
+
+class SIGRIE_FM : MipsR6Inst {
+  bits<16> code_;
+
+  let Inst{31-26} = OPGROUP_REGIMM.Value;
+  let Inst{25-21} = 0;
+  let Inst{20-16} = OPCODE5_SIGRIE.Value;
+  let Inst{15-0} = code_;
 }

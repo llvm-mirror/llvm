@@ -1,9 +1,8 @@
 //===- EnumTables.cpp - Enum to string conversion tables ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -200,6 +199,8 @@ static const EnumEntry<uint32_t> FrameProcSymFlagNames[] = {
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, Inlined),
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, StrictSecurityChecks),
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, SafeBuffers),
+    CV_ENUM_CLASS_ENT(FrameProcedureOptions, EncodedLocalBasePointerMask),
+    CV_ENUM_CLASS_ENT(FrameProcedureOptions, EncodedParamBasePointerMask),
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, ProfileGuidedOptimization),
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, ValidProfileCounts),
     CV_ENUM_CLASS_ENT(FrameProcedureOptions, OptimizedForSpeed),

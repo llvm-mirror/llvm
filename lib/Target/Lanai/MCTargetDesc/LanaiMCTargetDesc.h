@@ -1,9 +1,8 @@
 //===-- LanaiMCTargetDesc.h - Lanai Target Descriptions ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,7 +23,7 @@ class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
 class MCInstrAnalysis;
-class MCObjectWriter;
+class MCObjectTargetWriter;
 class MCRelocationInfo;
 class MCSubtargetInfo;
 class Target;
@@ -38,12 +37,11 @@ MCCodeEmitter *createLanaiMCCodeEmitter(const MCInstrInfo &MCII,
                                         const MCRegisterInfo &MRI,
                                         MCContext &Ctx);
 
-MCAsmBackend *createLanaiAsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                                    const Triple &TheTriple, StringRef CPU,
+MCAsmBackend *createLanaiAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                    const MCRegisterInfo &MRI,
                                     const MCTargetOptions &Options);
 
-std::unique_ptr<MCObjectWriter>
-createLanaiELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI);
+std::unique_ptr<MCObjectTargetWriter> createLanaiELFObjectWriter(uint8_t OSABI);
 } // namespace llvm
 
 // Defines symbolic names for Lanai registers.  This defines a mapping from

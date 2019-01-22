@@ -1,9 +1,8 @@
 //===- func-id-helper.h - XRay Function ID Conversion Helpers -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,6 +12,7 @@
 #ifndef LLVM_TOOLS_LLVM_XRAY_FUNC_ID_HELPER_H
 #define LLVM_TOOLS_LLVM_XRAY_FUNC_ID_HELPER_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/DebugInfo/Symbolize/Symbolize.h"
 #include <unordered_map>
 
@@ -28,6 +28,7 @@ private:
   std::string BinaryInstrMap;
   symbolize::LLVMSymbolizer &Symbolizer;
   const FunctionAddressMap &FunctionAddresses;
+  mutable llvm::DenseMap<int32_t, std::string> CachedNames;
 
 public:
   FuncIdConversionHelper(std::string BinaryInstrMap,

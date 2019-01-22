@@ -1,14 +1,13 @@
 // WebAssemblyMachineFunctionInfo.h-WebAssembly machine function info-*- C++ -*-
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file declares WebAssembly-specific per-machine-function
+/// This file declares WebAssembly-specific per-machine-function
 /// information.
 ///
 //===----------------------------------------------------------------------===//
@@ -17,7 +16,9 @@
 #define LLVM_LIB_TARGET_WEBASSEMBLY_WEBASSEMBLYMACHINEFUNCTIONINFO_H
 
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/MC/MCSymbolWasm.h"
 
 namespace llvm {
 
@@ -50,7 +51,7 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   // overaligned values on the user stack.
   unsigned BasePtrVreg = -1U;
 
- public:
+public:
   explicit WebAssemblyFunctionInfo(MachineFunction &MF) : MF(MF) {}
   ~WebAssemblyFunctionInfo() override;
 
@@ -59,6 +60,11 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
 
   void addResult(MVT VT) { Results.push_back(VT); }
   const std::vector<MVT> &getResults() const { return Results; }
+
+  void clearParamsAndResults() {
+    Params.clear();
+    Results.clear();
+  }
 
   void setNumLocals(size_t NumLocals) { Locals.resize(NumLocals, MVT::i32); }
   void setLocal(size_t i, MVT VT) { Locals[i] = VT; }
@@ -81,25 +87,29 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
 
   void stackifyVReg(unsigned VReg) {
     assert(MF.getRegInfo().getUniqueVRegDef(VReg));
-    if (TargetRegisterInfo::virtReg2Index(VReg) >= VRegStackified.size())
-      VRegStackified.resize(TargetRegisterInfo::virtReg2Index(VReg) + 1);
-    VRegStackified.set(TargetRegisterInfo::virtReg2Index(VReg));
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    if (I >= VRegStackified.size())
+      VRegStackified.resize(I + 1);
+    VRegStackified.set(I);
   }
   bool isVRegStackified(unsigned VReg) const {
-    if (TargetRegisterInfo::virtReg2Index(VReg) >= VRegStackified.size())
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    if (I >= VRegStackified.size())
       return false;
-    return VRegStackified.test(TargetRegisterInfo::virtReg2Index(VReg));
+    return VRegStackified.test(I);
   }
 
   void initWARegs();
   void setWAReg(unsigned VReg, unsigned WAReg) {
     assert(WAReg != UnusedReg);
-    assert(TargetRegisterInfo::virtReg2Index(VReg) < WARegs.size());
-    WARegs[TargetRegisterInfo::virtReg2Index(VReg)] = WAReg;
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    assert(I < WARegs.size());
+    WARegs[I] = WAReg;
   }
-  unsigned getWAReg(unsigned Reg) const {
-    assert(TargetRegisterInfo::virtReg2Index(Reg) < WARegs.size());
-    return WARegs[TargetRegisterInfo::virtReg2Index(Reg)];
+  unsigned getWAReg(unsigned VReg) const {
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    assert(I < WARegs.size());
+    return WARegs[I];
   }
 
   // For a given stackified WAReg, return the id number to print with push/pop.
@@ -109,12 +119,21 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   }
 };
 
-void ComputeLegalValueVTs(const Function &F, const TargetMachine &TM,
-                          Type *Ty, SmallVectorImpl<MVT> &ValueVTs);
+void ComputeLegalValueVTs(const Function &F, const TargetMachine &TM, Type *Ty,
+                          SmallVectorImpl<MVT> &ValueVTs);
 
-void ComputeSignatureVTs(const Function &F, const TargetMachine &TM,
-                         SmallVectorImpl<MVT> &Params,
+// Compute the signature for a given FunctionType (Ty). Note that it's not the
+// signature for F (F is just used to get varous context)
+void ComputeSignatureVTs(const FunctionType *Ty, const Function &F,
+                         const TargetMachine &TM, SmallVectorImpl<MVT> &Params,
                          SmallVectorImpl<MVT> &Results);
+
+void ValTypesFromMVTs(const ArrayRef<MVT> &In,
+                      SmallVectorImpl<wasm::ValType> &Out);
+
+std::unique_ptr<wasm::WasmSignature>
+SignatureFromMVTs(const SmallVectorImpl<MVT> &Results,
+                  const SmallVectorImpl<MVT> &Params);
 
 } // end namespace llvm
 

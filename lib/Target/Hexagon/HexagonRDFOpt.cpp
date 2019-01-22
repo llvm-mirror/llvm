@@ -1,9 +1,8 @@
 //===- HexagonRDFOpt.cpp --------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -55,9 +54,7 @@ namespace {
 
   class HexagonRDFOpt : public MachineFunctionPass {
   public:
-    HexagonRDFOpt() : MachineFunctionPass(ID) {
-      initializeHexagonRDFOptPass(*PassRegistry::getPassRegistry());
-    }
+    HexagonRDFOpt() : MachineFunctionPass(ID) {}
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineDominatorTree>();
@@ -104,10 +101,12 @@ struct HexagonDCE : public DeadCodeElimination {
 
 char HexagonRDFOpt::ID = 0;
 
-INITIALIZE_PASS_BEGIN(HexagonRDFOpt, "rdfopt", "Hexagon RDF opt", false, false)
+INITIALIZE_PASS_BEGIN(HexagonRDFOpt, "hexagon-rdf-opt",
+      "Hexagon RDF optimizations", false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachineDominanceFrontier)
-INITIALIZE_PASS_END(HexagonRDFOpt, "rdfopt", "Hexagon RDF opt", false, false)
+INITIALIZE_PASS_END(HexagonRDFOpt, "hexagon-rdf-opt",
+      "Hexagon RDF optimizations", false, false)
 
 bool HexagonCP::interpretAsCopy(const MachineInstr *MI, EqualityMap &EM) {
   auto mapRegs = [&EM] (RegisterRef DstR, RegisterRef SrcR) -> void {
@@ -280,7 +279,7 @@ bool HexagonDCE::rewrite(NodeAddr<InstrNode*> IA, SetVector<NodeId> &Remove) {
 }
 
 bool HexagonRDFOpt::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   if (RDFLimit.getPosition()) {

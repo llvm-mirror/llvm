@@ -1,9 +1,8 @@
 //===-- ARMInstPrinter.cpp - Convert ARM MCInst to assembly syntax --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,8 +12,6 @@
 
 #include "ARMInstPrinter.h"
 #include "Utils/ARMBaseInfo.h"
-#include "ARMBaseRegisterInfo.h"
-#include "ARMBaseRegisterInfo.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -271,6 +268,25 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     }
     break;
   }
+  case ARM::TSB:
+  case ARM::t2TSB:
+    O << "\ttsb\tcsync";
+    return;
+  case ARM::t2DSB:
+    switch (MI->getOperand(0).getImm()) {
+    default:
+      if (!printAliasInstr(MI, STI, O))
+        printInstruction(MI, STI, O);
+      break;
+    case 0:
+      O << "\tssbb";
+      break;
+    case 4:
+      O << "\tpssbb";
+      break;
+    }
+    printAnnotation(O, Annot);
+    return;
   }
 
   if (!printAliasInstr(MI, STI, O))
@@ -698,6 +714,13 @@ void ARMInstPrinter::printInstSyncBOption(const MCInst *MI, unsigned OpNum,
   O << ARM_ISB::InstSyncBOptToString(val);
 }
 
+void ARMInstPrinter::printTraceSyncBOption(const MCInst *MI, unsigned OpNum,
+                                          const MCSubtargetInfo &STI,
+                                          raw_ostream &O) {
+  unsigned val = MI->getOperand(OpNum).getImm();
+  O << ARM_TSB::TraceSyncBOptToString(val);
+}
+
 void ARMInstPrinter::printShiftImmOperand(const MCInst *MI, unsigned OpNum,
                                           const MCSubtargetInfo &STI,
                                           raw_ostream &O) {
@@ -825,7 +848,8 @@ void ARMInstPrinter::printMSRMaskOperand(const MCInst *MI, unsigned OpNum,
       return;
     }
 
-    llvm_unreachable("Unexpected mask value!");
+    O << SYSm;
+
     return;
   }
 

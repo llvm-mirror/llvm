@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/GlobalISel/InstructionSelector.cpp --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,10 +18,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 
 #define DEBUG_TYPE "instructionselector"
@@ -44,50 +43,6 @@ bool InstructionSelector::constrainOperandRegToRegClass(
 
   return
       constrainRegToClass(MRI, TII, RBI, I, I.getOperand(OpIdx).getReg(), RC);
-}
-
-bool InstructionSelector::constrainSelectedInstRegOperands(
-    MachineInstr &I, const TargetInstrInfo &TII, const TargetRegisterInfo &TRI,
-    const RegisterBankInfo &RBI) const {
-  MachineBasicBlock &MBB = *I.getParent();
-  MachineFunction &MF = *MBB.getParent();
-  MachineRegisterInfo &MRI = MF.getRegInfo();
-
-  for (unsigned OpI = 0, OpE = I.getNumExplicitOperands(); OpI != OpE; ++OpI) {
-    MachineOperand &MO = I.getOperand(OpI);
-
-    // There's nothing to be done on non-register operands.
-    if (!MO.isReg())
-      continue;
-
-    DEBUG(dbgs() << "Converting operand: " << MO << '\n');
-    assert(MO.isReg() && "Unsupported non-reg operand");
-
-    unsigned Reg = MO.getReg();
-    // Physical registers don't need to be constrained.
-    if (TRI.isPhysicalRegister(Reg))
-      continue;
-
-    // Register operands with a value of 0 (e.g. predicate operands) don't need
-    // to be constrained.
-    if (Reg == 0)
-      continue;
-
-    // If the operand is a vreg, we should constrain its regclass, and only
-    // insert COPYs if that's impossible.
-    // constrainOperandRegClass does that for us.
-    MO.setReg(constrainOperandRegClass(MF, TRI, MRI, TII, RBI, I, I.getDesc(),
-                                       Reg, OpI));
-
-    // Tie uses to defs as indicated in MCInstrDesc if this hasn't already been
-    // done.
-    if (MO.isUse()) {
-      int DefIdx = I.getDesc().getOperandConstraint(OpI, MCOI::TIED_TO);
-      if (DefIdx != -1 && !I.isRegTiedToUseOperand(DefIdx))
-        I.tieOperands(DefIdx, OpI);
-    }
-  }
-  return true;
 }
 
 bool InstructionSelector::isOperandImmEqual(
@@ -116,7 +71,13 @@ bool InstructionSelector::isBaseWithConstantOffset(
   return true;
 }
 
-bool InstructionSelector::isObviouslySafeToFold(MachineInstr &MI) const {
+bool InstructionSelector::isObviouslySafeToFold(MachineInstr &MI,
+                                                MachineInstr &IntoMI) const {
+  // Immediate neighbours are already folded.
+  if (MI.getParent() == IntoMI.getParent() &&
+      std::next(MI.getIterator()) == IntoMI.getIterator())
+    return true;
+
   return !MI.mayLoadOrStore() && !MI.hasUnmodeledSideEffects() &&
-         MI.implicit_operands().begin() == MI.implicit_operands().end();
+         empty(MI.implicit_operands());
 }

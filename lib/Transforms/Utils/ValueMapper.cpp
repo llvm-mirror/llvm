@@ -1,9 +1,8 @@
 //===- ValueMapper.cpp - Interface shared by lib/Transforms/Utils ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,6 +24,7 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
@@ -536,13 +536,23 @@ Optional<Metadata *> MDNodeMapper::tryToMapOperand(const Metadata *Op) {
   return None;
 }
 
+static Metadata *cloneOrBuildODR(const MDNode &N) {
+  auto *CT = dyn_cast<DICompositeType>(&N);
+  // If ODR type uniquing is enabled, we would have uniqued composite types
+  // with identifiers during bitcode reading, so we can just use CT.
+  if (CT && CT->getContext().isODRUniquingDebugTypes() &&
+      CT->getIdentifier() != "")
+    return const_cast<DICompositeType *>(CT);
+  return MDNode::replaceWithDistinct(N.clone());
+}
+
 MDNode *MDNodeMapper::mapDistinctNode(const MDNode &N) {
   assert(N.isDistinct() && "Expected a distinct node");
   assert(!M.getVM().getMappedMD(&N) && "Expected an unmapped node");
-  DistinctWorklist.push_back(cast<MDNode>(
-      (M.Flags & RF_MoveDistinctMDs)
-          ? M.mapToSelf(&N)
-          : M.mapToMetadata(&N, MDNode::replaceWithDistinct(N.clone()))));
+  DistinctWorklist.push_back(
+      cast<MDNode>((M.Flags & RF_MoveDistinctMDs)
+                       ? M.mapToSelf(&N)
+                       : M.mapToMetadata(&N, cloneOrBuildODR(N))));
   return DistinctWorklist.back();
 }
 

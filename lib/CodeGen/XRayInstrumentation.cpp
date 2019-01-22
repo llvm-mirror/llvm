@@ -1,9 +1,8 @@
 //===- XRayInstrumentation.cpp - Adds XRay instrumentation to functions. --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,12 +22,12 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Pass.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
 
@@ -52,7 +51,6 @@ struct XRayInstrumentation : public MachineFunctionPass {
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
-    AU.addRequired<MachineLoopInfo>();
     AU.addPreserved<MachineLoopInfo>();
     AU.addPreserved<MachineDominatorTree>();
     MachineFunctionPass::getAnalysisUsage(AU);
@@ -142,7 +140,7 @@ void XRayInstrumentation::prependRetWithPatchableExit(
 }
 
 bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
-  auto &F = *MF.getFunction();
+  auto &F = MF.getFunction();
   auto InstrAttr = F.getFnAttribute("function-instrument");
   bool AlwaysInstrument = !InstrAttr.hasAttribute(Attribute::None) &&
                           InstrAttr.isStringAttribute() &&
@@ -160,11 +158,26 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
     for (const auto &MBB : MF)
       MICount += MBB.size();
 
+    // Get MachineDominatorTree or compute it on the fly if it's unavailable
+    auto *MDT = getAnalysisIfAvailable<MachineDominatorTree>();
+    MachineDominatorTree ComputedMDT;
+    if (!MDT) {
+      ComputedMDT.getBase().recalculate(MF);
+      MDT = &ComputedMDT;
+    }
+
+    // Get MachineLoopInfo or compute it on the fly if it's unavailable
+    auto *MLI = getAnalysisIfAvailable<MachineLoopInfo>();
+    MachineLoopInfo ComputedMLI;
+    if (!MLI) {
+      ComputedMLI.getBase().analyze(MDT->getBase());
+      MLI = &ComputedMLI;
+    }
+
     // Check if we have a loop.
     // FIXME: Maybe make this smarter, and see whether the loops are dependent
     // on inputs or side-effects?
-    MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
-    if (MLI.empty() && MICount < XRayThreshold)
+    if (MLI->empty() && MICount < XRayThreshold)
       return false; // Function is too small and has no loops.
   }
 

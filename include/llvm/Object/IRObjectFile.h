@@ -1,9 +1,8 @@
 //===- IRObjectFile.h - LLVM IR object file implementation ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -50,11 +49,22 @@ public:
     return v->isIR();
   }
 
-  /// \brief Finds and returns bitcode embedded in the given object file, or an
+  using module_iterator =
+      pointee_iterator<std::vector<std::unique_ptr<Module>>::const_iterator,
+                       const Module>;
+
+  module_iterator module_begin() const { return module_iterator(Mods.begin()); }
+  module_iterator module_end() const { return module_iterator(Mods.end()); }
+
+  iterator_range<module_iterator> modules() const {
+    return make_range(module_begin(), module_end());
+  }
+
+  /// Finds and returns bitcode embedded in the given object file, or an
   /// error code if not found.
   static Expected<MemoryBufferRef> findBitcodeInObject(const ObjectFile &Obj);
 
-  /// \brief Finds and returns bitcode in the given memory buffer (which may
+  /// Finds and returns bitcode in the given memory buffer (which may
   /// be either a bitcode file or a native object file with embedded bitcode),
   /// or an error code if not found.
   static Expected<MemoryBufferRef>

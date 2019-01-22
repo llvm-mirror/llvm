@@ -1,3 +1,5 @@
+; RUN: opt < %s -msan-check-access-address=0 -S -passes=msan 2>&1 | FileCheck  \
+; RUN: %s
 ; RUN: opt < %s -msan -msan-check-access-address=0 -S | FileCheck %s
 ; REQUIRES: x86-registered-target
 
@@ -24,28 +26,6 @@ entry:
 ; CHECK: call i32 @llvm.x86.sse2.cvtsd2si
 ; CHECK: store i32 0, {{.*}} @__msan_retval_tls
 ; CHECK: ret i32
-
-; Two-argument vector conversion.
-
-define <2 x double> @test_cvtsi2sd(i32 %a, double %b) sanitize_memory {
-entry:
-  %vec = insertelement <2 x double> undef, double %b, i32 1
-  %0 = tail call <2 x double> @llvm.x86.sse2.cvtsi2sd(<2 x double> %vec, i32 %a)
-  ret <2 x double> %0
-}
-
-; CHECK-LABEL: @test_cvtsi2sd
-; CHECK: [[Sa:%[_01-9a-z]+]] = load i32, i32* {{.*}} @__msan_param_tls
-; CHECK: [[Sout0:%[_01-9a-z]+]] = insertelement <2 x i64> <i64 -1, i64 -1>, i64 {{.*}}, i32 1
-; Clear low half of result shadow
-; CHECK: [[Sout:%[_01-9a-z]+]] = insertelement <2 x i64> {{.*}}[[Sout0]], i64 0, i32 0
-; Trap on %a shadow.
-; CHECK: icmp ne {{.*}}[[Sa]], 0
-; CHECK: br
-; CHECK: call void @__msan_warning_noreturn
-; CHECK: call <2 x double> @llvm.x86.sse2.cvtsi2sd
-; CHECK: store <2 x i64> {{.*}}[[Sout]], {{.*}} @__msan_retval_tls
-; CHECK: ret <2 x double>
 
 ; x86_mmx packed vector conversion.
 

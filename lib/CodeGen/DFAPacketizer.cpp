@@ -1,9 +1,8 @@
 //=- llvm/CodeGen/DFAPacketizer.cpp - DFA Packetizer for VLIW -*- C++ -*-=====//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This class implements a deterministic finite automaton (DFA) based
@@ -29,13 +28,13 @@
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -222,7 +221,7 @@ VLIWPacketizerList::~VLIWPacketizerList() {
 // End the current packet, bundle packet instructions and reset DFA state.
 void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
                                    MachineBasicBlock::iterator MI) {
-  DEBUG({
+  LLVM_DEBUG({
     if (!CurrentPacketMIs.empty()) {
       dbgs() << "Finalizing packet:\n";
       for (MachineInstr *MI : CurrentPacketMIs)
@@ -235,7 +234,7 @@ void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
   }
   CurrentPacketMIs.clear();
   ResourceTracker->clearResources();
-  DEBUG(dbgs() << "End packet\n");
+  LLVM_DEBUG(dbgs() << "End packet\n");
 }
 
 // Bundle machine instructions into packets.
@@ -248,10 +247,9 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
                              std::distance(BeginItr, EndItr));
   VLIWScheduler->schedule();
 
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "Scheduling DAG of the packetize region\n";
-    for (SUnit &SU : VLIWScheduler->SUnits)
-      SU.dumpAll(VLIWScheduler);
+    VLIWScheduler->dump();
   });
 
   // Generate MI -> SU map.
@@ -287,10 +285,10 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
     assert(SUI && "Missing SUnit Info!");
 
     // Ask DFA if machine resource is available for MI.
-    DEBUG(dbgs() << "Checking resources for adding MI to packet " << MI);
+    LLVM_DEBUG(dbgs() << "Checking resources for adding MI to packet " << MI);
 
     bool ResourceAvail = ResourceTracker->canReserveResources(MI);
-    DEBUG({
+    LLVM_DEBUG({
       if (ResourceAvail)
         dbgs() << "  Resources are available for adding MI to packet\n";
       else
@@ -302,31 +300,33 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
         SUnit *SUJ = MIToSUnit[MJ];
         assert(SUJ && "Missing SUnit Info!");
 
-        DEBUG(dbgs() << "  Checking against MJ " << *MJ);
+        LLVM_DEBUG(dbgs() << "  Checking against MJ " << *MJ);
         // Is it legal to packetize SUI and SUJ together.
         if (!isLegalToPacketizeTogether(SUI, SUJ)) {
-          DEBUG(dbgs() << "  Not legal to add MI, try to prune\n");
+          LLVM_DEBUG(dbgs() << "  Not legal to add MI, try to prune\n");
           // Allow packetization if dependency can be pruned.
           if (!isLegalToPruneDependencies(SUI, SUJ)) {
             // End the packet if dependency cannot be pruned.
-            DEBUG(dbgs() << "  Could not prune dependencies for adding MI\n");
+            LLVM_DEBUG(dbgs()
+                       << "  Could not prune dependencies for adding MI\n");
             endPacket(MBB, MI);
             break;
           }
-          DEBUG(dbgs() << "  Pruned dependence for adding MI\n");
+          LLVM_DEBUG(dbgs() << "  Pruned dependence for adding MI\n");
         }
       }
     } else {
-      DEBUG(if (ResourceAvail)
-        dbgs() << "Resources are available, but instruction should not be "
-                  "added to packet\n  " << MI);
+      LLVM_DEBUG(if (ResourceAvail) dbgs()
+                 << "Resources are available, but instruction should not be "
+                    "added to packet\n  "
+                 << MI);
       // End the packet if resource is not available, or if the instruction
       // shoud not be added to the current packet.
       endPacket(MBB, MI);
     }
 
     // Add MI to the current packet.
-    DEBUG(dbgs() << "* Adding MI to packet " << MI << '\n');
+    LLVM_DEBUG(dbgs() << "* Adding MI to packet " << MI << '\n');
     BeginItr = addToPacket(MI);
   } // For all instructions in the packetization range.
 

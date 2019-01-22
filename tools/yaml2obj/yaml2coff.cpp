@@ -1,14 +1,13 @@
 //===- yaml2coff - Convert YAML to a COFF object file ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief The COFF component of yaml2obj.
+/// The COFF component of yaml2obj.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -24,6 +23,7 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <vector>
 
@@ -46,7 +46,8 @@ struct COFFParser {
 
   bool isPE() const { return Obj.OptionalHeader.hasValue(); }
   bool is64Bit() const {
-    return Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_AMD64;
+    return Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_AMD64 ||
+           Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_ARM64;
   }
 
   uint32_t getFileAlignment() const {
@@ -233,7 +234,13 @@ static bool layoutCOFF(COFFParser &CP) {
       }
     } else if (S.Name == ".debug$T") {
       if (S.SectionData.binary_size() == 0)
-        S.SectionData = CodeViewYAML::toDebugT(S.DebugT, CP.Allocator);
+        S.SectionData = CodeViewYAML::toDebugT(S.DebugT, CP.Allocator, S.Name);
+    } else if (S.Name == ".debug$P") {
+      if (S.SectionData.binary_size() == 0)
+        S.SectionData = CodeViewYAML::toDebugT(S.DebugP, CP.Allocator, S.Name);
+    } else if (S.Name == ".debug$H") {
+      if (S.DebugH.hasValue() && S.SectionData.binary_size() == 0)
+        S.SectionData = CodeViewYAML::toDebugH(*S.DebugH, CP.Allocator);
     }
 
     if (S.SectionData.binary_size() > 0) {
@@ -513,7 +520,15 @@ static bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
     assert(S.Header.SizeOfRawData >= S.SectionData.binary_size());
     OS << num_zeros(S.Header.SizeOfRawData - S.SectionData.binary_size());
     for (const COFFYAML::Relocation &R : S.Relocations) {
-      uint32_t SymbolTableIndex = SymbolTableIndexMap[R.SymbolName];
+      uint32_t SymbolTableIndex;
+      if (R.SymbolTableIndex) {
+        if (!R.SymbolName.empty())
+          WithColor::error()
+              << "Both SymbolName and SymbolTableIndex specified\n";
+        SymbolTableIndex = *R.SymbolTableIndex;
+      } else {
+        SymbolTableIndex = SymbolTableIndexMap[R.SymbolName];
+      }
       OS << binary_le(R.VirtualAddress)
          << binary_le(SymbolTableIndex)
          << binary_le(R.Type);

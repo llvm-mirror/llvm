@@ -1,9 +1,8 @@
 //=- ARMScheduleA9.td - ARM Cortex-A9 Scheduling Definitions -*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1898,6 +1897,9 @@ def CortexA9Model : SchedMachineModel {
   // FIXME: Many vector operations were never given an itinerary. We
   // haven't mapped these to the new model either.
   let CompleteModel = 0;
+
+  // FIXME: Remove when all errors have been fixed.
+  let FullInstRWOverlapCheck = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1993,15 +1995,15 @@ def : WriteRes<WriteVST4, []>;
 // Reserve A9UnitFP for 2 consecutive cycles.
 def A9Write2V4 : SchedWriteRes<[A9UnitFP, A9UnitAGU]> {
   let Latency = 4;
-  let ResourceCycles = [2];
+  let ResourceCycles = [2, 1];
 }
 def A9Write2V7 : SchedWriteRes<[A9UnitFP, A9UnitAGU]> {
   let Latency = 7;
-  let ResourceCycles = [2];
+  let ResourceCycles = [2, 1];
 }
 def A9Write2V9 : SchedWriteRes<[A9UnitFP, A9UnitAGU]> {
   let Latency = 9;
-  let ResourceCycles = [2];
+  let ResourceCycles = [2, 1];
 }
 
 // Branches don't have a def operand but still consume resources.
@@ -2534,8 +2536,7 @@ def : SchedAlias<WriteCMPsr, A9WriteALU>;
 def : InstRW< [A9WriteIsr], (instregex "MOVsr", "MOVsi", "MVNsr", "MOVCCsi",
                                        "MOVCCsr")>;
 def : InstRW< [WriteALU, A9ReadALU], (instregex "MVNr")>;
-def : InstRW< [A9WriteI2], (instregex "MOVCCi32imm", "MOVi32imm",
-                                      "MOV_ga_dyn")>;
+def : InstRW< [A9WriteI2], (instregex "MOVCCi32imm", "MOVi32imm")>;
 def : InstRW< [A9WriteI2pc], (instregex "MOV_ga_pcrel")>;
 def : InstRW< [A9WriteI2ld], (instregex "MOV_ga_pcrel_ldr")>;
 
@@ -2548,12 +2549,12 @@ def : InstRW< [A9WriteM],
       "SMMLA", "SMMLAR", "SMMLS", "SMMLSR")>;
 def : InstRW< [A9WriteM, A9WriteMHi],
       (instregex "SMULL", "SMULLv5", "UMULL", "UMULLv5", "SMLAL$", "UMLAL",
-      "UMAAL", "SMLALv5", "UMLALv5", "UMAALv5", "SMLALBB", "SMLALBT", "SMLALTB",
+      "UMAAL", "SMLALv5", "UMLALv5", "SMLALBB", "SMLALBT", "SMLALTB",
       "SMLALTT")>;
 // FIXME: These instructions used to have NoItinerary. Just copied the one from above.
 def : InstRW< [A9WriteM, A9WriteMHi],
       (instregex "SMLAD", "SMLADX", "SMLALD", "SMLALDX", "SMLSD", "SMLSDX",
-      "SMLSLD", "SMLLDX", "SMUAD", "SMUADX", "SMUSD", "SMUSDX")>;
+      "SMLSLD", "SMLSLDX", "SMUAD", "SMUADX", "SMUSD", "SMUSDX")>;
 
 def : InstRW<[A9WriteM16, A9WriteM16Hi],
       (instregex "SMULBB", "SMULBT", "SMULTB", "SMULTT", "SMULWB", "SMULWT")>;

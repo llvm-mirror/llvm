@@ -1,9 +1,8 @@
 //===--- InfoByHwMode.h -----------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Classes that implement data parameterized by HW modes for instruction
@@ -16,7 +15,7 @@
 #define LLVM_UTILS_TABLEGEN_INFOBYHWMODE_H
 
 #include "CodeGenHwModes.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/Support/MachineValueType.h"
 
 #include <map>
 #include <set>
@@ -47,10 +46,12 @@ std::vector<unsigned> union_modes(const InfoByHwMode<InfoT> &A,
   for (const auto &P : B)
     U.insert(P.first);
   // Make sure that the default mode is last on the list.
-  bool HasDefault = U.count(DefaultMode);
+  bool HasDefault = false;
   for (unsigned M : U)
     if (M != DefaultMode)
       V.push_back(M);
+    else
+      HasDefault = true;
   if (HasDefault)
     V.push_back(DefaultMode);
   return V;

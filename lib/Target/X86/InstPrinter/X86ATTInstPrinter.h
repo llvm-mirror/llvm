@@ -1,9 +1,8 @@
 //=- X86ATTInstPrinter.h - Convert X86 MCInst to assembly syntax --*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,15 +13,15 @@
 #ifndef LLVM_LIB_TARGET_X86_INSTPRINTER_X86ATTINSTPRINTER_H
 #define LLVM_LIB_TARGET_X86_INSTPRINTER_X86ATTINSTPRINTER_H
 
-#include "llvm/MC/MCInstPrinter.h"
+#include "X86InstPrinterCommon.h"
 
 namespace llvm {
 
-class X86ATTInstPrinter final : public MCInstPrinter {
+class X86ATTInstPrinter final : public X86InstPrinterCommon {
 public:
   X86ATTInstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
                     const MCRegisterInfo &MRI)
-      : MCInstPrinter(MAI, MII, MRI) {}
+      : X86InstPrinterCommon(MAI, MII, MRI) {}
 
   void printRegName(raw_ostream &OS, unsigned RegNo) const override;
   void printInst(const MCInst *MI, raw_ostream &OS, StringRef Annot,
@@ -38,21 +37,16 @@ public:
   void printInstruction(const MCInst *MI, raw_ostream &OS);
   static const char *getRegisterName(unsigned RegNo);
 
-  void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &OS);
+  void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &OS) override;
   void printMemReference(const MCInst *MI, unsigned Op, raw_ostream &OS);
-  void printSSEAVXCC(const MCInst *MI, unsigned Op, raw_ostream &OS);
-  void printXOPCC(const MCInst *MI, unsigned Op, raw_ostream &OS);
-  void printPCRelImm(const MCInst *MI, unsigned OpNo, raw_ostream &OS);
-  void printSrcIdx(const MCInst *MI, unsigned OpNo, raw_ostream &OS);
-  void printDstIdx(const MCInst *MI, unsigned OpNo, raw_ostream &OS);
   void printMemOffset(const MCInst *MI, unsigned OpNo, raw_ostream &OS);
-  void printRoundingControl(const MCInst *MI, unsigned Op, raw_ostream &OS);
+  void printSrcIdx(const MCInst *MI, unsigned Op, raw_ostream &O);
+  void printDstIdx(const MCInst *MI, unsigned Op, raw_ostream &O);
   void printU8Imm(const MCInst *MI, unsigned Op, raw_ostream &OS);
 
   void printanymem(const MCInst *MI, unsigned OpNo, raw_ostream &O) {
     printMemReference(MI, OpNo, O);
   }
-
   void printopaquemem(const MCInst *MI, unsigned OpNo, raw_ostream &O) {
     printMemReference(MI, OpNo, O);
   }

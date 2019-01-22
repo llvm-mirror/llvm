@@ -1,9 +1,8 @@
 //===----- ScheduleDAGFast.cpp - Fast poor list scheduler -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,18 +12,19 @@
 
 #include "InstrEmitter.h"
 #include "ScheduleDAGSDNodes.h"
+#include "SDNodeDbgValue.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "pre-RA-sched"
@@ -115,7 +115,7 @@ private:
 
 /// Schedule - Schedule the DAG using list scheduling.
 void ScheduleDAGFast::Schedule() {
-  DEBUG(dbgs() << "********** List Scheduling **********\n");
+  LLVM_DEBUG(dbgs() << "********** List Scheduling **********\n");
 
   NumLiveRegs = 0;
   LiveRegDefs.resize(TRI->getNumRegs(), nullptr);
@@ -124,8 +124,7 @@ void ScheduleDAGFast::Schedule() {
   // Build the scheduling graph.
   BuildSchedGraph(nullptr);
 
-  DEBUG(for (unsigned su = 0, e = SUnits.size(); su != e; ++su)
-          SUnits[su].dumpAll(this));
+  LLVM_DEBUG(dump());
 
   // Execute the actual scheduling loop.
   ListScheduleBottomUp();
@@ -143,7 +142,7 @@ void ScheduleDAGFast::ReleasePred(SUnit *SU, SDep *PredEdge) {
 #ifndef NDEBUG
   if (PredSU->NumSuccsLeft == 0) {
     dbgs() << "*** Scheduling failed! ***\n";
-    PredSU->dump(this);
+    dumpNode(*PredSU);
     dbgs() << " has been released too many times!\n";
     llvm_unreachable(nullptr);
   }
@@ -180,8 +179,8 @@ void ScheduleDAGFast::ReleasePredecessors(SUnit *SU, unsigned CurCycle) {
 /// count of its predecessors. If a predecessor pending count is zero, add it to
 /// the Available queue.
 void ScheduleDAGFast::ScheduleNodeBottomUp(SUnit *SU, unsigned CurCycle) {
-  DEBUG(dbgs() << "*** Scheduling [" << CurCycle << "]: ");
-  DEBUG(SU->dump(this));
+  LLVM_DEBUG(dbgs() << "*** Scheduling [" << CurCycle << "]: ");
+  LLVM_DEBUG(dumpNode(*SU));
 
   assert(CurCycle >= SU->getHeight() && "Node scheduled below its height!");
   SU->setHeightToAtLeast(CurCycle);
@@ -236,7 +235,7 @@ SUnit *ScheduleDAGFast::CopyAndMoveSuccessors(SUnit *SU) {
     if (!TII->unfoldMemoryOperand(*DAG, N, NewNodes))
       return nullptr;
 
-    DEBUG(dbgs() << "Unfolding SU # " << SU->NodeNum << "\n");
+    LLVM_DEBUG(dbgs() << "Unfolding SU # " << SU->NodeNum << "\n");
     assert(NewNodes.size() == 2 && "Expected a load folding node!");
 
     N = NewNodes[1];
@@ -346,7 +345,7 @@ SUnit *ScheduleDAGFast::CopyAndMoveSuccessors(SUnit *SU) {
     SU = NewSU;
   }
 
-  DEBUG(dbgs() << "Duplicating SU # " << SU->NodeNum << "\n");
+  LLVM_DEBUG(dbgs() << "Duplicating SU # " << SU->NodeNum << "\n");
   NewSU = Clone(SU);
 
   // New SUnit has the exact same predecessors.
@@ -592,14 +591,14 @@ void ScheduleDAGFast::ListScheduleBottomUp() {
           // Issue copies, these can be expensive cross register class copies.
           SmallVector<SUnit*, 2> Copies;
           InsertCopiesAndMoveSuccs(LRDef, Reg, DestRC, RC, Copies);
-          DEBUG(dbgs() << "Adding an edge from SU # " << TrySU->NodeNum
-                       << " to SU #" << Copies.front()->NodeNum << "\n");
+          LLVM_DEBUG(dbgs() << "Adding an edge from SU # " << TrySU->NodeNum
+                            << " to SU #" << Copies.front()->NodeNum << "\n");
           AddPred(TrySU, SDep(Copies.front(), SDep::Artificial));
           NewDef = Copies.back();
         }
 
-        DEBUG(dbgs() << "Adding an edge from SU # " << NewDef->NodeNum
-                     << " to SU #" << TrySU->NodeNum << "\n");
+        LLVM_DEBUG(dbgs() << "Adding an edge from SU # " << NewDef->NodeNum
+                          << " to SU #" << TrySU->NodeNum << "\n");
         LiveRegDefs[Reg] = NewDef;
         AddPred(NewDef, SDep(TrySU, SDep::Artificial));
         TrySU->isAvailable = false;
@@ -666,8 +665,8 @@ void ScheduleDAGLinearize::ScheduleNode(SDNode *N) {
     // These nodes do not need to be translated into MIs.
     return;
 
-  DEBUG(dbgs() << "\n*** Scheduling: ");
-  DEBUG(N->dump(DAG));
+  LLVM_DEBUG(dbgs() << "\n*** Scheduling: ");
+  LLVM_DEBUG(N->dump(DAG));
   Sequence.push_back(N);
 
   unsigned NumOps = N->getNumOperands();
@@ -713,7 +712,7 @@ static SDNode *findGluedUser(SDNode *N) {
 }
 
 void ScheduleDAGLinearize::Schedule() {
-  DEBUG(dbgs() << "********** DAG Linearization **********\n");
+  LLVM_DEBUG(dbgs() << "********** DAG Linearization **********\n");
 
   SmallVector<SDNode*, 8> Glues;
   unsigned DAGSize = 0;
@@ -763,19 +762,27 @@ ScheduleDAGLinearize::EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
   InstrEmitter Emitter(BB, InsertPos);
   DenseMap<SDValue, unsigned> VRBaseMap;
 
-  DEBUG({
-      dbgs() << "\n*** Final schedule ***\n";
-    });
+  LLVM_DEBUG({ dbgs() << "\n*** Final schedule ***\n"; });
 
-  // FIXME: Handle dbg_values.
   unsigned NumNodes = Sequence.size();
+  MachineBasicBlock *BB = Emitter.getBlock();
   for (unsigned i = 0; i != NumNodes; ++i) {
     SDNode *N = Sequence[NumNodes-i-1];
-    DEBUG(N->dump(DAG));
+    LLVM_DEBUG(N->dump(DAG));
     Emitter.EmitNode(N, false, false, VRBaseMap);
+
+    // Emit any debug values associated with the node.
+    if (N->getHasDebugValue()) {
+      MachineBasicBlock::iterator InsertPos = Emitter.getInsertPos();
+      for (auto DV : DAG->GetDbgValues(N)) {
+        if (!DV->isEmitted())
+          if (auto *DbgMI = Emitter.EmitDbgValue(DV, VRBaseMap))
+            BB->insert(InsertPos, DbgMI);
+      }
+    }
   }
 
-  DEBUG(dbgs() << '\n');
+  LLVM_DEBUG(dbgs() << '\n');
 
   InsertPos = Emitter.getInsertPos();
   return Emitter.getBlock();

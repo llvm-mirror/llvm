@@ -1,9 +1,8 @@
 //===-- MipsSEISelDAGToDAG.h - A Dag to Dag Inst Selector for MipsSE -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -93,37 +92,37 @@ private:
   bool selectIntAddrSImm10Lsl3(SDValue Addr, SDValue &Base,
                                SDValue &Offset) const override;
 
-  /// \brief Select constant vector splats.
+  /// Select constant vector splats.
   bool selectVSplat(SDNode *N, APInt &Imm,
                     unsigned MinSizeInBits) const override;
-  /// \brief Select constant vector splats whose value fits in a given integer.
+  /// Select constant vector splats whose value fits in a given integer.
   bool selectVSplatCommon(SDValue N, SDValue &Imm, bool Signed,
                                   unsigned ImmBitSize) const;
-  /// \brief Select constant vector splats whose value fits in a uimm1.
+  /// Select constant vector splats whose value fits in a uimm1.
   bool selectVSplatUimm1(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm2.
+  /// Select constant vector splats whose value fits in a uimm2.
   bool selectVSplatUimm2(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm3.
+  /// Select constant vector splats whose value fits in a uimm3.
   bool selectVSplatUimm3(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm4.
+  /// Select constant vector splats whose value fits in a uimm4.
   bool selectVSplatUimm4(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm5.
+  /// Select constant vector splats whose value fits in a uimm5.
   bool selectVSplatUimm5(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm6.
+  /// Select constant vector splats whose value fits in a uimm6.
   bool selectVSplatUimm6(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a uimm8.
+  /// Select constant vector splats whose value fits in a uimm8.
   bool selectVSplatUimm8(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value fits in a simm5.
+  /// Select constant vector splats whose value fits in a simm5.
   bool selectVSplatSimm5(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value is a power of 2.
+  /// Select constant vector splats whose value is a power of 2.
   bool selectVSplatUimmPow2(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value is the inverse of a
+  /// Select constant vector splats whose value is the inverse of a
   /// power of 2.
   bool selectVSplatUimmInvPow2(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value is a run of set bits
+  /// Select constant vector splats whose value is a run of set bits
   /// ending at the most significant bit
   bool selectVSplatMaskL(SDValue N, SDValue &Imm) const override;
-  /// \brief Select constant vector splats whose value is a run of set bits
+  /// Select constant vector splats whose value is a run of set bits
   /// starting at bit zero.
   bool selectVSplatMaskR(SDValue N, SDValue &Imm) const override;
 

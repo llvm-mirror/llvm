@@ -1,9 +1,8 @@
 //===- DAGISelMatcherOpt.cpp - Optimize a DAG Matcher ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -293,15 +292,12 @@ static void FactorNodes(std::unique_ptr<Matcher> &InputMatcherPtr) {
     if (Scan != e &&
         // Don't print it's obvious nothing extra could be merged anyway.
         Scan+1 != e) {
-      DEBUG(errs() << "Couldn't merge this:\n";
-            Optn->print(errs(), 4);
-            errs() << "into this:\n";
-            OptionsToMatch[Scan]->print(errs(), 4);
-            if (Scan+1 != e)
-              OptionsToMatch[Scan+1]->printOne(errs());
-            if (Scan+2 < e)
-              OptionsToMatch[Scan+2]->printOne(errs());
-            errs() << "\n");
+      LLVM_DEBUG(errs() << "Couldn't merge this:\n"; Optn->print(errs(), 4);
+                 errs() << "into this:\n";
+                 OptionsToMatch[Scan]->print(errs(), 4);
+                 if (Scan + 1 != e) OptionsToMatch[Scan + 1]->printOne(errs());
+                 if (Scan + 2 < e) OptionsToMatch[Scan + 2]->printOne(errs());
+                 errs() << "\n");
     }
     
     // If we only found one option starting with this matcher, no factoring is

@@ -1,17 +1,23 @@
 //==- SystemZInstrFP.td - Floating-point SystemZ instructions --*- tblgen-*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
+// TODO: Most floating-point instructions (except for simple moves and the
+// like) can raise exceptions -- should they have hasSideEffects=1 ?
 
 //===----------------------------------------------------------------------===//
 // Select instructions
 //===----------------------------------------------------------------------===//
 
 // C's ?: operator for floating-point operands.
+let Predicates = [FeatureVector] in {
+  def SelectVR32 : SelectWrapper<f32, VR32>;
+  def SelectVR64 : SelectWrapper<f64, VR64>;
+}
 def SelectF32  : SelectWrapper<f32, FP32>;
 def SelectF64  : SelectWrapper<f64, FP64>;
 let Predicates = [FeatureNoVectorEnhancements1] in
@@ -29,22 +35,20 @@ defm CondStoreF64 : CondStores<FP64, nonvolatile_store,
 //===----------------------------------------------------------------------===//
 
 // Load zero.
-let hasSideEffects = 0, isAsCheapAsAMove = 1, isMoveImm = 1 in {
+let isAsCheapAsAMove = 1, isMoveImm = 1 in {
   def LZER : InherentRRE<"lzer", 0xB374, FP32,  fpimm0>;
   def LZDR : InherentRRE<"lzdr", 0xB375, FP64,  fpimm0>;
   def LZXR : InherentRRE<"lzxr", 0xB376, FP128, fpimm0>;
 }
 
 // Moves between two floating-point registers.
-let hasSideEffects = 0 in {
-  def LER : UnaryRR <"ler", 0x38,   null_frag, FP32,  FP32>;
-  def LDR : UnaryRR <"ldr", 0x28,   null_frag, FP64,  FP64>;
-  def LXR : UnaryRRE<"lxr", 0xB365, null_frag, FP128, FP128>;
+def LER : UnaryRR <"ler", 0x38,   null_frag, FP32,  FP32>;
+def LDR : UnaryRR <"ldr", 0x28,   null_frag, FP64,  FP64>;
+def LXR : UnaryRRE<"lxr", 0xB365, null_frag, FP128, FP128>;
 
-  // For z13 we prefer LDR over LER to avoid partial register dependencies.
-  let isCodeGenOnly = 1 in
-    def LDR32 : UnaryRR<"ldr", 0x28, null_frag, FP32, FP32>;
-}
+// For z13 we prefer LDR over LER to avoid partial register dependencies.
+let isCodeGenOnly = 1 in
+  def LDR32 : UnaryRR<"ldr", 0x28, null_frag, FP32, FP32>;
 
 // Moves between two floating-point registers that also set the condition
 // codes.
@@ -64,7 +68,7 @@ let Predicates = [FeatureNoVector] in {
 
 // Use a normal load-and-test for compare against zero in case of
 // vector support (via a pseudo to simplify instruction selection).
-let Defs = [CC], usesCustomInserter = 1 in {
+let Defs = [CC], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
   def LTEBRCompare_VecPseudo : Pseudo<(outs), (ins FP32:$R1, FP32:$R2), []>;
   def LTDBRCompare_VecPseudo : Pseudo<(outs), (ins FP64:$R1, FP64:$R2), []>;
   def LTXBRCompare_VecPseudo : Pseudo<(outs), (ins FP128:$R1, FP128:$R2), []>;
@@ -92,7 +96,7 @@ let Predicates = [FeatureNoVectorEnhancements1] in
             (CPSDRsd FP32:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 let Predicates = [FeatureVectorEnhancements1] in
   def : Pat<(fcopysign FP32:$src1, (f32 (fpround (f128 VR128:$src2)))),
-            (CPSDRsd FP32:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_r64))>;
+            (CPSDRsd FP32:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_h64))>;
 
 // fcopysign with an FP64 result.
 let isCodeGenOnly = 1 in
@@ -105,7 +109,7 @@ let Predicates = [FeatureNoVectorEnhancements1] in
             (CPSDRdd FP64:$src1, (EXTRACT_SUBREG FP128:$src2, subreg_h64))>;
 let Predicates = [FeatureVectorEnhancements1] in
   def : Pat<(fcopysign FP64:$src1, (f64 (fpround (f128 VR128:$src2)))),
-            (CPSDRdd FP64:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_r64))>;
+            (CPSDRdd FP64:$src1, (EXTRACT_SUBREG VR128:$src2, subreg_h64))>;
 
 // fcopysign with an FP128 result.  Use "upper" as the high half and leave
 // the low half as-is.
@@ -130,7 +134,7 @@ defm LoadStoreF128 : MVCLoadStore<load, f128, MVCSequence, 16>;
 // Load instructions
 //===----------------------------------------------------------------------===//
 
-let canFoldAsLoad = 1, SimpleBDXLoad = 1 in {
+let canFoldAsLoad = 1, SimpleBDXLoad = 1, mayLoad = 1 in {
   defm LE : UnaryRXPair<"le", 0x78, 0xED64, load, FP32, 4>;
   defm LD : UnaryRXPair<"ld", 0x68, 0xED65, load, FP64, 8>;
 
@@ -150,7 +154,7 @@ let canFoldAsLoad = 1, SimpleBDXLoad = 1 in {
 // Store instructions
 //===----------------------------------------------------------------------===//
 
-let SimpleBDXStore = 1 in {
+let SimpleBDXStore = 1, mayStore = 1 in {
   defm STE : StoreRXPair<"ste", 0x70, 0xED66, store, FP32, 4>;
   defm STD : StoreRXPair<"std", 0x60, 0xED67, store, FP64, 8>;
 
@@ -182,7 +186,7 @@ def LDXBRA : TernaryRRFe<"ldxbra", 0xB345, FP128, FP128>,
 
 let Predicates = [FeatureNoVectorEnhancements1] in {
   def : Pat<(f32 (fpround FP128:$src)),
-            (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_hr32)>;
+            (EXTRACT_SUBREG (LEXBR FP128:$src), subreg_hh32)>;
   def : Pat<(f64 (fpround FP128:$src)),
             (EXTRACT_SUBREG (LDXBR FP128:$src), subreg_h64)>;
 }
@@ -441,13 +445,13 @@ def MDB  : BinaryRXE<"mdb",  0xED1C, fmul, FP64, load, 8>;
 def MDEBR : BinaryRRE<"mdebr", 0xB30C, null_frag, FP64, FP32>;
 def : Pat<(fmul (f64 (fpextend FP32:$src1)), (f64 (fpextend FP32:$src2))),
           (MDEBR (INSERT_SUBREG (f64 (IMPLICIT_DEF)),
-                                FP32:$src1, subreg_r32), FP32:$src2)>;
+                                FP32:$src1, subreg_h32), FP32:$src2)>;
 
 // f64 multiplication of an FP32 register and an f32 memory.
 def MDEB : BinaryRXE<"mdeb", 0xED0C, null_frag, FP64, load, 4>;
 def : Pat<(fmul (f64 (fpextend FP32:$src1)),
                 (f64 (extloadf32 bdxaddr12only:$addr))),
-          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_r32),
+          (MDEB (INSERT_SUBREG (f64 (IMPLICIT_DEF)), FP32:$src1, subreg_h32),
                 bdxaddr12only:$addr)>;
 
 // f128 multiplication of two FP64 registers.
@@ -525,11 +529,14 @@ let Defs = [CC], CCValues = 0xC in {
 //===----------------------------------------------------------------------===//
 
 let hasSideEffects = 1 in {
-  def EFPC  : InherentRRE<"efpc", 0xB38C, GR32, int_s390_efpc>;
-  def STFPC : StoreInherentS<"stfpc", 0xB29C, storei<int_s390_efpc>, 4>;
+  let mayLoad = 1, mayStore = 1 in {
+    // TODO: EFPC and SFPC do not touch memory at all
+    def EFPC  : InherentRRE<"efpc", 0xB38C, GR32, int_s390_efpc>;
+    def STFPC : StoreInherentS<"stfpc", 0xB29C, storei<int_s390_efpc>, 4>;
 
-  def SFPC : SideEffectUnaryRRE<"sfpc", 0xB384, GR32, int_s390_sfpc>;
-  def LFPC : SideEffectUnaryS<"lfpc", 0xB29D, loadu<int_s390_sfpc>, 4>;
+    def SFPC : SideEffectUnaryRRE<"sfpc", 0xB384, GR32, int_s390_sfpc>;
+    def LFPC : SideEffectUnaryS<"lfpc", 0xB29D, loadu<int_s390_sfpc>, 4>;
+  }
 
   def SFASR : SideEffectUnaryRRE<"sfasr", 0xB385, GR32, null_frag>;
   def LFAS  : SideEffectUnaryS<"lfas", 0xB2BD, null_frag, 4>;

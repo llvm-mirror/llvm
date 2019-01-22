@@ -7,7 +7,8 @@
 ; RUN: opt -function-import -stats -print-imports -enable-import-metadata -summary-file %t3.thinlto.bc %t.bc -S 2>&1 | FileCheck %s --check-prefix=CHECK --check-prefix=INSTLIMDEF
 ; Try again with new pass manager
 ; RUN: opt -passes='function-import' -stats -print-imports -enable-import-metadata -summary-file %t3.thinlto.bc %t.bc -S 2>&1 | FileCheck %s --check-prefix=CHECK --check-prefix=INSTLIMDEF
-; "-stats" requires +Asserts.
+; RUN: opt -passes='function-import' -debug-only=function-import -enable-import-metadata -summary-file %t3.thinlto.bc %t.bc -S 2>&1 | FileCheck %s --check-prefix=DUMP
+; "-stats" and "-debug-only" require +Asserts.
 ; REQUIRES: asserts
 
 ; Test import with smaller instruction limit
@@ -28,7 +29,8 @@ entry:
   call void (...) @weakfunc()
   call void (...) @linkoncefunc2()
   call void (...) @referencelargelinkonce()
-  call void (...) @variadic()
+  call void (...) @variadic_no_va_start()
+  call void (...) @variadic_va_start()
   ret i32 0
 }
 
@@ -36,13 +38,14 @@ entry:
 ; CHECK-DAG: declare void @weakalias
 declare void @weakalias(...) #1
 
-; Cannot create an alias to available_externally
-; CHECK-DAG: declare void @analias
+; External alias imported as available_externally copy of aliasee
+; CHECK-DAG: define available_externally void @analias
 declare void @analias(...) #1
 
-; Aliases are not imported
+; External alias imported as available_externally copy of aliasee
+; (linkoncealias is an external alias to a linkonce_odr)
 declare void @linkoncealias(...) #1
-; CHECK-DAG: declare void @linkoncealias(...)
+; CHECK-DAG: define available_externally void @linkoncealias()
 
 ; INSTLIMDEF-DAG: Import referencestatics
 ; INSTLIMDEF-DAG: define available_externally i32 @referencestatics(i32 %i) !thinlto_src_module !0 {
@@ -79,7 +82,7 @@ declare void @callfuncptr(...) #1
 
 ; Ensure that all uses of local variable @P which has used in setfuncptr
 ; and callfuncptr are to the same promoted/renamed global.
-; CHECK-DAG: @P.llvm.{{.*}} = external hidden global void ()*
+; CHECK-DAG: @P.llvm.{{.*}} = available_externally hidden global void ()* null
 ; CHECK-DAG: %0 = load void ()*, void ()** @P.llvm.
 ; CHECK-DAG: store void ()* @staticfunc2.llvm.{{.*}}, void ()** @P.llvm.
 
@@ -101,11 +104,21 @@ declare void @linkoncefunc2(...) #1
 ; INSTLIMDEF-DAG: define available_externally hidden void @funcwithpersonality.llvm.{{.*}}() personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) !thinlto_src_module !0 {
 ; INSTLIM5-DAG: declare hidden void @funcwithpersonality.llvm.{{.*}}()
 
-; CHECK-DAG: declare void @variadic(...)
-declare void @variadic(...)
+; We can import variadic functions without a va_start, since the inliner
+; can handle them.
+; INSTLIMDEF-DAG: Import variadic_no_va_start
+; CHECK-DAG: define available_externally void @variadic_no_va_start(...) !thinlto_src_module !0 {
+declare void @variadic_no_va_start(...)
+
+; We can import variadic functions with a va_start, since the inliner
+; can sometimes handle them.
+; CHECK-DAG: define available_externally void @variadic_va_start(...)
+declare void @variadic_va_start(...)
 
 ; INSTLIMDEF-DAG: Import globalfunc2
-; INSTLIMDEF-DAG: 11 function-import - Number of functions imported
+; INSTLIMDEF-DAG: 15 function-import - Number of functions imported
+; INSTLIMDEF-DAG: 4 function-import - Number of global variables imported
+
 ; CHECK-DAG: !0 = !{!"{{.*}}/Inputs/funcimport.ll"}
 
 ; The actual GUID values will depend on path to test.
@@ -141,3 +154,9 @@ declare void @variadic(...)
 ; GUID-DAG: GUID {{.*}} is linkoncealias
 ; GUID-DAG: GUID {{.*}} is callfuncptr
 ; GUID-DAG: GUID {{.*}} is linkoncefunc
+
+; DUMP:       Module [[M1:.*]] imports from 1 module
+; DUMP-NEXT:  15 functions imported from [[M2:.*]]
+; DUMP-NEXT:  4 vars imported from [[M2]]
+; DUMP:       Imported 15 functions for Module [[M1]]
+; DUMP-NEXT:  Imported 4 global variables for Module [[M1]]

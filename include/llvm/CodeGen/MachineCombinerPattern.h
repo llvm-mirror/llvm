@@ -1,10 +1,9 @@
 //===-- llvm/CodeGen/MachineCombinerPattern.h - Instruction pattern supported by
 // combiner  ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -68,12 +67,18 @@ enum class MachineCombinerPattern {
   FMLAv4i32_indexed_OP2,
   FMLSv1i32_indexed_OP2,
   FMLSv1i64_indexed_OP2,
-  FMLSv2i32_indexed_OP2,
-  FMLSv2i64_indexed_OP2,
+  FMLSv2f32_OP1,
   FMLSv2f32_OP2,
+  FMLSv2f64_OP1,
   FMLSv2f64_OP2,
-  FMLSv4i32_indexed_OP2,
-  FMLSv4f32_OP2
+  FMLSv2i32_indexed_OP1,
+  FMLSv2i32_indexed_OP2,
+  FMLSv2i64_indexed_OP1,
+  FMLSv2i64_indexed_OP2,
+  FMLSv4f32_OP1,
+  FMLSv4f32_OP2,
+  FMLSv4i32_indexed_OP1,
+  FMLSv4i32_indexed_OP2
 };
 
 } // end namespace llvm

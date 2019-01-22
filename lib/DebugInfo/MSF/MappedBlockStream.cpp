@@ -1,9 +1,8 @@
 //===- MappedBlockStream.cpp - Reads stream data from an MSF file ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -89,7 +88,7 @@ MappedBlockStream::createFpmStream(const MSFLayout &Layout,
 Error MappedBlockStream::readBytes(uint32_t Offset, uint32_t Size,
                                    ArrayRef<uint8_t> &Buffer) {
   // Make sure we aren't trying to read beyond the end of the stream.
-  if (auto EC = checkOffset(Offset, Size))
+  if (auto EC = checkOffsetForRead(Offset, Size))
     return EC;
 
   if (tryReadContiguously(Offset, Size, Buffer))
@@ -167,7 +166,7 @@ Error MappedBlockStream::readBytes(uint32_t Offset, uint32_t Size,
 Error MappedBlockStream::readLongestContiguousChunk(uint32_t Offset,
                                                     ArrayRef<uint8_t> &Buffer) {
   // Make sure we aren't trying to read beyond the end of the stream.
-  if (auto EC = checkOffset(Offset, 1))
+  if (auto EC = checkOffsetForRead(Offset, 1))
     return EC;
 
   uint32_t First = Offset / BlockSize;
@@ -243,7 +242,7 @@ Error MappedBlockStream::readBytes(uint32_t Offset,
   uint32_t OffsetInBlock = Offset % BlockSize;
 
   // Make sure we aren't trying to read beyond the end of the stream.
-  if (auto EC = checkOffset(Offset, Buffer.size()))
+  if (auto EC = checkOffsetForRead(Offset, Buffer.size()))
     return EC;
 
   uint32_t BytesLeft = Buffer.size();
@@ -388,7 +387,7 @@ uint32_t WritableMappedBlockStream::getLength() {
 Error WritableMappedBlockStream::writeBytes(uint32_t Offset,
                                             ArrayRef<uint8_t> Buffer) {
   // Make sure we aren't trying to write beyond the end of the stream.
-  if (auto EC = checkOffset(Offset, Buffer.size()))
+  if (auto EC = checkOffsetForWrite(Offset, Buffer.size()))
     return EC;
 
   uint32_t BlockNum = Offset / getBlockSize();

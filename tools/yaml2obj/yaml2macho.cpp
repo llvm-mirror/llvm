@@ -1,14 +1,13 @@
 //===- yaml2macho - Convert YAML to a Mach object file --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief The Mach component of yaml2obj.
+/// The Mach component of yaml2obj.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -417,10 +416,9 @@ Error MachOWriter::writeLinkEditData(raw_ostream &OS) {
     }
   }
 
-  std::sort(WriteQueue.begin(), WriteQueue.end(),
-            [](const writeOperation &a, const writeOperation &b) {
-              return a.first < b.first;
-            });
+  llvm::sort(WriteQueue, [](const writeOperation &a, const writeOperation &b) {
+    return a.first < b.first;
+  });
 
   for (auto writeOp : WriteQueue) {
     ZeroToOffset(OS, writeOp.first);

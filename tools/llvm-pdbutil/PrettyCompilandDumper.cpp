@@ -1,9 +1,8 @@
 //===- PrettyCompilandDumper.cpp - llvm-pdbutil compiland dumper -*- C++ *-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -28,6 +27,7 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolThunk.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolUnknown.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolUsingNamespace.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -55,62 +55,73 @@ void CompilandDumper::start(const PDBSymbolCompiland &Symbol,
 
   if (opts & Flags::Lines) {
     const IPDBSession &Session = Symbol.getSession();
-    auto Files = Session.getSourceFilesForCompiland(Symbol);
-    Printer.Indent();
-    while (auto File = Files->getNext()) {
-      Printer.NewLine();
-      WithColor(Printer, PDB_ColorItem::Path).get() << File->getFileName();
-
-      auto Lines = Session.findLineNumbers(Symbol, *File);
+    if (auto Files = Session.getSourceFilesForCompiland(Symbol)) {
       Printer.Indent();
-      while (auto Line = Lines->getNext()) {
+      while (auto File = Files->getNext()) {
         Printer.NewLine();
-        uint32_t LineStart = Line->getLineNumber();
-        uint32_t LineEnd = Line->getLineNumberEnd();
-
-        Printer << "Line ";
-        PDB_ColorItem StatementColor = Line->isStatement()
-                                           ? PDB_ColorItem::Keyword
-                                           : PDB_ColorItem::LiteralValue;
-        WithColor(Printer, StatementColor).get() << LineStart;
-        if (LineStart != LineEnd)
-          WithColor(Printer, StatementColor).get() << " - " << LineEnd;
-
-        uint32_t ColumnStart = Line->getColumnNumber();
-        uint32_t ColumnEnd = Line->getColumnNumberEnd();
-        if (ColumnStart != 0 || ColumnEnd != 0) {
-          Printer << ", Column: ";
-          WithColor(Printer, StatementColor).get() << ColumnStart;
-          if (ColumnEnd != ColumnStart)
-            WithColor(Printer, StatementColor).get() << " - " << ColumnEnd;
+        WithColor(Printer, PDB_ColorItem::Path).get() << File->getFileName();
+        if (File->getChecksumType() != PDB_Checksum::None) {
+          auto ChecksumType = File->getChecksumType();
+          auto ChecksumHexString = toHex(File->getChecksum());
+          WithColor(Printer, PDB_ColorItem::Comment).get()
+              << " (" << ChecksumType << ": " << ChecksumHexString << ")";
         }
 
-        Printer << ", Address: ";
-        if (Line->getLength() > 0) {
-          uint64_t AddrStart = Line->getVirtualAddress();
-          uint64_t AddrEnd = AddrStart + Line->getLength() - 1;
-          WithColor(Printer, PDB_ColorItem::Address).get()
+        auto Lines = Session.findLineNumbers(Symbol, *File);
+        if (!Lines)
+          continue;
+
+        Printer.Indent();
+        while (auto Line = Lines->getNext()) {
+          Printer.NewLine();
+          uint32_t LineStart = Line->getLineNumber();
+          uint32_t LineEnd = Line->getLineNumberEnd();
+
+          Printer << "Line ";
+          PDB_ColorItem StatementColor = Line->isStatement()
+            ? PDB_ColorItem::Keyword
+            : PDB_ColorItem::LiteralValue;
+          WithColor(Printer, StatementColor).get() << LineStart;
+          if (LineStart != LineEnd)
+            WithColor(Printer, StatementColor).get() << " - " << LineEnd;
+
+          uint32_t ColumnStart = Line->getColumnNumber();
+          uint32_t ColumnEnd = Line->getColumnNumberEnd();
+          if (ColumnStart != 0 || ColumnEnd != 0) {
+            Printer << ", Column: ";
+            WithColor(Printer, StatementColor).get() << ColumnStart;
+            if (ColumnEnd != ColumnStart)
+              WithColor(Printer, StatementColor).get() << " - " << ColumnEnd;
+          }
+
+          Printer << ", Address: ";
+          if (Line->getLength() > 0) {
+            uint64_t AddrStart = Line->getVirtualAddress();
+            uint64_t AddrEnd = AddrStart + Line->getLength() - 1;
+            WithColor(Printer, PDB_ColorItem::Address).get()
               << "[" << format_hex(AddrStart, 10) << " - "
               << format_hex(AddrEnd, 10) << "]";
-          Printer << " (" << Line->getLength() << " bytes)";
-        } else {
-          uint64_t AddrStart = Line->getVirtualAddress();
-          WithColor(Printer, PDB_ColorItem::Address).get()
+            Printer << " (" << Line->getLength() << " bytes)";
+          } else {
+            uint64_t AddrStart = Line->getVirtualAddress();
+            WithColor(Printer, PDB_ColorItem::Address).get()
               << "[" << format_hex(AddrStart, 10) << "] ";
-          Printer << "(0 bytes)";
+            Printer << "(0 bytes)";
+          }
         }
+        Printer.Unindent();
       }
       Printer.Unindent();
     }
-    Printer.Unindent();
   }
 
   if (opts & Flags::Children) {
-    auto ChildrenEnum = Symbol.findAllChildren();
-    Printer.Indent();
-    while (auto Child = ChildrenEnum->getNext())
-      Child->dump(*this);
-    Printer.Unindent();
+    if (auto ChildrenEnum = Symbol.findAllChildren()) {
+      Printer.Indent();
+      while (auto Child = ChildrenEnum->getNext())
+        Child->dump(*this);
+      Printer.Unindent();
+    }
   }
 }
 
@@ -204,4 +215,14 @@ void CompilandDumper::dump(const PDBSymbolTypeTypedef &Symbol) {}
 void CompilandDumper::dump(const PDBSymbolUnknown &Symbol) {
   Printer.NewLine();
   Printer << "unknown (" << Symbol.getSymTag() << ")";
+}
+
+void CompilandDumper::dump(const PDBSymbolUsingNamespace &Symbol) {
+  if (Printer.IsSymbolExcluded(Symbol.getName()))
+    return;
+
+  Printer.NewLine();
+  Printer << "using namespace ";
+  std::string Name = Symbol.getName();
+  WithColor(Printer, PDB_ColorItem::Identifier).get() << Name;
 }

@@ -1,9 +1,8 @@
 //===- KillTheDoctor - Prevent Dr. Watson from stopping tests ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -218,7 +217,7 @@ static std::error_code GetFileNameFromHandle(HANDLE FileHandle,
   }
 }
 
-/// @brief Find program using shell lookup rules.
+/// Find program using shell lookup rules.
 /// @param Program This is either an absolute path, relative path, or simple a
 ///        program name. Look in PATH for any programs that match. If no
 ///        extension is present, try all extensions in PATHEXT.

@@ -1,9 +1,8 @@
 //===- PruneEH.cpp - Pass which deletes unused exception handlers ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,16 +18,15 @@
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/EHPersonalities.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -78,13 +76,13 @@ static bool runImpl(CallGraphSCC &SCC, CallGraph &CG) {
 
   // Next, check to see if any callees might throw or if there are any external
   // functions in this SCC: if so, we cannot prune any functions in this SCC.
-  // Definitions that are weak and not declared non-throwing might be 
+  // Definitions that are weak and not declared non-throwing might be
   // overridden at linktime with something that throws, so assume that.
   // If this SCC includes the unwind instruction, we KNOW it throws, so
   // obviously the SCC might throw.
   //
   bool SCCMightUnwind = false, SCCMightReturn = false;
-  for (CallGraphSCC::iterator I = SCC.begin(), E = SCC.end(); 
+  for (CallGraphSCC::iterator I = SCC.begin(), E = SCC.end();
        (!SCCMightUnwind || !SCCMightReturn) && I != E; ++I) {
     Function *F = (*I)->getFunction();
     if (!F) {
@@ -108,7 +106,7 @@ static bool runImpl(CallGraphSCC &SCC, CallGraph &CG) {
         continue;
 
       for (const BasicBlock &BB : *F) {
-        const TerminatorInst *TI = BB.getTerminator();
+        const Instruction *TI = BB.getTerminator();
         if (CheckUnwind && TI->mayThrow()) {
           SCCMightUnwind = true;
         } else if (CheckReturn && isa<ReturnInst>(TI)) {
@@ -256,7 +254,7 @@ static void DeleteBasicBlock(BasicBlock *BB, CallGraph &CG) {
   }
 
   if (TokenInst) {
-    if (!isa<TerminatorInst>(TokenInst))
+    if (!TokenInst->isTerminator())
       changeToUnreachable(TokenInst->getNextNode(), /*UseLLVMTrap=*/false);
   } else {
     // Get the list of successors of this block.

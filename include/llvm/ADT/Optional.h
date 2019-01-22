@@ -1,9 +1,8 @@
 //===- Optional.h - Simple variant for passing optional values --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,71 +26,46 @@
 
 namespace llvm {
 
-template<typename T>
-class Optional {
+class raw_ostream;
+
+namespace optional_detail {
+/// Storage for any type.
+template <typename T, bool = is_trivially_copyable<T>::value> struct OptionalStorage {
   AlignedCharArrayUnion<T> storage;
   bool hasVal = false;
 
-public:
-  using value_type = T;
+  OptionalStorage() = default;
 
-  Optional(NoneType) {}
-  explicit Optional() {}
-
-  Optional(const T &y) : hasVal(true) {
-    new (storage.buffer) T(y);
-  }
-
-  Optional(const Optional &O) : hasVal(O.hasVal) {
+  OptionalStorage(const T &y) : hasVal(true) { new (storage.buffer) T(y); }
+  OptionalStorage(const OptionalStorage &O) : hasVal(O.hasVal) {
     if (hasVal)
-      new (storage.buffer) T(*O);
+      new (storage.buffer) T(*O.getPointer());
   }
-
-  Optional(T &&y) : hasVal(true) {
+  OptionalStorage(T &&y) : hasVal(true) {
     new (storage.buffer) T(std::forward<T>(y));
   }
-
-  Optional(Optional<T> &&O) : hasVal(O) {
-    if (O) {
-      new (storage.buffer) T(std::move(*O));
-      O.reset();
+  OptionalStorage(OptionalStorage &&O) : hasVal(O.hasVal) {
+    if (O.hasVal) {
+      new (storage.buffer) T(std::move(*O.getPointer()));
     }
   }
 
-  ~Optional() {
-    reset();
-  }
-
-  Optional &operator=(T &&y) {
+  OptionalStorage &operator=(T &&y) {
     if (hasVal)
-      **this = std::move(y);
+      *getPointer() = std::move(y);
     else {
       new (storage.buffer) T(std::move(y));
       hasVal = true;
     }
     return *this;
   }
-
-  Optional &operator=(Optional &&O) {
-    if (!O)
+  OptionalStorage &operator=(OptionalStorage &&O) {
+    if (!O.hasVal)
       reset();
     else {
-      *this = std::move(*O);
-      O.reset();
+      *this = std::move(*O.getPointer());
     }
     return *this;
-  }
-
-  /// Create a new object by constructing it in place with the given arguments.
-  template<typename ...ArgTypes>
-  void emplace(ArgTypes &&...Args) {
-    reset();
-    hasVal = true;
-    new (storage.buffer) T(std::forward<ArgTypes>(Args)...);
-  }
-
-  static inline Optional create(const T* y) {
-    return y ? Optional(*y) : Optional();
   }
 
   // FIXME: these assignments (& the equivalent const T&/const Optional& ctors)
@@ -99,42 +73,101 @@ public:
   // with the rvalue versions above - but this could place a different set of
   // requirements (notably: the existence of a default ctor) when implemented
   // in that way. Careful SFINAE to avoid such pitfalls would be required.
-  Optional &operator=(const T &y) {
+  OptionalStorage &operator=(const T &y) {
     if (hasVal)
-      **this = y;
+      *getPointer() = y;
     else {
       new (storage.buffer) T(y);
       hasVal = true;
     }
     return *this;
   }
-
-  Optional &operator=(const Optional &O) {
-    if (!O)
+  OptionalStorage &operator=(const OptionalStorage &O) {
+    if (!O.hasVal)
       reset();
     else
-      *this = *O;
+      *this = *O.getPointer();
     return *this;
   }
 
+  ~OptionalStorage() { reset(); }
+
   void reset() {
     if (hasVal) {
-      (**this).~T();
+      (*getPointer()).~T();
       hasVal = false;
     }
   }
 
-  const T* getPointer() const { assert(hasVal); return reinterpret_cast<const T*>(storage.buffer); }
-  T* getPointer() { assert(hasVal); return reinterpret_cast<T*>(storage.buffer); }
-  const T& getValue() const LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
-  T& getValue() LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
+  T *getPointer() {
+    assert(hasVal);
+    return reinterpret_cast<T *>(storage.buffer);
+  }
+  const T *getPointer() const {
+    assert(hasVal);
+    return reinterpret_cast<const T *>(storage.buffer);
+  }
+};
 
-  explicit operator bool() const { return hasVal; }
-  bool hasValue() const { return hasVal; }
-  const T* operator->() const { return getPointer(); }
-  T* operator->() { return getPointer(); }
-  const T& operator*() const LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
-  T& operator*() LLVM_LVALUE_FUNCTION { assert(hasVal); return *getPointer(); }
+} // namespace optional_detail
+
+template <typename T> class Optional {
+  optional_detail::OptionalStorage<T> Storage;
+
+public:
+  using value_type = T;
+
+  constexpr Optional() {}
+  constexpr Optional(NoneType) {}
+
+  Optional(const T &y) : Storage(y) {}
+  Optional(const Optional &O) = default;
+
+  Optional(T &&y) : Storage(std::forward<T>(y)) {}
+  Optional(Optional &&O) = default;
+
+  Optional &operator=(T &&y) {
+    Storage = std::move(y);
+    return *this;
+  }
+  Optional &operator=(Optional &&O) = default;
+
+  /// Create a new object by constructing it in place with the given arguments.
+  template <typename... ArgTypes> void emplace(ArgTypes &&... Args) {
+    reset();
+    Storage.hasVal = true;
+    new (getPointer()) T(std::forward<ArgTypes>(Args)...);
+  }
+
+  static inline Optional create(const T *y) {
+    return y ? Optional(*y) : Optional();
+  }
+
+  Optional &operator=(const T &y) {
+    Storage = y;
+    return *this;
+  }
+  Optional &operator=(const Optional &O) = default;
+
+  void reset() { Storage.reset(); }
+
+  const T *getPointer() const {
+    assert(Storage.hasVal);
+    return reinterpret_cast<const T *>(Storage.storage.buffer);
+  }
+  T *getPointer() {
+    assert(Storage.hasVal);
+    return reinterpret_cast<T *>(Storage.storage.buffer);
+  }
+  const T &getValue() const LLVM_LVALUE_FUNCTION { return *getPointer(); }
+  T &getValue() LLVM_LVALUE_FUNCTION { return *getPointer(); }
+
+  explicit operator bool() const { return Storage.hasVal; }
+  bool hasValue() const { return Storage.hasVal; }
+  const T *operator->() const { return getPointer(); }
+  T *operator->() { return getPointer(); }
+  const T &operator*() const LLVM_LVALUE_FUNCTION { return *getPointer(); }
+  T &operator*() LLVM_LVALUE_FUNCTION { return *getPointer(); }
 
   template <typename U>
   constexpr T getValueOr(U &&value) const LLVM_LVALUE_FUNCTION {
@@ -142,19 +175,14 @@ public:
   }
 
 #if LLVM_HAS_RVALUE_REFERENCE_THIS
-  T&& getValue() && { assert(hasVal); return std::move(*getPointer()); }
-  T&& operator*() && { assert(hasVal); return std::move(*getPointer()); }
+  T &&getValue() && { return std::move(*getPointer()); }
+  T &&operator*() && { return std::move(*getPointer()); }
 
   template <typename U>
   T getValueOr(U &&value) && {
     return hasValue() ? std::move(getValue()) : std::forward<U>(value);
   }
 #endif
-};
-
-template <typename T> struct isPodLike<Optional<T>> {
-  // An Optional<T> is pod-like if T is.
-  static const bool value = isPodLike<T>::value;
 };
 
 template <typename T, typename U>
@@ -289,6 +317,18 @@ template <typename T> bool operator>=(const Optional<T> &X, const T &Y) {
 
 template <typename T> bool operator>=(const T &X, const Optional<T> &Y) {
   return !(X < Y);
+}
+
+raw_ostream &operator<<(raw_ostream &OS, NoneType);
+
+template <typename T, typename = decltype(std::declval<raw_ostream &>()
+                                          << std::declval<const T &>())>
+raw_ostream &operator<<(raw_ostream &OS, const Optional<T> &O) {
+  if (O)
+    OS << *O;
+  else
+    OS << None;
+  return OS;
 }
 
 } // end namespace llvm

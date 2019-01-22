@@ -6,6 +6,7 @@
 set(LLVM_LINK_COMPONENTS
   DebugInfoDWARF
   DebugInfoPDB
+  Demangle
   Object
   Support
   Symbolize
@@ -14,3 +15,7 @@ set(LLVM_LINK_COMPONENTS
 add_llvm_tool(llvm-symbolizer
   llvm-symbolizer.cpp
   )
+
+if(LLVM_INSTALL_BINUTILS_SYMLINKS)
+  add_llvm_tool_symlink(addr2line llvm-symbolizer)
+endif()

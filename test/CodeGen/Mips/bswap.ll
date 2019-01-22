@@ -1,12 +1,21 @@
-; RUN: llc  < %s -march=mipsel -mcpu=mips32r2 | FileCheck %s -check-prefix=MIPS32
-; RUN: llc  < %s -march=mips64el -mcpu=mips64r2 | FileCheck %s -check-prefix=MIPS64
-; RUN: llc  < %s -mtriple=mipsel-linux-gnu -march=mipsel -mcpu=mips32r2 -mattr=+mips16 | FileCheck %s -check-prefix=MIPS16
+; RUN: llc  < %s -march=mipsel -mcpu=mips32r2 \
+; RUN:   | FileCheck %s -check-prefix=MIPS32
+; RUN: llc  < %s -march=mipsel -mcpu=mips32r2 -mattr=+micromips \
+; RUN:   | FileCheck %s -check-prefix=MM
+; RUN: llc  < %s -march=mips64el -mcpu=mips64r2 \
+; RUN:   | FileCheck %s -check-prefix=MIPS64
+; RUN: llc  < %s -march=mipsel -mcpu=mips32r2 -mattr=+mips16 \
+; RUN:   | FileCheck %s -check-prefix=MIPS16
 
 define i32 @bswap32(i32 signext %x) nounwind readnone {
 entry:
 ; MIPS32-LABEL: bswap32:
 ; MIPS32: wsbh $[[R0:[0-9]+]]
 ; MIPS32: rotr ${{[0-9]+}}, $[[R0]], 16
+
+; MM-LABEL: bswap32:
+; MM: wsbh $[[R0:[0-9]+]]
+; MM: rotr ${{[0-9]+}}, $[[R0]], 16
 
 ; MIPS64-LABEL: bswap32:
 ; MIPS64: wsbh $[[R0:[0-9]+]]
@@ -37,6 +46,12 @@ entry:
 ; MIPS32: wsbh $[[R0:[0-9]+]]
 ; MIPS32: rotr ${{[0-9]+}}, $[[R0]], 16
 
+; MM-LABEL: bswap64:
+; MM: wsbh $[[R0:[0-9]+]]
+; MM: rotr ${{[0-9]+}}, $[[R0]], 16
+; MM: wsbh $[[R0:[0-9]+]]
+; MM: rotr ${{[0-9]+}}, $[[R0]], 16
+
 ; MIPS64-LABEL: bswap64:
 ; MIPS64: dsbh $[[R0:[0-9]+]]
 ; MIPS64: dshd ${{[0-9]+}}, $[[R0]]
@@ -57,10 +72,8 @@ entry:
 ; MIPS16-DAG: srl $[[R1:[0-9]+]], $4, 24
 ; MIPS16-DAG: sll $[[R2:[0-9]+]], $4, 8
 ; MIPS16-DAG: sll $[[R3:[0-9]+]], $4, 24
-; MIPS16-DAG: li  $[[R4:[0-9]+]], 65280
 ; MIPS16-DAG: and $[[R0]], $[[R4]]
 ; MIPS16-DAG: or  $[[R1]], $[[R0]]
-; MIPS16-DAG: lw  $[[R7:[0-9]+]], 1f
 ; MIPS16-DAG: and $[[R2]], $[[R7]]
 ; MIPS16-DAG: or  $[[R3]], $[[R2]]
 ; MIPS16-DAG: or  $[[R3]], $[[R1]]
@@ -80,6 +93,16 @@ entry:
 ; MIPS32-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
 ; MIPS32-DAG: wsbh $[[R0:[0-9]+]]
 ; MIPS32-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
+
+; MM-LABEL: bswapv4i32:
+; MM-DAG: wsbh $[[R0:[0-9]+]]
+; MM-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
+; MM-DAG: wsbh $[[R0:[0-9]+]]
+; MM-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
+; MM-DAG: wsbh $[[R0:[0-9]+]]
+; MM-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
+; MM-DAG: wsbh $[[R0:[0-9]+]]
+; MM-DAG: rotr ${{[0-9]+}}, $[[R0]], 16
 
 ; MIPS64-LABEL: bswapv4i32:
 ; MIPS64-DAG: wsbh $[[R0:[0-9]+]]

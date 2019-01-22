@@ -1,9 +1,8 @@
 //===- MIRPrinter.h - MIR serialization format printer --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,7 +37,7 @@ void printMIR(raw_ostream &OS, const MachineFunction &MF);
 /// this funciton and the parser will use this function to construct a list if
 /// it is missing.
 void guessSuccessors(const MachineBasicBlock &MBB,
-                     SmallVectorImpl<MachineBasicBlock*> &Successors,
+                     SmallVectorImpl<MachineBasicBlock*> &Result,
                      bool &IsFallthrough);
 
 } // end namespace llvm

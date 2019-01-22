@@ -1,9 +1,8 @@
 //==- AArch64SchedA53.td - Cortex-A53 Scheduling Definitions -*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,6 +25,8 @@ def CortexA53Model : SchedMachineModel {
                              // Specification - Instruction Timings"
                              // v 1.0 Spreadsheet
   let CompleteModel = 1;
+
+  list<Predicate> UnsupportedFeatures = [HasSVE];
 }
 
 
@@ -220,19 +221,19 @@ def : InstRW<[A53WriteVLD1], (instregex "LD2i(8|16|32|64)$")>;
 def : InstRW<[A53WriteVLD1], (instregex "LD2Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
 def : InstRW<[A53WriteVLD2], (instregex "LD2Twov(8b|4h|2s)$")>;
 def : InstRW<[A53WriteVLD4], (instregex "LD2Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[A53WriteVLD1, WriteAdr], (instregex "LD2i(8|16|32|64)(_POST)?$")>;
-def : InstRW<[A53WriteVLD1, WriteAdr], (instregex "LD2Rv(8b|4h|2s|1d|16b|8h|4s|2d)(_POST)?$")>;
-def : InstRW<[A53WriteVLD2, WriteAdr], (instregex "LD2Twov(8b|4h|2s)(_POST)?$")>;
-def : InstRW<[A53WriteVLD4, WriteAdr], (instregex "LD2Twov(16b|8h|4s|2d)(_POST)?$")>;
+def : InstRW<[A53WriteVLD1, WriteAdr], (instregex "LD2i(8|16|32|64)_POST$")>;
+def : InstRW<[A53WriteVLD1, WriteAdr], (instregex "LD2Rv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
+def : InstRW<[A53WriteVLD2, WriteAdr], (instregex "LD2Twov(8b|4h|2s)_POST$")>;
+def : InstRW<[A53WriteVLD4, WriteAdr], (instregex "LD2Twov(16b|8h|4s|2d)_POST$")>;
 
 def : InstRW<[A53WriteVLD2], (instregex "LD3i(8|16|32|64)$")>;
 def : InstRW<[A53WriteVLD2], (instregex "LD3Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;
 def : InstRW<[A53WriteVLD4], (instregex "LD3Threev(8b|4h|2s|1d|16b|8h|4s)$")>;
-def : InstRW<[A53WriteVLD3], (instregex "LD3Threev(2d)$")>;
+def : InstRW<[A53WriteVLD3], (instregex "LD3Threev2d$")>;
 def : InstRW<[A53WriteVLD2, WriteAdr], (instregex "LD3i(8|16|32|64)_POST$")>;
 def : InstRW<[A53WriteVLD2, WriteAdr], (instregex "LD3Rv(8b|4h|2s|1d|16b|8h|4s|2d)_POST$")>;
 def : InstRW<[A53WriteVLD4, WriteAdr], (instregex "LD3Threev(8b|4h|2s|1d|16b|8h|4s)_POST$")>;
-def : InstRW<[A53WriteVLD3, WriteAdr], (instregex "LD3Threev(2d)_POST$")>;
+def : InstRW<[A53WriteVLD3, WriteAdr], (instregex "LD3Threev2d_POST$")>;
 
 def : InstRW<[A53WriteVLD2], (instregex "LD4i(8|16|32|64)$")>;
 def : InstRW<[A53WriteVLD2], (instregex "LD4Rv(8b|4h|2s|1d|16b|8h|4s|2d)$")>;

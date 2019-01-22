@@ -2,8 +2,8 @@
 ; rdar://7842028
 
 ; Do not delete partially dead copy instructions.
-; %RDI<def,dead> = MOV64rr %RAX<kill>, %EDI<imp-def>
-; REP_MOVSD %ECX<imp-def,dead>, %EDI<imp-def,dead>, %ESI<imp-def,dead>, %ECX<imp-use,kill>, %EDI<imp-use,kill>, %ESI<imp-use,kill>
+; dead %rdi = MOV64rr killed %rax, implicit-def %edi
+; REP_MOVSD implicit dead %ecx, implicit dead %edi, implicit dead %esi, implicit killed %ecx, implicit killed %edi, implicit killed %esi
 
 
 %struct.F = type { %struct.FC*, i32, i32, i8, i32, i32, i32 }
@@ -19,8 +19,8 @@ entry:
   %tmp4 = getelementptr inbounds %struct.FC, %struct.FC* %tmp3, i64 0, i32 1, i64 0
   %tmp5 = bitcast [32 x i32]* %BitValueArray to i8*
   %tmp6 = bitcast i32* %tmp4 to i8*
-  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %tmp5, i8* %tmp6, i64 128, i32 4, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 4 %tmp5, i8* align 4 %tmp6, i64 128, i1 false)
   unreachable
 }
 
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, i1) nounwind
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i1) nounwind

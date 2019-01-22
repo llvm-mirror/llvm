@@ -1,9 +1,8 @@
 //===-- MSP430BranchSelector.cpp - Emit long conditional branches ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -138,15 +137,15 @@ bool MSP430BSel::expandBranches(OffsetVector &BlockOffsets) {
         continue;
       }
 
-      DEBUG(dbgs() << "  Found a branch that needs expanding, BB#"
-                   << DestBB->getNumber() << ", Distance " << BranchDistance
-                   << "\n");
+      LLVM_DEBUG(dbgs() << "  Found a branch that needs expanding, "
+                        << printMBBReference(*DestBB) << ", Distance "
+                        << BranchDistance << "\n");
 
       // If JCC is not the last instruction we need to split the MBB.
       if (MI->getOpcode() == MSP430::JCC && std::next(MI) != EE) {
 
-        DEBUG(dbgs() << "  Found a basic block that needs to be split, BB#"
-                     << MBB->getNumber() << "\n");
+        LLVM_DEBUG(dbgs() << "  Found a basic block that needs to be split, "
+                          << printMBBReference(*MBB) << "\n");
 
         // Create a new basic block.
         MachineBasicBlock *NewBB =
@@ -229,7 +228,7 @@ bool MSP430BSel::runOnMachineFunction(MachineFunction &mf) {
   if (!BranchSelectEnabled)
     return false;
 
-  DEBUG(dbgs() << "\n********** " << getPassName() << " **********\n");
+  LLVM_DEBUG(dbgs() << "\n********** " << getPassName() << " **********\n");
 
   // BlockOffsets - Contains the distance from the beginning of the function to
   // the beginning of each basic block.

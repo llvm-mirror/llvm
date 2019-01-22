@@ -1,9 +1,8 @@
 //===-- WindowsResource.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,10 +13,10 @@
 #include "llvm/Object/WindowsResource.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/FileOutputBuffer.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 #include <ctime>
 #include <queue>
-#include <sstream>
 #include <system_error>
 
 using namespace llvm;
@@ -65,7 +64,7 @@ Expected<ResourceEntryRef> WindowsResource::getHeadEntry() {
 
 ResourceEntryRef::ResourceEntryRef(BinaryStreamRef Ref,
                                    const WindowsResource *Owner)
-    : Reader(Ref), OwningRes(Owner) {}
+    : Reader(Ref) {}
 
 Expected<ResourceEntryRef>
 ResourceEntryRef::create(BinaryStreamRef BSR, const WindowsResource *Owner) {
@@ -259,7 +258,7 @@ WindowsResourceParser::TreeNode::addChild(ArrayRef<UTF16> NameRef,
   std::vector<UTF16> EndianCorrectedName;
   if (sys::IsBigEndianHost) {
     EndianCorrectedName.resize(NameRef.size() + 1);
-    std::copy(NameRef.begin(), NameRef.end(), EndianCorrectedName.begin() + 1);
+    llvm::copy(NameRef, EndianCorrectedName.begin() + 1);
     EndianCorrectedName[0] = UNI_UTF16_BYTE_ORDER_MARK_SWAPPED;
     CorrectedName = makeArrayRef(EndianCorrectedName);
   } else
@@ -334,7 +333,7 @@ private:
   void writeDirectoryTree();
   void writeDirectoryStringTable();
   void writeFirstSectionRelocations();
-  std::unique_ptr<MemoryBuffer> OutputBuffer;
+  std::unique_ptr<WritableMemoryBuffer> OutputBuffer;
   char *BufferStart;
   uint64_t CurrentOffset = 0;
   COFF::MachineTypes MachineType;
@@ -360,7 +359,7 @@ WindowsResourceCOFFWriter::WindowsResourceCOFFWriter(
       Data(Parser.getData()), StringTable(Parser.getStringTable()) {
   performFileLayout();
 
-  OutputBuffer = MemoryBuffer::getNewMemBuffer(FileSize);
+  OutputBuffer = WritableMemoryBuffer::getNewMemBuffer(FileSize);
 }
 
 void WindowsResourceCOFFWriter::performFileLayout() {
@@ -425,7 +424,7 @@ static std::time_t getTime() {
 }
 
 std::unique_ptr<MemoryBuffer> WindowsResourceCOFFWriter::write() {
-  BufferStart = const_cast<char *>(OutputBuffer->getBufferStart());
+  BufferStart = OutputBuffer->getBufferStart();
 
   writeCOFFHeader();
   writeFirstSectionHeader();
@@ -441,19 +440,7 @@ std::unique_ptr<MemoryBuffer> WindowsResourceCOFFWriter::write() {
 void WindowsResourceCOFFWriter::writeCOFFHeader() {
   // Write the COFF header.
   auto *Header = reinterpret_cast<coff_file_header *>(BufferStart);
-  switch (MachineType) {
-  case COFF::IMAGE_FILE_MACHINE_ARMNT:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_ARMNT;
-    break;
-  case COFF::IMAGE_FILE_MACHINE_AMD64:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_AMD64;
-    break;
-  case COFF::IMAGE_FILE_MACHINE_I386:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_I386;
-    break;
-  default:
-    Header->Machine = COFF::IMAGE_FILE_MACHINE_UNKNOWN;
-  }
+  Header->Machine = MachineType;
   Header->NumberOfSections = 2;
   Header->TimeDateStamp = getTime();
   Header->PointerToSymbolTable = SymbolTableOffset;
@@ -513,8 +500,7 @@ void WindowsResourceCOFFWriter::writeFirstSection() {
 void WindowsResourceCOFFWriter::writeSecondSection() {
   // Now write the .rsrc$02 section.
   for (auto const &RawDataEntry : Data) {
-    std::copy(RawDataEntry.begin(), RawDataEntry.end(),
-              BufferStart + CurrentOffset);
+    llvm::copy(RawDataEntry, BufferStart + CurrentOffset);
     CurrentOffset += alignTo(RawDataEntry.size(), sizeof(uint64_t));
   }
 
@@ -573,10 +559,9 @@ void WindowsResourceCOFFWriter::writeSymbolTable() {
 
   // Now write a symbol for each relocation.
   for (unsigned i = 0; i < Data.size(); i++) {
-    char RelocationName[9];
-    sprintf(RelocationName, "$R%06X", DataOffsets[i]);
+    auto RelocationName = formatv("$R{0:X-6}", i & 0xffffff).sstr<COFF::NameSize>();
     Symbol = reinterpret_cast<coff_symbol16 *>(BufferStart + CurrentOffset);
-    strncpy(Symbol->Name.ShortName, RelocationName, (size_t)COFF::NameSize);
+    memcpy(Symbol->Name.ShortName, RelocationName.data(), (size_t) COFF::NameSize);
     Symbol->Value = DataOffsets[i];
     Symbol->SectionNumber = 2;
     Symbol->Type = COFF::IMAGE_SYM_DTYPE_NULL;
@@ -685,7 +670,7 @@ void WindowsResourceCOFFWriter::writeDirectoryStringTable() {
     support::endian::write16le(BufferStart + CurrentOffset, Length);
     CurrentOffset += sizeof(uint16_t);
     auto *Start = reinterpret_cast<UTF16 *>(BufferStart + CurrentOffset);
-    std::copy(String.begin(), String.end(), Start);
+    llvm::copy(String, Start);
     CurrentOffset += Length * sizeof(UTF16);
     TotalStringTableSize += Length * sizeof(UTF16) + sizeof(uint16_t);
   }
@@ -714,8 +699,11 @@ void WindowsResourceCOFFWriter::writeFirstSectionRelocations() {
     case COFF::IMAGE_FILE_MACHINE_I386:
       Reloc->Type = COFF::IMAGE_REL_I386_DIR32NB;
       break;
+    case COFF::IMAGE_FILE_MACHINE_ARM64:
+      Reloc->Type = COFF::IMAGE_REL_ARM64_ADDR32NB;
+      break;
     default:
-      Reloc->Type = 0;
+      llvm_unreachable("unknown machine type");
     }
     CurrentOffset += sizeof(coff_relocation);
   }

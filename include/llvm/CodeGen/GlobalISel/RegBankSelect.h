@@ -1,9 +1,8 @@
 //=- llvm/CodeGen/GlobalISel/RegBankSelect.h - Reg Bank Selector --*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,7 +21,7 @@
 /// of an instruction should live. It asks the target which banks may be
 /// used for each operand of the instruction and what is the cost. Then,
 /// it chooses the solution which minimize the cost of the instruction plus
-/// the cost of any move that may be needed to to the values into the right
+/// the cost of any move that may be needed to the values into the right
 /// register bank.
 /// In other words, the cost for an instruction on a register bank RegBank
 /// is: Cost of I on RegBank plus the sum of the cost for bringing the

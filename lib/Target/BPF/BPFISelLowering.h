@@ -1,9 +1,8 @@
 //===-- BPFISelLowering.h - BPF DAG Lowering Interface ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@
 
 #include "BPF.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
 class BPFSubtarget;
@@ -28,7 +27,8 @@ enum NodeType : unsigned {
   CALL,
   SELECT_CC,
   BR_CC,
-  Wrapper
+  Wrapper,
+  MEMCPY
 };
 }
 
@@ -54,10 +54,17 @@ public:
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *BB) const override;
 
+  bool getHasAlu32() const { return HasAlu32; }
   bool getHasJmpExt() const { return HasJmpExt; }
+
+  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
+                         EVT VT) const override;
+
+  MVT getScalarShiftAmountTy(const DataLayout &, EVT) const override;
 
 private:
   // Control Instruction Selection Features
+  bool HasAlu32;
   bool HasJmpExt;
 
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
@@ -100,6 +107,14 @@ private:
                                          Type *Ty) const override {
     return true;
   }
+
+  unsigned EmitSubregExt(MachineInstr &MI, MachineBasicBlock *BB, unsigned Reg,
+                         bool isSigned) const;
+
+  MachineBasicBlock * EmitInstrWithCustomInserterMemcpy(MachineInstr &MI,
+                                                        MachineBasicBlock *BB)
+                                                        const;
+
 };
 }
 

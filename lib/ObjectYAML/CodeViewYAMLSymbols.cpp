@@ -1,9 +1,8 @@
 //===- CodeViewYAMLSymbols.cpp - CodeView YAMLIO Symbol implementation ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,10 +39,11 @@ using namespace llvm::CodeViewYAML::detail;
 using namespace llvm::yaml;
 
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TypeIndex)
+LLVM_YAML_IS_SEQUENCE_VECTOR(LocalVariableAddrGap)
 
 // We only need to declare these, the definitions are in CodeViewYAMLTypes.cpp
-LLVM_YAML_DECLARE_SCALAR_TRAITS(APSInt, false)
-LLVM_YAML_DECLARE_SCALAR_TRAITS(TypeIndex, false)
+LLVM_YAML_DECLARE_SCALAR_TRAITS(APSInt, QuotingType::None)
+LLVM_YAML_DECLARE_SCALAR_TRAITS(TypeIndex, QuotingType::None)
 
 LLVM_YAML_DECLARE_ENUM_TRAITS(SymbolKind)
 LLVM_YAML_DECLARE_ENUM_TRAITS(FrameCookieKind)
@@ -62,7 +62,7 @@ LLVM_YAML_DECLARE_ENUM_TRAITS(ThunkOrdinal)
 
 LLVM_YAML_STRONG_TYPEDEF(StringRef, TypeName)
 
-LLVM_YAML_DECLARE_SCALAR_TRAITS(TypeName, true)
+LLVM_YAML_DECLARE_SCALAR_TRAITS(TypeName, QuotingType::Single)
 
 StringRef ScalarTraits<TypeName>::input(StringRef S, void *V, TypeName &T) {
   return ScalarTraits<StringRef>::input(S, V, T.value);
@@ -107,7 +107,7 @@ void ScalarBitSetTraits<ExportFlags>::bitset(IO &io, ExportFlags &Flags) {
 }
 
 void ScalarBitSetTraits<PublicSymFlags>::bitset(IO &io, PublicSymFlags &Flags) {
-  auto FlagNames = getProcSymFlagNames();
+  auto FlagNames = getPublicSymFlagNames();
   for (const auto &E : FlagNames) {
     io.bitSetCase(Flags, E.Name.str().c_str(),
                   static_cast<PublicSymFlags>(E.Value));
@@ -179,6 +179,24 @@ void ScalarEnumerationTraits<FrameCookieKind>::enumeration(
                 static_cast<FrameCookieKind>(E.Value));
   }
 }
+
+namespace llvm {
+namespace yaml {
+template <> struct MappingTraits<LocalVariableAddrRange> {
+  static void mapping(IO &io, LocalVariableAddrRange &Range) {
+    io.mapRequired("OffsetStart", Range.OffsetStart);
+    io.mapRequired("ISectStart", Range.ISectStart);
+    io.mapRequired("Range", Range.Range);
+  }
+};
+template <> struct MappingTraits<LocalVariableAddrGap> {
+  static void mapping(IO &io, LocalVariableAddrGap &Gap) {
+    io.mapRequired("GapStartOffset", Gap.GapStartOffset);
+    io.mapRequired("Range", Gap.Range);
+  }
+};
+} // namespace yaml
+} // namespace llvm
 
 namespace llvm {
 namespace CodeViewYAML {
@@ -353,32 +371,50 @@ template <> void SymbolRecordImpl<LocalSym>::map(IO &IO) {
 }
 
 template <> void SymbolRecordImpl<DefRangeSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Program", Symbol.Program);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <> void SymbolRecordImpl<DefRangeSubfieldSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Program", Symbol.Program);
+  IO.mapRequired("OffsetInParent", Symbol.OffsetInParent);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <> void SymbolRecordImpl<DefRangeRegisterSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Register", Symbol.Hdr.Register);
+  IO.mapRequired("MayHaveNoName", Symbol.Hdr.MayHaveNoName);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <> void SymbolRecordImpl<DefRangeFramePointerRelSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Offset", Symbol.Offset);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <> void SymbolRecordImpl<DefRangeSubfieldRegisterSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Register", Symbol.Hdr.Register);
+  IO.mapRequired("MayHaveNoName", Symbol.Hdr.MayHaveNoName);
+  IO.mapRequired("OffsetInParent", Symbol.Hdr.OffsetInParent);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <>
 void SymbolRecordImpl<DefRangeFramePointerRelFullScopeSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Register", Symbol.Offset);
 }
 
 template <> void SymbolRecordImpl<DefRangeRegisterRelSym>::map(IO &IO) {
-  // TODO: Print the subfields
+  IO.mapRequired("Register", Symbol.Hdr.Register);
+  IO.mapRequired("Flags", Symbol.Hdr.Flags);
+  IO.mapRequired("BasePointerOffset", Symbol.Hdr.BasePointerOffset);
+  IO.mapRequired("Range", Symbol.Range);
+  IO.mapRequired("Gaps", Symbol.Gaps);
 }
 
 template <> void SymbolRecordImpl<BlockSym>::map(IO &IO) {
@@ -511,6 +547,10 @@ template <> void SymbolRecordImpl<ThreadLocalDataSym>::map(IO &IO) {
   IO.mapOptional("Offset", Symbol.DataOffset, 0U);
   IO.mapOptional("Segment", Symbol.Segment, uint16_t(0));
   IO.mapRequired("DisplayName", Symbol.Name);
+}
+
+template <> void SymbolRecordImpl<UsingNamespaceSym>::map(IO &IO) {
+  IO.mapRequired("Namespace", Symbol.Name);
 }
 
 } // end namespace detail

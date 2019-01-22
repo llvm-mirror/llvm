@@ -3,7 +3,7 @@
 
 define <8 x float> @test_2xfloat_to_8xfloat(<8 x float> %vec) {
 ; CHECK-LABEL: test_2xfloat_to_8xfloat:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastsd %xmm0, %ymm0
 ; CHECK-NEXT:    retq
   %res = shufflevector <8 x float> %vec, <8 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -11,7 +11,7 @@ define <8 x float> @test_2xfloat_to_8xfloat(<8 x float> %vec) {
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mask0(<8 x float> %vec, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %ymm3, %ymm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm1 {%k1} = xmm0[0,1,0,1,0,1,0,1]
@@ -25,7 +25,7 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mask0(<8 x float> %vec, <8 x 
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask0(<8 x float> %vec, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1]
@@ -37,7 +37,7 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask0(<8 x float> %vec, <8 
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mask1(<8 x float> %vec, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %ymm3, %ymm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm1 {%k1} = xmm0[0,1,0,1,0,1,0,1]
@@ -51,7 +51,7 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mask1(<8 x float> %vec, <8 x 
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask1(<8 x float> %vec, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1]
@@ -63,7 +63,7 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask1(<8 x float> %vec, <8 
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mask2(<8 x float> %vec, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %ymm3, %ymm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm1 {%k1} = xmm0[0,1,0,1,0,1,0,1]
@@ -77,7 +77,7 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mask2(<8 x float> %vec, <8 x 
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask2(<8 x float> %vec, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1]
@@ -89,7 +89,7 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask2(<8 x float> %vec, <8 
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mask3(<8 x float> %vec, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %ymm3, %ymm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm1 {%k1} = xmm0[0,1,0,1,0,1,0,1]
@@ -103,7 +103,7 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mask3(<8 x float> %vec, <8 x 
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask3(<8 x float> %vec, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1]
@@ -115,7 +115,7 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mask3(<8 x float> %vec, <8 
 }
 define <16 x float> @test_2xfloat_to_16xfloat(<16 x float> %vec) {
 ; CHECK-LABEL: test_2xfloat_to_16xfloat:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastsd %xmm0, %zmm0
 ; CHECK-NEXT:    retq
   %res = shufflevector <16 x float> %vec, <16 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -123,7 +123,7 @@ define <16 x float> @test_2xfloat_to_16xfloat(<16 x float> %vec) {
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mask0(<16 x float> %vec, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %zmm3, %zmm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm1 {%k1} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -137,7 +137,7 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mask0(<16 x float> %vec, <1
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask0(<16 x float> %vec, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -149,7 +149,7 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask0(<16 x float> %vec, 
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mask1(<16 x float> %vec, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %zmm3, %zmm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm1 {%k1} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -163,7 +163,7 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mask1(<16 x float> %vec, <1
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask1(<16 x float> %vec, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -175,7 +175,7 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask1(<16 x float> %vec, 
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mask2(<16 x float> %vec, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %zmm3, %zmm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm1 {%k1} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -189,7 +189,7 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mask2(<16 x float> %vec, <1
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask2(<16 x float> %vec, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -201,7 +201,7 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask2(<16 x float> %vec, 
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mask3(<16 x float> %vec, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
 ; CHECK-NEXT:    vcmpeqps %zmm3, %zmm2, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm1 {%k1} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -215,7 +215,7 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mask3(<16 x float> %vec, <1
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask3(<16 x float> %vec, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm0[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
@@ -227,7 +227,7 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mask3(<16 x float> %vec, 
 }
 define <4 x double> @test_2xdouble_to_4xdouble_mem(<2 x double>* %vp) {
 ; CHECK-LABEL: test_2xdouble_to_4xdouble_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf128 {{.*#+}} ymm0 = mem[0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x double>, <2 x double>* %vp
@@ -236,7 +236,7 @@ define <4 x double> @test_2xdouble_to_4xdouble_mem(<2 x double>* %vp) {
 }
 define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask0(<2 x double>* %vp, <4 x double> %default, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_4xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1]
@@ -250,7 +250,7 @@ define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask0(<2 x double>* %v
 
 define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask0(<2 x double>* %vp, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_4xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1]
@@ -263,7 +263,7 @@ define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask0(<2 x double>* 
 }
 define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask1(<2 x double>* %vp, <4 x double> %default, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_4xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1]
@@ -277,7 +277,7 @@ define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask1(<2 x double>* %v
 
 define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask1(<2 x double>* %vp, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_4xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1]
@@ -290,7 +290,7 @@ define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask1(<2 x double>* 
 }
 define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask2(<2 x double>* %vp, <4 x double> %default, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_4xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1]
@@ -304,7 +304,7 @@ define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask2(<2 x double>* %v
 
 define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask2(<2 x double>* %vp, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_4xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1]
@@ -317,7 +317,7 @@ define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask2(<2 x double>* 
 }
 define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask3(<2 x double>* %vp, <4 x double> %default, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_4xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1]
@@ -331,7 +331,7 @@ define <4 x double> @test_masked_2xdouble_to_4xdouble_mem_mask3(<2 x double>* %v
 
 define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask3(<2 x double>* %vp, <4 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_4xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1]
@@ -344,7 +344,7 @@ define <4 x double> @test_masked_z_2xdouble_to_4xdouble_mem_mask3(<2 x double>* 
 }
 define <8 x double> @test_2xdouble_to_8xdouble_mem(<2 x double>* %vp) {
 ; CHECK-LABEL: test_2xdouble_to_8xdouble_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
 ; CHECK-NEXT:    retq
   %vec = load <2 x double>, <2 x double>* %vp
@@ -353,7 +353,7 @@ define <8 x double> @test_2xdouble_to_8xdouble_mem(<2 x double>* %vp) {
 }
 define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask0(<2 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_8xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1]
@@ -367,7 +367,7 @@ define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask0(<2 x double>* %v
 
 define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask0(<2 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_8xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
@@ -380,7 +380,7 @@ define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask0(<2 x double>* 
 }
 define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask1(<2 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_8xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1]
@@ -394,7 +394,7 @@ define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask1(<2 x double>* %v
 
 define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask1(<2 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_8xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
@@ -407,7 +407,7 @@ define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask1(<2 x double>* 
 }
 define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask2(<2 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_8xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1]
@@ -421,7 +421,7 @@ define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask2(<2 x double>* %v
 
 define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask2(<2 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_8xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
@@ -434,7 +434,7 @@ define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask2(<2 x double>* 
 }
 define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask3(<2 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_2xdouble_to_8xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1]
@@ -448,7 +448,7 @@ define <8 x double> @test_masked_2xdouble_to_8xdouble_mem_mask3(<2 x double>* %v
 
 define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask3(<2 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_2xdouble_to_8xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
@@ -461,7 +461,7 @@ define <8 x double> @test_masked_z_2xdouble_to_8xdouble_mem_mask3(<2 x double>* 
 }
 define <8 x double> @test_4xdouble_to_8xdouble_mem(<4 x double>* %vp) {
 ; CHECK-LABEL: test_4xdouble_to_8xdouble_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 = mem[0,1,2,3,0,1,2,3]
 ; CHECK-NEXT:    retq
   %vec = load <4 x double>, <4 x double>* %vp
@@ -470,7 +470,7 @@ define <8 x double> @test_4xdouble_to_8xdouble_mem(<4 x double>* %vp) {
 }
 define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask0(<4 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_4xdouble_to_8xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -484,7 +484,7 @@ define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask0(<4 x double>* %v
 
 define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask0(<4 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_4xdouble_to_8xdouble_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -497,7 +497,7 @@ define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask0(<4 x double>* 
 }
 define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask1(<4 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_4xdouble_to_8xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -511,7 +511,7 @@ define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask1(<4 x double>* %v
 
 define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask1(<4 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_4xdouble_to_8xdouble_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -524,7 +524,7 @@ define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask1(<4 x double>* 
 }
 define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask2(<4 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_4xdouble_to_8xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -538,7 +538,7 @@ define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask2(<4 x double>* %v
 
 define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask2(<4 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_4xdouble_to_8xdouble_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -551,7 +551,7 @@ define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask2(<4 x double>* 
 }
 define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask3(<4 x double>* %vp, <8 x double> %default, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_4xdouble_to_8xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqpd %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -565,7 +565,7 @@ define <8 x double> @test_masked_4xdouble_to_8xdouble_mem_mask3(<4 x double>* %v
 
 define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask3(<4 x double>* %vp, <8 x double> %mask) {
 ; CHECK-LABEL: test_masked_z_4xdouble_to_8xdouble_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqpd %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -578,9 +578,8 @@ define <8 x double> @test_masked_z_4xdouble_to_8xdouble_mem_mask3(<4 x double>* 
 }
 define <8 x float> @test_2xfloat_to_8xfloat_mem(<2 x float>* %vp) {
 ; CHECK-LABEL: test_2xfloat_to_8xfloat_mem:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
-; CHECK-NEXT:    vbroadcastsd %xmm0, %ymm0
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vbroadcastsd (%rdi), %ymm0
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %res = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -588,11 +587,10 @@ define <8 x float> @test_2xfloat_to_8xfloat_mem(<2 x float>* %vp) {
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask0(<2 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mem_mask0:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %ymm3, %ymm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = xmm2[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -603,11 +601,10 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask0(<2 x float>* %vp, <
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask0(<2 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mem_mask0:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %ymm2, %ymm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -617,11 +614,10 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask0(<2 x float>* %vp,
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask1(<2 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mem_mask1:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %ymm3, %ymm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = xmm2[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -632,11 +628,10 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask1(<2 x float>* %vp, <
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask1(<2 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mem_mask1:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %ymm2, %ymm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -646,11 +641,10 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask1(<2 x float>* %vp,
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask2(<2 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mem_mask2:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %ymm3, %ymm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = xmm2[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -661,11 +655,10 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask2(<2 x float>* %vp, <
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask2(<2 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mem_mask2:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %ymm2, %ymm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -675,11 +668,10 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask2(<2 x float>* %vp,
 }
 define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask3(<2 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_8xfloat_mem_mask3:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %ymm3, %ymm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = xmm2[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -690,11 +682,10 @@ define <8 x float> @test_masked_2xfloat_to_8xfloat_mem_mask3(<2 x float>* %vp, <
 
 define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask3(<2 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_8xfloat_mem_mask3:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %ymm2, %ymm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <8 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -704,9 +695,8 @@ define <8 x float> @test_masked_z_2xfloat_to_8xfloat_mem_mask3(<2 x float>* %vp,
 }
 define <16 x float> @test_2xfloat_to_16xfloat_mem(<2 x float>* %vp) {
 ; CHECK-LABEL: test_2xfloat_to_16xfloat_mem:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
-; CHECK-NEXT:    vbroadcastsd %xmm0, %zmm0
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vbroadcastsd (%rdi), %zmm0
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %res = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -714,11 +704,10 @@ define <16 x float> @test_2xfloat_to_16xfloat_mem(<2 x float>* %vp) {
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask0(<2 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %zmm3, %zmm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = xmm2[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -729,11 +718,10 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask0(<2 x float>* %vp,
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask0(<2 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %zmm2, %zmm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -743,11 +731,10 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask0(<2 x float>* %v
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask1(<2 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %zmm3, %zmm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = xmm2[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -758,11 +745,10 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask1(<2 x float>* %vp,
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask1(<2 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %zmm2, %zmm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -772,11 +758,10 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask1(<2 x float>* %v
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask2(<2 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %zmm3, %zmm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = xmm2[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -787,11 +772,10 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask2(<2 x float>* %vp,
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask2(<2 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %zmm2, %zmm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -801,11 +785,10 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask2(<2 x float>* %v
 }
 define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask3(<2 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_2xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm2 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm3, %xmm3, %xmm3
-; CHECK-NEXT:    vcmpeqps %zmm3, %zmm1, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = xmm2[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -816,11 +799,10 @@ define <16 x float> @test_masked_2xfloat_to_16xfloat_mem_mask3(<2 x float>* %vp,
 
 define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask3(<2 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_2xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm1 = mem[0],zero
-; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
-; CHECK-NEXT:    vcmpeqps %zmm2, %zmm0, %k1
-; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = xmm1[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
+; CHECK-NEXT:    vbroadcastf32x2 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <2 x float>, <2 x float>* %vp
   %shuf = shufflevector <2 x float> %vec, <2 x float> undef, <16 x i32> <i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1, i32 0, i32 1>
@@ -830,7 +812,7 @@ define <16 x float> @test_masked_z_2xfloat_to_16xfloat_mem_mask3(<2 x float>* %v
 }
 define <8 x float> @test_4xfloat_to_8xfloat_mem(<4 x float>* %vp) {
 ; CHECK-LABEL: test_4xfloat_to_8xfloat_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf128 {{.*#+}} ymm0 = mem[0,1,0,1]
 ; CHECK-NEXT:    retq
   %vec = load <4 x float>, <4 x float>* %vp
@@ -839,7 +821,7 @@ define <8 x float> @test_4xfloat_to_8xfloat_mem(<4 x float>* %vp) {
 }
 define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask0(<4 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_8xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -853,7 +835,7 @@ define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask0(<4 x float>* %vp, <
 
 define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask0(<4 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_8xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -866,7 +848,7 @@ define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask0(<4 x float>* %vp,
 }
 define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask1(<4 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_8xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -880,7 +862,7 @@ define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask1(<4 x float>* %vp, <
 
 define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask1(<4 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_8xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -893,7 +875,7 @@ define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask1(<4 x float>* %vp,
 }
 define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask2(<4 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_8xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -907,7 +889,7 @@ define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask2(<4 x float>* %vp, <
 
 define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask2(<4 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_8xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -920,7 +902,7 @@ define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask2(<4 x float>* %vp,
 }
 define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask3(<4 x float>* %vp, <8 x float> %default, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_8xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %ymm2, %ymm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} = mem[0,1,2,3,0,1,2,3]
@@ -934,7 +916,7 @@ define <8 x float> @test_masked_4xfloat_to_8xfloat_mem_mask3(<4 x float>* %vp, <
 
 define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask3(<4 x float>* %vp, <8 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_8xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %ymm1, %ymm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} ymm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3]
@@ -947,7 +929,7 @@ define <8 x float> @test_masked_z_4xfloat_to_8xfloat_mem_mask3(<4 x float>* %vp,
 }
 define <16 x float> @test_4xfloat_to_16xfloat_mem(<4 x float>* %vp) {
 ; CHECK-LABEL: test_4xfloat_to_16xfloat_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
 ; CHECK-NEXT:    retq
   %vec = load <4 x float>, <4 x float>* %vp
@@ -956,7 +938,7 @@ define <16 x float> @test_4xfloat_to_16xfloat_mem(<4 x float>* %vp) {
 }
 define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask0(<4 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -970,7 +952,7 @@ define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask0(<4 x float>* %vp,
 
 define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask0(<4 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -983,7 +965,7 @@ define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask0(<4 x float>* %v
 }
 define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask1(<4 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -997,7 +979,7 @@ define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask1(<4 x float>* %vp,
 
 define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask1(<4 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -1010,7 +992,7 @@ define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask1(<4 x float>* %v
 }
 define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask2(<4 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -1024,7 +1006,7 @@ define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask2(<4 x float>* %vp,
 
 define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask2(<4 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -1037,7 +1019,7 @@ define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask2(<4 x float>* %v
 }
 define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask3(<4 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_4xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -1051,7 +1033,7 @@ define <16 x float> @test_masked_4xfloat_to_16xfloat_mem_mask3(<4 x float>* %vp,
 
 define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask3(<4 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_4xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x4 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,0,1,2,3,0,1,2,3,0,1,2,3]
@@ -1064,7 +1046,7 @@ define <16 x float> @test_masked_z_4xfloat_to_16xfloat_mem_mask3(<4 x float>* %v
 }
 define <16 x float> @test_8xfloat_to_16xfloat_mem(<8 x float>* %vp) {
 ; CHECK-LABEL: test_8xfloat_to_16xfloat_mem:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vbroadcastf64x4 {{.*#+}} zmm0 = mem[0,1,2,3,0,1,2,3]
 ; CHECK-NEXT:    retq
   %vec = load <8 x float>, <8 x float>* %vp
@@ -1073,7 +1055,7 @@ define <16 x float> @test_8xfloat_to_16xfloat_mem(<8 x float>* %vp) {
 }
 define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask0(<8 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_8xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1087,7 +1069,7 @@ define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask0(<8 x float>* %vp,
 
 define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask0(<8 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_8xfloat_to_16xfloat_mem_mask0:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1100,7 +1082,7 @@ define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask0(<8 x float>* %v
 }
 define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask1(<8 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_8xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1114,7 +1096,7 @@ define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask1(<8 x float>* %vp,
 
 define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask1(<8 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_8xfloat_to_16xfloat_mem_mask1:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1127,7 +1109,7 @@ define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask1(<8 x float>* %v
 }
 define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask2(<8 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_8xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1141,7 +1123,7 @@ define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask2(<8 x float>* %vp,
 
 define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask2(<8 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_8xfloat_to_16xfloat_mem_mask2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1154,7 +1136,7 @@ define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask2(<8 x float>* %v
 }
 define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask3(<8 x float>* %vp, <16 x float> %default, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_8xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm2, %xmm2, %xmm2
 ; CHECK-NEXT:    vcmpeqps %zmm2, %zmm1, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]
@@ -1168,7 +1150,7 @@ define <16 x float> @test_masked_8xfloat_to_16xfloat_mem_mask3(<8 x float>* %vp,
 
 define <16 x float> @test_masked_z_8xfloat_to_16xfloat_mem_mask3(<8 x float>* %vp, <16 x float> %mask) {
 ; CHECK-LABEL: test_masked_z_8xfloat_to_16xfloat_mem_mask3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vcmpeqps %zmm1, %zmm0, %k1
 ; CHECK-NEXT:    vbroadcastf32x8 {{.*#+}} zmm0 {%k1} {z} = mem[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7]

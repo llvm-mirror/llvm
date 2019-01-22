@@ -1,9 +1,8 @@
 //===- LoopAnalysisManager.h - Loop analysis management ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -37,6 +36,7 @@
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -58,13 +58,17 @@ struct LoopStandardAnalysisResults {
   ScalarEvolution &SE;
   TargetLibraryInfo &TLI;
   TargetTransformInfo &TTI;
+  MemorySSA *MSSA;
 };
+
+/// Enables memory ssa as a dependency for loop passes.
+extern cl::opt<bool> EnableMSSALoopDependency;
 
 /// Extern template declaration for the analysis set for this IR unit.
 extern template class AllAnalysesOn<Loop>;
 
 extern template class AnalysisManager<Loop, LoopStandardAnalysisResults &>;
-/// \brief The loop analysis manager.
+/// The loop analysis manager.
 ///
 /// See the documentation for the AnalysisManager template for detail
 /// documentation. This typedef serves as a convenient way to refer to this

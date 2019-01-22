@@ -1,15 +1,12 @@
 //===- llvm/unittest/DebugInfo/MSF/MappedBlockStreamTest.cpp --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
-#include "llvm/DebugInfo/MSF/IMSFFile.h"
-#include "llvm/DebugInfo/MSF/MSFError.h"
 #include "llvm/Support/BinaryByteStream.h"
 #include "llvm/Support/BinaryStreamReader.h"
 #include "llvm/Support/BinaryStreamRef.h"
@@ -19,7 +16,6 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-#include <unordered_map>
 
 using namespace llvm;
 using namespace llvm::msf;
@@ -42,7 +38,7 @@ public:
 
   Error readBytes(uint32_t Offset, uint32_t Size,
                   ArrayRef<uint8_t> &Buffer) override {
-    if (auto EC = checkOffset(Offset, Size))
+    if (auto EC = checkOffsetForRead(Offset, Size))
       return EC;
     Buffer = Data.slice(Offset, Size);
     return Error::success();
@@ -50,7 +46,7 @@ public:
 
   Error readLongestContiguousChunk(uint32_t Offset,
                                    ArrayRef<uint8_t> &Buffer) override {
-    if (auto EC = checkOffset(Offset, 1))
+    if (auto EC = checkOffsetForRead(Offset, 1))
       return EC;
     Buffer = Data.drop_front(Offset);
     return Error::success();
@@ -59,7 +55,7 @@ public:
   uint32_t getLength() override { return Data.size(); }
 
   Error writeBytes(uint32_t Offset, ArrayRef<uint8_t> SrcData) override {
-    if (auto EC = checkOffset(Offset, SrcData.size()))
+    if (auto EC = checkOffsetForWrite(Offset, SrcData.size()))
       return EC;
     ::memcpy(&Data[Offset], SrcData.data(), SrcData.size());
     return Error::success();

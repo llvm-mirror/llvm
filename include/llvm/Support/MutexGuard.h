@@ -1,9 +1,8 @@
 //===-- Support/MutexGuard.h - Acquire/Release Mutex In Scope ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,7 +22,7 @@ namespace llvm {
   /// these on the stack at the top of some scope to be assured that C++
   /// destruction of the object will always release the Mutex and thus avoid
   /// a host of nasty multi-threading problems in the face of exceptions, etc.
-  /// @brief Guard a section of code with a Mutex.
+  /// Guard a section of code with a Mutex.
   class MutexGuard {
     sys::Mutex &M;
     MutexGuard(const MutexGuard &) = delete;

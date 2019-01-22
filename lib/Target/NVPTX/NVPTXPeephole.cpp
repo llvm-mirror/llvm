@@ -1,9 +1,8 @@
 //===-- NVPTXPeephole.cpp - NVPTX Peephole Optimiztions -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,11 +21,11 @@
 // This peephole pass optimizes these cases, for example
 //
 // It will transform the following pattern
-//    %vreg0<def> = LEA_ADDRi64 %VRFrame, 4
-//    %vreg1<def> = cvta_to_local_yes_64 %vreg0
+//    %0 = LEA_ADDRi64 %VRFrame, 4
+//    %1 = cvta_to_local_yes_64 %0
 //
 // into
-//    %vreg1<def> = LEA_ADDRi64 %VRFrameLocal, 4
+//    %1 = LEA_ADDRi64 %VRFrameLocal, 4
 //
 // %VRFrameLocal is the virtual register name of %SPL
 //
@@ -36,8 +35,8 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 using namespace llvm;
 
@@ -125,7 +124,7 @@ static void CombineCVTAToLocal(MachineInstr &Root) {
 }
 
 bool NVPTXPeephole::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   bool Changed = false;

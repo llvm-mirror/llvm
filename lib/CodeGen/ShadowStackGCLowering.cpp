@@ -1,9 +1,8 @@
 //===- ShadowStackGCLowering.cpp - Custom lowering for shadow-stack gc ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -175,7 +174,7 @@ bool ShadowStackGCLowering::doInitialization(Module &M) {
   }
   if (!Active)
     return false;
-  
+
   // struct FrameMap {
   //   int32_t NumRoots; // Number of roots in stack frame.
   //   int32_t NumMeta;  // Number of metadata descriptors. May be < NumRoots.
@@ -286,7 +285,7 @@ bool ShadowStackGCLowering::runOnFunction(Function &F) {
   if (!F.hasGC() ||
       F.getGC() != std::string("shadow-stack"))
     return false;
-  
+
   LLVMContext &Context = F.getContext();
 
   // Find calls to llvm.gcroot.

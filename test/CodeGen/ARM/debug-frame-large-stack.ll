@@ -1,4 +1,4 @@
-; RUN: llc -filetype=asm -o - < %s -mtriple arm-arm-netbsd-eabi -disable-fp-elim| FileCheck %s --check-prefix=CHECK-ARM
+; RUN: llc -filetype=asm -o - < %s -mtriple arm-arm-netbsd-eabi -frame-pointer=all| FileCheck %s --check-prefix=CHECK-ARM
 ; RUN: llc -filetype=asm -o - < %s -mtriple arm-arm-netbsd-eabi | FileCheck %s --check-prefix=CHECK-ARM-FP-ELIM
 
 define void @test1() {
@@ -35,6 +35,7 @@ define void @test2() {
 ; CHECK-ARM: sub    sp, sp, #4096
 ; CHECK-ARM: .cfi_endproc
 
+; FIXME: Misspelled CHECK-ARM-FP-ELIM
 ; CHECK-ARM-FP_ELIM-LABEL: test2:
 ; CHECK-ARM-FP_ELIM: .cfi_startproc
 ; CHECK-ARM-FP_ELIM: push    {r4, r5}

@@ -1,9 +1,8 @@
 //===- DebugFrameDataSubsection.cpp -----------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,8 +13,11 @@ using namespace llvm;
 using namespace llvm::codeview;
 
 Error DebugFrameDataSubsectionRef::initialize(BinaryStreamReader Reader) {
-  if (auto EC = Reader.readObject(RelocPtr))
-    return EC;
+  if (Reader.bytesRemaining() % sizeof(FrameData) != 0) {
+    if (auto EC = Reader.readObject(RelocPtr))
+      return EC;
+  }
+
   if (Reader.bytesRemaining() % sizeof(FrameData) != 0)
     return make_error<CodeViewError>(cv_error_code::corrupt_record,
                                      "Invalid frame data record format!");
@@ -26,15 +28,30 @@ Error DebugFrameDataSubsectionRef::initialize(BinaryStreamReader Reader) {
   return Error::success();
 }
 
+Error DebugFrameDataSubsectionRef::initialize(BinaryStreamRef Section) {
+  BinaryStreamReader Reader(Section);
+  return initialize(Reader);
+}
+
 uint32_t DebugFrameDataSubsection::calculateSerializedSize() const {
-  return 4 + sizeof(FrameData) * Frames.size();
+  uint32_t Size = sizeof(FrameData) * Frames.size();
+  if (IncludeRelocPtr)
+    Size += sizeof(uint32_t);
+  return Size;
 }
 
 Error DebugFrameDataSubsection::commit(BinaryStreamWriter &Writer) const {
-  if (auto EC = Writer.writeInteger<uint32_t>(0))
-    return EC;
+  if (IncludeRelocPtr) {
+    if (auto EC = Writer.writeInteger<uint32_t>(0))
+      return EC;
+  }
 
-  if (auto EC = Writer.writeArray(makeArrayRef(Frames)))
+  std::vector<FrameData> SortedFrames(Frames.begin(), Frames.end());
+  std::sort(SortedFrames.begin(), SortedFrames.end(),
+            [](const FrameData &LHS, const FrameData &RHS) {
+              return LHS.RvaStart < RHS.RvaStart;
+            });
+  if (auto EC = Writer.writeArray(makeArrayRef(SortedFrames)))
     return EC;
   return Error::success();
 }

@@ -1,9 +1,8 @@
 //===---------- AArch64CollectLOH.cpp - AArch64 collect LOH pass --*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,23 +100,19 @@
 #include "AArch64.h"
 #include "AArch64InstrInfo.h"
 #include "AArch64MachineFunctionInfo.h"
-#include "AArch64Subtarget.h"
-#include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-collect-loh"
@@ -384,8 +379,8 @@ static bool handleMiddleInst(const MachineInstr &MI, LOHInfo &DefInfo,
 static void handleADRP(const MachineInstr &MI, AArch64FunctionInfo &AFI,
                        LOHInfo &Info) {
   if (Info.LastADRP != nullptr) {
-    DEBUG(dbgs() << "Adding MCLOH_AdrpAdrp:\n" << '\t' << MI << '\t'
-                 << *Info.LastADRP);
+    LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAdrp:\n"
+                      << '\t' << MI << '\t' << *Info.LastADRP);
     AFI.addLOHDirective(MCLOH_AdrpAdrp, {&MI, Info.LastADRP});
     ++NumADRPSimpleCandidate;
   }
@@ -394,48 +389,52 @@ static void handleADRP(const MachineInstr &MI, AArch64FunctionInfo &AFI,
   if (Info.IsCandidate) {
     switch (Info.Type) {
     case MCLOH_AdrpAdd:
-      DEBUG(dbgs() << "Adding MCLOH_AdrpAdd:\n" << '\t' << MI << '\t'
-                   << *Info.MI0);
+      LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAdd:\n"
+                        << '\t' << MI << '\t' << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpAdd, {&MI, Info.MI0});
       ++NumADRSimpleCandidate;
       break;
     case MCLOH_AdrpLdr:
       if (supportLoadFromLiteral(*Info.MI0)) {
-        DEBUG(dbgs() << "Adding MCLOH_AdrpLdr:\n" << '\t' << MI << '\t'
-                     << *Info.MI0);
+        LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpLdr:\n"
+                          << '\t' << MI << '\t' << *Info.MI0);
         AFI.addLOHDirective(MCLOH_AdrpLdr, {&MI, Info.MI0});
         ++NumADRPToLDR;
       }
       break;
     case MCLOH_AdrpAddLdr:
-      DEBUG(dbgs() << "Adding MCLOH_AdrpAddLdr:\n" << '\t' << MI << '\t'
-                   << *Info.MI1 << '\t' << *Info.MI0);
+      LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAddLdr:\n"
+                        << '\t' << MI << '\t' << *Info.MI1 << '\t'
+                        << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpAddLdr, {&MI, Info.MI1, Info.MI0});
       ++NumADDToLDR;
       break;
     case MCLOH_AdrpAddStr:
       if (Info.MI1 != nullptr) {
-        DEBUG(dbgs() << "Adding MCLOH_AdrpAddStr:\n" << '\t' << MI << '\t'
-                     << *Info.MI1 << '\t' << *Info.MI0);
+        LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAddStr:\n"
+                          << '\t' << MI << '\t' << *Info.MI1 << '\t'
+                          << *Info.MI0);
         AFI.addLOHDirective(MCLOH_AdrpAddStr, {&MI, Info.MI1, Info.MI0});
         ++NumADDToSTR;
       }
       break;
     case MCLOH_AdrpLdrGotLdr:
-      DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGotLdr:\n" << '\t' << MI << '\t'
-                   << *Info.MI1 << '\t' << *Info.MI0);
+      LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGotLdr:\n"
+                        << '\t' << MI << '\t' << *Info.MI1 << '\t'
+                        << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpLdrGotLdr, {&MI, Info.MI1, Info.MI0});
       ++NumLDRToLDR;
       break;
     case MCLOH_AdrpLdrGotStr:
-      DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGotStr:\n" << '\t' << MI << '\t'
-                   << *Info.MI1 << '\t' << *Info.MI0);
+      LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGotStr:\n"
+                        << '\t' << MI << '\t' << *Info.MI1 << '\t'
+                        << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpLdrGotStr, {&MI, Info.MI1, Info.MI0});
       ++NumLDRToSTR;
       break;
     case MCLOH_AdrpLdrGot:
-      DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGot:\n" << '\t' << MI << '\t'
-                   << *Info.MI0);
+      LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpLdrGot:\n"
+                        << '\t' << MI << '\t' << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpLdrGot, {&MI, Info.MI0});
       break;
     case MCLOH_AdrpAdrp:
@@ -486,11 +485,11 @@ static void handleNormalInst(const MachineInstr &MI, LOHInfo *LOHInfos) {
 }
 
 bool AArch64CollectLOH::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
-  DEBUG(dbgs() << "********** AArch64 Collect LOH **********\n"
-               << "Looking in function " << MF.getName() << '\n');
+  LLVM_DEBUG(dbgs() << "********** AArch64 Collect LOH **********\n"
+                    << "Looking in function " << MF.getName() << '\n');
 
   LOHInfo LOHInfos[N_GPR_REGS];
   AArch64FunctionInfo &AFI = *MF.getInfo<AArch64FunctionInfo>();

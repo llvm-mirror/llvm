@@ -1,9 +1,8 @@
 //===- ARCInstKind.cpp - ObjC ARC Optimization ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -85,97 +84,73 @@ raw_ostream &llvm::objcarc::operator<<(raw_ostream &OS,
 }
 
 ARCInstKind llvm::objcarc::GetFunctionClass(const Function *F) {
-  Function::const_arg_iterator AI = F->arg_begin(), AE = F->arg_end();
 
-  // No (mandatory) arguments.
-  if (AI == AE)
-    return StringSwitch<ARCInstKind>(F->getName())
-        .Case("objc_autoreleasePoolPush", ARCInstKind::AutoreleasepoolPush)
-        .Case("clang.arc.use", ARCInstKind::IntrinsicUser)
-        .Default(ARCInstKind::CallOrUser);
-
-  // One argument.
-  const Argument *A0 = &*AI++;
-  if (AI == AE) {
-    // Argument is a pointer.
-    PointerType *PTy = dyn_cast<PointerType>(A0->getType());
-    if (!PTy)
-      return ARCInstKind::CallOrUser;
-
-    Type *ETy = PTy->getElementType();
-    // Argument is i8*.
-    if (ETy->isIntegerTy(8))
-      return StringSwitch<ARCInstKind>(F->getName())
-          .Case("objc_retain", ARCInstKind::Retain)
-          .Case("objc_retainAutoreleasedReturnValue", ARCInstKind::RetainRV)
-          .Case("objc_unsafeClaimAutoreleasedReturnValue", ARCInstKind::ClaimRV)
-          .Case("objc_retainBlock", ARCInstKind::RetainBlock)
-          .Case("objc_release", ARCInstKind::Release)
-          .Case("objc_autorelease", ARCInstKind::Autorelease)
-          .Case("objc_autoreleaseReturnValue", ARCInstKind::AutoreleaseRV)
-          .Case("objc_autoreleasePoolPop", ARCInstKind::AutoreleasepoolPop)
-          .Case("objc_retainedObject", ARCInstKind::NoopCast)
-          .Case("objc_unretainedObject", ARCInstKind::NoopCast)
-          .Case("objc_unretainedPointer", ARCInstKind::NoopCast)
-          .Case("objc_retain_autorelease", ARCInstKind::FusedRetainAutorelease)
-          .Case("objc_retainAutorelease", ARCInstKind::FusedRetainAutorelease)
-          .Case("objc_retainAutoreleaseReturnValue",
-                ARCInstKind::FusedRetainAutoreleaseRV)
-          .Case("objc_sync_enter", ARCInstKind::User)
-          .Case("objc_sync_exit", ARCInstKind::User)
-          .Default(ARCInstKind::CallOrUser);
-
-    // Argument is i8**
-    if (PointerType *Pte = dyn_cast<PointerType>(ETy))
-      if (Pte->getElementType()->isIntegerTy(8))
-        return StringSwitch<ARCInstKind>(F->getName())
-            .Case("objc_loadWeakRetained", ARCInstKind::LoadWeakRetained)
-            .Case("objc_loadWeak", ARCInstKind::LoadWeak)
-            .Case("objc_destroyWeak", ARCInstKind::DestroyWeak)
-            .Default(ARCInstKind::CallOrUser);
-
-    // Anything else with one argument.
+  Intrinsic::ID ID = F->getIntrinsicID();
+  switch (ID) {
+  default:
     return ARCInstKind::CallOrUser;
+  case Intrinsic::objc_autorelease:
+    return ARCInstKind::Autorelease;
+  case Intrinsic::objc_autoreleasePoolPop:
+    return ARCInstKind::AutoreleasepoolPop;
+  case Intrinsic::objc_autoreleasePoolPush:
+    return ARCInstKind::AutoreleasepoolPush;
+  case Intrinsic::objc_autoreleaseReturnValue:
+    return ARCInstKind::AutoreleaseRV;
+  case Intrinsic::objc_copyWeak:
+    return ARCInstKind::CopyWeak;
+  case Intrinsic::objc_destroyWeak:
+    return ARCInstKind::DestroyWeak;
+  case Intrinsic::objc_initWeak:
+    return ARCInstKind::InitWeak;
+  case Intrinsic::objc_loadWeak:
+    return ARCInstKind::LoadWeak;
+  case Intrinsic::objc_loadWeakRetained:
+    return ARCInstKind::LoadWeakRetained;
+  case Intrinsic::objc_moveWeak:
+    return ARCInstKind::MoveWeak;
+  case Intrinsic::objc_release:
+    return ARCInstKind::Release;
+  case Intrinsic::objc_retain:
+    return ARCInstKind::Retain;
+  case Intrinsic::objc_retainAutorelease:
+    return ARCInstKind::FusedRetainAutorelease;
+  case Intrinsic::objc_retainAutoreleaseReturnValue:
+    return ARCInstKind::FusedRetainAutoreleaseRV;
+  case Intrinsic::objc_retainAutoreleasedReturnValue:
+    return ARCInstKind::RetainRV;
+  case Intrinsic::objc_retainBlock:
+    return ARCInstKind::RetainBlock;
+  case Intrinsic::objc_storeStrong:
+    return ARCInstKind::StoreStrong;
+  case Intrinsic::objc_storeWeak:
+    return ARCInstKind::StoreWeak;
+  case Intrinsic::objc_clang_arc_use:
+    return ARCInstKind::IntrinsicUser;
+  case Intrinsic::objc_unsafeClaimAutoreleasedReturnValue:
+    return ARCInstKind::ClaimRV;
+  case Intrinsic::objc_retainedObject:
+    return ARCInstKind::NoopCast;
+  case Intrinsic::objc_unretainedObject:
+    return ARCInstKind::NoopCast;
+  case Intrinsic::objc_unretainedPointer:
+    return ARCInstKind::NoopCast;
+  case Intrinsic::objc_retain_autorelease:
+    return ARCInstKind::FusedRetainAutorelease;
+  case Intrinsic::objc_sync_enter:
+    return ARCInstKind::User;
+  case Intrinsic::objc_sync_exit:
+    return ARCInstKind::User;
+  case Intrinsic::objc_arc_annotation_topdown_bbstart:
+  case Intrinsic::objc_arc_annotation_topdown_bbend:
+  case Intrinsic::objc_arc_annotation_bottomup_bbstart:
+  case Intrinsic::objc_arc_annotation_bottomup_bbend:
+    // Ignore annotation calls. This is important to stop the
+    // optimizer from treating annotations as uses which would
+    // make the state of the pointers they are attempting to
+    // elucidate to be incorrect.
+    return ARCInstKind::None;
   }
-
-  // Two arguments, first is i8**.
-  const Argument *A1 = &*AI++;
-  if (AI == AE)
-    if (PointerType *PTy = dyn_cast<PointerType>(A0->getType()))
-      if (PointerType *Pte = dyn_cast<PointerType>(PTy->getElementType()))
-        if (Pte->getElementType()->isIntegerTy(8))
-          if (PointerType *PTy1 = dyn_cast<PointerType>(A1->getType())) {
-            Type *ETy1 = PTy1->getElementType();
-            // Second argument is i8*
-            if (ETy1->isIntegerTy(8))
-              return StringSwitch<ARCInstKind>(F->getName())
-                  .Case("objc_storeWeak", ARCInstKind::StoreWeak)
-                  .Case("objc_initWeak", ARCInstKind::InitWeak)
-                  .Case("objc_storeStrong", ARCInstKind::StoreStrong)
-                  .Default(ARCInstKind::CallOrUser);
-            // Second argument is i8**.
-            if (PointerType *Pte1 = dyn_cast<PointerType>(ETy1))
-              if (Pte1->getElementType()->isIntegerTy(8))
-                return StringSwitch<ARCInstKind>(F->getName())
-                    .Case("objc_moveWeak", ARCInstKind::MoveWeak)
-                    .Case("objc_copyWeak", ARCInstKind::CopyWeak)
-                    // Ignore annotation calls. This is important to stop the
-                    // optimizer from treating annotations as uses which would
-                    // make the state of the pointers they are attempting to
-                    // elucidate to be incorrect.
-                    .Case("llvm.arc.annotation.topdown.bbstart",
-                          ARCInstKind::None)
-                    .Case("llvm.arc.annotation.topdown.bbend",
-                          ARCInstKind::None)
-                    .Case("llvm.arc.annotation.bottomup.bbstart",
-                          ARCInstKind::None)
-                    .Case("llvm.arc.annotation.bottomup.bbend",
-                          ARCInstKind::None)
-                    .Default(ARCInstKind::CallOrUser);
-          }
-
-  // Anything else.
-  return ARCInstKind::CallOrUser;
 }
 
 // A whitelist of intrinsics that we know do not use objc pointers or decrement
@@ -209,6 +184,7 @@ static bool isInertIntrinsic(unsigned ID) {
   // Don't let dbg info affect our results.
   case Intrinsic::dbg_declare:
   case Intrinsic::dbg_value:
+  case Intrinsic::dbg_label:
     // Short cut: Some intrinsics obviously don't use ObjC pointers.
     return true;
   default:
@@ -233,7 +209,7 @@ static bool isUseOnlyIntrinsic(unsigned ID) {
   }
 }
 
-/// \brief Determine what kind of construct V is.
+/// Determine what kind of construct V is.
 ARCInstKind llvm::objcarc::GetARCInstKind(const Value *V) {
   if (const Instruction *I = dyn_cast<Instruction>(V)) {
     // Any instruction other than bitcast and gep with a pointer operand have a
@@ -331,7 +307,7 @@ ARCInstKind llvm::objcarc::GetARCInstKind(const Value *V) {
   return ARCInstKind::None;
 }
 
-/// \brief Test if the given class is a kind of user.
+/// Test if the given class is a kind of user.
 bool llvm::objcarc::IsUser(ARCInstKind Class) {
   switch (Class) {
   case ARCInstKind::User:
@@ -365,7 +341,7 @@ bool llvm::objcarc::IsUser(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class is objc_retain or equivalent.
+/// Test if the given class is objc_retain or equivalent.
 bool llvm::objcarc::IsRetain(ARCInstKind Class) {
   switch (Class) {
   case ARCInstKind::Retain:
@@ -401,7 +377,7 @@ bool llvm::objcarc::IsRetain(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class is objc_autorelease or equivalent.
+/// Test if the given class is objc_autorelease or equivalent.
 bool llvm::objcarc::IsAutorelease(ARCInstKind Class) {
   switch (Class) {
   case ARCInstKind::Autorelease:
@@ -435,7 +411,7 @@ bool llvm::objcarc::IsAutorelease(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class represents instructions which return their
+/// Test if the given class represents instructions which return their
 /// argument verbatim.
 bool llvm::objcarc::IsForwarding(ARCInstKind Class) {
   switch (Class) {
@@ -470,7 +446,7 @@ bool llvm::objcarc::IsForwarding(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class represents instructions which do nothing if
+/// Test if the given class represents instructions which do nothing if
 /// passed a null pointer.
 bool llvm::objcarc::IsNoopOnNull(ARCInstKind Class) {
   switch (Class) {
@@ -505,7 +481,7 @@ bool llvm::objcarc::IsNoopOnNull(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class represents instructions which are always safe
+/// Test if the given class represents instructions which are always safe
 /// to mark with the "tail" keyword.
 bool llvm::objcarc::IsAlwaysTail(ARCInstKind Class) {
   // ARCInstKind::RetainBlock may be given a stack argument.
@@ -541,7 +517,7 @@ bool llvm::objcarc::IsAlwaysTail(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class represents instructions which are never safe
+/// Test if the given class represents instructions which are never safe
 /// to mark with the "tail" keyword.
 bool llvm::objcarc::IsNeverTail(ARCInstKind Class) {
   /// It is never safe to tail call objc_autorelease since by tail calling
@@ -580,7 +556,7 @@ bool llvm::objcarc::IsNeverTail(ARCInstKind Class) {
   llvm_unreachable("covered switch isn't covered?");
 }
 
-/// \brief Test if the given class represents instructions which are always safe
+/// Test if the given class represents instructions which are always safe
 /// to mark with the nounwind attribute.
 bool llvm::objcarc::IsNoThrow(ARCInstKind Class) {
   // objc_retainBlock is not nounwind because it calls user copy constructors

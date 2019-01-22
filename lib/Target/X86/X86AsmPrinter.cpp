@@ -1,9 +1,8 @@
 //===-- X86AsmPrinter.cpp - Convert X86 LLVM code to AT&T assembly --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,25 +18,25 @@
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
 #include "llvm/BinaryFormat/COFF.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionCOFF.h"
+#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -65,7 +64,7 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   SetupMachineFunction(MF);
 
   if (Subtarget->isTargetCOFF()) {
-    bool Local = MF.getFunction()->hasLocalLinkage();
+    bool Local = MF.getFunction().hasLocalLinkage();
     OutStreamer->BeginCOFFSymbolDef(CurrentFnSym);
     OutStreamer->EmitCOFFSymbolStorageClass(
         Local ? COFF::IMAGE_SYM_CLASS_STATIC : COFF::IMAGE_SYM_CLASS_EXTERNAL);
@@ -88,19 +87,19 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
 void X86AsmPrinter::EmitFunctionBodyStart() {
   if (EmitFPOData) {
-    X86TargetStreamer *XTS =
-        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
-    unsigned ParamsSize =
-        MF->getInfo<X86MachineFunctionInfo>()->getArgumentStackSize();
-    XTS->emitFPOProc(CurrentFnSym, ParamsSize);
+    if (auto *XTS =
+        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer()))
+      XTS->emitFPOProc(
+          CurrentFnSym,
+          MF->getInfo<X86MachineFunctionInfo>()->getArgumentStackSize());
   }
 }
 
 void X86AsmPrinter::EmitFunctionBodyEnd() {
   if (EmitFPOData) {
-    X86TargetStreamer *XTS =
-        static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer());
-    XTS->emitFPOEndProc();
+    if (auto *XTS =
+            static_cast<X86TargetStreamer *>(OutStreamer->getTargetStreamer()))
+      XTS->emitFPOEndProc();
   }
 }
 
@@ -129,6 +128,9 @@ static void printSymbolOperand(X86AsmPrinter &P, const MachineOperand &MO,
     if (MO.getTargetFlags() == X86II::MO_DLLIMPORT)
       GVSym =
           P.OutContext.getOrCreateSymbol(Twine("__imp_") + GVSym->getName());
+    else if (MO.getTargetFlags() == X86II::MO_COFFSTUB)
+      GVSym =
+          P.OutContext.getOrCreateSymbol(Twine(".refptr.") + GVSym->getName());
 
     if (MO.getTargetFlags() == X86II::MO_DARWIN_NONLAZY ||
         MO.getTargetFlags() == X86II::MO_DARWIN_NONLAZY_PIC_BASE) {
@@ -161,6 +163,7 @@ static void printSymbolOperand(X86AsmPrinter &P, const MachineOperand &MO,
     break;
   case X86II::MO_DARWIN_NONLAZY:
   case X86II::MO_DLLIMPORT:
+  case X86II::MO_COFFSTUB:
     // These affect the name of the symbol, not any suffix.
     break;
   case X86II::MO_GOT_ABSOLUTE_ADDRESS:
@@ -372,6 +375,14 @@ static void printIntelMemReference(X86AsmPrinter &P, const MachineInstr *MI,
 static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
                               char Mode, raw_ostream &O) {
   unsigned Reg = MO.getReg();
+  bool EmitPercent = true;
+
+  if (!X86::GR8RegClass.contains(Reg) &&
+      !X86::GR16RegClass.contains(Reg) &&
+      !X86::GR32RegClass.contains(Reg) &&
+      !X86::GR64RegClass.contains(Reg))
+    return true;
+
   switch (Mode) {
   default: return true;  // Unknown mode.
   case 'b': // Print QImode register
@@ -386,6 +397,9 @@ static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
   case 'k': // Print SImode register
     Reg = getX86SubSuperRegister(Reg, 32);
     break;
+  case 'V':
+    EmitPercent = false;
+    LLVM_FALLTHROUGH;
   case 'q':
     // Print 64-bit register names if 64-bit integer registers are available.
     // Otherwise, print 32-bit register names.
@@ -393,7 +407,10 @@ static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
     break;
   }
 
-  O << '%' << X86ATTInstPrinter::getRegisterName(Reg);
+  if (EmitPercent)
+    O << '%';
+
+  O << X86ATTInstPrinter::getRegisterName(Reg);
   return false;
 }
 
@@ -466,6 +483,7 @@ bool X86AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     case 'w': // Print HImode register
     case 'k': // Print SImode register
     case 'q': // Print DImode register
+    case 'V': // Print native register without '%'
       if (MO.isReg())
         return printAsmMRegister(*this, MO, ExtraCode[0], O);
       printOperand(*this, MI, OpNo, O);
@@ -475,7 +493,7 @@ bool X86AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
       printPCRelImm(*this, MI, OpNo, O);
       return false;
 
-    case 'n':  // Negate the immediate or print a '-' before the operand.
+    case 'n': // Negate the immediate or print a '-' before the operand.
       // Note: this is a temporary solution. It should be handled target
       // independently as part of the 'MC' work.
       if (MO.isImm()) {
@@ -526,27 +544,70 @@ bool X86AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 void X86AsmPrinter::EmitStartOfAsmFile(Module &M) {
   const Triple &TT = TM.getTargetTriple();
 
+  if (TT.isOSBinFormatELF()) {
+    // Assemble feature flags that may require creation of a note section.
+    unsigned FeatureFlagsAnd = 0;
+    if (M.getModuleFlag("cf-protection-branch"))
+      FeatureFlagsAnd |= ELF::GNU_PROPERTY_X86_FEATURE_1_IBT;
+    if (M.getModuleFlag("cf-protection-return"))
+      FeatureFlagsAnd |= ELF::GNU_PROPERTY_X86_FEATURE_1_SHSTK;
+
+    if (FeatureFlagsAnd) {
+      // Emit a .note.gnu.property section with the flags.
+      if (!TT.isArch32Bit() && !TT.isArch64Bit())
+        llvm_unreachable("CFProtection used on invalid architecture!");
+      MCSection *Cur = OutStreamer->getCurrentSectionOnly();
+      MCSection *Nt = MMI->getContext().getELFSection(
+          ".note.gnu.property", ELF::SHT_NOTE, ELF::SHF_ALLOC);
+      OutStreamer->SwitchSection(Nt);
+
+      // Emitting note header.
+      int WordSize = TT.isArch64Bit() ? 8 : 4;
+      EmitAlignment(WordSize == 4 ? 2 : 3);
+      OutStreamer->EmitIntValue(4, 4 /*size*/); // data size for "GNU\0"
+      OutStreamer->EmitIntValue(8 + WordSize, 4 /*size*/); // Elf_Prop size
+      OutStreamer->EmitIntValue(ELF::NT_GNU_PROPERTY_TYPE_0, 4 /*size*/);
+      OutStreamer->EmitBytes(StringRef("GNU", 4)); // note name
+
+      // Emitting an Elf_Prop for the CET properties.
+      OutStreamer->EmitIntValue(ELF::GNU_PROPERTY_X86_FEATURE_1_AND, 4);
+      OutStreamer->EmitIntValue(4, 4);               // data size
+      OutStreamer->EmitIntValue(FeatureFlagsAnd, 4); // data
+      EmitAlignment(WordSize == 4 ? 2 : 3);          // padding
+
+      OutStreamer->endSection(Nt);
+      OutStreamer->SwitchSection(Cur);
+    }
+  }
+
   if (TT.isOSBinFormatMachO())
     OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
   if (TT.isOSBinFormatCOFF()) {
     // Emit an absolute @feat.00 symbol.  This appears to be some kind of
     // compiler features bitfield read by link.exe.
+    MCSymbol *S = MMI->getContext().getOrCreateSymbol(StringRef("@feat.00"));
+    OutStreamer->BeginCOFFSymbolDef(S);
+    OutStreamer->EmitCOFFSymbolStorageClass(COFF::IMAGE_SYM_CLASS_STATIC);
+    OutStreamer->EmitCOFFSymbolType(COFF::IMAGE_SYM_DTYPE_NULL);
+    OutStreamer->EndCOFFSymbolDef();
+    int64_t Feat00Flags = 0;
+
     if (TT.getArch() == Triple::x86) {
-      MCSymbol *S = MMI->getContext().getOrCreateSymbol(StringRef("@feat.00"));
-      OutStreamer->BeginCOFFSymbolDef(S);
-      OutStreamer->EmitCOFFSymbolStorageClass(COFF::IMAGE_SYM_CLASS_STATIC);
-      OutStreamer->EmitCOFFSymbolType(COFF::IMAGE_SYM_DTYPE_NULL);
-      OutStreamer->EndCOFFSymbolDef();
       // According to the PE-COFF spec, the LSB of this value marks the object
       // for "registered SEH".  This means that all SEH handler entry points
       // must be registered in .sxdata.  Use of any unregistered handlers will
       // cause the process to terminate immediately.  LLVM does not know how to
       // register any SEH handlers, so its object files should be safe.
-      OutStreamer->EmitSymbolAttribute(S, MCSA_Global);
-      OutStreamer->EmitAssignment(
-          S, MCConstantExpr::create(int64_t(1), MMI->getContext()));
+      Feat00Flags |= 1;
     }
+
+    if (M.getModuleFlag("cfguardtable"))
+      Feat00Flags |= 0x800; // Object is CFG-aware.
+
+    OutStreamer->EmitSymbolAttribute(S, MCSA_Global);
+    OutStreamer->EmitAssignment(
+        S, MCConstantExpr::create(Feat00Flags, MMI->getContext()));
   }
   OutStreamer->EmitSyntaxDirective();
 
@@ -580,64 +641,48 @@ emitNonLazySymbolPointer(MCStreamer &OutStreamer, MCSymbol *StubLabel,
         4 /*size*/);
 }
 
-MCSymbol *X86AsmPrinter::GetCPISymbol(unsigned CPID) const {
-  if (Subtarget->isTargetKnownWindowsMSVC()) {
-    const MachineConstantPoolEntry &CPE =
-        MF->getConstantPool()->getConstants()[CPID];
-    if (!CPE.isMachineConstantPoolEntry()) {
-      const DataLayout &DL = MF->getDataLayout();
-      SectionKind Kind = CPE.getSectionKind(&DL);
-      const Constant *C = CPE.Val.ConstVal;
-      unsigned Align = CPE.Alignment;
-      if (const MCSectionCOFF *S = dyn_cast<MCSectionCOFF>(
-              getObjFileLowering().getSectionForConstant(DL, Kind, C, Align))) {
-        if (MCSymbol *Sym = S->getCOMDATSymbol()) {
-          if (Sym->isUndefined())
-            OutStreamer->EmitSymbolAttribute(Sym, MCSA_Global);
-          return Sym;
-        }
-      }
-    }
-  }
+static void emitNonLazyStubs(MachineModuleInfo *MMI, MCStreamer &OutStreamer) {
 
-  return AsmPrinter::GetCPISymbol(CPID);
+  MachineModuleInfoMachO &MMIMacho =
+      MMI->getObjFileInfo<MachineModuleInfoMachO>();
+
+  // Output stubs for dynamically-linked functions.
+  MachineModuleInfoMachO::SymbolListTy Stubs;
+
+  // Output stubs for external and common global variables.
+  Stubs = MMIMacho.GetGVStubList();
+  if (!Stubs.empty()) {
+    OutStreamer.SwitchSection(MMI->getContext().getMachOSection(
+        "__IMPORT", "__pointers", MachO::S_NON_LAZY_SYMBOL_POINTERS,
+        SectionKind::getMetadata()));
+
+    for (auto &Stub : Stubs)
+      emitNonLazySymbolPointer(OutStreamer, Stub.first, Stub.second);
+
+    Stubs.clear();
+    OutStreamer.AddBlankLine();
+  }
 }
 
 void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   const Triple &TT = TM.getTargetTriple();
 
   if (TT.isOSBinFormatMachO()) {
-    // All darwin targets use mach-o.
-    MachineModuleInfoMachO &MMIMacho =
-        MMI->getObjFileInfo<MachineModuleInfoMachO>();
+    // Mach-O uses non-lazy symbol stubs to encode per-TU information into
+    // global table for symbol lookup.
+    emitNonLazyStubs(MMI, *OutStreamer);
 
-    // Output stubs for dynamically-linked functions.
-    MachineModuleInfoMachO::SymbolListTy Stubs;
-
-    // Output stubs for external and common global variables.
-    Stubs = MMIMacho.GetGVStubList();
-    if (!Stubs.empty()) {
-      MCSection *TheSection = OutContext.getMachOSection(
-          "__IMPORT", "__pointers", MachO::S_NON_LAZY_SYMBOL_POINTERS,
-          SectionKind::getMetadata());
-      OutStreamer->SwitchSection(TheSection);
-
-      for (auto &Stub : Stubs)
-        emitNonLazySymbolPointer(*OutStreamer, Stub.first, Stub.second);
-
-      Stubs.clear();
-      OutStreamer->AddBlankLine();
-    }
-
-    SM.serializeToStackMapSection();
+    // Emit stack and fault map information.
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
 
-    // Funny Darwin hack: This flag tells the linker that no global symbols
-    // contain code that falls through to other global symbols (e.g. the obvious
-    // implementation of multiple entry points).  If this doesn't occur, the
-    // linker can safely perform dead code stripping.  Since LLVM never
-    // generates code that does this, it is always safe to set.
+    // This flag tells the linker that no global symbols contain code that fall
+    // through to other global symbols (e.g. an implementation of multiple entry
+    // points). If this doesn't occur, the linker can safely perform dead code
+    // stripping. Since LLVM never generates code that does this, it is always
+    // safe to set.
     OutStreamer->EmitAssemblerFlag(MCAF_SubsectionsViaSymbols);
+    return;
   }
 
   if (TT.isKnownWindowsMSVCEnvironment() && MMI->usesVAFloatArgument()) {
@@ -645,36 +690,18 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
         (TT.getArch() == Triple::x86_64) ? "_fltused" : "__fltused";
     MCSymbol *S = MMI->getContext().getOrCreateSymbol(SymbolName);
     OutStreamer->EmitSymbolAttribute(S, MCSA_Global);
+    return;
   }
 
   if (TT.isOSBinFormatCOFF()) {
-    const TargetLoweringObjectFileCOFF &TLOFCOFF =
-        static_cast<const TargetLoweringObjectFileCOFF&>(getObjFileLowering());
-
-    std::string Flags;
-    raw_string_ostream FlagsOS(Flags);
-
-    for (const auto &Function : M)
-      TLOFCOFF.emitLinkerFlagsForGlobal(FlagsOS, &Function);
-    for (const auto &Global : M.globals())
-      TLOFCOFF.emitLinkerFlagsForGlobal(FlagsOS, &Global);
-    for (const auto &Alias : M.aliases())
-      TLOFCOFF.emitLinkerFlagsForGlobal(FlagsOS, &Alias);
-
-    FlagsOS.flush();
-
-    // Output collected flags.
-    if (!Flags.empty()) {
-      OutStreamer->SwitchSection(TLOFCOFF.getDrectveSection());
-      OutStreamer->EmitBytes(Flags);
-    }
-
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
+    return;
   }
 
   if (TT.isOSBinFormatELF()) {
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
+    return;
   }
 }
 

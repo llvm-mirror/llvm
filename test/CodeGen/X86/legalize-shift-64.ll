@@ -3,9 +3,9 @@
 
 define i64 @test1(i32 %xx, i32 %test) nounwind {
 ; CHECK-LABEL: test1:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
+; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; CHECK-NEXT:    andb $7, %cl
 ; CHECK-NEXT:    movl %edx, %eax
 ; CHECK-NEXT:    shll %cl, %eax
@@ -22,7 +22,7 @@ define i64 @test1(i32 %xx, i32 %test) nounwind {
 
 define i64 @test2(i64 %xx, i32 %test) nounwind {
 ; CHECK-LABEL: test2:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushl %esi
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %esi
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
@@ -41,7 +41,7 @@ define i64 @test2(i64 %xx, i32 %test) nounwind {
 
 define i64 @test3(i64 %xx, i32 %test) nounwind {
 ; CHECK-LABEL: test3:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
@@ -57,7 +57,7 @@ define i64 @test3(i64 %xx, i32 %test) nounwind {
 
 define i64 @test4(i64 %xx, i32 %test) nounwind {
 ; CHECK-LABEL: test4:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
@@ -74,7 +74,7 @@ define i64 @test4(i64 %xx, i32 %test) nounwind {
 ; PR14668
 define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; CHECK-LABEL: test5:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushl %ebp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    pushl %ebx
@@ -88,6 +88,8 @@ define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; CHECK-NEXT:    .cfi_offset %ebx, -12
 ; CHECK-NEXT:    .cfi_offset %ebp, -8
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %ch
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ebx
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %esi
@@ -97,18 +99,17 @@ define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; CHECK-NEXT:    testb $32, %cl
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ebp
 ; CHECK-NEXT:    je .LBB4_2
-; CHECK-NEXT:  # BB#1:
+; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    movl %edi, %esi
 ; CHECK-NEXT:    xorl %edi, %edi
 ; CHECK-NEXT:  .LBB4_2:
-; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; CHECK-NEXT:    movl %edx, %ebx
-; CHECK-NEXT:    movb {{[0-9]+}}(%esp), %cl
+; CHECK-NEXT:    movb %ch, %cl
 ; CHECK-NEXT:    shll %cl, %ebx
 ; CHECK-NEXT:    shldl %cl, %edx, %ebp
-; CHECK-NEXT:    testb $32, %cl
+; CHECK-NEXT:    testb $32, %ch
 ; CHECK-NEXT:    je .LBB4_4
-; CHECK-NEXT:  # BB#3:
+; CHECK-NEXT:  # %bb.3:
 ; CHECK-NEXT:    movl %ebx, %ebp
 ; CHECK-NEXT:    xorl %ebx, %ebx
 ; CHECK-NEXT:  .LBB4_4:
@@ -117,9 +118,13 @@ define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; CHECK-NEXT:    movl %esi, 4(%eax)
 ; CHECK-NEXT:    movl %edi, (%eax)
 ; CHECK-NEXT:    popl %esi
+; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    popl %edi
+; CHECK-NEXT:    .cfi_def_cfa_offset 12
 ; CHECK-NEXT:    popl %ebx
+; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    popl %ebp
+; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    retl $4
   %shl = shl <2 x i64> %A, %B
   ret <2 x i64> %shl
@@ -128,7 +133,7 @@ define <2 x i64> @test5(<2 x i64> %A, <2 x i64> %B) {
 ; PR16108
 define i32 @test6() {
 ; CHECK-LABEL: test6:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushl %ebp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    .cfi_offset %ebp, -8
@@ -138,28 +143,18 @@ define i32 @test6() {
 ; CHECK-NEXT:    subl $16, %esp
 ; CHECK-NEXT:    movl $1, {{[0-9]+}}(%esp)
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; CHECK-NEXT:    movl $1, %eax
-; CHECK-NEXT:    xorl %ecx, %ecx
-; CHECK-NEXT:    shldl $32, %eax, %ecx
-; CHECK-NEXT:    movb $32, %dl
-; CHECK-NEXT:    testb %dl, %dl
-; CHECK-NEXT:    jne .LBB5_2
-; CHECK-NEXT:  # BB#1:
-; CHECK-NEXT:    movl %ecx, %eax
-; CHECK-NEXT:  .LBB5_2:
-; CHECK-NEXT:    sete %cl
-; CHECK-NEXT:    movzbl %cl, %ecx
-; CHECK-NEXT:    xorl $1, %eax
-; CHECK-NEXT:    orl %ecx, %eax
-; CHECK-NEXT:    je .LBB5_5
-; CHECK-NEXT:  # BB#3: # %if.then
-; CHECK-NEXT:    movl $1, %eax
-; CHECK-NEXT:    jmp .LBB5_4
-; CHECK-NEXT:  .LBB5_5: # %if.end
 ; CHECK-NEXT:    xorl %eax, %eax
-; CHECK-NEXT:  .LBB5_4: # %if.then
+; CHECK-NEXT:    orl $0, %eax
+; CHECK-NEXT:    je .LBB5_3
+; CHECK-NEXT:  # %bb.1: # %if.then
+; CHECK-NEXT:    movl $1, %eax
+; CHECK-NEXT:    jmp .LBB5_2
+; CHECK-NEXT:  .LBB5_3: # %if.end
+; CHECK-NEXT:    xorl %eax, %eax
+; CHECK-NEXT:  .LBB5_2: # %if.then
 ; CHECK-NEXT:    movl %ebp, %esp
 ; CHECK-NEXT:    popl %ebp
+; CHECK-NEXT:    .cfi_def_cfa %esp, 4
 ; CHECK-NEXT:    retl
   %x = alloca i32, align 4
   %t = alloca i64, align 8

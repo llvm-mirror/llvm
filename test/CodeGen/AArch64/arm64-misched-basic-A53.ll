@@ -8,7 +8,7 @@
 ;
 ; CHECK: ********** MI Scheduling **********
 ; CHECK: main
-; CHECK: *** Final schedule for BB#2 ***
+; CHECK: *** Final schedule for %bb.2 ***
 ; CHECK: MADDWrrr
 ; CHECK: ADDWri
 ; CHECK: ********** INTERVALS **********
@@ -26,9 +26,9 @@ entry:
   %yy = alloca i32, align 4
   store i32 0, i32* %retval
   %0 = bitcast [8 x i32]* %x to i8*
-  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %0, i8* bitcast ([8 x i32]* @main.x to i8*), i64 32, i32 4, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 4 %0, i8* align 4 bitcast ([8 x i32]* @main.x to i8*), i64 32, i1 false)
   %1 = bitcast [8 x i32]* %y to i8*
-  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %1, i8* bitcast ([8 x i32]* @main.y to i8*), i64 32, i32 4, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 4 %1, i8* align 4 bitcast ([8 x i32]* @main.y to i8*), i64 32, i1 false)
   store i32 0, i32* %xx, align 4
   store i32 0, i32* %yy, align 4
   store i32 0, i32* %i, align 4
@@ -83,8 +83,8 @@ for.end:                                          ; preds = %for.cond
 ; after it, this test checks to make sure there are more than one.
 ;
 ; CHECK: ********** MI Scheduling **********
-; CHECK: neon4xfloat:BB#0
-; CHECK: *** Final schedule for BB#0 ***
+; CHECK: neon4xfloat:%bb.0
+; CHECK: *** Final schedule for %bb.0 ***
 ; CHECK: FDIVv4f32
 ; CHECK: FADDv4f32
 ; CHECK: FADDv4f32
@@ -105,7 +105,7 @@ define <4 x float> @neon4xfloat(<4 x float> %A, <4 x float> %B) {
 }
 
 ; Function Attrs: nounwind
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i32, i1) #1
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i1) #1
 
 attributes #0 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { nounwind }
@@ -130,7 +130,7 @@ declare { <16 x i8>, <16 x i8> } @llvm.aarch64.neon.ld2.v16i8.p0i8(i8*)
 ; are otherwise ready are jammed in the pending queue.
 ; CHECK: ********** MI Scheduling **********
 ; CHECK: testResourceConflict
-; CHECK: *** Final schedule for BB#0 ***
+; CHECK: *** Final schedule for %bb.0 ***
 ; CHECK: BRK
 ; CHECK: ********** INTERVALS **********
 define void @testResourceConflict(float* %ptr) {
@@ -178,7 +178,7 @@ declare void @llvm.trap()
 ; Resource contention on LDST.
 ; CHECK: ********** MI Scheduling **********
 ; CHECK: testLdStConflict
-; CHECK: *** Final schedule for BB#1 ***
+; CHECK: *** Final schedule for %bb.1 ***
 ; CHECK: LD4Fourv2d
 ; CHECK: STRQui
 ; CHECK: ********** INTERVALS **********

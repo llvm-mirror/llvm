@@ -25,7 +25,7 @@ end:
 }
 
 ; CHECK-LABEL: {{^}}else_execfix_leave_wqm:
-; CHECK: ; BB#0:
+; CHECK: ; %bb.0:
 ; CHECK-NEXT: s_mov_b64 [[INIT_EXEC:s\[[0-9]+:[0-9]+\]]], exec
 ; CHECK: ; %Flow
 ; CHECK-NEXT: s_or_saveexec_b64 [[DST:s\[[0-9]+:[0-9]+\]]],
@@ -44,7 +44,7 @@ if:
 
 else:
   %c = fmul float %v, 3.0
-  %tex = call <4 x float> @llvm.amdgcn.image.sample.v4f32.f32.v8i32(float %c, <8 x i32> undef, <4 x i32> undef, i32 15, i1 false, i1 false, i1 false, i1 false, i1 false)
+  %tex = call <4 x float> @llvm.amdgcn.image.sample.1d.v4f32.f32(i32 15, float %c, <8 x i32> undef, <4 x i32> undef, i1 0, i32 0, i32 0)
   %v.else = extractelement <4 x float> %tex, i32 0
   br label %end
 
@@ -55,7 +55,7 @@ end:
 }
 
 declare void @llvm.amdgcn.buffer.store.f32(float, <4 x i32>, i32, i32, i1, i1) #1
-declare <4 x float> @llvm.amdgcn.image.sample.v4f32.f32.v8i32(float, <8 x i32>, <4 x i32>, i32, i1, i1, i1, i1, i1) #2
+declare <4 x float> @llvm.amdgcn.image.sample.1d.v4f32.f32(i32, float, <8 x i32>, <4 x i32>, i1, i32, i32) #2
 
 attributes #0 = { nounwind }
 attributes #1 = { nounwind writeonly }

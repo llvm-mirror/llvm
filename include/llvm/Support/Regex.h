@@ -1,9 +1,8 @@
 //===-- Regex.h - Regular Expression matcher implementation -*- C++ -*-----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -86,11 +85,11 @@ namespace llvm {
     std::string sub(StringRef Repl, StringRef String,
                     std::string *Error = nullptr);
 
-    /// \brief If this function returns true, ^Str$ is an extended regular
+    /// If this function returns true, ^Str$ is an extended regular
     /// expression that matches Str and only Str.
     static bool isLiteralERE(StringRef Str);
 
-    /// \brief Turn String into a regex by escaping its special characters.
+    /// Turn String into a regex by escaping its special characters.
     static std::string escape(StringRef String);
 
   private:

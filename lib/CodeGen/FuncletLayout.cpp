@@ -1,9 +1,8 @@
 //===-- FuncletLayout.cpp - Contiguously lay out funclets -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,8 +40,11 @@ INITIALIZE_PASS(FuncletLayout, DEBUG_TYPE,
                 "Contiguously Lay Out Funclets", false, false)
 
 bool FuncletLayout::runOnMachineFunction(MachineFunction &F) {
+  // Even though this gets information from getEHScopeMembership(), this pass is
+  // only necessary for funclet-based EH personalities, in which these EH scopes
+  // are outlined at the end.
   DenseMap<const MachineBasicBlock *, int> FuncletMembership =
-      getFuncletMembership(F);
+      getEHScopeMembership(F);
   if (FuncletMembership.empty())
     return false;
 

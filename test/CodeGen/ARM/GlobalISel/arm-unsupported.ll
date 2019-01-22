@@ -43,7 +43,7 @@ define i17 @test_funny_ints(i17 %a, i17 %b) {
 }
 
 define half @test_half(half %a, half %b) {
-; CHECK: remark: {{.*}} unable to lower arguments: half (half, half)*
+; CHECK: remark: {{.*}} unable to lower arguments: half (half, half)* (in function: test_half)
 ; CHECK-LABEL: warning: Instruction selection used fallback path for test_half
   %res = fadd half %a, %b
   ret half %res
@@ -83,13 +83,6 @@ define void @test_vararg_definition(i32 %a, ...) {
   ret void
 }
 
-define void @test_vararg_call(i32 %a) {
-; CHECK: remark: {{.*}} unable to translate instruction: call
-; CHECK-LABEL: warning: Instruction selection used fallback path for test_vararg_call
-  call void(i32, ...) @test_vararg_definition(i32 %a, i32 %a, i32 %a)
-  ret void
-}
-
 define i32 @test_thumb(i32 %a) #0 {
 ; CHECK: remark: {{.*}} unable to lower arguments: i32 (i32)*
 ; CHECK-LABEL: warning: Instruction selection used fallback path for test_thumb
@@ -111,6 +104,21 @@ define i32 @test_thread_local_global() {
 ; ROPI-RWPI-LABEL: warning: Instruction selection used fallback path for test_thread_local_global
   %v = load i32, i32* @thread_local_global
   ret i32 %v
+}
+
+%byval.class = type { i32 }
+
+define void @test_byval_arg(%byval.class* byval %x) {
+; CHECK: remark: {{.*}} unable to lower arguments: void (%byval.class*)*
+; CHECK-LABEL: warning: Instruction selection used fallback path for test_byval
+  ret void
+}
+
+define void @test_byval_param(%byval.class* %x) {
+; CHECK: remark: {{.*}} unable to translate instruction: call
+; CHECK-LABEL: warning: Instruction selection used fallback path for test_byval_param
+  call void @test_byval_arg(%byval.class* byval %x)
+  ret void
 }
 
 attributes #0 = { "target-features"="+thumb-mode" }

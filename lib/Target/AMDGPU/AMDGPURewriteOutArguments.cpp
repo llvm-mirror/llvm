@@ -1,9 +1,8 @@
 //===- AMDGPURewriteOutArgumentsPass.cpp - Create struct returns ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -163,7 +162,7 @@ bool AMDGPURewriteOutArguments::checkArgumentUses(Value &Arg) const {
       // some casts between structs and non-structs, but we can't bitcast
       // directly between them.  directly bitcast between them.  Blender uses
       // some casts that look like { <3 x float> }* to <4 x float>*
-      if ((SrcEltTy->isStructTy() && (SrcEltTy->getNumContainedTypes() != 1)))
+      if ((SrcEltTy->isStructTy() && (SrcEltTy->getStructNumElements() != 1)))
         return false;
 
       // Clang emits OpenCL 3-vector type accesses with a bitcast to the
@@ -249,8 +248,8 @@ bool AMDGPURewriteOutArguments::runOnFunction(Function &F) {
   SmallVector<Argument *, 4> OutArgs;
   for (Argument &Arg : F.args()) {
     if (isOutArgumentCandidate(Arg)) {
-      DEBUG(dbgs() << "Found possible out argument " << Arg
-            << " in function " << F.getName() << '\n');
+      LLVM_DEBUG(dbgs() << "Found possible out argument " << Arg
+                        << " in function " << F.getName() << '\n');
       OutArgs.push_back(&Arg);
     }
   }
@@ -310,7 +309,7 @@ bool AMDGPURewriteOutArguments::runOnFunction(Function &F) {
           SI = dyn_cast<StoreInst>(Q.getInst());
 
         if (SI) {
-          DEBUG(dbgs() << "Found out argument store: " << *SI << '\n');
+          LLVM_DEBUG(dbgs() << "Found out argument store: " << *SI << '\n');
           ReplaceableStores.emplace_back(RI, SI);
         } else {
           ThisReplaceable = false;
@@ -328,7 +327,8 @@ bool AMDGPURewriteOutArguments::runOnFunction(Function &F) {
         if (llvm::find_if(ValVec,
               [OutArg](const std::pair<Argument *, Value *> &Entry) {
                  return Entry.first == OutArg;}) != ValVec.end()) {
-          DEBUG(dbgs() << "Saw multiple out arg stores" << *OutArg << '\n');
+          LLVM_DEBUG(dbgs()
+                     << "Saw multiple out arg stores" << *OutArg << '\n');
           // It is possible to see stores to the same argument multiple times,
           // but we expect these would have been optimized out already.
           ThisReplaceable = false;
@@ -358,7 +358,7 @@ bool AMDGPURewriteOutArguments::runOnFunction(Function &F) {
                                               F.getFunctionType()->params(),
                                               F.isVarArg());
 
-  DEBUG(dbgs() << "Computed new return type: " << *NewRetTy << '\n');
+  LLVM_DEBUG(dbgs() << "Computed new return type: " << *NewRetTy << '\n');
 
   Function *NewFunc = Function::Create(NewFuncTy, Function::PrivateLinkage,
                                        F.getName() + ".body");
@@ -400,8 +400,8 @@ bool AMDGPURewriteOutArguments::runOnFunction(Function &F) {
       if (Val->getType() != EltTy) {
         Type *EffectiveEltTy = EltTy;
         if (StructType *CT = dyn_cast<StructType>(EltTy)) {
-          assert(CT->getNumContainedTypes() == 1);
-          EffectiveEltTy = CT->getContainedType(0);
+          assert(CT->getNumElements() == 1);
+          EffectiveEltTy = CT->getElementType(0);
         }
 
         if (DL->getTypeSizeInBits(EffectiveEltTy) !=

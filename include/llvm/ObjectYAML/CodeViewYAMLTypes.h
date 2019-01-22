@@ -1,9 +1,8 @@
 //==- CodeViewYAMLTypes.h - CodeView YAMLIO Type implementation --*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -27,10 +26,8 @@
 namespace llvm {
 
 namespace codeview {
-
-class TypeTableBuilder;
-
-} // end namespace codeview
+class AppendingTypeTableBuilder;
+}
 
 namespace CodeViewYAML {
 
@@ -48,19 +45,21 @@ struct MemberRecord {
 struct LeafRecord {
   std::shared_ptr<detail::LeafRecordBase> Leaf;
 
-  codeview::CVType toCodeViewRecord(BumpPtrAllocator &Allocator) const;
-  codeview::CVType toCodeViewRecord(codeview::TypeTableBuilder &TS) const;
+  codeview::CVType
+  toCodeViewRecord(codeview::AppendingTypeTableBuilder &Serializer) const;
   static Expected<LeafRecord> fromCodeViewRecord(codeview::CVType Type);
 };
 
-std::vector<LeafRecord> fromDebugT(ArrayRef<uint8_t> DebugT);
-ArrayRef<uint8_t> toDebugT(ArrayRef<LeafRecord>, BumpPtrAllocator &Alloc);
+std::vector<LeafRecord> fromDebugT(ArrayRef<uint8_t> DebugTorP,
+                                   StringRef SectionName);
+ArrayRef<uint8_t> toDebugT(ArrayRef<LeafRecord>, BumpPtrAllocator &Alloc,
+                           StringRef SectionName);
 
 } // end namespace CodeViewYAML
 
 } // end namespace llvm
 
-LLVM_YAML_DECLARE_SCALAR_TRAITS(codeview::GUID, true)
+LLVM_YAML_DECLARE_SCALAR_TRAITS(codeview::GUID, QuotingType::Single)
 
 LLVM_YAML_DECLARE_MAPPING_TRAITS(CodeViewYAML::LeafRecord)
 LLVM_YAML_DECLARE_MAPPING_TRAITS(CodeViewYAML::MemberRecord)

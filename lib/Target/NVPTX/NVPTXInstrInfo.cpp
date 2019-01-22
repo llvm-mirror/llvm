@@ -1,9 +1,8 @@
 //===- NVPTXInstrInfo.cpp - NVPTX Instruction Information -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -68,51 +67,6 @@ void NVPTXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   BuildMI(MBB, I, DL, get(Op), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
-}
-
-bool NVPTXInstrInfo::isMoveInstr(const MachineInstr &MI, unsigned &SrcReg,
-                                 unsigned &DestReg) const {
-  // Look for the appropriate part of TSFlags
-  bool isMove = false;
-
-  unsigned TSFlags =
-      (MI.getDesc().TSFlags & NVPTX::SimpleMoveMask) >> NVPTX::SimpleMoveShift;
-  isMove = (TSFlags == 1);
-
-  if (isMove) {
-    MachineOperand dest = MI.getOperand(0);
-    MachineOperand src = MI.getOperand(1);
-    assert(dest.isReg() && "dest of a movrr is not a reg");
-    assert(src.isReg() && "src of a movrr is not a reg");
-
-    SrcReg = src.getReg();
-    DestReg = dest.getReg();
-    return true;
-  }
-
-  return false;
-}
-
-bool NVPTXInstrInfo::isLoadInstr(const MachineInstr &MI,
-                                 unsigned &AddrSpace) const {
-  bool isLoad = false;
-  unsigned TSFlags =
-      (MI.getDesc().TSFlags & NVPTX::isLoadMask) >> NVPTX::isLoadShift;
-  isLoad = (TSFlags == 1);
-  if (isLoad)
-    AddrSpace = getLdStCodeAddrSpace(MI);
-  return isLoad;
-}
-
-bool NVPTXInstrInfo::isStoreInstr(const MachineInstr &MI,
-                                  unsigned &AddrSpace) const {
-  bool isStore = false;
-  unsigned TSFlags =
-      (MI.getDesc().TSFlags & NVPTX::isStoreMask) >> NVPTX::isStoreShift;
-  isStore = (TSFlags == 1);
-  if (isStore)
-    AddrSpace = getLdStCodeAddrSpace(MI);
-  return isStore;
 }
 
 /// AnalyzeBranch - Analyze the branching code at the end of MBB, returning

@@ -22,25 +22,26 @@ class TestingConfig:
             }
 
         pass_vars = ['LIBRARY_PATH', 'LD_LIBRARY_PATH', 'SYSTEMROOT', 'TERM',
-                     'LD_PRELOAD', 'ASAN_OPTIONS', 'UBSAN_OPTIONS',
+                     'CLANG', 'LD_PRELOAD', 'ASAN_OPTIONS', 'UBSAN_OPTIONS',
                      'LSAN_OPTIONS', 'ADB', 'ANDROID_SERIAL',
                      'SANITIZER_IGNORE_CVE_2016_2143', 'TMPDIR', 'TMP', 'TEMP',
-                     'TEMPDIR', 'AVRLIT_BOARD', 'AVRLIT_PORT']
+                     'TEMPDIR', 'AVRLIT_BOARD', 'AVRLIT_PORT',
+                     'FILECHECK_DUMP_INPUT_ON_FAILURE', 'FILECHECK_OPTS',
+                     'VCINSTALLDIR', 'VCToolsinstallDir', 'VSINSTALLDIR',
+                     'WindowsSdkDir', 'WindowsSDKLibVersion']
+
+        if sys.platform == 'win32':
+            pass_vars.append('INCLUDE')
+            pass_vars.append('LIB')
+            pass_vars.append('PATHEXT')
+            environment['PYTHONBUFFERED'] = '1'
+
         for var in pass_vars:
             val = os.environ.get(var, '')
             # Check for empty string as some variables such as LD_PRELOAD cannot be empty
             # ('') for OS's such as OpenBSD.
             if val:
                 environment[var] = val
-
-        if sys.platform == 'win32':
-            environment.update({
-                    'INCLUDE' : os.environ.get('INCLUDE',''),
-                    'PATHEXT' : os.environ.get('PATHEXT',''),
-                    'PYTHONUNBUFFERED' : '1',
-                    'TEMP' : os.environ.get('TEMP',''),
-                    'TMP' : os.environ.get('TMP',''),
-                    })
 
         # Set the default available features based on the LitConfig.
         available_features = []
@@ -99,7 +100,6 @@ class TestingConfig:
             litConfig.fatal(
                 'unable to parse config file %r, traceback: %s' % (
                     path, traceback.format_exc()))
-
         self.finish(litConfig)
 
     def __init__(self, parent, name, suffixes, test_format,
@@ -151,4 +151,29 @@ class TestingConfig:
             return self
         else:
             return self.parent.root
+
+class SubstituteCaptures:
+    """
+    Helper class to indicate that the substitutions contains backreferences.
+
+    This can be used as the following in lit.cfg to mark subsitutions as having
+    back-references::
+
+        config.substutions.append(('\b[^ ]*.cpp', SubstituteCaptures('\0.txt')))
+
+    """
+    def __init__(self, substitution):
+        self.substitution = substitution
+
+    def replace(self, pattern, replacement):
+        return self.substitution
+
+    def __str__(self):
+        return self.substitution
+
+    def __len__(self):
+        return len(self.substitution)
+
+    def __getitem__(self, item):
+        return self.substitution.__getitem__(item)
 

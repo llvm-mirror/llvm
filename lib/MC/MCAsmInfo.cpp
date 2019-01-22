@@ -1,9 +1,8 @@
 //===- MCAsmInfo.cpp - Asm Info -------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,8 +16,17 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+
+enum DefaultOnOff { Default, Enable, Disable };
+static cl::opt<DefaultOnOff> DwarfExtendedLoc(
+    "dwarf-extended-loc", cl::Hidden,
+    cl::desc("Disable emission of the extended flags in .loc directives."),
+    cl::values(clEnumVal(Default, "Default for platform"),
+               clEnumVal(Enable, "Enabled"), clEnumVal(Disable, "Disabled")),
+    cl::init(Default));
 
 MCAsmInfo::MCAsmInfo() {
   SeparatorString = ";";
@@ -41,6 +49,8 @@ MCAsmInfo::MCAsmInfo() {
   Data64bitsDirective = "\t.quad\t";
   GlobalDirective = "\t.globl\t";
   WeakDirective = "\t.weak\t";
+  if (DwarfExtendedLoc != Default)
+    SupportsExtendedDwarfLocDirective = DwarfExtendedLoc == Enable;
 
   // FIXME: Clang's logic should be synced with the logic used to initialize
   //        this member and the two implementations should be merged.

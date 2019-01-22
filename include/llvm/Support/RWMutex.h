@@ -1,9 +1,8 @@
 //===- RWMutex.h - Reader/Writer Mutual Exclusion Lock ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,7 +20,7 @@
 namespace llvm {
 namespace sys {
 
-    /// @brief Platform agnostic RWMutex class.
+    /// Platform agnostic RWMutex class.
     class RWMutexImpl
     {
     /// @name Constructors
@@ -29,7 +28,7 @@ namespace sys {
     public:
 
       /// Initializes the lock but doesn't acquire it.
-      /// @brief Default Constructor.
+      /// Default Constructor.
       explicit RWMutexImpl();
 
     /// @}
@@ -40,7 +39,7 @@ namespace sys {
     /// @}
 
       /// Releases and removes the lock
-      /// @brief Destructor
+      /// Destructor
       ~RWMutexImpl();
 
     /// @}
@@ -52,24 +51,24 @@ namespace sys {
       /// lock is held by a writer, this method will wait until it can acquire
       /// the lock.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally acquire the lock in reader mode.
+      /// Unconditionally acquire the lock in reader mode.
       bool reader_acquire();
 
       /// Attempts to release the lock in reader mode.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally release the lock in reader mode.
+      /// Unconditionally release the lock in reader mode.
       bool reader_release();
 
       /// Attempts to unconditionally acquire the lock in reader mode. If the
       /// lock is held by any readers, this method will wait until it can
       /// acquire the lock.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally acquire the lock in writer mode.
+      /// Unconditionally acquire the lock in writer mode.
       bool writer_acquire();
 
       /// Attempts to release the lock in writer mode.
       /// @returns false if any kind of error occurs, true otherwise.
-      /// @brief Unconditionally release the lock in write mode.
+      /// Unconditionally release the lock in write mode.
       bool writer_release();
 
     //@}

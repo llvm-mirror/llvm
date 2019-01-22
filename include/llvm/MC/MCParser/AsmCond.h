@@ -1,9 +1,8 @@
 //===- AsmCond.h - Assembly file conditional assembly  ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,7 +14,7 @@ namespace llvm {
 /// AsmCond - Class to support conditional assembly
 ///
 /// The conditional assembly feature (.if, .else, .elseif and .endif) is
-/// implemented with AsmCond that tells us what we are in the middle of 
+/// implemented with AsmCond that tells us what we are in the middle of
 /// processing.  Ignore can be either true or false.  When true we are ignoring
 /// the block of code in the middle of a conditional.
 

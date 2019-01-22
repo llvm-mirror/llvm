@@ -1,9 +1,8 @@
 //===- FileAnalysis.h -------------------------------------------*- C++ -*-===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +10,9 @@
 #define LLVM_CFI_VERIFY_FILE_ANALYSIS_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/DebugInfo/Symbolize/Symbolize.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -43,6 +44,32 @@
 namespace llvm {
 namespace cfi_verify {
 
+struct GraphResult;
+
+extern bool IgnoreDWARFFlag;
+
+enum class CFIProtectionStatus {
+  // This instruction is protected by CFI.
+  PROTECTED,
+  // The instruction is not an indirect control flow instruction, and thus
+  // shouldn't be protected.
+  FAIL_NOT_INDIRECT_CF,
+  // There is a path to the instruction that was unexpected.
+  FAIL_ORPHANS,
+  // There is a path to the instruction from a conditional branch that does not
+  // properly check the destination for this vcall/icall.
+  FAIL_BAD_CONDITIONAL_BRANCH,
+  // One of the operands of the indirect CF instruction is modified between the
+  // CFI-check and execution.
+  FAIL_REGISTER_CLOBBERED,
+  // The instruction referenced does not exist. This normally indicates an
+  // error in the program, where you try and validate a graph that was created
+  // in a different FileAnalysis object.
+  FAIL_INVALID_INSTRUCTION,
+};
+
+StringRef stringCFIProtectionStatus(CFIProtectionStatus Status);
+
 // Disassembler and analysis tool for machine code files. Keeps track of non-
 // sequential control flows, including indirect control flow instructions.
 class FileAnalysis {
@@ -66,12 +93,6 @@ public:
   FileAnalysis(const FileAnalysis &) = delete;
   FileAnalysis(FileAnalysis &&Other) = default;
 
-  // Check whether the provided instruction is CFI protected in this file.
-  // Returns false if this instruction doesn't exist in this file, if it's not
-  // an indirect control flow instruction, or isn't CFI protected. Returns true
-  // otherwise.
-  bool isIndirectInstructionCFIProtected(uint64_t Address) const;
-
   // Returns the instruction at the provided address. Returns nullptr if there
   // is no instruction at the provided address.
   const Instr *getInstruction(uint64_t Address) const;
@@ -88,6 +109,10 @@ public:
 
   // Returns whether this instruction is used by CFI to trap the program.
   bool isCFITrap(const Instr &InstrMeta) const;
+
+  // Returns whether this instruction is a call to a function that will trap on
+  // CFI violations (i.e., it serves as a trap in this instance).
+  bool willTrapOnCFIViolation(const Instr &InstrMeta) const;
 
   // Returns whether this function can fall through to the next instruction.
   // Undefined (and bad) instructions cannot fall through, and instruction that
@@ -120,6 +145,27 @@ public:
   const MCInstrInfo *getMCInstrInfo() const;
   const MCInstrAnalysis *getMCInstrAnalysis() const;
 
+  // Returns the inlining information for the provided address.
+  Expected<DIInliningInfo> symbolizeInlinedCode(uint64_t Address);
+
+  // Returns whether the provided Graph represents a protected indirect control
+  // flow instruction in this file.
+  CFIProtectionStatus validateCFIProtection(const GraphResult &Graph) const;
+
+  // Returns the first place the operand register is clobbered between the CFI-
+  // check and the indirect CF instruction execution. We do this by walking
+  // backwards from the indirect CF and ensuring there is at most one load
+  // involving the operand register (which is the indirect CF itself on x86).
+  // If the register is not modified, returns the address of the indirect CF
+  // instruction. The result is undefined if the provided graph does not fall
+  // under either the FAIL_REGISTER_CLOBBERED or PROTECTED status (see
+  // CFIProtectionStatus).
+  uint64_t indirectCFOperandClobber(const GraphResult& Graph) const;
+
+  // Prints an instruction to the provided stream using this object's pretty-
+  // printers.
+  void printInstruction(const Instr &InstrMeta, raw_ostream &OS) const;
+
 protected:
   // Construct a blank object with the provided triple and features. Used in
   // testing, where a sub class will dependency inject protected methods to
@@ -140,6 +186,10 @@ protected:
   // Parses code sections from the internal object file. Saves them into the
   // internal members. Should only be called once by Create().
   Error parseCodeSections();
+
+  // Parses the symbol table to look for the addresses of functions that will
+  // trap on CFI violations.
+  Error parseSymbolTable();
 
 private:
   // Members that describe the input file.
@@ -162,8 +212,12 @@ private:
   std::unique_ptr<const MCInstrAnalysis> MIA;
   std::unique_ptr<MCInstPrinter> Printer;
 
+  // Symbolizer used for debug information parsing.
+  std::unique_ptr<symbolize::LLVMSymbolizer> Symbolizer;
+
   // A mapping between the virtual memory address to the instruction metadata
-  // struct.
+  // struct. TODO(hctim): Reimplement this as a sorted vector to avoid per-
+  // insertion allocation.
   std::map<uint64_t, Instr> Instructions;
 
   // Contains a mapping between a specific address, and a list of instructions
@@ -172,6 +226,9 @@ private:
 
   // A list of addresses of indirect control flow instructions.
   std::set<uint64_t> IndirectInstructions;
+
+  // The addresses of functions that will trap on CFI violations.
+  SmallSet<uint64_t, 4> TrapOnFailFunctionAddresses;
 };
 
 class UnsupportedDisassembly : public ErrorInfo<UnsupportedDisassembly> {

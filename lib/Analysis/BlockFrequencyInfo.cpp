@@ -1,9 +1,8 @@
 //===- BlockFrequencyInfo.cpp - Block Frequency Analysis ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -218,6 +217,11 @@ BlockFrequencyInfo::getProfileCountFromFreq(uint64_t Freq) const {
   return BFI->getProfileCountFromFreq(*getFunction(), Freq);
 }
 
+bool BlockFrequencyInfo::isIrrLoopHeader(const BasicBlock *BB) {
+  assert(BFI && "Expected analysis to be available");
+  return BFI->isIrrLoopHeader(BB);
+}
+
 void BlockFrequencyInfo::setBlockFreq(const BasicBlock *BB, uint64_t Freq) {
   assert(BFI && "Expected analysis to be available");
   BFI->setBlockFreq(BB, Freq);
@@ -247,8 +251,8 @@ void BlockFrequencyInfo::setBlockFreqAndScale(
 
 /// Pop up a ghostview window with the current block frequency propagation
 /// rendered using dot.
-void BlockFrequencyInfo::view() const {
-  ViewGraph(const_cast<BlockFrequencyInfo *>(this), "BlockFrequencyDAGs");
+void BlockFrequencyInfo::view(StringRef title) const {
+  ViewGraph(const_cast<BlockFrequencyInfo *>(this), title);
 }
 
 const Function *BlockFrequencyInfo::getFunction() const {

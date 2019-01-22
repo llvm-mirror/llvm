@@ -1,9 +1,8 @@
 //===-- TarWriter.cpp - Tar archive file creator --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -159,8 +158,10 @@ static void writeUstarHeader(raw_fd_ostream &OS, StringRef Prefix,
 // Creates a TarWriter instance and returns it.
 Expected<std::unique_ptr<TarWriter>> TarWriter::create(StringRef OutputPath,
                                                        StringRef BaseDir) {
+  using namespace sys::fs;
   int FD;
-  if (std::error_code EC = openFileForWrite(OutputPath, FD, sys::fs::F_None))
+  if (std::error_code EC =
+          openFileForWrite(OutputPath, FD, CD_CreateAlways, OF_None))
     return make_error<StringError>("cannot open " + OutputPath, EC);
   return std::unique_ptr<TarWriter>(new TarWriter(FD, BaseDir));
 }
@@ -172,6 +173,10 @@ TarWriter::TarWriter(int FD, StringRef BaseDir)
 void TarWriter::append(StringRef Path, StringRef Data) {
   // Write Path and Data.
   std::string Fullpath = BaseDir + "/" + sys::path::convert_to_slash(Path);
+
+  // We do not want to include the same file more than once.
+  if (!Files.insert(Fullpath).second)
+    return;
 
   StringRef Prefix;
   StringRef Name;

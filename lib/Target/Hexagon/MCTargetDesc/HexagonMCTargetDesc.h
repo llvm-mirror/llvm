@@ -1,9 +1,8 @@
 //===-- HexagonMCTargetDesc.h - Hexagon Target Descriptions -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,16 +15,45 @@
 
 #include "llvm/Support/CommandLine.h"
 #include <cstdint>
+#include <string>
+
+#define Hexagon_POINTER_SIZE 4
+
+#define Hexagon_PointerSize (Hexagon_POINTER_SIZE)
+#define Hexagon_PointerSize_Bits (Hexagon_POINTER_SIZE * 8)
+#define Hexagon_WordSize Hexagon_PointerSize
+#define Hexagon_WordSize_Bits Hexagon_PointerSize_Bits
+
+// allocframe saves LR and FP on stack before allocating
+// a new stack frame. This takes 8 bytes.
+#define HEXAGON_LRFP_SIZE 8
+
+// Normal instruction size (in bytes).
+#define HEXAGON_INSTR_SIZE 4
+
+// Maximum number of words and instructions in a packet.
+#define HEXAGON_PACKET_SIZE 4
+#define HEXAGON_MAX_PACKET_SIZE (HEXAGON_PACKET_SIZE * HEXAGON_INSTR_SIZE)
+// Minimum number of instructions in an end-loop packet.
+#define HEXAGON_PACKET_INNER_SIZE 2
+#define HEXAGON_PACKET_OUTER_SIZE 3
+// Maximum number of instructions in a packet before shuffling,
+// including a compound one or a duplex or an extender.
+#define HEXAGON_PRESHUFFLE_PACKET_SIZE (HEXAGON_PACKET_SIZE + 3)
+
+// Name of the global offset table as defined by the Hexagon ABI
+#define HEXAGON_GOT_SYM_NAME "_GLOBAL_OFFSET_TABLE_"
 
 namespace llvm {
 
 struct InstrItinerary;
 struct InstrStage;
+class FeatureBitset;
 class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
-class MCObjectWriter;
+class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
@@ -44,9 +72,9 @@ MCInstrInfo *createHexagonMCInstrInfo();
 MCRegisterInfo *createHexagonMCRegisterInfo(StringRef TT);
 
 namespace Hexagon_MC {
-  StringRef ParseHexagonTriple(const Triple &TT, StringRef CPU);
-  StringRef selectHexagonCPU(const Triple &TT, StringRef CPU);
+  StringRef selectHexagonCPU(StringRef CPU);
 
+  FeatureBitset completeHVXFeatures(const FeatureBitset &FB);
   /// Create a Hexagon MCSubtargetInfo instance. This is exposed so Asm parser,
   /// etc. do not need to go through TargetRegistry.
   MCSubtargetInfo *createHexagonMCSubtargetInfo(const Triple &TT, StringRef CPU,
@@ -59,13 +87,12 @@ MCCodeEmitter *createHexagonMCCodeEmitter(const MCInstrInfo &MCII,
                                           MCContext &MCT);
 
 MCAsmBackend *createHexagonAsmBackend(const Target &T,
+                                      const MCSubtargetInfo &STI,
                                       const MCRegisterInfo &MRI,
-                                      const Triple &TT, StringRef CPU,
                                       const MCTargetOptions &Options);
 
-std::unique_ptr<MCObjectWriter>
-createHexagonELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI,
-                             StringRef CPU);
+std::unique_ptr<MCObjectTargetWriter>
+createHexagonELFObjectWriter(uint8_t OSABI, StringRef CPU);
 
 unsigned HexagonGetLastSlot();
 
@@ -80,6 +107,7 @@ unsigned HexagonGetLastSlot();
 // Defines symbolic names for the Hexagon instructions.
 //
 #define GET_INSTRINFO_ENUM
+#define GET_INSTRINFO_SCHED_ENUM
 #include "HexagonGenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_ENUM

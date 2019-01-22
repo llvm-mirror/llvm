@@ -1,9 +1,8 @@
 //=- AArch64InstrAtomics.td - AArch64 Atomic codegen support -*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -30,18 +29,18 @@ def : Pat<(atomic_fence (imm), (imm)), (DMB (i32 0xb))>;
 
 // A atomic load operation that actually needs acquire semantics.
 class acquiring_load<PatFrag base>
-  : PatFrag<(ops node:$ptr), (base node:$ptr), [{
-  AtomicOrdering Ordering = cast<AtomicSDNode>(N)->getOrdering();
-  return isAcquireOrStronger(Ordering);
-}]>;
+  : PatFrag<(ops node:$ptr), (base node:$ptr)> {
+  let IsAtomic = 1;
+  let IsAtomicOrderingAcquireOrStronger = 1;
+}
 
 // An atomic load operation that does not need either acquire or release
 // semantics.
 class relaxed_load<PatFrag base>
-  : PatFrag<(ops node:$ptr), (base node:$ptr), [{
-  AtomicOrdering Ordering = cast<AtomicSDNode>(N)->getOrdering();
-  return !isAcquireOrStronger(Ordering);
-}]>;
+  : PatFrag<(ops node:$ptr), (base node:$ptr)> {
+  let IsAtomic = 1;
+  let IsAtomicOrderingAcquireOrStronger = 0;
+}
 
 // 8-bit loads
 def : Pat<(acquiring_load<atomic_load_8>  GPR64sp:$ptr), (LDARB GPR64sp:$ptr)>;
@@ -113,19 +112,17 @@ def : Pat<(relaxed_load<atomic_load_64>
 
 // A store operation that actually needs release semantics.
 class releasing_store<PatFrag base>
-  : PatFrag<(ops node:$ptr, node:$val), (base node:$ptr, node:$val), [{
-  AtomicOrdering Ordering = cast<AtomicSDNode>(N)->getOrdering();
-  assert(Ordering != AtomicOrdering::AcquireRelease &&
-         "unexpected store ordering");
-  return isReleaseOrStronger(Ordering);
-}]>;
+  : PatFrag<(ops node:$ptr, node:$val), (base node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let IsAtomicOrderingReleaseOrStronger = 1;
+}
 
 // An atomic store operation that doesn't actually need to be atomic on AArch64.
 class relaxed_store<PatFrag base>
-  : PatFrag<(ops node:$ptr, node:$val), (base node:$ptr, node:$val), [{
-  AtomicOrdering Ordering = cast<AtomicSDNode>(N)->getOrdering();
-  return !isReleaseOrStronger(Ordering);
-}]>;
+  : PatFrag<(ops node:$ptr, node:$val), (base node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let IsAtomicOrderingReleaseOrStronger = 0;
+}
 
 // 8-bit stores
 def : Pat<(releasing_store<atomic_store_8> GPR64sp:$ptr, GPR32:$val),
@@ -411,13 +408,18 @@ let Predicates = [HasLSE] in {
   defm : LDOPregister_patterns<"LDADD", "atomic_load_add">;
   defm : LDOPregister_patterns<"LDSET", "atomic_load_or">;
   defm : LDOPregister_patterns<"LDEOR", "atomic_load_xor">;
+  defm : LDOPregister_patterns<"LDCLR", "atomic_load_clr">;
   defm : LDOPregister_patterns<"LDSMAX", "atomic_load_max">;
   defm : LDOPregister_patterns<"LDSMIN", "atomic_load_min">;
   defm : LDOPregister_patterns<"LDUMAX", "atomic_load_umax">;
   defm : LDOPregister_patterns<"LDUMIN", "atomic_load_umin">;
   defm : LDOPregister_patterns<"SWP", "atomic_swap">;
+  defm : CASregister_patterns<"CAS", "atomic_cmp_swap">;
+
+  // These two patterns are only needed for global isel, selection dag isel
+  // converts atomic load-sub into a sub and atomic load-add, and likewise for
+  // and -> clr.
   defm : LDOPregister_patterns_mod<"LDADD", "atomic_load_sub", "SUB">;
   defm : LDOPregister_patterns_mod<"LDCLR", "atomic_load_and", "ORN">;
-  defm : CASregister_patterns<"CAS", "atomic_cmp_swap">;
 }
 

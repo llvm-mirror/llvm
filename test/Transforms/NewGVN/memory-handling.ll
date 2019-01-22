@@ -20,9 +20,9 @@ declare i16** @__ctype_b_loc() local_unnamed_addr #1
 
 ; Function Attrs: nounwind uwtable
 define void @BuildMask(i8* nocapture readonly) local_unnamed_addr #0 {
-  tail call void @llvm.memset.p0i8.i64(i8* bitcast ([26 x %struct.Letter]* @alPhrase to i8*), i8 0, i64 416, i32 16, i1 false)
-  tail call void @llvm.memset.p0i8.i64(i8* bitcast ([2 x i64]* @aqMainMask to i8*), i8 0, i64 16, i32 16, i1 false)
-  tail call void @llvm.memset.p0i8.i64(i8* bitcast ([2 x i64]* @aqMainSign to i8*), i8 0, i64 16, i32 16, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* align 16 bitcast ([26 x %struct.Letter]* @alPhrase to i8*), i8 0, i64 416, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* align 16 bitcast ([2 x i64]* @aqMainMask to i8*), i8 0, i64 16, i1 false)
+  tail call void @llvm.memset.p0i8.i64(i8* align 16 bitcast ([2 x i64]* @aqMainSign to i8*), i8 0, i64 16, i1 false)
   br label %.sink.split
 
 .sink.split:                                      ; preds = %14, %1
@@ -162,7 +162,7 @@ define void @BuildMask(i8* nocapture readonly) local_unnamed_addr #0 {
 }
 
 ; Function Attrs: argmemonly nounwind
-declare void @llvm.memset.p0i8.i64(i8* nocapture writeonly, i8, i64, i32, i1) #2
+declare void @llvm.memset.p0i8.i64(i8* nocapture writeonly, i8, i64, i1) #2
 
 ; Function Attrs: inlinehint nounwind readonly uwtable
 declare i32 @tolower(i32) local_unnamed_addr #3
@@ -176,7 +176,7 @@ attributes #5 = { nounwind readonly }
 
 !llvm.ident = !{!0}
 
-!0 = !{!"clang version 4.0.0 (http://llvm.org/git/clang.git 9b9db7fa41a1905899dbcbcc6cbdd05d2511da8e) (/Users/dannyb/sources/llvm-clean a3908a41623f6ac14ba8c04613d6c64e0544bb5d)"}
+!0 = !{!"clang version 4.0.0"}
 !1 = !{!2, !2, i64 0}
 !2 = !{!"int", !3, i64 0}
 !3 = !{!"omnipotent char", !4, i64 0}

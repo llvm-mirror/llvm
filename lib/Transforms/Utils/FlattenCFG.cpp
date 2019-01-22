@@ -1,9 +1,8 @@
 //===- FlatternCFG.cpp - Code to perform CFG flattening -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,6 +12,7 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/IRBuilder.h"
@@ -24,7 +24,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 
 using namespace llvm;
@@ -36,16 +35,16 @@ namespace {
 class FlattenCFGOpt {
   AliasAnalysis *AA;
 
-  /// \brief Use parallel-and or parallel-or to generate conditions for
+  /// Use parallel-and or parallel-or to generate conditions for
   /// conditional branches.
   bool FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder);
 
-  /// \brief If \param BB is the merge block of an if-region, attempt to merge
+  /// If \param BB is the merge block of an if-region, attempt to merge
   /// the if-region with an adjacent if-region upstream if two if-regions
   /// contain identical instructions.
   bool MergeIfRegion(BasicBlock *BB, IRBuilder<> &Builder);
 
-  /// \brief Compare a pair of blocks: \p Block1 and \p Block2, which
+  /// Compare a pair of blocks: \p Block1 and \p Block2, which
   /// are from two if-regions whose entry blocks are \p Head1 and \p
   /// Head2.  \returns true if \p Block1 and \p Block2 contain identical
   /// instructions, and have no memory reference alias with \p Head2.
@@ -232,7 +231,7 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder) {
   if (!FirstCondBlock || !LastCondBlock || (FirstCondBlock == LastCondBlock))
     return false;
 
-  TerminatorInst *TBB = LastCondBlock->getTerminator();
+  Instruction *TBB = LastCondBlock->getTerminator();
   BasicBlock *PS1 = TBB->getSuccessor(0);
   BasicBlock *PS2 = TBB->getSuccessor(1);
   BranchInst *PBI1 = dyn_cast<BranchInst>(PS1->getTerminator());
@@ -312,7 +311,7 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder) {
     new UnreachableInst(CB->getContext(), CB);
   } while (Iteration);
 
-  DEBUG(dbgs() << "Use parallel and/or in:\n" << *FirstCondBlock);
+  LLVM_DEBUG(dbgs() << "Use parallel and/or in:\n" << *FirstCondBlock);
   return true;
 }
 
@@ -325,7 +324,7 @@ bool FlattenCFGOpt::FlattenParallelAndOr(BasicBlock *BB, IRBuilder<> &Builder) {
 bool FlattenCFGOpt::CompareIfRegionBlock(BasicBlock *Head1, BasicBlock *Head2,
                                          BasicBlock *Block1,
                                          BasicBlock *Block2) {
-  TerminatorInst *PTI2 = Head2->getTerminator();
+  Instruction *PTI2 = Head2->getTerminator();
   Instruction *PBI2 = &Head2->front();
 
   bool eq1 = (Block1 == Head1);
@@ -421,7 +420,7 @@ bool FlattenCFGOpt::MergeIfRegion(BasicBlock *BB, IRBuilder<> &Builder) {
   if ((IfTrue2 != SecondEntryBlock) && (IfFalse2 != SecondEntryBlock))
     return false;
 
-  TerminatorInst *PTI2 = SecondEntryBlock->getTerminator();
+  Instruction *PTI2 = SecondEntryBlock->getTerminator();
   Instruction *PBI2 = &SecondEntryBlock->front();
 
   if (!CompareIfRegionBlock(FirstEntryBlock, SecondEntryBlock, IfTrue1,
@@ -469,7 +468,7 @@ bool FlattenCFGOpt::MergeIfRegion(BasicBlock *BB, IRBuilder<> &Builder) {
   // Remove \param SecondEntryBlock
   SecondEntryBlock->dropAllReferences();
   SecondEntryBlock->eraseFromParent();
-  DEBUG(dbgs() << "If conditions merged into:\n" << *FirstEntryBlock);
+  LLVM_DEBUG(dbgs() << "If conditions merged into:\n" << *FirstEntryBlock);
   return true;
 }
 

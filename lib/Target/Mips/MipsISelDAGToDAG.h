@@ -1,9 +1,8 @@
 //===---- MipsISelDAGToDAG.h - A Dag to Dag Inst Selector for Mips --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,6 +39,8 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
 protected:
   SDNode *getGlobalBaseReg();
@@ -93,34 +94,34 @@ private:
   virtual bool selectAddr16(SDValue Addr, SDValue &Base, SDValue &Offset);
   virtual bool selectAddr16SP(SDValue Addr, SDValue &Base, SDValue &Offset);
 
-  /// \brief Select constant vector splats.
+  /// Select constant vector splats.
   virtual bool selectVSplat(SDNode *N, APInt &Imm,
                             unsigned MinSizeInBits) const;
-  /// \brief Select constant vector splats whose value fits in a uimm1.
+  /// Select constant vector splats whose value fits in a uimm1.
   virtual bool selectVSplatUimm1(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm2.
+  /// Select constant vector splats whose value fits in a uimm2.
   virtual bool selectVSplatUimm2(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm3.
+  /// Select constant vector splats whose value fits in a uimm3.
   virtual bool selectVSplatUimm3(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm4.
+  /// Select constant vector splats whose value fits in a uimm4.
   virtual bool selectVSplatUimm4(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm5.
+  /// Select constant vector splats whose value fits in a uimm5.
   virtual bool selectVSplatUimm5(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm6.
+  /// Select constant vector splats whose value fits in a uimm6.
   virtual bool selectVSplatUimm6(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a uimm8.
+  /// Select constant vector splats whose value fits in a uimm8.
   virtual bool selectVSplatUimm8(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value fits in a simm5.
+  /// Select constant vector splats whose value fits in a simm5.
   virtual bool selectVSplatSimm5(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value is a power of 2.
+  /// Select constant vector splats whose value is a power of 2.
   virtual bool selectVSplatUimmPow2(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value is the inverse of a
+  /// Select constant vector splats whose value is the inverse of a
   /// power of 2.
   virtual bool selectVSplatUimmInvPow2(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value is a run of set bits
+  /// Select constant vector splats whose value is a run of set bits
   /// ending at the most significant bit
   virtual bool selectVSplatMaskL(SDValue N, SDValue &Imm) const;
-  /// \brief Select constant vector splats whose value is a run of set bits
+  /// Select constant vector splats whose value is a run of set bits
   /// starting at bit zero.
   virtual bool selectVSplatMaskR(SDValue N, SDValue &Imm) const;
 

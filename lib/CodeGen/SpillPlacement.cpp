@@ -1,9 +1,8 @@
 //===- SpillPlacement.cpp - Optimal Spill Code Placement ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -246,7 +245,7 @@ void SpillPlacement::activate(unsigned n) {
   }
 }
 
-/// \brief Set the threshold for a given entry frequency.
+/// Set the threshold for a given entry frequency.
 ///
 /// Set the threshold relative to \c Entry.  Since the threshold is used as a
 /// bound on the open interval (-Threshold;Threshold), 1 is the minimum

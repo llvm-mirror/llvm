@@ -83,6 +83,8 @@ class LitConfig(object):
             Interface for setting maximum time to spend executing
             a single test
         """
+        if not isinstance(value, int):
+            self.fatal('maxIndividualTestTime must set to a value of type int.')
         self._maxIndividualTestTime = value
         if self.maxIndividualTestTime > 0:
             # The current implementation needs psutil to set
@@ -117,6 +119,22 @@ class LitConfig(object):
 
         if self.bashPath is None:
             self.bashPath = ''
+
+        # Check whether the found version of bash is able to cope with paths in
+        # the host path format. If not, don't return it as it can't be used to
+        # run scripts. For example, WSL's bash.exe requires '/mnt/c/foo' rather
+        # than 'C:\\foo' or 'C:/foo'.
+        if self.isWindows and self.bashPath:
+            command = [self.bashPath, '-c',
+                       '[[ -f "%s" ]]' % self.bashPath.replace('\\', '\\\\')]
+            _, _, exitCode = lit.util.executeCommand(command)
+            if exitCode:
+                self.note('bash command failed: %s' % (
+                    ' '.join('"%s"' % c for c in command)))
+                self.bashPath = ''
+
+        if not self.bashPath:
+            self.warning('Unable to find a usable version of bash.')
 
         return self.bashPath
 

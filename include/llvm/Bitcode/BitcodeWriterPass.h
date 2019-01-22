@@ -1,9 +1,8 @@
 //===-- BitcodeWriterPass.h - Bitcode writing pass --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -21,9 +20,10 @@
 namespace llvm {
 class Module;
 class ModulePass;
+class Pass;
 class raw_ostream;
 
-/// \brief Create and return a pass that writes the module to the specified
+/// Create and return a pass that writes the module to the specified
 /// ostream. Note that this pass is designed for use with the legacy pass
 /// manager.
 ///
@@ -40,7 +40,10 @@ ModulePass *createBitcodeWriterPass(raw_ostream &Str,
                                     bool EmitSummaryIndex = false,
                                     bool EmitModuleHash = false);
 
-/// \brief Pass for writing a module of IR out to a bitcode file.
+/// Check whether a pass is a BitcodeWriterPass.
+bool isBitcodeWriterPass(Pass *P);
+
+/// Pass for writing a module of IR out to a bitcode file.
 ///
 /// Note that this is intended for use with the new pass manager. To construct
 /// a pass for the legacy pass manager, use the function above.
@@ -51,7 +54,7 @@ class BitcodeWriterPass : public PassInfoMixin<BitcodeWriterPass> {
   bool EmitModuleHash;
 
 public:
-  /// \brief Construct a bitcode writer pass around a particular output stream.
+  /// Construct a bitcode writer pass around a particular output stream.
   ///
   /// If \c ShouldPreserveUseListOrder, encode use-list order so it can be
   /// reproduced when deserialized.
@@ -65,7 +68,7 @@ public:
       : OS(OS), ShouldPreserveUseListOrder(ShouldPreserveUseListOrder),
   EmitSummaryIndex(EmitSummaryIndex), EmitModuleHash(EmitModuleHash) {}
 
-  /// \brief Run the bitcode writer pass, and output the module to the selected
+  /// Run the bitcode writer pass, and output the module to the selected
   /// output stream.
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
 };

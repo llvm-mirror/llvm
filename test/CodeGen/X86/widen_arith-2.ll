@@ -5,7 +5,7 @@
 
 define void @update(i64* %dst_i, i64* %src_i, i32 %n) nounwind {
 ; CHECK-LABEL: update:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    subl $12, %esp
 ; CHECK-NEXT:    movl $0, (%esp)
 ; CHECK-NEXT:    pcmpeqd %xmm0, %xmm0
@@ -24,7 +24,7 @@ define void @update(i64* %dst_i, i64* %src_i, i32 %n) nounwind {
 ; CHECK-NEXT:    pmovzxbw {{.*#+}} xmm2 = mem[0],zero,mem[1],zero,mem[2],zero,mem[3],zero,mem[4],zero,mem[5],zero,mem[6],zero,mem[7],zero
 ; CHECK-NEXT:    psubw %xmm0, %xmm2
 ; CHECK-NEXT:    pand %xmm1, %xmm2
-; CHECK-NEXT:    packsswb %xmm0, %xmm2
+; CHECK-NEXT:    packuswb %xmm0, %xmm2
 ; CHECK-NEXT:    movq %xmm2, (%edx,%eax,8)
 ; CHECK-NEXT:    incl (%esp)
 ; CHECK-NEXT:  .LBB0_1: # %forcond
@@ -32,7 +32,7 @@ define void @update(i64* %dst_i, i64* %src_i, i32 %n) nounwind {
 ; CHECK-NEXT:    movl (%esp), %eax
 ; CHECK-NEXT:    cmpl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    jl .LBB0_2
-; CHECK-NEXT:  # BB#3: # %afterfor
+; CHECK-NEXT:  # %bb.3: # %afterfor
 ; CHECK-NEXT:    addl $12, %esp
 ; CHECK-NEXT:    retl
 entry:

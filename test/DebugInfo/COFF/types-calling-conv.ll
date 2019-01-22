@@ -30,11 +30,10 @@
 ; CHECK:   Pointer (0x1001) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
 ; CHECK:     PointeeType: A (0x1000)
-; CHECK:     PointerAttributes: 0x800A
 ; CHECK:     PtrType: Near32 (0xA)
 ; CHECK:     PtrMode: Pointer (0x0)
 ; CHECK:     IsFlat: 0
-; CHECK:     IsConst: 0
+; CHECK:     IsConst: 1
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
 ; CHECK:     SizeOf: 4
@@ -49,7 +48,7 @@
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     ClassType: A (0x1000)
-; CHECK:     ThisType: A* (0x1001)
+; CHECK:     ThisType: A* const (0x1001)
 ; CHECK:     CallingConvention: ThisCall (0xB)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -93,7 +92,19 @@
 ; CHECK:     FunctionType: void A::() (0x1003)
 ; CHECK:     Name: A::thiscallcc
 ; CHECK:   }
-; CHECK:   Procedure (0x1009) {
+; CHECK:   Pointer (0x1009) {
+; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
+; CHECK:     PointeeType: A (0x1000)
+; CHECK:     PtrType: Near32 (0xA)
+; CHECK:     PtrMode: Pointer (0x0)
+; CHECK:     IsFlat: 0
+; CHECK:     IsConst: 0
+; CHECK:     IsVolatile: 0
+; CHECK:     IsUnaligned: 0
+; CHECK:     IsRestrict: 0
+; CHECK:     SizeOf: 4
+; CHECK:   }
+; CHECK:   Procedure (0x100A) {
 ; CHECK:     TypeLeafKind: LF_PROCEDURE (0x1008)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     CallingConvention: NearC (0x0)
@@ -102,13 +113,13 @@
 ; CHECK:     NumParameters: 0
 ; CHECK:     ArgListType: () (0x1002)
 ; CHECK:   }
-; CHECK:   FuncId (0x100A) {
+; CHECK:   FuncId (0x100B) {
 ; CHECK:     TypeLeafKind: LF_FUNC_ID (0x1601)
 ; CHECK:     ParentScope: 0x0
-; CHECK:     FunctionType: void () (0x1009)
+; CHECK:     FunctionType: void () (0x100A)
 ; CHECK:     Name: cdeclcc
 ; CHECK:   }
-; CHECK:   Procedure (0x100B) {
+; CHECK:   Procedure (0x100C) {
 ; CHECK:     TypeLeafKind: LF_PROCEDURE (0x1008)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     CallingConvention: NearFast (0x4)
@@ -117,13 +128,13 @@
 ; CHECK:     NumParameters: 0
 ; CHECK:     ArgListType: () (0x1002)
 ; CHECK:   }
-; CHECK:   FuncId (0x100C) {
+; CHECK:   FuncId (0x100D) {
 ; CHECK:     TypeLeafKind: LF_FUNC_ID (0x1601)
 ; CHECK:     ParentScope: 0x0
-; CHECK:     FunctionType: void () (0x100B)
+; CHECK:     FunctionType: void () (0x100C)
 ; CHECK:     Name: fastcallcc
 ; CHECK:   }
-; CHECK:   Procedure (0x100D) {
+; CHECK:   Procedure (0x100E) {
 ; CHECK:     TypeLeafKind: LF_PROCEDURE (0x1008)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     CallingConvention: NearStdCall (0x7)
@@ -132,13 +143,13 @@
 ; CHECK:     NumParameters: 0
 ; CHECK:     ArgListType: () (0x1002)
 ; CHECK:   }
-; CHECK:   FuncId (0x100E) {
+; CHECK:   FuncId (0x100F) {
 ; CHECK:     TypeLeafKind: LF_FUNC_ID (0x1601)
 ; CHECK:     ParentScope: 0x0
-; CHECK:     FunctionType: void () (0x100D)
+; CHECK:     FunctionType: void () (0x100E)
 ; CHECK:     Name: stdcallcc
 ; CHECK:   }
-; CHECK:   Procedure (0x100F) {
+; CHECK:   Procedure (0x1010) {
 ; CHECK:     TypeLeafKind: LF_PROCEDURE (0x1008)
 ; CHECK:     ReturnType: void (0x3)
 ; CHECK:     CallingConvention: NearVector (0x18)
@@ -147,10 +158,10 @@
 ; CHECK:     NumParameters: 0
 ; CHECK:     ArgListType: () (0x1002)
 ; CHECK:   }
-; CHECK:   FuncId (0x1010) {
+; CHECK:   FuncId (0x1011) {
 ; CHECK:     TypeLeafKind: LF_FUNC_ID (0x1601)
 ; CHECK:     ParentScope: 0x0
-; CHECK:     FunctionType: void () (0x100F)
+; CHECK:     FunctionType: void () (0x1010)
 ; CHECK:     Name: vectorcallcc
 ; CHECK:   }
 ; CHECK: ]
@@ -210,7 +221,7 @@ attributes #2 = { nounwind readnone }
 !3 = !{i32 2, !"CodeView", i32 1}
 !4 = !{i32 2, !"Debug Info Version", i32 3}
 !5 = !{!"clang version 3.9.0 (trunk 272067)"}
-!6 = distinct !DISubprogram(name: "A::thiscallcc", linkageName: "\01?thiscallcc@A@@QAEXXZ", scope: !7, file: !1, line: 4, type: !10, isLocal: false, isDefinition: true, scopeLine: 4, flags: DIFlagPrototyped, isOptimized: true, unit: !0, declaration: !9, variables: !13)
+!6 = distinct !DISubprogram(name: "A::thiscallcc", linkageName: "\01?thiscallcc@A@@QAEXXZ", scope: !7, file: !1, line: 4, type: !10, isLocal: false, isDefinition: true, scopeLine: 4, flags: DIFlagPrototyped, isOptimized: true, unit: !0, declaration: !9, retainedNodes: !13)
 !7 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "A", file: !1, line: 1, size: 8, align: 8, elements: !8)
 !8 = !{!9}
 !9 = !DISubprogram(name: "A::thiscallcc", linkageName: "\01?thiscallcc@A@@QAEXXZ", scope: !7, file: !1, line: 2, type: !10, isLocal: false, isDefinition: false, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: true)
@@ -223,14 +234,14 @@ attributes #2 = { nounwind readnone }
 !16 = !DIExpression()
 !17 = !DILocation(line: 0, scope: !6)
 !18 = !DILocation(line: 4, column: 23, scope: !6)
-!19 = distinct !DISubprogram(name: "cdeclcc", linkageName: "\01?cdeclcc@@YAXXZ", scope: !1, file: !1, line: 5, type: !20, isLocal: false, isDefinition: true, scopeLine: 5, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !2)
+!19 = distinct !DISubprogram(name: "cdeclcc", linkageName: "\01?cdeclcc@@YAXXZ", scope: !1, file: !1, line: 5, type: !20, isLocal: false, isDefinition: true, scopeLine: 5, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !2)
 !21 = !{null}
 !22 = !DILocation(line: 5, column: 17, scope: !19)
-!23 = distinct !DISubprogram(name: "fastcallcc", linkageName: "\01?fastcallcc@@YIXXZ", scope: !1, file: !1, line: 6, type: !29, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !2)
+!23 = distinct !DISubprogram(name: "fastcallcc", linkageName: "\01?fastcallcc@@YIXXZ", scope: !1, file: !1, line: 6, type: !29, isLocal: false, isDefinition: true, scopeLine: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !2)
 !24 = !DILocation(line: 6, column: 31, scope: !23)
-!25 = distinct !DISubprogram(name: "stdcallcc", linkageName: "\01?stdcallcc@@YGXXZ", scope: !1, file: !1, line: 7, type: !30, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !2)
+!25 = distinct !DISubprogram(name: "stdcallcc", linkageName: "\01?stdcallcc@@YGXXZ", scope: !1, file: !1, line: 7, type: !30, isLocal: false, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !2)
 !26 = !DILocation(line: 7, column: 29, scope: !25)
-!27 = distinct !DISubprogram(name: "vectorcallcc", linkageName: "\01?vectorcallcc@@YQXXZ", scope: !1, file: !1, line: 8, type: !31, isLocal: false, isDefinition: true, scopeLine: 8, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !2)
+!27 = distinct !DISubprogram(name: "vectorcallcc", linkageName: "\01?vectorcallcc@@YQXXZ", scope: !1, file: !1, line: 8, type: !31, isLocal: false, isDefinition: true, scopeLine: 8, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !2)
 !28 = !DILocation(line: 8, column: 35, scope: !27)
 
 !20 = !DISubroutineType(cc: DW_CC_normal, types: !21)

@@ -1,9 +1,8 @@
 //===- ScheduleDAGILP.h - ILP metric for ScheduleDAGInstrs ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,7 +24,7 @@ namespace llvm {
 
 class raw_ostream;
 
-/// \brief Represent the ILP of the subDAG rooted at a DAG node.
+/// Represent the ILP of the subDAG rooted at a DAG node.
 ///
 /// ILPValues summarize the DAG subtree rooted at each node. ILPValues are
 /// valid for all nodes regardless of their subtree membership.
@@ -62,13 +61,13 @@ struct ILPValue {
   void dump() const;
 };
 
-/// \brief Compute the values of each DAG node for various metrics during DFS.
+/// Compute the values of each DAG node for various metrics during DFS.
 class SchedDFSResult {
   friend class SchedDFSImpl;
 
   static const unsigned InvalidSubtreeID = ~0u;
 
-  /// \brief Per-SUnit data computed during DFS for various metrics.
+  /// Per-SUnit data computed during DFS for various metrics.
   ///
   /// A node's SubtreeID is set to itself when it is visited to indicate that it
   /// is the root of a subtree. Later it is set to its parent to indicate an
@@ -81,7 +80,7 @@ class SchedDFSResult {
     NodeData() = default;
   };
 
-  /// \brief Per-Subtree data computed during DFS.
+  /// Per-Subtree data computed during DFS.
   struct TreeData {
     unsigned ParentTreeID = InvalidSubtreeID;
     unsigned SubInstrCount = 0;
@@ -89,7 +88,7 @@ class SchedDFSResult {
     TreeData() = default;
   };
 
-  /// \brief Record a connection between subtrees and the connection level.
+  /// Record a connection between subtrees and the connection level.
   struct Connection {
     unsigned TreeID;
     unsigned Level;
@@ -117,15 +116,15 @@ public:
   SchedDFSResult(bool IsBU, unsigned lim)
     : IsBottomUp(IsBU), SubtreeLimit(lim) {}
 
-  /// \brief Get the node cutoff before subtrees are considered significant.
+  /// Get the node cutoff before subtrees are considered significant.
   unsigned getSubtreeLimit() const { return SubtreeLimit; }
 
-  /// \brief Return true if this DFSResult is uninitialized.
+  /// Return true if this DFSResult is uninitialized.
   ///
   /// resize() initializes DFSResult, while compute() populates it.
   bool empty() const { return DFSNodeData.empty(); }
 
-  /// \brief Clear the results.
+  /// Clear the results.
   void clear() {
     DFSNodeData.clear();
     DFSTreeData.clear();
@@ -133,37 +132,37 @@ public:
     SubtreeConnectLevels.clear();
   }
 
-  /// \brief Initialize the result data with the size of the DAG.
+  /// Initialize the result data with the size of the DAG.
   void resize(unsigned NumSUnits) {
     DFSNodeData.resize(NumSUnits);
   }
 
-  /// \brief Compute various metrics for the DAG with given roots.
+  /// Compute various metrics for the DAG with given roots.
   void compute(ArrayRef<SUnit> SUnits);
 
-  /// \brief Get the number of instructions in the given subtree and its
+  /// Get the number of instructions in the given subtree and its
   /// children.
   unsigned getNumInstrs(const SUnit *SU) const {
     return DFSNodeData[SU->NodeNum].InstrCount;
   }
 
-  /// \brief Get the number of instructions in the given subtree not including
+  /// Get the number of instructions in the given subtree not including
   /// children.
   unsigned getNumSubInstrs(unsigned SubtreeID) const {
     return DFSTreeData[SubtreeID].SubInstrCount;
   }
 
-  /// \brief Get the ILP value for a DAG node.
+  /// Get the ILP value for a DAG node.
   ///
   /// A leaf node has an ILP of 1/1.
   ILPValue getILP(const SUnit *SU) const {
     return ILPValue(DFSNodeData[SU->NodeNum].InstrCount, 1 + SU->getDepth());
   }
 
-  /// \brief The number of subtrees detected in this DAG.
+  /// The number of subtrees detected in this DAG.
   unsigned getNumSubtrees() const { return SubtreeConnectLevels.size(); }
 
-  /// \brief Get the ID of the subtree the given DAG node belongs to.
+  /// Get the ID of the subtree the given DAG node belongs to.
   ///
   /// For convenience, if DFSResults have not been computed yet, give everything
   /// tree ID 0.
@@ -174,7 +173,7 @@ public:
     return DFSNodeData[SU->NodeNum].SubtreeID;
   }
 
-  /// \brief Get the connection level of a subtree.
+  /// Get the connection level of a subtree.
   ///
   /// For bottom-up trees, the connection level is the latency depth (in cycles)
   /// of the deepest connection to another subtree.
@@ -182,7 +181,7 @@ public:
     return SubtreeConnectLevels[SubtreeID];
   }
 
-  /// \brief Scheduler callback to update SubtreeConnectLevels when a tree is
+  /// Scheduler callback to update SubtreeConnectLevels when a tree is
   /// initially scheduled.
   void scheduleTree(unsigned SubtreeID);
 };

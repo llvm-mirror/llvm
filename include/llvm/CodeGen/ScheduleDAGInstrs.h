@@ -1,9 +1,8 @@
 //===- ScheduleDAGInstrs.h - MachineInstr Scheduling ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,9 +23,9 @@
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/MC/LaneBitmask.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <list>
@@ -190,7 +189,7 @@ namespace llvm {
     using SUList = std::list<SUnit *>;
 
   protected:
-    /// \brief A map from ValueType to SUList, used during DAG construction, as
+    /// A map from ValueType to SUList, used during DAG construction, as
     /// a means of remembering which SUs depend on which memory locations.
     class Value2SUsMap;
 
@@ -201,7 +200,7 @@ namespace llvm {
     void reduceHugeMemNodeMaps(Value2SUsMap &stores,
                                Value2SUsMap &loads, unsigned N);
 
-    /// \brief Adds a chain edge between SUa and SUb, but only if both
+    /// Adds a chain edge between SUa and SUb, but only if both
     /// AliasAnalysis and Target fail to deny the dependency.
     void addChainDependency(SUnit *SUa, SUnit *SUb,
                             unsigned Latency = 0);
@@ -286,7 +285,7 @@ namespace llvm {
     /// Cleans up after scheduling in the given block.
     virtual void finishBlock();
 
-    /// \brief Initialize the DAG and common scheduler state for a new
+    /// Initialize the DAG and common scheduler state for a new
     /// scheduling region. This does not actually create the DAG, only clears
     /// it. The scheduling driver may call BuildSchedGraph multiple times per
     /// scheduling region.
@@ -308,7 +307,7 @@ namespace llvm {
                          LiveIntervals *LIS = nullptr,
                          bool TrackLaneMasks = false);
 
-    /// \brief Adds dependencies from instructions in the current list of
+    /// Adds dependencies from instructions in the current list of
     /// instructions being scheduled to scheduling barrier. We want to make sure
     /// instructions which define registers that are either used by the
     /// terminator or are live-out are properly scheduled. This is especially
@@ -327,7 +326,8 @@ namespace llvm {
     /// whole MachineFunction. By default does nothing.
     virtual void finalizeSchedule() {}
 
-    void dumpNode(const SUnit *SU) const override;
+    void dumpNode(const SUnit &SU) const override;
+    void dump() const override;
 
     /// Returns a label for a DAG node that points to an instruction.
     std::string getGraphNodeLabel(const SUnit *SU) const override;

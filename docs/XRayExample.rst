@@ -48,11 +48,11 @@ Getting Traces
 --------------
 
 By default, XRay does not write out the trace files or patch the application
-before main starts. If we just run ``llc`` it should just work like a normally
-built binary. However, if we want to get a full trace of the application's
-operations (of the functions we do end up instrumenting with XRay) then we need
-to enable XRay at application start. To do this, XRay checks the
-``XRAY_OPTIONS`` environment variable.
+before main starts. If we run ``llc`` it should work like a normally built
+binary. If we want to get a full trace of the application's operations (of the
+functions we do end up instrumenting with XRay) then we need to enable XRay
+at application start. To do this, XRay checks the ``XRAY_OPTIONS`` environment
+variable.
 
 ::
 
@@ -60,7 +60,7 @@ to enable XRay at application start. To do this, XRay checks the
   $ ./bin/llc input.ll
 
   # We need to set the XRAY_OPTIONS to enable some features.
-  $ XRAY_OPTIONS="patch_premain=true" ./bin/llc input.ll
+  $ XRAY_OPTIONS="patch_premain=true xray_mode=xray-basic verbosity=1" ./bin/llc input.ll
   ==69819==XRay: Log file in 'xray-log.llc.m35qPB'
 
 At this point we now have an XRay trace we can start analysing.
@@ -73,9 +73,8 @@ instrumented, and how much time we're spending in parts of the code. To make
 sense of this data, we use the ``llvm-xray`` tool which has a few subcommands
 to help us understand our trace.
 
-One of the simplest things we can do is to get an accounting of the functions
-that have been instrumented. We can see an example accounting with ``llvm-xray
-account``:
+One of the things we can do is to get an accounting of the functions that have
+been instrumented. We can see an example accounting with ``llvm-xray account``:
 
 ::
 
@@ -178,22 +177,22 @@ add the attribute to the source.
 To use this feature, you can define one file for the functions to always
 instrument, and another for functions to never instrument. The format of these
 files are exactly the same as the SanitizerLists files that control similar
-things for the sanitizer implementations. For example, we can have two
-different files like below:
+things for the sanitizer implementations. For example:
 
 ::
 
-  # always-instrument.txt
+  # xray-attr-list.txt
   # always instrument functions that match the following filters:
+  [always]
   fun:main
 
-  # never-instrument.txt
   # never instrument functions that match the following filters:
+  [never]
   fun:__cxx_*
 
-Given the above two files we can re-build by providing those two files as
-arguments to clang as ``-fxray-always-instrument=always-instrument.txt`` or
-``-fxray-never-instrument=never-instrument.txt``.
+Given the file above we can re-build by providing it to the
+``-fxray-attr-list=`` flag to clang. You can have multiple files, each defining
+different sets of attribute sets, to be combined into a single list by clang.
 
 The XRay stack tool
 -------------------
@@ -202,8 +201,7 @@ Given a trace, and optionally an instrumentation map, the ``llvm-xray stack``
 command can be used to analyze a call stack graph constructed from the function
 call timeline.
 
-The simplest way to use the command is simply to output the top stacks by call
-count and time spent.
+The way to use the command is to output the top stacks by call count and time spent.
 
 ::
 
@@ -245,7 +243,7 @@ FlameGraph tool, currently available on `github
 
 To generate output for a flamegraph, a few more options are necessary.
 
-- ``-all-stacks`` - Emits all of the stacks instead of just the top stacks.
+- ``-all-stacks`` - Emits all of the stacks.
 - ``-stack-format`` - Choose the flamegraph output format 'flame'.
 - ``-aggregation-type`` - Choose the metric to graph.
 
@@ -258,6 +256,21 @@ svg file.
   /path/to/FlameGraph/flamegraph.pl > flamegraph.svg
 
 If you open the svg in a browser, mouse events allow exploring the call stacks.
+
+Chrome Trace Viewer Visualization
+---------------------------------
+
+We can also generate a trace which can be loaded by the Chrome Trace Viewer
+from the same generated trace:
+
+::
+
+  $ llvm-xray convert -symbolize -instr_map=./bin/llc \
+    -output_format=trace_event xray-log.llc.5rqxkU \
+      | gzip > llc-trace.txt.gz
+
+From a Chrome browser, navigating to ``chrome:///tracing`` allows us to load
+the ``sample-trace.txt.gz`` file to visualize the execution trace.
 
 Further Exploration
 -------------------
@@ -275,11 +288,11 @@ application.
   #include <iostream>
   #include <thread>
 
-  [[clang::xray_always_intrument]] void f() {
+  [[clang::xray_always_instrument]] void f() {
     std::cerr << '.';
   }
 
-  [[clang::xray_always_intrument]] void g() {
+  [[clang::xray_always_instrument]] void g() {
     for (int i = 0; i < 1 << 10; ++i) {
       std::cerr << '-';
     }
@@ -303,7 +316,7 @@ We then build the above with XRay instrumentation:
 ::
 
   $ clang++ -o sample -O3 sample.cc -std=c++11 -fxray-instrument -fxray-instruction-threshold=1
-  $ XRAY_OPTIONS="patch_premain=true" ./sample
+  $ XRAY_OPTIONS="patch_premain=true xray_mode=xray-basic" ./sample
 
 We can then explore the graph rendering of the trace generated by this sample
 application. We assume you have the graphviz toosl available in your system,
@@ -319,6 +332,7 @@ applications:
   $ llvm-xray graph xray-log.sample.* -m sample -color-edges=sum -edge-label=sum \
       | unflatten -f -l10 | dot -Tsvg -o sample.svg
 
+
 Next Steps
 ----------
 
@@ -329,8 +343,6 @@ making things better.
 
   - Implement a query/filtering library that allows for finding patterns in the
     XRay traces.
-  - A conversion from the XRay trace onto something that can be visualised
-    better by other tools (like the Chrome trace viewer for example).
   - Collecting function call stacks and how often they're encountered in the
     XRay trace.
 

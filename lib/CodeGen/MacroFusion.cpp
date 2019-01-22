@@ -1,9 +1,8 @@
 //===- MacroFusion.cpp - Macro Fusion -------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,10 +18,10 @@
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleDAGMutation.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 
 #define DEBUG_TYPE "machine-scheduler"
 
@@ -33,47 +32,87 @@ using namespace llvm;
 static cl::opt<bool> EnableMacroFusion("misched-fusion", cl::Hidden,
   cl::desc("Enable scheduling for macro fusion."), cl::init(true));
 
-static void fuseInstructionPair(ScheduleDAGMI &DAG, SUnit &FirstSU,
+static bool isHazard(const SDep &Dep) {
+  return Dep.getKind() == SDep::Anti || Dep.getKind() == SDep::Output;
+}
+
+static bool fuseInstructionPair(ScheduleDAGMI &DAG, SUnit &FirstSU,
                                 SUnit &SecondSU) {
+  // Check that neither instr is already paired with another along the edge
+  // between them.
+  for (SDep &SI : FirstSU.Succs)
+    if (SI.isCluster())
+      return false;
+
+  for (SDep &SI : SecondSU.Preds)
+    if (SI.isCluster())
+      return false;
+  // Though the reachability checks above could be made more generic,
+  // perhaps as part of ScheduleDAGMI::addEdge(), since such edges are valid,
+  // the extra computation cost makes it less interesting in general cases.
+
   // Create a single weak edge between the adjacent instrs. The only effect is
   // to cause bottom-up scheduling to heavily prioritize the clustered instrs.
-  DAG.addEdge(&SecondSU, SDep(&FirstSU, SDep::Cluster));
+  if (!DAG.addEdge(&SecondSU, SDep(&FirstSU, SDep::Cluster)))
+    return false;
 
-  // Adjust the latency between the anchor instr and its
-  // predecessors.
-  for (SDep &IDep : SecondSU.Preds)
-    if (IDep.getSUnit() == &FirstSU)
-      IDep.setLatency(0);
+  // Adjust the latency between both instrs.
+  for (SDep &SI : FirstSU.Succs)
+    if (SI.getSUnit() == &SecondSU)
+      SI.setLatency(0);
 
-  // Adjust the latency between the dependent instr and its
-  // predecessors.
-  for (SDep &IDep : FirstSU.Succs)
-    if (IDep.getSUnit() == &SecondSU)
-      IDep.setLatency(0);
+  for (SDep &SI : SecondSU.Preds)
+    if (SI.getSUnit() == &FirstSU)
+      SI.setLatency(0);
 
-  DEBUG(dbgs() << DAG.MF.getName() << "(): Macro fuse ";
-        FirstSU.print(dbgs(), &DAG); dbgs() << " - ";
-        SecondSU.print(dbgs(), &DAG); dbgs() << " /  ";
-        dbgs() << DAG.TII->getName(FirstSU.getInstr()->getOpcode()) << " - " <<
-                  DAG.TII->getName(SecondSU.getInstr()->getOpcode()) << '\n'; );
+  LLVM_DEBUG(
+      dbgs() << "Macro fuse: "; DAG.dumpNodeName(FirstSU); dbgs() << " - ";
+      DAG.dumpNodeName(SecondSU); dbgs() << " /  ";
+      dbgs() << DAG.TII->getName(FirstSU.getInstr()->getOpcode()) << " - "
+             << DAG.TII->getName(SecondSU.getInstr()->getOpcode()) << '\n';);
 
+  // Make data dependencies from the FirstSU also dependent on the SecondSU to
+  // prevent them from being scheduled between the FirstSU and the SecondSU.
   if (&SecondSU != &DAG.ExitSU)
-    // Make instructions dependent on FirstSU also dependent on SecondSU to
-    // prevent them from being scheduled between FirstSU and and SecondSU.
     for (const SDep &SI : FirstSU.Succs) {
-      if (SI.getSUnit() == &SecondSU)
+      SUnit *SU = SI.getSUnit();
+      if (SI.isWeak() || isHazard(SI) ||
+          SU == &DAG.ExitSU || SU == &SecondSU || SU->isPred(&SecondSU))
         continue;
-      DEBUG(dbgs() << "  Copy Succ ";
-            SI.getSUnit()->print(dbgs(), &DAG); dbgs() << '\n';);
-      DAG.addEdge(SI.getSUnit(), SDep(&SecondSU, SDep::Artificial));
+      LLVM_DEBUG(dbgs() << "  Bind "; DAG.dumpNodeName(SecondSU);
+                 dbgs() << " - "; DAG.dumpNodeName(*SU); dbgs() << '\n';);
+      DAG.addEdge(SU, SDep(&SecondSU, SDep::Artificial));
     }
 
+  // Make the FirstSU also dependent on the dependencies of the SecondSU to
+  // prevent them from being scheduled between the FirstSU and the SecondSU.
+  if (&FirstSU != &DAG.EntrySU) {
+    for (const SDep &SI : SecondSU.Preds) {
+      SUnit *SU = SI.getSUnit();
+      if (SI.isWeak() || isHazard(SI) || &FirstSU == SU || FirstSU.isSucc(SU))
+        continue;
+      LLVM_DEBUG(dbgs() << "  Bind "; DAG.dumpNodeName(*SU); dbgs() << " - ";
+                 DAG.dumpNodeName(FirstSU); dbgs() << '\n';);
+      DAG.addEdge(&FirstSU, SDep(SU, SDep::Artificial));
+    }
+    // ExitSU comes last by design, which acts like an implicit dependency
+    // between ExitSU and any bottom root in the graph. We should transfer
+    // this to FirstSU as well.
+    if (&SecondSU == &DAG.ExitSU) {
+      for (SUnit &SU : DAG.SUnits) {
+        if (SU.Succs.empty())
+          DAG.addEdge(&FirstSU, SDep(&SU, SDep::Artificial));
+      }
+    }
+  }
+
   ++NumFused;
+  return true;
 }
 
 namespace {
 
-/// \brief Post-process the DAG to create cluster edges between instrs that may
+/// Post-process the DAG to create cluster edges between instrs that may
 /// be fused by the processor into a single operation.
 class MacroFusion : public ScheduleDAGMutation {
   ShouldSchedulePredTy shouldScheduleAdjacent;
@@ -103,7 +142,7 @@ void MacroFusion::apply(ScheduleDAGInstrs *DAGInstrs) {
     scheduleAdjacentImpl(*DAG, DAG->ExitSU);
 }
 
-/// \brief Implement the fusion of instr pairs in the scheduling DAG,
+/// Implement the fusion of instr pairs in the scheduling DAG,
 /// anchored at the instr in AnchorSU..
 bool MacroFusion::scheduleAdjacentImpl(ScheduleDAGMI &DAG, SUnit &AnchorSU) {
   const MachineInstr &AnchorMI = *AnchorSU.getInstr();
@@ -116,9 +155,8 @@ bool MacroFusion::scheduleAdjacentImpl(ScheduleDAGMI &DAG, SUnit &AnchorSU) {
 
   // Explorer for fusion candidates among the dependencies of the anchor instr.
   for (SDep &Dep : AnchorSU.Preds) {
-    // Ignore dependencies that don't enforce ordering.
-    if (Dep.getKind() == SDep::Anti || Dep.getKind() == SDep::Output ||
-        Dep.isWeak())
+    // Ignore dependencies other than data or strong ordering.
+    if (Dep.isWeak() || isHazard(Dep))
       continue;
 
     SUnit &DepSU = *Dep.getSUnit();
@@ -129,8 +167,8 @@ bool MacroFusion::scheduleAdjacentImpl(ScheduleDAGMI &DAG, SUnit &AnchorSU) {
     if (!shouldScheduleAdjacent(TII, ST, DepMI, AnchorMI))
       continue;
 
-    fuseInstructionPair(DAG, DepSU, AnchorSU);
-    return true;
+    if (fuseInstructionPair(DAG, DepSU, AnchorSU))
+      return true;
   }
 
   return false;

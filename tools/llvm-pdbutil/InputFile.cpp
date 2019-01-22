@@ -1,9 +1,8 @@
 //===- InputFile.cpp ------------------------------------------ *- C++ --*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -41,6 +40,10 @@ getModuleDebugStream(PDBFile &File, StringRef &ModuleName, uint32_t Index) {
 
   auto &Dbi = Err(File.getPDBDbiStream());
   const auto &Modules = Dbi.modules();
+  if (Index >= Modules.getModuleCount())
+    return make_error<RawError>(raw_error_code::index_out_of_bounds,
+                                "Invalid module index");
+
   auto Modi = Modules.getModuleDescriptor(Index);
 
   ModuleName = Modi.getModuleName();
@@ -95,7 +98,8 @@ static inline bool isDebugSSection(object::SectionRef Section,
 
 static bool isDebugTSection(SectionRef Section, CVTypeArray &Types) {
   BinaryStreamReader Reader;
-  if (!isCodeViewDebugSubsection(Section, ".debug$T", Reader))
+  if (!isCodeViewDebugSubsection(Section, ".debug$T", Reader) &&
+      !isCodeViewDebugSubsection(Section, ".debug$P", Reader))
     return false;
   cantFail(Reader.readArray(Types, Reader.bytesRemaining()));
   return true;
@@ -109,10 +113,6 @@ static std::string formatChecksumKind(FileChecksumKind Kind) {
     RETURN_CASE(FileChecksumKind, SHA256, "SHA-256");
   }
   return formatUnknownEnum(Kind);
-}
-
-static const DebugStringTableSubsectionRef &extractStringTable(PDBFile &File) {
-  return cantFail(File.getStringTable()).getStringTable();
 }
 
 template <typename... Args>
@@ -163,8 +163,13 @@ void SymbolGroup::initializeForPdb(uint32_t Modi) {
 
   // PDB always uses the same string table, but each module has its own
   // checksums.  So we only set the strings if they're not already set.
-  if (!SC.hasStrings())
-    SC.setStrings(extractStringTable(File->pdb()));
+  if (!SC.hasStrings()) {
+    auto StringTable = File->pdb().getStringTable();
+    if (StringTable)
+      SC.setStrings(StringTable->getStringTable());
+    else
+      consumeError(StringTable.takeError());
+  }
 
   SC.resetChecksums();
   auto MDS = getModuleDebugStream(File->pdb(), Name, Modi);
@@ -242,7 +247,7 @@ void SymbolGroup::formatFromChecksumsOffset(LinePrinter &Printer,
   }
 }
 
-Expected<InputFile> InputFile::open(StringRef Path) {
+Expected<InputFile> InputFile::open(StringRef Path, bool AllowUnknownFile) {
   InputFile IF;
   if (!llvm::sys::fs::exists(Path))
     return make_error<StringError>(formatv("File {0} not found", Path),
@@ -263,7 +268,7 @@ Expected<InputFile> InputFile::open(StringRef Path) {
     return std::move(IF);
   }
 
-  if (Magic == file_magic::unknown) {
+  if (Magic == file_magic::pdb) {
     std::unique_ptr<IPDBSession> Session;
     if (auto Err = loadDataForPDB(PDB_ReaderType::Native, Path, Session))
       return std::move(Err);
@@ -274,9 +279,19 @@ Expected<InputFile> InputFile::open(StringRef Path) {
     return std::move(IF);
   }
 
-  return make_error<StringError>(
-      formatv("File {0} is not a supported file type", Path),
-      inconvertibleErrorCode());
+  if (!AllowUnknownFile)
+    return make_error<StringError>(
+        formatv("File {0} is not a supported file type", Path),
+        inconvertibleErrorCode());
+
+  auto Result = MemoryBuffer::getFile(Path, -1LL, false);
+  if (!Result)
+    return make_error<StringError>(
+        formatv("File {0} could not be opened", Path), Result.getError());
+
+  IF.UnknownFile = std::move(*Result);
+  IF.PdbOrObj = IF.UnknownFile.get();
+  return std::move(IF);
 }
 
 PDBFile &InputFile::pdb() {
@@ -297,6 +312,25 @@ object::COFFObjectFile &InputFile::obj() {
 const object::COFFObjectFile &InputFile::obj() const {
   assert(isObj());
   return *PdbOrObj.get<object::COFFObjectFile *>();
+}
+
+MemoryBuffer &InputFile::unknown() {
+  assert(isUnknown());
+  return *PdbOrObj.get<MemoryBuffer *>();
+}
+
+const MemoryBuffer &InputFile::unknown() const {
+  assert(isUnknown());
+  return *PdbOrObj.get<MemoryBuffer *>();
+}
+
+StringRef InputFile::getFilePath() const {
+  if (isPdb())
+    return pdb().getFilePath();
+  if (isObj())
+    return obj().getFileName();
+  assert(isUnknown());
+  return unknown().getBufferIdentifier();
 }
 
 bool InputFile::hasTypes() const {
@@ -322,6 +356,8 @@ bool InputFile::isPdb() const { return PdbOrObj.is<PDBFile *>(); }
 bool InputFile::isObj() const {
   return PdbOrObj.is<object::COFFObjectFile *>();
 }
+
+bool InputFile::isUnknown() const { return PdbOrObj.is<MemoryBuffer *>(); }
 
 codeview::LazyRandomTypeCollection &
 InputFile::getOrCreateTypeCollection(TypeCollectionKind Kind) {

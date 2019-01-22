@@ -6,7 +6,7 @@
 
 define i64 @foo() {
 ; CHECK-LABEL: foo:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movq $-1, %rax
 ; CHECK-NEXT:    retq
   ret i64 -1
@@ -14,7 +14,7 @@ define i64 @foo() {
 
 define i64 @main() {
 ; CHECK-LABEL: main:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    pushq %rax
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
 ; CHECK-NEXT:    callq foo
@@ -25,6 +25,7 @@ define i64 @main() {
 ; CHECK-NEXT:    subq %rcx, %rax
 ; CHECK-NEXT:    shrq $32, %rax
 ; CHECK-NEXT:    popq %rcx
+; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
   %b = call i64 @foo()
   %or = and i64 %b, 18446744069414584575 ; this is 0xffffffff000000ff

@@ -1,9 +1,8 @@
 //===- llvm/unittest/Support/CrashRecoveryTest.cpp ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,7 +10,7 @@
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "gtest/gtest.h"
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOGDI
 #include <windows.h>
@@ -61,7 +60,7 @@ TEST(CrashRecoveryTest, Cleanup) {
   EXPECT_EQ(1, GlobalInt);
 }
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 static void raiseIt() {
   RaiseException(123, EXCEPTION_NONCONTINUABLE, 0, NULL);
 }

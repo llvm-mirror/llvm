@@ -1,14 +1,13 @@
 //===- Support/Chrono.cpp - Utilities for Timing Manipulation ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Chrono.h"
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -32,7 +31,7 @@ static inline struct tm getStructTM(TimePoint<> TP) {
   assert(LT);
   (void)LT;
 #endif
-#if defined(LLVM_ON_WIN32)
+#if defined(_WIN32)
   int Error = ::localtime_s(&Storage, &OurTime);
   assert(!Error);
   (void)Error;
@@ -65,17 +64,17 @@ void format_provider<TimePoint<>>::format(const TimePoint<> &T, raw_ostream &OS,
     if (Style[I] == '%' && Style.size() > I + 1) switch (Style[I + 1]) {
         case 'L':  // Milliseconds, from Ruby.
           FStream << llvm::format(
-              "%.3lu", duration_cast<milliseconds>(Fractional).count());
+              "%.3lu", (long)duration_cast<milliseconds>(Fractional).count());
           ++I;
           continue;
         case 'f':  // Microseconds, from Python.
           FStream << llvm::format(
-              "%.6lu", duration_cast<microseconds>(Fractional).count());
+              "%.6lu", (long)duration_cast<microseconds>(Fractional).count());
           ++I;
           continue;
         case 'N':  // Nanoseconds, from date(1).
           FStream << llvm::format(
-              "%.6lu", duration_cast<nanoseconds>(Fractional).count());
+              "%.6lu", (long)duration_cast<nanoseconds>(Fractional).count());
           ++I;
           continue;
         case '%':  // Consume %%, so %%f parses as (%%)f not %(%f)

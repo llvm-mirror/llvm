@@ -1,9 +1,8 @@
 //===-- PPCSubtarget.h - Define Subtarget for the PPC ----------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,9 +18,9 @@
 #include "PPCInstrInfo.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
 #define GET_SUBTARGETINFO_HEADER
@@ -46,6 +45,7 @@ namespace PPC {
     DIR_750,
     DIR_970,
     DIR_A2,
+    DIR_E500,
     DIR_E500mc,
     DIR_E5500,
     DIR_PWR3,
@@ -94,6 +94,7 @@ protected:
   bool HasHardFloat;
   bool IsPPC64;
   bool HasAltivec;
+  bool HasFPU;
   bool HasSPE;
   bool HasQPX;
   bool HasVSX;
@@ -133,6 +134,7 @@ protected:
   bool HasFloat128;
   bool IsISA3_0;
   bool UseLongCalls;
+  bool SecurePlt;
 
   POPCNTDKind HasPOPCNTD;
 
@@ -238,6 +240,7 @@ public:
   bool hasFPCVT() const { return HasFPCVT; }
   bool hasAltivec() const { return HasAltivec; }
   bool hasSPE() const { return HasSPE; }
+  bool hasFPU() const { return HasFPU; }
   bool hasQPX() const { return HasQPX; }
   bool hasVSX() const { return HasVSX; }
   bool hasP8Vector() const { return HasP8Vector; }
@@ -255,6 +258,7 @@ public:
   bool hasOnlyMSYNC() const { return HasOnlyMSYNC; }
   bool isPPC4xx() const { return IsPPC4xx; }
   bool isPPC6xx() const { return IsPPC6xx; }
+  bool isSecurePlt() const {return SecurePlt; }
   bool isE500() const { return IsE500; }
   bool isFeatureMFTB() const { return FeatureMFTB; }
   bool isDeprecatedDST() const { return DeprecatedDST; }

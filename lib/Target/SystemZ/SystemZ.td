@@ -1,9 +1,8 @@
 //===-- SystemZ.td - Describe the SystemZ target machine -----*- tblgen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -58,7 +57,7 @@ include "SystemZInstrHFP.td"
 include "SystemZInstrDFP.td"
 include "SystemZInstrSystem.td"
 
-def SystemZInstrInfo : InstrInfo {}
+def SystemZInstrInfo : InstrInfo { let guessInstructionProperties = 0; }
 
 //===----------------------------------------------------------------------===//
 // Assembly parser
@@ -75,4 +74,5 @@ def SystemZAsmParser : AsmParser {
 def SystemZ : Target {
   let InstructionSet = SystemZInstrInfo;
   let AssemblyParsers = [SystemZAsmParser];
+  let AllowRegisterRenaming = 1;
 }

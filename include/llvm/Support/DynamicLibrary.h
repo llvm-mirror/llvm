@@ -1,9 +1,8 @@
 //===-- llvm/Support/DynamicLibrary.h - Portable Dynamic Library -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -64,7 +63,7 @@ namespace sys {
     /// if the library fails to load.
     ///
     /// It is safe to call this function multiple times for the same library.
-    /// @brief Open a dynamic library permanently.
+    /// Open a dynamic library permanently.
     static DynamicLibrary getPermanentLibrary(const char *filename,
                                               std::string *errMsg = nullptr);
 
@@ -110,10 +109,10 @@ namespace sys {
     /// search permanently loaded libraries (getPermanentLibrary()) as well
     /// as explicitly registered symbols (AddSymbol()).
     /// @throws std::string on error.
-    /// @brief Search through libraries for address of a symbol
+    /// Search through libraries for address of a symbol
     static void *SearchForAddressOfSymbol(const char *symbolName);
 
-    /// @brief Convenience function for C++ophiles.
+    /// Convenience function for C++ophiles.
     static void *SearchForAddressOfSymbol(const std::string &symbolName) {
       return SearchForAddressOfSymbol(symbolName.c_str());
     }
@@ -121,7 +120,7 @@ namespace sys {
     /// This functions permanently adds the symbol \p symbolName with the
     /// value \p symbolValue.  These symbols are searched before any
     /// libraries.
-    /// @brief Add searchable symbol/value pair.
+    /// Add searchable symbol/value pair.
     static void AddSymbol(StringRef symbolName, void *symbolValue);
 
     class HandleSet;

@@ -1,9 +1,8 @@
 //===- HexagonGenPredicate.cpp --------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,13 +18,13 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <iterator>
 #include <map>
@@ -74,7 +73,7 @@ namespace {
   raw_ostream &operator<< (raw_ostream &OS, const PrintRegister &PR)
     LLVM_ATTRIBUTE_UNUSED;
   raw_ostream &operator<< (raw_ostream &OS, const PrintRegister &PR) {
-    return OS << PrintReg(PR.Reg.R, &PR.TRI, PR.Reg.S);
+    return OS << printReg(PR.Reg.R, &PR.TRI, PR.Reg.S);
   }
 
   class HexagonGenPredicate : public MachineFunctionPass {
@@ -222,13 +221,12 @@ void HexagonGenPredicate::collectPredicateGPR(MachineFunction &MF) {
 }
 
 void HexagonGenPredicate::processPredicateGPR(const Register &Reg) {
-  DEBUG(dbgs() << __func__ << ": "
-               << PrintReg(Reg.R, TRI, Reg.S) << "\n");
+  LLVM_DEBUG(dbgs() << __func__ << ": " << printReg(Reg.R, TRI, Reg.S) << "\n");
   using use_iterator = MachineRegisterInfo::use_iterator;
 
   use_iterator I = MRI->use_begin(Reg.R), E = MRI->use_end();
   if (I == E) {
-    DEBUG(dbgs() << "Dead reg: " << PrintReg(Reg.R, TRI, Reg.S) << '\n');
+    LLVM_DEBUG(dbgs() << "Dead reg: " << printReg(Reg.R, TRI, Reg.S) << '\n');
     MachineInstr *DefI = MRI->getVRegDef(Reg.R);
     DefI->eraseFromParent();
     return;
@@ -250,7 +248,7 @@ Register HexagonGenPredicate::getPredRegFor(const Register &Reg) {
   if (F != G2P.end())
     return F->second;
 
-  DEBUG(dbgs() << __func__ << ": " << PrintRegister(Reg, *TRI));
+  LLVM_DEBUG(dbgs() << __func__ << ": " << PrintRegister(Reg, *TRI));
   MachineInstr *DefI = MRI->getVRegDef(Reg.R);
   assert(DefI);
   unsigned Opc = DefI->getOpcode();
@@ -258,7 +256,7 @@ Register HexagonGenPredicate::getPredRegFor(const Register &Reg) {
     assert(DefI->getOperand(0).isDef() && DefI->getOperand(1).isUse());
     Register PR = DefI->getOperand(1);
     G2P.insert(std::make_pair(Reg, PR));
-    DEBUG(dbgs() << " -> " << PrintRegister(PR, *TRI) << '\n');
+    LLVM_DEBUG(dbgs() << " -> " << PrintRegister(PR, *TRI) << '\n');
     return PR;
   }
 
@@ -274,7 +272,8 @@ Register HexagonGenPredicate::getPredRegFor(const Register &Reg) {
     BuildMI(B, std::next(DefIt), DL, TII->get(TargetOpcode::COPY), NewPR)
       .addReg(Reg.R, 0, Reg.S);
     G2P.insert(std::make_pair(Reg, Register(NewPR)));
-    DEBUG(dbgs() << " -> !" << PrintRegister(Register(NewPR), *TRI) << '\n');
+    LLVM_DEBUG(dbgs() << " -> !" << PrintRegister(Register(NewPR), *TRI)
+                      << '\n');
     return Register(NewPR);
   }
 
@@ -364,7 +363,7 @@ bool HexagonGenPredicate::isScalarPred(Register PredReg) {
 }
 
 bool HexagonGenPredicate::convertToPredForm(MachineInstr *MI) {
-  DEBUG(dbgs() << __func__ << ": " << MI << " " << *MI);
+  LLVM_DEBUG(dbgs() << __func__ << ": " << MI << " " << *MI);
 
   unsigned Opc = MI->getOpcode();
   assert(isConvertibleToPredForm(MI));
@@ -426,7 +425,7 @@ bool HexagonGenPredicate::convertToPredForm(MachineInstr *MI) {
     Register Pred = getPredRegFor(GPR);
     MIB.addReg(Pred.R, 0, Pred.S);
   }
-  DEBUG(dbgs() << "generated: " << *MIB);
+  LLVM_DEBUG(dbgs() << "generated: " << *MIB);
 
   // Generate a copy-out: NewGPR = NewPR, and replace all uses of OutR
   // with NewGPR.
@@ -449,7 +448,7 @@ bool HexagonGenPredicate::convertToPredForm(MachineInstr *MI) {
 }
 
 bool HexagonGenPredicate::eliminatePredCopies(MachineFunction &MF) {
-  DEBUG(dbgs() << __func__ << "\n");
+  LLVM_DEBUG(dbgs() << __func__ << "\n");
   const TargetRegisterClass *PredRC = &Hexagon::PredRegsRegClass;
   bool Changed = false;
   VectOfInst Erase;
@@ -492,7 +491,7 @@ bool HexagonGenPredicate::eliminatePredCopies(MachineFunction &MF) {
 }
 
 bool HexagonGenPredicate::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
 
   TII = MF.getSubtarget<HexagonSubtarget>().getInstrInfo();

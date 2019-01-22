@@ -1,9 +1,8 @@
 //===-- CFG.cpp - BasicBlock analysis --------------------------------------==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -71,7 +70,7 @@ void llvm::FindFunctionBackedges(const Function &F,
 /// successor.
 unsigned llvm::GetSuccessorNumber(const BasicBlock *BB,
     const BasicBlock *Succ) {
-  const TerminatorInst *Term = BB->getTerminator();
+  const Instruction *Term = BB->getTerminator();
 #ifndef NDEBUG
   unsigned e = Term->getNumSuccessors();
 #endif
@@ -85,8 +84,9 @@ unsigned llvm::GetSuccessorNumber(const BasicBlock *BB,
 /// isCriticalEdge - Return true if the specified edge is a critical edge.
 /// Critical edges are edges from a block with multiple successors to a block
 /// with multiple predecessors.
-bool llvm::isCriticalEdge(const TerminatorInst *TI, unsigned SuccNum,
+bool llvm::isCriticalEdge(const Instruction *TI, unsigned SuccNum,
                           bool AllowIdenticalEdges) {
+  assert(TI->isTerminator() && "Must be a terminator to have successors!");
   assert(SuccNum < TI->getNumSuccessors() && "Illegal edge specification!");
   if (TI->getNumSuccessors() == 1) return false;
 

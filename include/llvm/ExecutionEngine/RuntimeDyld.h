@@ -1,9 +1,8 @@
 //===- RuntimeDyld.h - Run-time dynamic linker for MC-JIT -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -65,7 +64,7 @@ protected:
   void reassignSectionAddress(unsigned SectionID, uint64_t Addr);
 
 public:
-  /// \brief Information about the loaded object.
+  /// Information about the loaded object.
   class LoadedObjectInfo : public llvm::LoadedObjectInfo {
     friend class RuntimeDyldImpl;
 
@@ -88,7 +87,7 @@ public:
     ObjSectionToIDMap ObjSecToIDMap;
   };
 
-  /// \brief Memory Management.
+  /// Memory Management.
   class MemoryManager {
     friend class RuntimeDyld;
 
@@ -170,7 +169,7 @@ public:
     bool FinalizationLocked = false;
   };
 
-  /// \brief Construct a RuntimeDyld instance.
+  /// Construct a RuntimeDyld instance.
   RuntimeDyld(MemoryManager &MemMgr, JITSymbolResolver &Resolver);
   RuntimeDyld(const RuntimeDyld &) = delete;
   RuntimeDyld &operator=(const RuntimeDyld &) = delete;
@@ -188,6 +187,13 @@ public:
   /// Get the target address and flags for the named symbol.
   /// This address is the one used for relocation.
   JITEvaluatedSymbol getSymbol(StringRef Name) const;
+
+  /// Returns a copy of the symbol table. This can be used by on-finalized
+  /// callbacks to extract the symbol table before throwing away the
+  /// RuntimeDyld instance. Because the map keys (StringRefs) are backed by
+  /// strings inside the RuntimeDyld instance, the map should be processed
+  /// before the RuntimeDyld instance is discarded.
+  std::map<StringRef, JITEvaluatedSymbol> getSymbolTable() const;
 
   /// Resolve the relocations for all symbols we currently know about.
   void resolveRelocations();
@@ -243,6 +249,16 @@ public:
   void finalizeWithMemoryManagerLocking();
 
 private:
+  friend void
+  jitLinkForORC(object::ObjectFile &Obj,
+                std::unique_ptr<MemoryBuffer> UnderlyingBuffer,
+                RuntimeDyld::MemoryManager &MemMgr, JITSymbolResolver &Resolver,
+                bool ProcessAllSections,
+                std::function<Error(std::unique_ptr<LoadedObjectInfo>,
+                                    std::map<StringRef, JITEvaluatedSymbol>)>
+                    OnLoaded,
+                std::function<void(Error)> OnEmitted);
+
   // RuntimeDyldImpl is the actual class. RuntimeDyld is just the public
   // interface.
   std::unique_ptr<RuntimeDyldImpl> Dyld;
@@ -251,6 +267,21 @@ private:
   bool ProcessAllSections;
   RuntimeDyldCheckerImpl *Checker;
 };
+
+// Asynchronous JIT link for ORC.
+//
+// Warning: This API is experimental and probably should not be used by anyone
+// but ORC's RTDyldObjectLinkingLayer2. Internally it constructs a RuntimeDyld
+// instance and uses continuation passing to perform the fix-up and finalize
+// steps asynchronously.
+void jitLinkForORC(object::ObjectFile &Obj,
+                   std::unique_ptr<MemoryBuffer> UnderlyingBuffer,
+                   RuntimeDyld::MemoryManager &MemMgr,
+                   JITSymbolResolver &Resolver, bool ProcessAllSections,
+                   std::function<Error(std::unique_ptr<LoadedObjectInfo>,
+                                       std::map<StringRef, JITEvaluatedSymbol>)>
+                       OnLoaded,
+                   std::function<void(Error)> OnEmitted);
 
 } // end namespace llvm
 

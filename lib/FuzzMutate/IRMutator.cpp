@@ -1,22 +1,23 @@
 //===-- IRMutator.cpp -----------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/FuzzMutate/IRMutator.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/FuzzMutate/Operations.h"
 #include "llvm/FuzzMutate/Random.h"
 #include "llvm/FuzzMutate/RandomIRBuilder.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 
 using namespace llvm;
@@ -71,6 +72,7 @@ static void eliminateDeadCode(Function &F) {
   FPM.addPass(DCEPass());
   FunctionAnalysisManager FAM;
   FAM.registerPass([&] { return TargetLibraryAnalysis(); });
+  FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
   FPM.run(F, FAM);
 }
 
@@ -90,14 +92,14 @@ std::vector<fuzzerop::OpDescriptor> InjectorIRStrategy::getDefaultOps() {
   return Ops;
 }
 
-fuzzerop::OpDescriptor
+Optional<fuzzerop::OpDescriptor>
 InjectorIRStrategy::chooseOperation(Value *Src, RandomIRBuilder &IB) {
   auto OpMatchesPred = [&Src](fuzzerop::OpDescriptor &Op) {
     return Op.SourcePreds[0].matches({}, Src);
   };
   auto RS = makeSampler(IB.Rand, make_filter_range(Operations, OpMatchesPred));
   if (RS.isEmpty())
-    report_fatal_error("No available operations for src type");
+    return None;
   return *RS;
 }
 
@@ -105,6 +107,8 @@ void InjectorIRStrategy::mutate(BasicBlock &BB, RandomIRBuilder &IB) {
   SmallVector<Instruction *, 32> Insts;
   for (auto I = BB.getFirstInsertionPt(), E = BB.end(); I != E; ++I)
     Insts.push_back(&*I);
+  if (Insts.size() < 1)
+    return;
 
   // Choose an insertion point for our new instruction.
   size_t IP = uniform<size_t>(IB.Rand, 0, Insts.size() - 1);
@@ -118,10 +122,15 @@ void InjectorIRStrategy::mutate(BasicBlock &BB, RandomIRBuilder &IB) {
 
   // Choose an operation that's constrained to be valid for the type of the
   // source, collect any other sources it needs, and then build it.
-  fuzzerop::OpDescriptor OpDesc = chooseOperation(Srcs[0], IB);
-  for (const auto &Pred : makeArrayRef(OpDesc.SourcePreds).slice(1))
+  auto OpDesc = chooseOperation(Srcs[0], IB);
+  // Bail if no operation was found
+  if (!OpDesc)
+    return;
+
+  for (const auto &Pred : makeArrayRef(OpDesc->SourcePreds).slice(1))
     Srcs.push_back(IB.findOrCreateSource(BB, InstsBefore, Srcs, Pred));
-  if (Value *Op = OpDesc.BuilderFunc(Srcs, Insts[IP])) {
+
+  if (Value *Op = OpDesc->BuilderFunc(Srcs, Insts[IP])) {
     // Find a sink and wire up the results of the operation.
     IB.connectToSink(BB, InstsAfter, Op);
   }
@@ -143,11 +152,17 @@ uint64_t InstDeleterIRStrategy::getWeight(size_t CurrentSize, size_t MaxSize,
 
 void InstDeleterIRStrategy::mutate(Function &F, RandomIRBuilder &IB) {
   auto RS = makeSampler<Instruction *>(IB.Rand);
-  // Avoid terminators so we don't have to worry about keeping the CFG coherent.
-  for (Instruction &Inst : instructions(F))
-    if (!Inst.isTerminator())
-      RS.sample(&Inst, /*Weight=*/1);
-  assert(!RS.isEmpty() && "No instructions to delete");
+  for (Instruction &Inst : instructions(F)) {
+    // TODO: We can't handle these instructions.
+    if (Inst.isTerminator() || Inst.isEHPad() ||
+        Inst.isSwiftError() || isa<PHINode>(Inst))
+      continue;
+
+    RS.sample(&Inst, /*Weight=*/1);
+  }
+  if (RS.isEmpty())
+    return;
+
   // Delete the instruction.
   mutate(*RS.getSelection(), IB);
   // Clean up any dead code that's left over after removing the instruction.
@@ -180,4 +195,5 @@ void InstDeleterIRStrategy::mutate(Instruction &Inst, RandomIRBuilder &IB) {
     RS.sample(IB.newSource(*BB, InstsBefore, {}, Pred), /*Weight=*/1);
 
   Inst.replaceAllUsesWith(RS.getSelection());
+  Inst.eraseFromParent();
 }

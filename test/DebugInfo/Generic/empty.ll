@@ -9,14 +9,16 @@
 ; Expect no line table entry since there are no functions and file references in this compile unit
 ; CHECK: .debug_line contents:
 ; CHECK: Line table prologue:
-; CHECK: total_length: 0x00000019
+; CHECK: total_length: 0x0000001a
 ; CHECK-NOT: file_names[
 
 ; CHECK-NOT: .debug_pubnames contents:
 ; CHECK: contents:
 
 ; Don't emit DW_AT_addr_base when there are no addresses.
+; Also don't emit a split line table when there are no type units.
 ; FISSION-NOT: DW_AT_GNU_addr_base [DW_FORM_sec_offset]
+; FISSION-NOT: .debug_line.dwo contents:
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!5}

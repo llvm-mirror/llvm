@@ -1,9 +1,8 @@
 //===- SelectionDAGAddressAnalysis.h - DAG Address Analysis -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,18 +44,21 @@ public:
         IsIndexSignExt(IsIndexSignExt) {}
 
   SDValue getBase() { return Base; }
+  SDValue getBase() const { return Base; }
   SDValue getIndex() { return Index; }
+  SDValue getIndex() const { return Index; }
 
-  bool equalBaseIndex(BaseIndexOffset &Other, const SelectionDAG &DAG) {
+  bool equalBaseIndex(const BaseIndexOffset &Other,
+                      const SelectionDAG &DAG) const {
     int64_t Off;
     return equalBaseIndex(Other, DAG, Off);
   }
 
-  bool equalBaseIndex(BaseIndexOffset &Other, const SelectionDAG &DAG,
-                      int64_t &Off);
+  bool equalBaseIndex(const BaseIndexOffset &Other, const SelectionDAG &DAG,
+                      int64_t &Off) const;
 
   /// Parses tree in Ptr for base, index, offset addresses.
-  static BaseIndexOffset match(SDValue Ptr, const SelectionDAG &DAG);
+  static BaseIndexOffset match(const LSBaseSDNode *N, const SelectionDAG &DAG);
 };
 
 } // end namespace llvm

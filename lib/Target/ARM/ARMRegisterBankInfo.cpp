@@ -1,9 +1,8 @@
 //===- ARMRegisterBankInfo.cpp -----------------------------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -17,7 +16,7 @@
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 #define GET_TARGET_REGBANK_IMPL
 #include "ARMGenRegisterBank.inc"
@@ -175,15 +174,20 @@ const RegisterBank &ARMRegisterBankInfo::getRegBankFromRegClass(
 
   switch (RC.getID()) {
   case GPRRegClassID:
+  case GPRwithAPSRRegClassID:
   case GPRnopcRegClassID:
+  case rGPRRegClassID:
   case GPRspRegClassID:
   case tGPR_and_tcGPRRegClassID:
+  case tcGPRRegClassID:
   case tGPRRegClassID:
     return getRegBank(ARM::GPRRegBankID);
+  case HPRRegClassID:
   case SPR_8RegClassID:
   case SPRRegClassID:
   case DPR_8RegClassID:
   case DPRRegClassID:
+  case QPRRegClassID:
     return getRegBank(ARM::FPRRegBankID);
   default:
     llvm_unreachable("Unsupported register kind");
@@ -226,12 +230,31 @@ ARMRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_SEXT:
   case G_ZEXT:
   case G_ANYEXT:
-  case G_TRUNC:
   case G_GEP:
+  case G_INTTOPTR:
+  case G_PTRTOINT:
+  case G_CTLZ:
     // FIXME: We're abusing the fact that everything lives in a GPR for now; in
     // the real world we would use different mappings.
     OperandsMapping = &ARM::ValueMappings[ARM::GPR3OpsIdx];
     break;
+  case G_TRUNC: {
+    // In some cases we may end up with a G_TRUNC from a 64-bit value to a
+    // 32-bit value. This isn't a real floating point trunc (that would be a
+    // G_FPTRUNC). Instead it is an integer trunc in disguise, which can appear
+    // because the legalizer doesn't distinguish between integer and floating
+    // point values so it may leave some 64-bit integers un-narrowed. Until we
+    // have a more principled solution that doesn't let such things sneak all
+    // the way to this point, just map the source to a DPR and the destination
+    // to a GPR.
+    LLT LargeTy = MRI.getType(MI.getOperand(1).getReg());
+    OperandsMapping =
+        LargeTy.getSizeInBits() <= 32
+            ? &ARM::ValueMappings[ARM::GPR3OpsIdx]
+            : getOperandsMapping({&ARM::ValueMappings[ARM::GPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::DPR3OpsIdx]});
+    break;
+  }
   case G_LOAD:
   case G_STORE: {
     LLT Ty = MRI.getType(MI.getOperand(0).getReg());
@@ -242,13 +265,75 @@ ARMRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
             : &ARM::ValueMappings[ARM::GPR3OpsIdx];
     break;
   }
-  case G_FADD: {
+  case G_FADD:
+  case G_FSUB:
+  case G_FMUL:
+  case G_FDIV:
+  case G_FNEG: {
     LLT Ty = MRI.getType(MI.getOperand(0).getReg());
-    assert((Ty.getSizeInBits() == 32 || Ty.getSizeInBits() == 64) &&
-           "Unsupported size for G_FADD");
-    OperandsMapping = Ty.getSizeInBits() == 64
+    OperandsMapping =Ty.getSizeInBits() == 64
                           ? &ARM::ValueMappings[ARM::DPR3OpsIdx]
                           : &ARM::ValueMappings[ARM::SPR3OpsIdx];
+    break;
+  }
+  case G_FMA: {
+    LLT Ty = MRI.getType(MI.getOperand(0).getReg());
+    OperandsMapping =
+        Ty.getSizeInBits() == 64
+            ? getOperandsMapping({&ARM::ValueMappings[ARM::DPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::DPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::DPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::DPR3OpsIdx]})
+            : getOperandsMapping({&ARM::ValueMappings[ARM::SPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::SPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::SPR3OpsIdx],
+                                  &ARM::ValueMappings[ARM::SPR3OpsIdx]});
+    break;
+  }
+  case G_FPEXT: {
+    LLT ToTy = MRI.getType(MI.getOperand(0).getReg());
+    LLT FromTy = MRI.getType(MI.getOperand(1).getReg());
+    if (ToTy.getSizeInBits() == 64 && FromTy.getSizeInBits() == 32)
+      OperandsMapping =
+          getOperandsMapping({&ARM::ValueMappings[ARM::DPR3OpsIdx],
+                              &ARM::ValueMappings[ARM::SPR3OpsIdx]});
+    break;
+  }
+  case G_FPTRUNC: {
+    LLT ToTy = MRI.getType(MI.getOperand(0).getReg());
+    LLT FromTy = MRI.getType(MI.getOperand(1).getReg());
+    if (ToTy.getSizeInBits() == 32 && FromTy.getSizeInBits() == 64)
+      OperandsMapping =
+          getOperandsMapping({&ARM::ValueMappings[ARM::SPR3OpsIdx],
+                              &ARM::ValueMappings[ARM::DPR3OpsIdx]});
+    break;
+  }
+  case G_FPTOSI:
+  case G_FPTOUI: {
+    LLT ToTy = MRI.getType(MI.getOperand(0).getReg());
+    LLT FromTy = MRI.getType(MI.getOperand(1).getReg());
+    if ((FromTy.getSizeInBits() == 32 || FromTy.getSizeInBits() == 64) &&
+        ToTy.getSizeInBits() == 32)
+      OperandsMapping =
+          FromTy.getSizeInBits() == 64
+              ? getOperandsMapping({&ARM::ValueMappings[ARM::GPR3OpsIdx],
+                                    &ARM::ValueMappings[ARM::DPR3OpsIdx]})
+              : getOperandsMapping({&ARM::ValueMappings[ARM::GPR3OpsIdx],
+                                    &ARM::ValueMappings[ARM::SPR3OpsIdx]});
+    break;
+  }
+  case G_SITOFP:
+  case G_UITOFP: {
+    LLT ToTy = MRI.getType(MI.getOperand(0).getReg());
+    LLT FromTy = MRI.getType(MI.getOperand(1).getReg());
+    if (FromTy.getSizeInBits() == 32 &&
+        (ToTy.getSizeInBits() == 32 || ToTy.getSizeInBits() == 64))
+      OperandsMapping =
+          ToTy.getSizeInBits() == 64
+              ? getOperandsMapping({&ARM::ValueMappings[ARM::DPR3OpsIdx],
+                                    &ARM::ValueMappings[ARM::GPR3OpsIdx]})
+              : getOperandsMapping({&ARM::ValueMappings[ARM::SPR3OpsIdx],
+                                    &ARM::ValueMappings[ARM::GPR3OpsIdx]});
     break;
   }
   case G_CONSTANT:

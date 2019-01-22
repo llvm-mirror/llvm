@@ -1,5 +1,5 @@
 ; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s
-; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu -disable-fp-elim | FileCheck -check-prefix CHECK-WITHFP-ARM64 %s
+; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu -frame-pointer=all | FileCheck -check-prefix CHECK-WITHFP-ARM64 %s
 
 ; Make sure a reasonably sane prologue and epilogue are
 ; generated. This test is not robust in the face of an frame-handling
@@ -17,7 +17,7 @@ declare void @foo()
 
 define void @trivial_func() nounwind {
 ; CHECK-LABEL: trivial_func: // @trivial_func
-; CHECK-NEXT: // BB#0
+; CHECK-NEXT: // %bb.0
 ; CHECK-NEXT: ret
 
   ret void

@@ -1,9 +1,8 @@
 //===- EHStreamer.h - Exception Handling Directive Streamer -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,8 +13,8 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_EHSTREAMER_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_EHSTREAMER_H
 
-#include "AsmPrinterHandler.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/AsmPrinterHandler.h"
 #include "llvm/Support/Compiler.h"
 
 namespace llvm {
@@ -72,9 +71,9 @@ protected:
 
   /// Compute the actions table and gather the first action index for each
   /// landing pad site.
-  unsigned computeActionsTable(const SmallVectorImpl<const LandingPadInfo*>&LPs,
-                               SmallVectorImpl<ActionEntry> &Actions,
-                               SmallVectorImpl<unsigned> &FirstActions);
+  void computeActionsTable(const SmallVectorImpl<const LandingPadInfo *> &LandingPads,
+                           SmallVectorImpl<ActionEntry> &Actions,
+                           SmallVectorImpl<unsigned> &FirstActions);
 
   void computePadMap(const SmallVectorImpl<const LandingPadInfo *> &LandingPads,
                      RangeMapType &PadMap);
@@ -85,9 +84,10 @@ protected:
   /// zero for the landing pad and the action.  Calls marked 'nounwind' have
   /// no entry and must not be contained in the try-range of any entry - they
   /// form gaps in the table.  Entries must be ordered by try-range address.
-  void computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
-                            const SmallVectorImpl<const LandingPadInfo *> &LPs,
-                            const SmallVectorImpl<unsigned> &FirstActions);
+  virtual void computeCallSiteTable(
+      SmallVectorImpl<CallSiteEntry> &CallSites,
+      const SmallVectorImpl<const LandingPadInfo *> &LandingPads,
+      const SmallVectorImpl<unsigned> &FirstActions);
 
   /// Emit landing pads and actions.
   ///
@@ -108,11 +108,13 @@ protected:
   ///     found the frame is unwound and handling continues.
   ///  3. Type id table contains references to all the C++ typeinfo for all
   ///     catches in the function.  This tables is reversed indexed base 1.
-  void emitExceptionTable();
+  ///
+  /// Returns the starting symbol of an exception table.
+  MCSymbol *emitExceptionTable();
 
-  virtual void emitTypeInfos(unsigned TTypeEncoding);
+  virtual void emitTypeInfos(unsigned TTypeEncoding, MCSymbol *TTBaseLabel);
 
-  // Helpers for for identifying what kind of clause an EH typeid or selector
+  // Helpers for identifying what kind of clause an EH typeid or selector
   // corresponds to. Negative selectors are for filter clauses, the zero
   // selector is for cleanups, and positive selectors are for catch clauses.
   static bool isFilterEHSelector(int Selector) { return Selector < 0; }

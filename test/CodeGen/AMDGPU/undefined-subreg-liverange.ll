@@ -34,9 +34,8 @@ bb:
   %tmp = load volatile i32, i32 addrspace(1)* undef, align 4
   %tmp1 = load volatile i32, i32 addrspace(1)* undef, align 4
   %tmp2 = insertelement <4 x i32> undef, i32 %tmp1, i32 0
-  %tmp3 = insertelement <4 x i32> %tmp2, i32 %tmp1, i32 1
-  %tmp3.cast = bitcast <4 x i32> %tmp3 to <4 x float>
-  %tmp4 = call <4 x float> @llvm.amdgcn.image.sample.v4f32.v4f32.v8i32(<4 x float> %tmp3.cast, <8 x i32> undef, <4 x i32> undef, i32 15, i1 false, i1 false, i1 false, i1 false, i1 false)
+  %tmp3 = bitcast i32 %tmp1 to float
+  %tmp4 = call <4 x float> @llvm.amdgcn.image.sample.2d.v4f32.f32(i32 15, float %tmp3, float %tmp3, <8 x i32> undef, <4 x i32> undef, i1 0, i32 0, i32 0)
   %tmp5 = extractelement <4 x float> %tmp4, i32 0
   %tmp6 = fmul float %tmp5, undef
   %tmp7 = fadd float %tmp6, %tmp6
@@ -58,18 +57,18 @@ bb11:                                             ; preds = %bb9
 
 ; CHECK-LABEL: {{^}}partially_undef_copy:
 ; CHECK: v_mov_b32_e32 v5, 5
-; CHECK: v_mov_b32_e32 v6, 6
+; CHECK-DAG: v_mov_b32_e32 v6, 6
 
-; CHECK: v_mov_b32_e32 v[[OUTPUT_LO:[0-9]+]], v5
+; CHECK-DAG: v_mov_b32_e32 v[[OUTPUT_LO:[0-9]+]], v5
 
 ; Undef copy
-; CHECK: v_mov_b32_e32 v1, v6
+; CHECK-DAG: v_mov_b32_e32 v1, v6
 
 ; undef copy
-; CHECK: v_mov_b32_e32 v2, v7
+; CHECK-DAG: v_mov_b32_e32 v2, v7
 
-; CHECK: v_mov_b32_e32 v[[OUTPUT_HI:[0-9]+]], v8
-; CHECK: v_mov_b32_e32 v[[OUTPUT_LO]], v6
+; CHECK-DAG: v_mov_b32_e32 v[[OUTPUT_HI:[0-9]+]], v8
+; CHECK-DAG: v_mov_b32_e32 v[[OUTPUT_LO]], v6
 
 ; CHECK: buffer_store_dwordx4 v{{\[}}[[OUTPUT_LO]]:[[OUTPUT_HI]]{{\]}}
 define amdgpu_kernel void @partially_undef_copy() #0 {
@@ -84,7 +83,7 @@ define amdgpu_kernel void @partially_undef_copy() #0 {
   ret void
 }
 
-declare <4 x float> @llvm.amdgcn.image.sample.v4f32.v4f32.v8i32(<4 x float>, <8 x i32>, <4 x i32>, i32, i1, i1, i1, i1, i1) #1
+declare <4 x float> @llvm.amdgcn.image.sample.2d.v4f32.f32(i32, float, float, <8 x i32>, <4 x i32>, i1, i32, i32) #1
 
 attributes #0 = { nounwind }
 attributes #1 = { nounwind readonly }

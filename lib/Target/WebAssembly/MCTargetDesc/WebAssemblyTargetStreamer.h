@@ -1,14 +1,13 @@
 //==-- WebAssemblyTargetStreamer.h - WebAssembly Target Streamer -*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file declares WebAssembly-specific target streamer classes.
+/// This file declares WebAssembly-specific target streamer classes.
 /// These are for implementing support for target-specific assembly directives.
 ///
 //===----------------------------------------------------------------------===//
@@ -17,13 +16,13 @@
 #define LLVM_LIB_TARGET_WEBASSEMBLY_MCTARGETDESC_WEBASSEMBLYTARGETSTREAMER_H
 
 #include "llvm/BinaryFormat/Wasm.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/MachineValueType.h"
 
 namespace llvm {
 
-class MCELFStreamer;
 class MCWasmStreamer;
+class MCSymbolWasm;
 
 /// WebAssembly-specific streamer interface, to implement support
 /// WebAssembly-specific assembly directives.
@@ -31,26 +30,21 @@ class WebAssemblyTargetStreamer : public MCTargetStreamer {
 public:
   explicit WebAssemblyTargetStreamer(MCStreamer &S);
 
-  /// .param
-  virtual void emitParam(MCSymbol *Symbol, ArrayRef<MVT> Types) = 0;
-  /// .result
-  virtual void emitResult(MCSymbol *Symbol, ArrayRef<MVT> Types) = 0;
   /// .local
-  virtual void emitLocal(ArrayRef<MVT> Types) = 0;
-  /// .globalvar
-  virtual void emitGlobal(ArrayRef<wasm::Global> Globals) = 0;
-  /// .stack_pointer
-  virtual void emitStackPointer(uint32_t Index) = 0;
+  virtual void emitLocal(ArrayRef<wasm::ValType> Types) = 0;
   /// .endfunc
   virtual void emitEndFunc() = 0;
   /// .functype
-  virtual void emitIndirectFunctionType(MCSymbol *Symbol,
-                                        SmallVectorImpl<MVT> &Params,
-                                        SmallVectorImpl<MVT> &Results) = 0;
+  virtual void emitFunctionType(const MCSymbolWasm *Sym) = 0;
   /// .indidx
   virtual void emitIndIdx(const MCExpr *Value) = 0;
-  /// .import_global
-  virtual void emitGlobalImport(StringRef name) = 0;
+  /// .globaltype
+  virtual void emitGlobalType(const MCSymbolWasm *Sym) = 0;
+  /// .eventtype
+  virtual void emitEventType(const MCSymbolWasm *Sym) = 0;
+  /// .import_module
+  virtual void emitImportModule(const MCSymbolWasm *Sym,
+                                StringRef ModuleName) = 0;
 
 protected:
   void emitValueType(wasm::ValType Type);
@@ -59,39 +53,20 @@ protected:
 /// This part is for ascii assembly output
 class WebAssemblyTargetAsmStreamer final : public WebAssemblyTargetStreamer {
   formatted_raw_ostream &OS;
+  void emitSignature(const wasm::WasmSignature *Sig);
+  void emitParamList(const wasm::WasmSignature *Sig);
+  void emitReturnList(const wasm::WasmSignature *Sig);
 
 public:
   WebAssemblyTargetAsmStreamer(MCStreamer &S, formatted_raw_ostream &OS);
 
-  void emitParam(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitResult(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitLocal(ArrayRef<MVT> Types) override;
-  void emitGlobal(ArrayRef<wasm::Global> Globals) override;
-  void emitStackPointer(uint32_t Index) override;
+  void emitLocal(ArrayRef<wasm::ValType> Types) override;
   void emitEndFunc() override;
-  void emitIndirectFunctionType(MCSymbol *Symbol,
-                                SmallVectorImpl<MVT> &Params,
-                                SmallVectorImpl<MVT> &Results) override;
+  void emitFunctionType(const MCSymbolWasm *Sym) override;
   void emitIndIdx(const MCExpr *Value) override;
-  void emitGlobalImport(StringRef name) override;
-};
-
-/// This part is for ELF object output
-class WebAssemblyTargetELFStreamer final : public WebAssemblyTargetStreamer {
-public:
-  explicit WebAssemblyTargetELFStreamer(MCStreamer &S);
-
-  void emitParam(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitResult(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitLocal(ArrayRef<MVT> Types) override;
-  void emitGlobal(ArrayRef<wasm::Global> Globals) override;
-  void emitStackPointer(uint32_t Index) override;
-  void emitEndFunc() override;
-  void emitIndirectFunctionType(MCSymbol *Symbol,
-                                SmallVectorImpl<MVT> &Params,
-                                SmallVectorImpl<MVT> &Results) override;
-  void emitIndIdx(const MCExpr *Value) override;
-  void emitGlobalImport(StringRef name) override;
+  void emitGlobalType(const MCSymbolWasm *Sym) override;
+  void emitEventType(const MCSymbolWasm *Sym) override;
+  void emitImportModule(const MCSymbolWasm *Sym, StringRef ModuleName) override;
 };
 
 /// This part is for Wasm object output
@@ -99,17 +74,29 @@ class WebAssemblyTargetWasmStreamer final : public WebAssemblyTargetStreamer {
 public:
   explicit WebAssemblyTargetWasmStreamer(MCStreamer &S);
 
-  void emitParam(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitResult(MCSymbol *Symbol, ArrayRef<MVT> Types) override;
-  void emitLocal(ArrayRef<MVT> Types) override;
-  void emitGlobal(ArrayRef<wasm::Global> Globals) override;
-  void emitStackPointer(uint32_t Index) override;
+  void emitLocal(ArrayRef<wasm::ValType> Types) override;
   void emitEndFunc() override;
-  void emitIndirectFunctionType(MCSymbol *Symbol,
-                                SmallVectorImpl<MVT> &Params,
-                                SmallVectorImpl<MVT> &Results) override;
+  void emitFunctionType(const MCSymbolWasm *Sym) override {}
   void emitIndIdx(const MCExpr *Value) override;
-  void emitGlobalImport(StringRef name) override;
+  void emitGlobalType(const MCSymbolWasm *Sym) override {}
+  void emitEventType(const MCSymbolWasm *Sym) override {}
+  void emitImportModule(const MCSymbolWasm *Sym,
+                        StringRef ModuleName) override {}
+};
+
+/// This part is for null output
+class WebAssemblyTargetNullStreamer final : public WebAssemblyTargetStreamer {
+public:
+  explicit WebAssemblyTargetNullStreamer(MCStreamer &S)
+      : WebAssemblyTargetStreamer(S) {}
+
+  void emitLocal(ArrayRef<wasm::ValType>) override {}
+  void emitEndFunc() override {}
+  void emitFunctionType(const MCSymbolWasm *) override {}
+  void emitIndIdx(const MCExpr *) override {}
+  void emitGlobalType(const MCSymbolWasm *) override {}
+  void emitEventType(const MCSymbolWasm *) override {}
+  void emitImportModule(const MCSymbolWasm *, StringRef) override {}
 };
 
 } // end namespace llvm

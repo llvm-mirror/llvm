@@ -1,9 +1,8 @@
 //===-- BPFAsmPrinter.cpp - BPF LLVM assembly writer ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 #include "BPFInstrInfo.h"
 #include "BPFMCInstLower.h"
 #include "BPFTargetMachine.h"
+#include "BTFDebug.h"
 #include "InstPrinter/BPFInstPrinter.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -40,6 +40,7 @@ public:
       : AsmPrinter(TM, std::move(Streamer)) {}
 
   StringRef getPassName() const override { return "BPF Assembly Printer"; }
+  bool doInitialization(Module &M) override;
   void printOperand(const MachineInstr *MI, int OpNum, raw_ostream &O);
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        unsigned AsmVariant, const char *ExtraCode,
@@ -51,6 +52,18 @@ public:
   void EmitInstruction(const MachineInstr *MI) override;
 };
 } // namespace
+
+bool BPFAsmPrinter::doInitialization(Module &M) {
+  AsmPrinter::doInitialization(M);
+
+  if (MAI->doesSupportDebugInformation()) {
+    Handlers.push_back(HandlerInfo(new BTFDebug(this), "emit",
+                                   "Debug Info Emission", "BTF",
+                                   "BTF Emission"));
+  }
+
+  return false;
+}
 
 void BPFAsmPrinter::printOperand(const MachineInstr *MI, int OpNum,
                                  raw_ostream &O) {

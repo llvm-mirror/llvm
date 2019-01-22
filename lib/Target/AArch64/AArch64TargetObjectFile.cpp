@@ -1,9 +1,8 @@
 //===-- AArch64TargetObjectFile.cpp - AArch64 Object Info -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,6 +21,9 @@ void AArch64_ELFTargetObjectFile::Initialize(MCContext &Ctx,
                                              const TargetMachine &TM) {
   TargetLoweringObjectFileELF::Initialize(Ctx, TM);
   InitializeELF(TM.Options.UseInitArray);
+  // AARCH64 ELF ABI does not define static relocation type for TLS offset
+  // within a module.  Do not generate AT_location for TLS variables.
+  SupportDebugThreadLocalLocation = false;
 }
 
 AArch64_MachoTargetObjectFile::AArch64_MachoTargetObjectFile()

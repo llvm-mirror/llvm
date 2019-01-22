@@ -1,9 +1,8 @@
 //===-- llvm-dwarfdump.cpp - Debug info dumping utility for llvm ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,23 +18,17 @@
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Object/RelocVisitor.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
-#include <cstring>
-#include <string>
-#include <system_error>
 
 using namespace llvm;
 using namespace object;
@@ -136,6 +129,10 @@ static list<std::string>
                      "name or by number. This option can be specified "
                      "multiple times, once for each desired architecture."),
                 cat(DwarfDumpCategory));
+static opt<bool>
+    Diff("diff",
+         desc("Emit diff-friendly output by omitting offsets and addresses."),
+         cat(DwarfDumpCategory));
 static list<std::string>
     Find("find",
          desc("Search for the exact match for <name> in the accelerator tables "
@@ -157,9 +154,8 @@ static list<std::string> Name(
          "the -regex option <pattern> is interpreted as a regular expression."),
     value_desc("pattern"), cat(DwarfDumpCategory));
 static alias NameAlias("n", desc("Alias for -name"), aliasopt(Name));
-static opt<unsigned>
-    Lookup("lookup",
-           desc("Lookup <address> in the debug information and print out any"
+static opt<unsigned long long> Lookup("lookup",
+           desc("Lookup <address> in the debug information and print out any "
                 "available file, function, block and line table details."),
            value_desc("address"), cat(DwarfDumpCategory));
 static opt<std::string>
@@ -229,7 +225,7 @@ static alias VerboseAlias("v", desc("Alias for -verbose."), aliasopt(Verbose),
 static void error(StringRef Prefix, std::error_code EC) {
   if (!EC)
     return;
-  errs() << Prefix << ": " << EC.message() << "\n";
+  WithColor::error() << Prefix << ": " << EC.message() << "\n";
   exit(1);
 }
 
@@ -237,6 +233,7 @@ static DIDumpOptions getDumpOpts() {
   DIDumpOptions DumpOpts;
   DumpOpts.DumpType = DumpType;
   DumpOpts.RecurseDepth = RecurseDepth;
+  DumpOpts.ShowAddresses = !Diff;
   DumpOpts.ShowChildren = ShowChildren;
   DumpOpts.ShowParents = ShowParents;
   DumpOpts.ShowForm = ShowForm;
@@ -283,32 +280,101 @@ using HandlerFn = std::function<bool(ObjectFile &, DWARFContext &DICtx, Twine,
                                      raw_ostream &)>;
 
 /// Print only DIEs that have a certain name.
+static bool filterByName(const StringSet<> &Names, DWARFDie Die,
+                         StringRef NameRef, raw_ostream &OS) {
+  std::string Name =
+      (IgnoreCase && !UseRegex) ? NameRef.lower() : NameRef.str();
+  if (UseRegex) {
+    // Match regular expression.
+    for (auto Pattern : Names.keys()) {
+      Regex RE(Pattern, IgnoreCase ? Regex::IgnoreCase : Regex::NoFlags);
+      std::string Error;
+      if (!RE.isValid(Error)) {
+        errs() << "error in regular expression: " << Error << "\n";
+        exit(1);
+      }
+      if (RE.match(Name)) {
+        Die.dump(OS, 0, getDumpOpts());
+        return true;
+      }
+    }
+  } else if (Names.count(Name)) {
+    // Match full text.
+    Die.dump(OS, 0, getDumpOpts());
+    return true;
+  }
+  return false;
+}
+
+/// Print only DIEs that have a certain name.
 static void filterByName(const StringSet<> &Names,
-                         DWARFContext::cu_iterator_range CUs, raw_ostream &OS) {
+                         DWARFContext::unit_iterator_range CUs,
+                         raw_ostream &OS) {
   for (const auto &CU : CUs)
     for (const auto &Entry : CU->dies()) {
       DWARFDie Die = {CU.get(), &Entry};
-      if (const char *NamePtr = Die.getName(DINameKind::ShortName)) {
-        std::string Name =
-            (IgnoreCase && !UseRegex) ? StringRef(NamePtr).lower() : NamePtr;
-        // Match regular expression.
-        if (UseRegex)
-          for (auto Pattern : Names.keys()) {
-            Regex RE(Pattern, IgnoreCase ? Regex::IgnoreCase : Regex::NoFlags);
-            std::string Error;
-            if (!RE.isValid(Error)) {
-              errs() << "error in regular expression: " << Error << "\n";
-              exit(1);
-            }
-            if (RE.match(Name))
-              Die.dump(OS, 0, getDumpOpts());
-          }
-        // Match full text.
-        else if (Names.count(Name))
-          Die.dump(OS, 0, getDumpOpts());
-      }
+      if (const char *Name = Die.getName(DINameKind::ShortName))
+        if (filterByName(Names, Die, Name, OS))
+          continue;
+      if (const char *Name = Die.getName(DINameKind::LinkageName))
+        filterByName(Names, Die, Name, OS);
     }
+}
 
+static void getDies(DWARFContext &DICtx, const AppleAcceleratorTable &Accel,
+                    StringRef Name, SmallVectorImpl<DWARFDie> &Dies) {
+  for (const auto &Entry : Accel.equal_range(Name)) {
+    if (llvm::Optional<uint64_t> Off = Entry.getDIESectionOffset()) {
+      if (DWARFDie Die = DICtx.getDIEForOffset(*Off))
+        Dies.push_back(Die);
+    }
+  }
+}
+
+static DWARFDie toDie(const DWARFDebugNames::Entry &Entry,
+                      DWARFContext &DICtx) {
+  llvm::Optional<uint64_t> CUOff = Entry.getCUOffset();
+  llvm::Optional<uint64_t> Off = Entry.getDIEUnitOffset();
+  if (!CUOff || !Off)
+    return DWARFDie();
+
+  DWARFCompileUnit *CU = DICtx.getCompileUnitForOffset(*CUOff);
+  if (!CU)
+    return DWARFDie();
+
+  if (llvm::Optional<uint64_t> DWOId = CU->getDWOId()) {
+    // This is a skeleton unit. Look up the DIE in the DWO unit.
+    CU = DICtx.getDWOCompileUnitForHash(*DWOId);
+    if (!CU)
+      return DWARFDie();
+  }
+
+  return CU->getDIEForOffset(CU->getOffset() + *Off);
+}
+
+static void getDies(DWARFContext &DICtx, const DWARFDebugNames &Accel,
+                    StringRef Name, SmallVectorImpl<DWARFDie> &Dies) {
+  for (const auto &Entry : Accel.equal_range(Name)) {
+    if (DWARFDie Die = toDie(Entry, DICtx))
+      Dies.push_back(Die);
+  }
+}
+
+/// Print only DIEs that have a certain name.
+static void filterByAccelName(ArrayRef<std::string> Names, DWARFContext &DICtx,
+                              raw_ostream &OS) {
+  SmallVector<DWARFDie, 4> Dies;
+  for (const auto &Name : Names) {
+    getDies(DICtx, DICtx.getAppleNames(), Name, Dies);
+    getDies(DICtx, DICtx.getAppleTypes(), Name, Dies);
+    getDies(DICtx, DICtx.getAppleNamespaces(), Name, Dies);
+    getDies(DICtx, DICtx.getDebugNames(), Name, Dies);
+  }
+  llvm::sort(Dies);
+  Dies.erase(std::unique(Dies.begin(), Dies.end()), Dies.end());
+
+  for (DWARFDie Die : Dies)
+    Die.dump(OS, 0, getDumpOpts());
 }
 
 /// Handle the --lookup option and dump the DIEs and line info for the given
@@ -355,35 +421,15 @@ static bool dumpObjectFile(ObjectFile &Obj, DWARFContext &DICtx, Twine Filename,
     for (auto name : Name)
       Names.insert((IgnoreCase && !UseRegex) ? StringRef(name).lower() : name);
 
-    filterByName(Names, DICtx.compile_units(), OS);
-    filterByName(Names, DICtx.dwo_compile_units(), OS);
+    filterByName(Names, DICtx.normal_units(), OS);
+    filterByName(Names, DICtx.dwo_units(), OS);
     return true;
   }
 
   // Handle the --find option and lower it to --debug-info=<offset>.
   if (!Find.empty()) {
-    DumpOffsets[DIDT_ID_DebugInfo] = [&]() -> llvm::Optional<uint64_t> {
-      for (auto Name : Find) {
-        auto find = [&](const DWARFAcceleratorTable &Accel)
-            -> llvm::Optional<uint64_t> {
-          for (auto Entry : Accel.equal_range(Name))
-            for (auto Atom : Entry)
-              if (auto Offset = Atom.getAsSectionOffset())
-                return Offset;
-          return None;
-        };
-        if (auto Offset = find(DICtx.getAppleNames()))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-        if (auto Offset = find(DICtx.getAppleTypes()))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-        if (auto Offset = find(DICtx.getAppleNamespaces()))
-          return DumpOffsets[DIDT_ID_DebugInfo] = *Offset;
-      }
-      return None;
-    }();
-    // Early exit if --find was specified but the current file doesn't have it.
-    if (!DumpOffsets[DIDT_ID_DebugInfo])
-      return true;
+    filterByAccelName(Find, DICtx, OS);
+    return true;
   }
 
   // Dump the complete DWARF structure.
@@ -478,6 +524,8 @@ static bool handleFile(StringRef Filename, HandlerFn HandleObj,
 static std::vector<std::string> expandBundle(const std::string &InputPath) {
   std::vector<std::string> BundlePaths;
   SmallString<256> BundlePath(InputPath);
+  // Normalize input path. This is necessary to accept `bundle.dSYM/`.
+  sys::path::remove_dots(BundlePath);
   // Manually open up the bundle to avoid introducing additional dependencies.
   if (sys::fs::is_directory(BundlePath) &&
       sys::path::extension(BundlePath) == ".dSYM") {
@@ -506,15 +554,12 @@ static std::vector<std::string> expandBundle(const std::string &InputPath) {
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
+  InitLLVM X(argc, argv);
 
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
 
-  HideUnrelatedOptions({&DwarfDumpCategory, &SectionCategory});
+  HideUnrelatedOptions({&DwarfDumpCategory, &SectionCategory, &ColorCategory});
   cl::ParseCommandLineOptions(
       argc, argv,
       "pretty-print DWARF debug information in object files"
@@ -522,6 +567,14 @@ int main(int argc, char **argv) {
 
   if (Help) {
     PrintHelpMessage(/*Hidden =*/false, /*Categorized =*/true);
+    return 0;
+  }
+
+  // FIXME: Audit interactions between these two options and make them
+  //        compatible.
+  if (Diff && Verbose) {
+    WithColor::error() << "incompatible arguments: specifying both -diff and "
+                          "-verbose is currently not supported";
     return 0;
   }
 
@@ -536,14 +589,17 @@ int main(int argc, char **argv) {
   }
 
   raw_ostream &OS = OutputFile ? OutputFile->os() : outs();
+  bool OffsetRequested = false;
 
   // Defaults to dumping all sections, unless brief mode is specified in which
   // case only the .debug_info section in dumped.
 #define HANDLE_DWARF_SECTION(ENUM_NAME, ELF_NAME, CMDLINE_NAME)                \
   if (Dump##ENUM_NAME.IsRequested) {                                           \
     DumpType |= DIDT_##ENUM_NAME;                                              \
-    if (Dump##ENUM_NAME.HasValue)                                              \
+    if (Dump##ENUM_NAME.HasValue) {                                            \
       DumpOffsets[DIDT_ID_##ENUM_NAME] = Dump##ENUM_NAME.Val;                  \
+      OffsetRequested = true;                                                  \
+    }                                                                          \
   }
 #include "llvm/BinaryFormat/Dwarf.def"
 #undef HANDLE_DWARF_SECTION
@@ -558,8 +614,12 @@ int main(int argc, char **argv) {
       DumpType = DIDT_DebugInfo;
   }
 
+  // Unless dumping a specific DIE, default to --show-children.
+  if (!ShowChildren && !Verify && !OffsetRequested && Name.empty() && Find.empty())
+    ShowChildren = true;
+
   // Defaults to a.out if no filenames specified.
-  if (InputFilenames.size() == 0)
+  if (InputFilenames.empty())
     InputFilenames.push_back("a.out");
 
   // Expand any .dSYM bundles to the individual object files contained therein.
@@ -571,7 +631,7 @@ int main(int argc, char **argv) {
 
   if (Verify) {
     // If we encountered errors during verify, exit with a non-zero exit status.
-    if (!std::all_of(Objects.begin(), Objects.end(), [&](std::string Object) {
+    if (!all_of(Objects, [&](std::string Object) {
           return handleFile(Object, verifyObjectFile, OS);
         }))
       exit(1);

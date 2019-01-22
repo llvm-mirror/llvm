@@ -1,14 +1,13 @@
 //===-- R600ISelLowering.h - R600 DAG Lowering Interface -*- C++ -*--------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief R600 DAG Lowering interface definition
+/// R600 DAG Lowering interface definition
 //
 //===----------------------------------------------------------------------===//
 
@@ -23,6 +22,8 @@ class R600InstrInfo;
 class R600Subtarget;
 
 class R600TargetLowering final : public AMDGPUTargetLowering {
+
+  const R600Subtarget *Subtarget;
 public:
   R600TargetLowering(const TargetMachine &TM, const R600Subtarget &STI);
 
@@ -36,6 +37,7 @@ public:
   void ReplaceNodeResults(SDNode * N,
                           SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
+  CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool isVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -95,9 +97,11 @@ private:
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
- bool FoldOperand(SDNode *ParentNode, unsigned SrcIdx, SDValue &Src,
-                  SDValue &Neg, SDValue &Abs, SDValue &Sel, SDValue &Imm,
-                  SelectionDAG &DAG) const;
+  bool FoldOperand(SDNode *ParentNode, unsigned SrcIdx, SDValue &Src,
+                   SDValue &Neg, SDValue &Abs, SDValue &Sel, SDValue &Imm,
+                   SelectionDAG &DAG) const;
+  SDValue constBufferLoad(LoadSDNode *LoadNode, int Block,
+                          SelectionDAG &DAG) const;
 
   SDNode *PostISelFolding(MachineSDNode *N, SelectionDAG &DAG) const override;
 };

@@ -1,9 +1,8 @@
 //=- AArch64/AArch64MCCodeEmitter.cpp - Convert AArch64 code to machine code-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -163,6 +162,13 @@ public:
                                 SmallVectorImpl<MCFixup> &Fixups,
                                 const MCSubtargetInfo &STI) const;
 
+  uint32_t getImm8OptLsl(const MCInst &MI, unsigned OpIdx,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const;
+  uint32_t getSVEIncDecImm(const MCInst &MI, unsigned OpIdx,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
   unsigned fixMOVZ(const MCInst &MI, unsigned EncodedValue,
                    const MCSubtargetInfo &STI) const;
 
@@ -276,7 +282,8 @@ AArch64MCCodeEmitter::getAddSubImmOpValue(const MCInst &MI, unsigned OpIdx,
   if (const AArch64MCExpr *A64E = dyn_cast<AArch64MCExpr>(Expr)) {
     AArch64MCExpr::VariantKind RefKind = A64E->getKind();
     if (RefKind == AArch64MCExpr::VK_TPREL_HI12 ||
-        RefKind == AArch64MCExpr::VK_DTPREL_HI12)
+        RefKind == AArch64MCExpr::VK_DTPREL_HI12 ||
+        RefKind == AArch64MCExpr::VK_SECREL_HI12)
       ShiftVal = 12;
   }
   return ShiftVal == 0 ? 0 : (1 << ShiftVal);
@@ -508,6 +515,34 @@ AArch64MCCodeEmitter::getVecShiftL8OpValue(const MCInst &MI, unsigned OpIdx,
   return MO.getImm() - 8;
 }
 
+uint32_t
+AArch64MCCodeEmitter::getImm8OptLsl(const MCInst &MI, unsigned OpIdx,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const {
+  // Test shift
+  auto ShiftOpnd = MI.getOperand(OpIdx + 1).getImm();
+  assert(AArch64_AM::getShiftType(ShiftOpnd) == AArch64_AM::LSL &&
+         "Unexpected shift type for imm8_opt_lsl immediate.");
+
+  unsigned ShiftVal = AArch64_AM::getShiftValue(ShiftOpnd);
+  assert((ShiftVal == 0 || ShiftVal == 8) &&
+         "Unexpected shift value for imm8_opt_lsl immediate.");
+
+  // Test immediate
+  auto Immediate = MI.getOperand(OpIdx).getImm();
+  return (Immediate & 0xff) | (ShiftVal == 0 ? 0 : (1 << ShiftVal));
+}
+
+uint32_t
+AArch64MCCodeEmitter::getSVEIncDecImm(const MCInst &MI, unsigned OpIdx,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpIdx);
+  assert(MO.isImm() && "Expected an immediate value!");
+  // Normalize 1-16 range to 0-15.
+  return MO.getImm() - 1;
+}
+
 /// getMoveVecShifterOpValue - Return the encoded value for the vector move
 /// shifter (MSL).
 uint32_t AArch64MCCodeEmitter::getMoveVecShifterOpValue(
@@ -571,7 +606,7 @@ void AArch64MCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   }
 
   uint64_t Binary = getBinaryCodeForInstr(MI, Fixups, STI);
-  support::endian::Writer<support::little>(OS).write<uint32_t>(Binary);
+  support::endian::write<uint32_t>(OS, Binary, support::little);
   ++MCNumEmitted; // Keep track of the # of mi's emitted.
 }
 

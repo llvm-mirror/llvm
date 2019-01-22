@@ -1,9 +1,8 @@
 //===--- DWARFExpression.h - DWARF Expression handling ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -93,12 +92,13 @@ public:
 
   /// An iterator to go through the expression operations.
   class iterator
-      : public iterator_facade_base<iterator, std::forward_iterator_tag, Operation> {
+      : public iterator_facade_base<iterator, std::forward_iterator_tag,
+                                    Operation> {
     friend class DWARFExpression;
-    DWARFExpression *Expr;
+    const DWARFExpression *Expr;
     uint32_t Offset;
     Operation Op;
-    iterator(DWARFExpression *Expr, uint32_t Offset)
+    iterator(const DWARFExpression *Expr, uint32_t Offset)
         : Expr(Expr), Offset(Offset) {
       Op.Error =
           Offset >= Expr->Data.getData().size() ||
@@ -127,10 +127,11 @@ public:
     assert(AddressSize == 8 || AddressSize == 4);
   }
 
-  iterator begin() { return iterator(this, 0); }
-  iterator end() { return iterator(this, Data.getData().size()); }
+  iterator begin() const { return iterator(this, 0); }
+  iterator end() const { return iterator(this, Data.getData().size()); }
 
-  void print(raw_ostream &OS, const MCRegisterInfo *RegInfo);
+  void print(raw_ostream &OS, const MCRegisterInfo *RegInfo,
+             bool IsEH = false) const;
 
 private:
   DataExtractor Data;

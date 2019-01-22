@@ -1,9 +1,8 @@
 //===- WholeProgramDevirt.h - Whole-program devirt pass ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,6 +27,7 @@ template <typename T> class ArrayRef;
 template <typename T> class MutableArrayRef;
 class Function;
 class GlobalVariable;
+class ModuleSummaryIndex;
 
 namespace wholeprogramdevirt {
 
@@ -218,6 +218,13 @@ void setAfterReturnValues(MutableArrayRef<VirtualCallTarget> Targets,
 } // end namespace wholeprogramdevirt
 
 struct WholeProgramDevirtPass : public PassInfoMixin<WholeProgramDevirtPass> {
+  ModuleSummaryIndex *ExportSummary;
+  const ModuleSummaryIndex *ImportSummary;
+  WholeProgramDevirtPass(ModuleSummaryIndex *ExportSummary,
+                         const ModuleSummaryIndex *ImportSummary)
+      : ExportSummary(ExportSummary), ImportSummary(ImportSummary) {
+    assert(!(ExportSummary && ImportSummary));
+  }
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &);
 };
 

@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/GlobalISel/RegisterBankInfo.h ---------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -103,8 +102,8 @@ public:
   /// Currently the TableGen-like file would look like:
   /// \code
   /// PartialMapping[] = {
-  /// /*32-bit add*/ {0, 32, GPR},
-  /// /*2x32-bit add*/ {0, 32, GPR}, {0, 32, GPR}, // <-- Same entry 3x
+  /// /*32-bit add*/    {0, 32, GPR}, // Scalar entry repeated for first vec elt.
+  /// /*2x32-bit add*/  {0, 32, GPR}, {32, 32, GPR},
   /// /*<2x32-bit> vadd {0, 64, VPR}
   /// }; // PartialMapping duplicated.
   ///
@@ -118,14 +117,15 @@ public:
   /// With the array of pointer, we would have:
   /// \code
   /// PartialMapping[] = {
-  /// /*32-bit add*/ {0, 32, GPR},
+  /// /*32-bit add lower */ {0, 32, GPR},
+  /// /*32-bit add upper */ {32, 32, GPR},
   /// /*<2x32-bit> vadd {0, 64, VPR}
   /// }; // No more duplication.
   ///
   /// BreakDowns[] = {
   /// /*AddBreakDown*/ &PartialMapping[0],
-  /// /*2xAddBreakDown*/ &PartialMapping[0], &PartialMapping[0],
-  /// /*VAddBreakDown*/ &PartialMapping[1]
+  /// /*2xAddBreakDown*/ &PartialMapping[0], &PartialMapping[1],
+  /// /*VAddBreakDown*/ &PartialMapping[2]
   /// }; // Addresses of PartialMapping duplicated (smaller).
   ///
   /// ValueMapping[] {
@@ -622,6 +622,8 @@ public:
   /// \pre \p Reg is a virtual register that either has a bank or a class.
   /// \returns The constrained register class, or nullptr if there is none.
   /// \note This is a generic variant of MachineRegisterInfo::constrainRegClass
+  /// \note Use MachineRegisterInfo::constrainRegAttrs instead for any non-isel
+  /// purpose, including non-select passes of GlobalISel
   static const TargetRegisterClass *
   constrainGenericRegister(unsigned Reg, const TargetRegisterClass &RC,
                            MachineRegisterInfo &MRI);

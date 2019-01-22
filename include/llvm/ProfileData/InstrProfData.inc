@@ -1,9 +1,8 @@
 /*===-- InstrProfData.inc - instr profiling runtime structures -*- C++ -*-=== *\
 |*
-|*                     The LLVM Compiler Infrastructure
-|*
-|* This file is distributed under the University of Illinois Open Source
-|* License. See LICENSE.TXT for details.
+|* Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+|* See https://llvm.org/LICENSE.txt for license information.
+|* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 |*
 \*===----------------------------------------------------------------------===*/
 /*
@@ -178,7 +177,7 @@ VALUE_PROF_FUNC_PARAM(uint64_t, LargeValue, Type::getInt64Ty(Ctx))
  * functions are profiled by the instrumented code. The target addresses are
  * written in the raw profile data and converted to target function name's MD5
  * hash by the profile reader during deserialization.  Typically, this happens
- * when the the raw profile data is read during profile merging.
+ * when the raw profile data is read during profile merging.
  *
  * For this remapping the ProfData is used.  ProfData contains both the function
  * name hash and the function address.
@@ -308,14 +307,14 @@ typedef struct ValueProfRecord {
 
 #ifdef __cplusplus
   /*!
-   * \brief Return the number of value sites.
+   * Return the number of value sites.
    */
   uint32_t getNumValueSites() const { return NumValueSites; }
   /*!
-   * \brief Read data from this record and save it to Record.
+   * Read data from this record and save it to Record.
    */
   void deserializeTo(InstrProfRecord &Record,
-                     InstrProfRecord::ValueMapType *VMap);
+                     InstrProfSymtab *SymTab);
   /*
    * In-place byte swap:
    * Do byte swap for this instance. \c Old is the original order before
@@ -393,7 +392,7 @@ typedef struct ValueProfData {
    * Read data from this data and save it to \c Record.
    */
   void deserializeTo(InstrProfRecord &Record,
-                     InstrProfRecord::ValueMapType *VMap);
+                     InstrProfSymtab *SymTab);
   void operator delete(void *ptr) { ::operator delete(ptr); }
 #endif
 } ValueProfData;
@@ -458,7 +457,7 @@ getValueProfRecordHeaderSize(uint32_t NumValueSites);
 #endif
 
 /*!
- * \brief Return the \c ValueProfRecord header size including the
+ * Return the \c ValueProfRecord header size including the
  * padding bytes.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
@@ -471,7 +470,7 @@ uint32_t getValueProfRecordHeaderSize(uint32_t NumValueSites) {
 }
 
 /*!
- * \brief Return the total size of the value profile record including the
+ * Return the total size of the value profile record including the
  * header and the value data.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
@@ -482,7 +481,7 @@ uint32_t getValueProfRecordSize(uint32_t NumValueSites,
 }
 
 /*!
- * \brief Return the pointer to the start of value data array.
+ * Return the pointer to the start of value data array.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *This) {
@@ -491,7 +490,7 @@ InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *This) {
 }
 
 /*!
- * \brief Return the total number of value data for \c This record.
+ * Return the total number of value data for \c This record.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 uint32_t getValueProfRecordNumValueData(ValueProfRecord *This) {
@@ -503,7 +502,7 @@ uint32_t getValueProfRecordNumValueData(ValueProfRecord *This) {
 }
 
 /*!
- * \brief Use this method to advance to the next \c This \c ValueProfRecord.
+ * Use this method to advance to the next \c This \c ValueProfRecord.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 ValueProfRecord *getValueProfRecordNext(ValueProfRecord *This) {
@@ -514,7 +513,7 @@ ValueProfRecord *getValueProfRecordNext(ValueProfRecord *This) {
 }
 
 /*!
- * \brief Return the first \c ValueProfRecord instance.
+ * Return the first \c ValueProfRecord instance.
  */
 INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 ValueProfRecord *getFirstValueProfRecord(ValueProfData *This) {
@@ -628,7 +627,7 @@ serializeValueProfDataFrom(ValueProfRecordClosure *Closure,
 /* Raw profile format version (start from 1). */
 #define INSTR_PROF_RAW_VERSION 4
 /* Indexed profile format version (start from 1). */
-#define INSTR_PROF_INDEX_VERSION 4
+#define INSTR_PROF_INDEX_VERSION 5
 /* Coverage mapping format vresion (start from 0). */
 #define INSTR_PROF_COVMAP_VERSION 2
 

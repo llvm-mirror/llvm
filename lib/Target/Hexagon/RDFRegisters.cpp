@@ -1,9 +1,8 @@
 //===- RDFRegisters.cpp ---------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,11 +11,11 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <set>
@@ -365,7 +364,7 @@ RegisterRef RegisterAggr::makeRegRef() const {
 void RegisterAggr::print(raw_ostream &OS) const {
   OS << '{';
   for (int U = Units.find_first(); U >= 0; U = Units.find_next(U))
-    OS << ' ' << PrintRegUnit(U, &PRI.getTRI());
+    OS << ' ' << printRegUnit(U, &PRI.getTRI());
   OS << " }";
 }
 

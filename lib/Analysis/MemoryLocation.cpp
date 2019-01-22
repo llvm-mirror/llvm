@@ -1,9 +1,8 @@
 //===- MemoryLocation.cpp - Memory location descriptions -------------------==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,13 +17,28 @@
 #include "llvm/IR/Type.h"
 using namespace llvm;
 
+void LocationSize::print(raw_ostream &OS) const {
+  OS << "LocationSize::";
+  if (*this == unknown())
+    OS << "unknown";
+  else if (*this == mapEmpty())
+    OS << "mapEmpty";
+  else if (*this == mapTombstone())
+    OS << "mapTombstone";
+  else if (isPrecise())
+    OS << "precise(" << getValue() << ')';
+  else
+    OS << "upperBound(" << getValue() << ')';
+}
+
 MemoryLocation MemoryLocation::get(const LoadInst *LI) {
   AAMDNodes AATags;
   LI->getAAMetadata(AATags);
   const auto &DL = LI->getModule()->getDataLayout();
 
-  return MemoryLocation(LI->getPointerOperand(),
-                        DL.getTypeStoreSize(LI->getType()), AATags);
+  return MemoryLocation(
+      LI->getPointerOperand(),
+      LocationSize::precise(DL.getTypeStoreSize(LI->getType())), AATags);
 }
 
 MemoryLocation MemoryLocation::get(const StoreInst *SI) {
@@ -33,7 +47,8 @@ MemoryLocation MemoryLocation::get(const StoreInst *SI) {
   const auto &DL = SI->getModule()->getDataLayout();
 
   return MemoryLocation(SI->getPointerOperand(),
-                        DL.getTypeStoreSize(SI->getValueOperand()->getType()),
+                        LocationSize::precise(DL.getTypeStoreSize(
+                            SI->getValueOperand()->getType())),
                         AATags);
 }
 
@@ -41,7 +56,8 @@ MemoryLocation MemoryLocation::get(const VAArgInst *VI) {
   AAMDNodes AATags;
   VI->getAAMetadata(AATags);
 
-  return MemoryLocation(VI->getPointerOperand(), UnknownSize, AATags);
+  return MemoryLocation(VI->getPointerOperand(), LocationSize::unknown(),
+                        AATags);
 }
 
 MemoryLocation MemoryLocation::get(const AtomicCmpXchgInst *CXI) {
@@ -49,9 +65,10 @@ MemoryLocation MemoryLocation::get(const AtomicCmpXchgInst *CXI) {
   CXI->getAAMetadata(AATags);
   const auto &DL = CXI->getModule()->getDataLayout();
 
-  return MemoryLocation(
-      CXI->getPointerOperand(),
-      DL.getTypeStoreSize(CXI->getCompareOperand()->getType()), AATags);
+  return MemoryLocation(CXI->getPointerOperand(),
+                        LocationSize::precise(DL.getTypeStoreSize(
+                            CXI->getCompareOperand()->getType())),
+                        AATags);
 }
 
 MemoryLocation MemoryLocation::get(const AtomicRMWInst *RMWI) {
@@ -60,14 +77,23 @@ MemoryLocation MemoryLocation::get(const AtomicRMWInst *RMWI) {
   const auto &DL = RMWI->getModule()->getDataLayout();
 
   return MemoryLocation(RMWI->getPointerOperand(),
-                        DL.getTypeStoreSize(RMWI->getValOperand()->getType()),
+                        LocationSize::precise(DL.getTypeStoreSize(
+                            RMWI->getValOperand()->getType())),
                         AATags);
 }
 
 MemoryLocation MemoryLocation::getForSource(const MemTransferInst *MTI) {
-  uint64_t Size = UnknownSize;
+  return getForSource(cast<AnyMemTransferInst>(MTI));
+}
+
+MemoryLocation MemoryLocation::getForSource(const AtomicMemTransferInst *MTI) {
+  return getForSource(cast<AnyMemTransferInst>(MTI));
+}
+
+MemoryLocation MemoryLocation::getForSource(const AnyMemTransferInst *MTI) {
+  auto Size = LocationSize::unknown();
   if (ConstantInt *C = dyn_cast<ConstantInt>(MTI->getLength()))
-    Size = C->getValue().getZExtValue();
+    Size = LocationSize::precise(C->getValue().getZExtValue());
 
   // memcpy/memmove can have AA tags. For memcpy, they apply
   // to both the source and the destination.
@@ -77,28 +103,36 @@ MemoryLocation MemoryLocation::getForSource(const MemTransferInst *MTI) {
   return MemoryLocation(MTI->getRawSource(), Size, AATags);
 }
 
-MemoryLocation MemoryLocation::getForDest(const MemIntrinsic *MTI) {
-  uint64_t Size = UnknownSize;
-  if (ConstantInt *C = dyn_cast<ConstantInt>(MTI->getLength()))
-    Size = C->getValue().getZExtValue();
+MemoryLocation MemoryLocation::getForDest(const MemIntrinsic *MI) {
+  return getForDest(cast<AnyMemIntrinsic>(MI));
+}
+
+MemoryLocation MemoryLocation::getForDest(const AtomicMemIntrinsic *MI) {
+  return getForDest(cast<AnyMemIntrinsic>(MI));
+}
+
+MemoryLocation MemoryLocation::getForDest(const AnyMemIntrinsic *MI) {
+  auto Size = LocationSize::unknown();
+  if (ConstantInt *C = dyn_cast<ConstantInt>(MI->getLength()))
+    Size = LocationSize::precise(C->getValue().getZExtValue());
 
   // memcpy/memmove can have AA tags. For memcpy, they apply
   // to both the source and the destination.
   AAMDNodes AATags;
-  MTI->getAAMetadata(AATags);
+  MI->getAAMetadata(AATags);
 
-  return MemoryLocation(MTI->getRawDest(), Size, AATags);
+  return MemoryLocation(MI->getRawDest(), Size, AATags);
 }
 
-MemoryLocation MemoryLocation::getForArgument(ImmutableCallSite CS,
+MemoryLocation MemoryLocation::getForArgument(const CallBase *Call,
                                               unsigned ArgIdx,
-                                              const TargetLibraryInfo &TLI) {
+                                              const TargetLibraryInfo *TLI) {
   AAMDNodes AATags;
-  CS->getAAMetadata(AATags);
-  const Value *Arg = CS.getArgument(ArgIdx);
+  Call->getAAMetadata(AATags);
+  const Value *Arg = Call->getArgOperand(ArgIdx);
 
   // We may be able to produce an exact size for known intrinsics.
-  if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(CS.getInstruction())) {
+  if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(Call)) {
     const DataLayout &DL = II->getModule()->getDataLayout();
 
     switch (II->getIntrinsicID()) {
@@ -110,7 +144,8 @@ MemoryLocation MemoryLocation::getForArgument(ImmutableCallSite CS,
       assert((ArgIdx == 0 || ArgIdx == 1) &&
              "Invalid argument index for memory intrinsic");
       if (ConstantInt *LenCI = dyn_cast<ConstantInt>(II->getArgOperand(2)))
-        return MemoryLocation(Arg, LenCI->getZExtValue(), AATags);
+        return MemoryLocation(Arg, LocationSize::precise(LenCI->getZExtValue()),
+                              AATags);
       break;
 
     case Intrinsic::lifetime_start:
@@ -118,23 +153,37 @@ MemoryLocation MemoryLocation::getForArgument(ImmutableCallSite CS,
     case Intrinsic::invariant_start:
       assert(ArgIdx == 1 && "Invalid argument index");
       return MemoryLocation(
-          Arg, cast<ConstantInt>(II->getArgOperand(0))->getZExtValue(), AATags);
+          Arg,
+          LocationSize::precise(
+              cast<ConstantInt>(II->getArgOperand(0))->getZExtValue()),
+          AATags);
 
     case Intrinsic::invariant_end:
+      // The first argument to an invariant.end is a "descriptor" type (e.g. a
+      // pointer to a empty struct) which is never actually dereferenced.
+      if (ArgIdx == 0)
+        return MemoryLocation(Arg, LocationSize::precise(0), AATags);
       assert(ArgIdx == 2 && "Invalid argument index");
       return MemoryLocation(
-          Arg, cast<ConstantInt>(II->getArgOperand(1))->getZExtValue(), AATags);
+          Arg,
+          LocationSize::precise(
+              cast<ConstantInt>(II->getArgOperand(1))->getZExtValue()),
+          AATags);
 
     case Intrinsic::arm_neon_vld1:
       assert(ArgIdx == 0 && "Invalid argument index");
       // LLVM's vld1 and vst1 intrinsics currently only support a single
       // vector register.
-      return MemoryLocation(Arg, DL.getTypeStoreSize(II->getType()), AATags);
+      return MemoryLocation(
+          Arg, LocationSize::precise(DL.getTypeStoreSize(II->getType())),
+          AATags);
 
     case Intrinsic::arm_neon_vst1:
       assert(ArgIdx == 0 && "Invalid argument index");
-      return MemoryLocation(
-          Arg, DL.getTypeStoreSize(II->getArgOperand(1)->getType()), AATags);
+      return MemoryLocation(Arg,
+                            LocationSize::precise(DL.getTypeStoreSize(
+                                II->getArgOperand(1)->getType())),
+                            AATags);
     }
   }
 
@@ -143,16 +192,20 @@ MemoryLocation MemoryLocation::getForArgument(ImmutableCallSite CS,
   // LoopIdiomRecognizer likes to turn loops into calls to memset_pattern16
   // whenever possible.
   LibFunc F;
-  if (CS.getCalledFunction() && TLI.getLibFunc(*CS.getCalledFunction(), F) &&
-      F == LibFunc_memset_pattern16 && TLI.has(F)) {
+  if (TLI && Call->getCalledFunction() &&
+      TLI->getLibFunc(*Call->getCalledFunction(), F) &&
+      F == LibFunc_memset_pattern16 && TLI->has(F)) {
     assert((ArgIdx == 0 || ArgIdx == 1) &&
            "Invalid argument index for memset_pattern16");
     if (ArgIdx == 1)
-      return MemoryLocation(Arg, 16, AATags);
-    if (const ConstantInt *LenCI = dyn_cast<ConstantInt>(CS.getArgument(2)))
-      return MemoryLocation(Arg, LenCI->getZExtValue(), AATags);
+      return MemoryLocation(Arg, LocationSize::precise(16), AATags);
+    if (const ConstantInt *LenCI =
+            dyn_cast<ConstantInt>(Call->getArgOperand(2)))
+      return MemoryLocation(Arg, LocationSize::precise(LenCI->getZExtValue()),
+                            AATags);
   }
   // FIXME: Handle memset_pattern4 and memset_pattern8 also.
 
-  return MemoryLocation(CS.getArgument(ArgIdx), UnknownSize, AATags);
+  return MemoryLocation(Call->getArgOperand(ArgIdx), LocationSize::unknown(),
+                        AATags);
 }

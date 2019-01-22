@@ -31,8 +31,8 @@ define amdgpu_ps void @vcc_implicit_def(float %arg13, float %arg14) {
 }
 
 ; SI-LABEL: {{^}}true:
-; SI-NEXT: BB#
-; SI-NEXT: BB#
+; SI-NEXT: %bb.
+; SI-NEXT: %bb.
 ; SI-NEXT: s_endpgm
 define amdgpu_gs void @true() {
   call void @llvm.amdgcn.kill(i1 true)
@@ -212,7 +212,7 @@ define amdgpu_gs void @neg_olt(float %a) {
 
 ; SI-LABEL: {{^}}fcmp_x2:
 ; FIXME: LLVM should be able to combine these fcmp opcodes.
-; SI: v_cmp_gt_f32
+; SI: v_cmp_lt_f32_e32 vcc, s{{[0-9]+}}, v0
 ; SI: v_cndmask_b32
 ; SI: v_cmpx_le_f32
 define amdgpu_ps void @fcmp_x2(float %a) #0 {
@@ -231,6 +231,43 @@ define amdgpu_ps void @wqm(float %a) {
   %c1 = fcmp une float %a, 0.0
   %c2 = call i1 @llvm.amdgcn.wqm.vote(i1 %c1)
   call void @llvm.amdgcn.kill(i1 %c2)
+  ret void
+}
+
+; This checks that we use the 64-bit encoding when the operand is a SGPR.
+; SI-LABEL: {{^}}test_sgpr:
+; SI: v_cmpx_ge_f32_e64
+define amdgpu_ps void @test_sgpr(float inreg %a) #0 {
+  %c = fcmp ole float %a, 1.000000e+00
+  call void @llvm.amdgcn.kill(i1 %c) #1
+  ret void
+}
+
+; SI-LABEL: {{^}}test_non_inline_imm_sgpr:
+; SI-NOT: v_cmpx_ge_f32_e64
+define amdgpu_ps void @test_non_inline_imm_sgpr(float inreg %a) #0 {
+  %c = fcmp ole float %a, 1.500000e+00
+  call void @llvm.amdgcn.kill(i1 %c) #1
+  ret void
+}
+
+; SI-LABEL: {{^}}test_scc_liveness:
+; SI: v_cmp
+; SI: s_and_b64 exec
+; SI: s_cmp
+; SI: s_cbranch_scc
+define amdgpu_ps void @test_scc_liveness() #0 {
+main_body:
+  br label %loop3
+
+loop3:                                            ; preds = %loop3, %main_body
+  %tmp = phi i32 [ 0, %main_body ], [ %tmp5, %loop3 ]
+  %tmp1 = icmp sgt i32 %tmp, 0
+  call void @llvm.amdgcn.kill(i1 %tmp1) #1
+  %tmp5 = add i32 %tmp, 1
+  br i1 %tmp1, label %endloop15, label %loop3
+
+endloop15:                                        ; preds = %loop3
   ret void
 }
 

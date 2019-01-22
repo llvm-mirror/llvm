@@ -1,9 +1,8 @@
 //===- LoopPassManager.cpp - Loop pass management -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -30,11 +29,25 @@ PassManager<Loop, LoopAnalysisManager, LoopStandardAnalysisResults &,
   if (DebugLogging)
     dbgs() << "Starting Loop pass manager run.\n";
 
+  // Request PassInstrumentation from analysis manager, will use it to run
+  // instrumenting callbacks for the passes later.
+  PassInstrumentation PI = AM.getResult<PassInstrumentationAnalysis>(L, AR);
   for (auto &Pass : Passes) {
     if (DebugLogging)
       dbgs() << "Running pass: " << Pass->name() << " on " << L;
 
+    // Check the PassInstrumentation's BeforePass callbacks before running the
+    // pass, skip its execution completely if asked to (callback returns false).
+    if (!PI.runBeforePass<Loop>(*Pass, L))
+      continue;
+
     PreservedAnalyses PassPA = Pass->run(L, AM, AR, U);
+
+    // do not pass deleted Loop into the instrumentation
+    if (U.skipCurrentLoop())
+      PI.runAfterPassInvalidated<Loop>(*Pass);
+    else
+      PI.runAfterPass<Loop>(*Pass, L);
 
     // If the loop was deleted, abort the run and return to the outer walk.
     if (U.skipCurrentLoop()) {

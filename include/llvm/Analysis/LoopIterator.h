@@ -1,9 +1,8 @@
 //===--------- LoopIterator.h - Iterate over loop blocks --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This file defines iterators to visit the basic blocks within a loop.
@@ -166,6 +165,25 @@ public:
     PostNumbers.clear();
     PostBlocks.clear();
   }
+};
+
+/// Wrapper class to LoopBlocksDFS that provides a standard begin()/end()
+/// interface for the DFS reverse post-order traversal of blocks in a loop body.
+class LoopBlocksRPO {
+private:
+  LoopBlocksDFS DFS;
+
+public:
+  LoopBlocksRPO(Loop *Container) : DFS(Container) {}
+
+  /// Traverse the loop blocks and store the DFS result.
+  void perform(LoopInfo *LI) {
+    DFS.perform(LI);
+  }
+
+  /// Reverse iterate over the cached postorder blocks.
+  LoopBlocksDFS::RPOIterator begin() const { return DFS.beginRPO(); }
+  LoopBlocksDFS::RPOIterator end() const { return DFS.endRPO(); }
 };
 
 /// Specialize po_iterator_storage to record postorder numbers.

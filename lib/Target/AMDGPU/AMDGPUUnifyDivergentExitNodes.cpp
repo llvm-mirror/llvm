@@ -1,9 +1,8 @@
 //===- AMDGPUUnifyDivergentExitNodes.cpp ----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,9 +24,10 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Analysis/DivergenceAnalysis.h"
+#include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -39,7 +39,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils.h"
 
 using namespace llvm;
 
@@ -69,7 +69,7 @@ char &llvm::AMDGPUUnifyDivergentExitNodesID = AMDGPUUnifyDivergentExitNodes::ID;
 INITIALIZE_PASS_BEGIN(AMDGPUUnifyDivergentExitNodes, DEBUG_TYPE,
                      "Unify divergent function exit nodes", false, false)
 INITIALIZE_PASS_DEPENDENCY(PostDominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(DivergenceAnalysis)
+INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
 INITIALIZE_PASS_END(AMDGPUUnifyDivergentExitNodes, DEBUG_TYPE,
                     "Unify divergent function exit nodes", false, false)
 
@@ -77,10 +77,10 @@ void AMDGPUUnifyDivergentExitNodes::getAnalysisUsage(AnalysisUsage &AU) const{
   // TODO: Preserve dominator tree.
   AU.addRequired<PostDominatorTreeWrapperPass>();
 
-  AU.addRequired<DivergenceAnalysis>();
+  AU.addRequired<LegacyDivergenceAnalysis>();
 
   // No divergent values are changed, only blocks and branch edges.
-  AU.addPreserved<DivergenceAnalysis>();
+  AU.addPreserved<LegacyDivergenceAnalysis>();
 
   // We preserve the non-critical-edgeness property
   AU.addPreservedID(BreakCriticalEdgesID);
@@ -94,7 +94,7 @@ void AMDGPUUnifyDivergentExitNodes::getAnalysisUsage(AnalysisUsage &AU) const{
 
 /// \returns true if \p BB is reachable through only uniform branches.
 /// XXX - Is there a more efficient way to find this?
-static bool isUniformlyReached(const DivergenceAnalysis &DA,
+static bool isUniformlyReached(const LegacyDivergenceAnalysis &DA,
                                BasicBlock &BB) {
   SmallVector<BasicBlock *, 8> Stack;
   SmallPtrSet<BasicBlock *, 8> Visited;
@@ -144,7 +144,8 @@ static BasicBlock *unifyReturnBlockSet(Function &F,
     if (PN)
       PN->addIncoming(BB->getTerminator()->getOperand(0), BB);
 
-    BB->getInstList().pop_back();  // Remove the return insn
+    // Remove and delete the return inst.
+    BB->getTerminator()->eraseFromParent();
     BranchInst::Create(NewRetBlock, BB);
   }
 
@@ -161,12 +162,15 @@ bool AMDGPUUnifyDivergentExitNodes::runOnFunction(Function &F) {
   if (PDT.getRoots().size() <= 1)
     return false;
 
-  DivergenceAnalysis &DA = getAnalysis<DivergenceAnalysis>();
+  LegacyDivergenceAnalysis &DA = getAnalysis<LegacyDivergenceAnalysis>();
 
   // Loop over all of the blocks in a function, tracking all of the blocks that
   // return.
   SmallVector<BasicBlock *, 4> ReturningBlocks;
   SmallVector<BasicBlock *, 4> UnreachableBlocks;
+
+  // Dummy return block for infinite loop.
+  BasicBlock *DummyReturnBB = nullptr;
 
   for (BasicBlock *BB : PDT.getRoots()) {
     if (isa<ReturnInst>(BB->getTerminator())) {
@@ -175,6 +179,35 @@ bool AMDGPUUnifyDivergentExitNodes::runOnFunction(Function &F) {
     } else if (isa<UnreachableInst>(BB->getTerminator())) {
       if (!isUniformlyReached(DA, *BB))
         UnreachableBlocks.push_back(BB);
+    } else if (BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator())) {
+
+      ConstantInt *BoolTrue = ConstantInt::getTrue(F.getContext());
+      if (DummyReturnBB == nullptr) {
+        DummyReturnBB = BasicBlock::Create(F.getContext(),
+                                           "DummyReturnBlock", &F);
+        Type *RetTy = F.getReturnType();
+        Value *RetVal = RetTy->isVoidTy() ? nullptr : UndefValue::get(RetTy);
+        ReturnInst::Create(F.getContext(), RetVal, DummyReturnBB);
+        ReturningBlocks.push_back(DummyReturnBB);
+      }
+
+      if (BI->isUnconditional()) {
+        BasicBlock *LoopHeaderBB = BI->getSuccessor(0);
+        BI->eraseFromParent(); // Delete the unconditional branch.
+        // Add a new conditional branch with a dummy edge to the return block.
+        BranchInst::Create(LoopHeaderBB, DummyReturnBB, BoolTrue, BB);
+      } else { // Conditional branch.
+        // Create a new transition block to hold the conditional branch.
+        BasicBlock *TransitionBB = BasicBlock::Create(F.getContext(),
+                                                      "TransitionBlock", &F);
+
+        // Move BI from BB to the new transition block.
+        BI->removeFromParent();
+        TransitionBB->getInstList().push_back(BI);
+
+        // Create a branch that will always branch to the transition block.
+        BranchInst::Create(TransitionBB, DummyReturnBB, BoolTrue, BB);
+      }
     }
   }
 
@@ -189,7 +222,8 @@ bool AMDGPUUnifyDivergentExitNodes::runOnFunction(Function &F) {
       new UnreachableInst(F.getContext(), UnreachableBlock);
 
       for (BasicBlock *BB : UnreachableBlocks) {
-        BB->getInstList().pop_back();  // Remove the unreachable inst.
+        // Remove and delete the unreachable inst.
+        BB->getTerminator()->eraseFromParent();
         BranchInst::Create(UnreachableBlock, BB);
       }
     }
@@ -200,7 +234,8 @@ bool AMDGPUUnifyDivergentExitNodes::runOnFunction(Function &F) {
 
       Type *RetTy = F.getReturnType();
       Value *RetVal = RetTy->isVoidTy() ? nullptr : UndefValue::get(RetTy);
-      UnreachableBlock->getInstList().pop_back();  // Remove the unreachable inst.
+      // Remove and delete the unreachable inst.
+      UnreachableBlock->getTerminator()->eraseFromParent();
 
       Function *UnreachableIntrin =
         Intrinsic::getDeclaration(F.getParent(), Intrinsic::amdgcn_unreachable);

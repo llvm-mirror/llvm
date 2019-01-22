@@ -5,14 +5,14 @@ declare void @Print__512(<16 x i32>) #0
 
 define void @bar__512(<16 x i32>* %var) #0 {
 ; CHECK-LABEL: bar__512:
-; CHECK:       ## BB#0: ## %allocas
+; CHECK:       ## %bb.0: ## %allocas
 ; CHECK-NEXT:    pushq %rbx
 ; CHECK-NEXT:    subq $112, %rsp
 ; CHECK-NEXT:    movq %rdi, %rbx
-; CHECK-NEXT:    vmovups (%rbx), %zmm0
+; CHECK-NEXT:    vmovups (%rdi), %zmm0
 ; CHECK-NEXT:    vmovups %zmm0, (%rsp) ## 64-byte Spill
 ; CHECK-NEXT:    vbroadcastss {{.*}}(%rip), %zmm1
-; CHECK-NEXT:    vmovaps %zmm1, (%rbx)
+; CHECK-NEXT:    vmovaps %zmm1, (%rdi)
 ; CHECK-NEXT:    callq _Print__512
 ; CHECK-NEXT:    vmovups (%rsp), %zmm0 ## 64-byte Reload
 ; CHECK-NEXT:    callq _Print__512

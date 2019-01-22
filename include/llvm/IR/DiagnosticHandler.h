@@ -1,9 +1,8 @@
 //===- DiagnosticHandler.h - DiagnosticHandler class for LLVM -*- C++ ---*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Base DiagnosticHandler class declaration. Derive from this class to provide
@@ -18,7 +17,7 @@
 namespace llvm {
 class DiagnosticInfo;
 
-/// \brief This is the base class for diagnostic handling in LLVM.
+/// This is the base class for diagnostic handling in LLVM.
 /// The handleDiagnostics method must be overriden by the subclasses to handle
 /// diagnostic. The *RemarkEnabled methods can be overriden to control
 /// which remarks are enabled.

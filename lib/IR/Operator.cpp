@@ -1,9 +1,8 @@
 //===-- Operator.cpp - Implement the LLVM operators -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -35,8 +34,8 @@ Type *GEPOperator::getResultElementType() const {
 bool GEPOperator::accumulateConstantOffset(const DataLayout &DL,
                                            APInt &Offset) const {
   assert(Offset.getBitWidth() ==
-             DL.getPointerSizeInBits(getPointerAddressSpace()) &&
-         "The offset must have exactly as many bits as our pointer.");
+             DL.getIndexSizeInBits(getPointerAddressSpace()) &&
+         "The offset bit width does not match DL specification.");
 
   for (gep_type_iterator GTI = gep_type_begin(this), GTE = gep_type_end(this);
        GTI != GTE; ++GTI) {

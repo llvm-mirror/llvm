@@ -18,10 +18,10 @@ entry:
 }
 
 ; CHECK-LABEL: isel
-; CHECK: push {r4, r5}
-; CHECK: movw r12, #0
-; CHECK: movt r12, #0
-; CHECK: movw r4, #{{\d*}}
+; CHECK: push {r4, r5, r6, lr}
+; CHECK-DAG: movw r12, #0
+; CHECK-DAG: movt r12, #0
+; CHECK-DAG: movw r4, #{{\d*}}
 ; CHECK: blx r12
 ; CHECK: sub.w sp, sp, r4
 

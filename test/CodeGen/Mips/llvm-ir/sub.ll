@@ -28,8 +28,6 @@
 ; RUN:    -check-prefixes=R2-R6,GP64,NOT-MM,GP64-R2
 ; RUN: llc < %s -march=mips64 -mcpu=mips64r6 | FileCheck %s \
 ; RUN:    -check-prefixes=R2-R6,GP64,NOT-MM,GP64-R2
-; RUN: llc < %s -march=mips64 -mcpu=mips64r6 -mattr=+micromips | FileCheck %s \
-; RUN:    -check-prefixes=GP64,MM64
 
 define signext i1 @sub_i1(i1 signext %a, i1 signext %b) {
 entry:
@@ -165,7 +163,7 @@ entry:
 ; MMR3: subu16   $5, $[[T19]], $[[T20]]
 
 ; MMR6: move     $[[T0:[0-9]+]], $7
-; MMR6: sw       $[[T0]], 8($sp)
+; MMR6: sw       $7, 8($sp)
 ; MMR6: move     $[[T1:[0-9]+]], $5
 ; MMR6: sw       $4, 12($sp)
 ; MMR6: lw       $[[T2:[0-9]+]], 48($sp)
@@ -212,17 +210,6 @@ entry:
 ; GP64-R2:     dext      $[[T1:[0-9]+]], $[[T0]], 0, 32
 ; GP64-R2:     dsubu     $2, $1, $[[T1]]
 ; GP64-R2:     dsubu     $3, $5, $7
-
-; FIXME: Again, redundant sign extension. Also, microMIPSR6 has the
-;        dext instruction which should be used here.
-
-; MM64: dsubu   $[[T0:[0-9]+]], $4, $6
-; MM64: sltu    $[[T1:[0-9]+]], $5, $7
-; MM64: dsll    $[[T2:[0-9]+]], $[[T1]], 32
-; MM64: dsrl    $[[T3:[0-9]+]], $[[T2]], 32
-; MM64: dsubu   $2, $[[T0]], $[[T3]]
-; MM64: dsubu   $3, $5, $7
-; MM64: jr      $ra
 
   %r = sub i128 %a, %b
   ret i128 %r

@@ -1,10 +1,10 @@
 ; RUN: llvm-pdbutil pretty -module-syms %p/../Inputs/symbolformat.pdb | FileCheck --check-prefix=SYM_FORMAT_FPO %s
 ; RUN: llvm-pdbutil pretty -module-syms %p/../Inputs/symbolformat.pdb | FileCheck --check-prefix=SYM_FORMAT %s
-; RUN: llvm-pdbutil pretty -types %p/../Inputs/symbolformat.pdb > %t.types
+; RUN: llvm-pdbutil pretty -classes -enums -typedefs %p/../Inputs/symbolformat.pdb > %t.types
 ; RUN: FileCheck --check-prefix=TYPES_FORMAT %s < %t.types
 ; RUN: FileCheck --check-prefix=TYPES_1 %s < %t.types
 ; RUN: FileCheck --check-prefix=TYPES_2 %s < %t.types
-; RUN: llvm-pdbutil pretty -types %p/../Inputs/symbolformat.pdb | FileCheck --check-prefix=TYPES_FORMAT %s
+; RUN: llvm-pdbutil pretty -enums -typedefs %p/../Inputs/symbolformat.pdb | FileCheck --check-prefix=TYPES_FORMAT %s
 ; RUN: llvm-pdbutil pretty -globals %p/../Inputs/symbolformat.pdb | FileCheck --check-prefix=GLOBALS %s
 
 ; The format is func [0x<rva_start>+<prologue_length> - 0x<rva_end>-<epilogue_length>]
@@ -34,8 +34,8 @@
 ; TYPES_1: Classes
 ; TYPES_1: struct A [sizeof = 4] {
 ; TYPES_1: virtual void PureFunc() = 0
-; TYPES_1: virtual void VirtualFunc()
-; TYPES_1: void RegularFunc()
+; TYPES_1: virtual void {{(A::)?}}VirtualFunc()
+; TYPES_1: void {{(A::)?}}RegularFunc()
 ; TYPES_1: }
 
 ; TYPES_2: Classes

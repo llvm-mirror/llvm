@@ -1,9 +1,8 @@
 //===- X86MacroFusion.h - X86 Macro Fusion --------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,6 +10,9 @@
 ///  to pair instructions back to back.
 //
 //===----------------------------------------------------------------------===//
+
+#ifndef LLVM_LIB_TARGET_X86_X86MACROFUSION_H
+#define LLVM_LIB_TARGET_X86_X86MACROFUSION_H
 
 #include "llvm/CodeGen/MachineScheduler.h"
 
@@ -23,3 +25,5 @@ std::unique_ptr<ScheduleDAGMutation>
 createX86MacroFusionDAGMutation();
 
 } // end namespace llvm
+
+#endif

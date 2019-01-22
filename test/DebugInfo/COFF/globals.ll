@@ -59,7 +59,6 @@
 ; OBJ:   Pointer (0x1001) {
 ; OBJ:     TypeLeafKind: LF_POINTER (0x1002)
 ; OBJ:     PointeeType: const int (0x1000)
-; OBJ:     PointerAttributes: 0x1000C
 ; OBJ:     PtrType: Near64 (0xC)
 ; OBJ:     PtrMode: Pointer (0x0)
 ; OBJ:     IsFlat: 0
@@ -97,7 +96,7 @@
 ; OBJ:   ]
 ; OBJ: ]
 ; OBJ: CodeViewDebugInfo [
-; OBJ:   Section: .debug$S (8)
+; OBJ:   Section: .debug$S
 ; OBJ:   Magic: 0x4
 ; OBJ:   Subsection [
 ; OBJ:     SubSectionType: Symbols (0xF1)

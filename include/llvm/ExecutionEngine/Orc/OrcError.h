@@ -1,9 +1,8 @@
 //===------ OrcError.h - Reject symbol lookup requests ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,7 +21,9 @@ namespace orc {
 
 enum class OrcErrorCode : int {
   // RPC Errors
-  JITSymbolNotFound = 1,
+  UnknownORCError = 1,
+  DuplicateDefinition,
+  JITSymbolNotFound,
   RemoteAllocatorDoesNotExist,
   RemoteAllocatorIdAlreadyInUse,
   RemoteMProtectAddrUnrecognized,
@@ -38,6 +39,18 @@ enum class OrcErrorCode : int {
 };
 
 std::error_code orcError(OrcErrorCode ErrCode);
+
+class DuplicateDefinition : public ErrorInfo<DuplicateDefinition> {
+public:
+  static char ID;
+
+  DuplicateDefinition(std::string SymbolName);
+  std::error_code convertToErrorCode() const override;
+  void log(raw_ostream &OS) const override;
+  const std::string &getSymbolName() const;
+private:
+  std::string SymbolName;
+};
 
 class JITSymbolNotFound : public ErrorInfo<JITSymbolNotFound> {
 public:

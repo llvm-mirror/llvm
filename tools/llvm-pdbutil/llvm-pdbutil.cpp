@@ -1,9 +1,8 @@
 //===- llvm-pdbutil.cpp - Dump debug info from a PDB file -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,42 +12,43 @@
 
 #include "llvm-pdbutil.h"
 
-#include "Analyze.h"
 #include "BytesOutputStyle.h"
-#include "Diff.h"
 #include "DumpOutputStyle.h"
+#include "ExplainOutputStyle.h"
 #include "InputFile.h"
 #include "LinePrinter.h"
 #include "OutputStyle.h"
+#include "PrettyClassDefinitionDumper.h"
 #include "PrettyCompilandDumper.h"
+#include "PrettyEnumDumper.h"
 #include "PrettyExternalSymbolDumper.h"
 #include "PrettyFunctionDumper.h"
 #include "PrettyTypeDumper.h"
+#include "PrettyTypedefDumper.h"
 #include "PrettyVariableDumper.h"
 #include "YAMLOutputStyle.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Config/config.h"
+#include "llvm/DebugInfo/CodeView/AppendingTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
+#include "llvm/DebugInfo/CodeView/MergingTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/StringsAndChecksums.h"
 #include "llvm/DebugInfo/CodeView/TypeStreamMerger.h"
-#include "llvm/DebugInfo/CodeView/TypeTableBuilder.h"
 #include "llvm/DebugInfo/MSF/MSFBuilder.h"
-#include "llvm/DebugInfo/PDB/GenericError.h"
 #include "llvm/DebugInfo/PDB/IPDBEnumChildren.h"
+#include "llvm/DebugInfo/PDB/IPDBInjectedSource.h"
 #include "llvm/DebugInfo/PDB/IPDBRawSymbol.h"
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
 #include "llvm/DebugInfo/PDB/Native/DbiModuleDescriptorBuilder.h"
-#include "llvm/DebugInfo/PDB/Native/DbiStream.h"
 #include "llvm/DebugInfo/PDB/Native/DbiStreamBuilder.h"
 #include "llvm/DebugInfo/PDB/Native/InfoStream.h"
 #include "llvm/DebugInfo/PDB/Native/InfoStreamBuilder.h"
@@ -65,7 +65,13 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolData.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolExe.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolFunc.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolPublicSymbol.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolThunk.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionArg.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeTypedef.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 #include "llvm/Support/BinaryByteStream.h"
 #include "llvm/Support/COM.h"
 #include "llvm/Support/CommandLine.h"
@@ -73,6 +79,7 @@
 #include "llvm/Support/FileOutputBuffer.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/LineIterator.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -84,8 +91,6 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <set>
-
 using namespace llvm;
 using namespace llvm::codeview;
 using namespace llvm::msf;
@@ -96,11 +101,12 @@ namespace opts {
 cl::SubCommand DumpSubcommand("dump", "Dump MSF and CodeView debug info");
 cl::SubCommand BytesSubcommand("bytes", "Dump raw bytes from the PDB file");
 
+cl::SubCommand DiaDumpSubcommand("diadump",
+                                 "Dump debug information using a DIA-like API");
+
 cl::SubCommand
     PrettySubcommand("pretty",
                      "Dump semantic information about types and symbols");
-
-cl::SubCommand DiffSubcommand("diff", "Diff the contents of 2 PDB files");
 
 cl::SubCommand
     YamlToPdbSubcommand("yaml2pdb",
@@ -109,12 +115,14 @@ cl::SubCommand
     PdbToYamlSubcommand("pdb2yaml",
                         "Generate a detailed YAML description of a PDB File");
 
-cl::SubCommand
-    AnalyzeSubcommand("analyze",
-                      "Analyze various aspects of a PDB's structure");
-
 cl::SubCommand MergeSubcommand("merge",
                                "Merge multiple PDBs into a single PDB");
+
+cl::SubCommand ExplainSubcommand("explain",
+                                 "Explain the meaning of a file offset");
+
+cl::SubCommand ExportSubcommand("export",
+                                "Write binary data from a stream to a file");
 
 cl::OptionCategory TypeCategory("Symbol Type Options");
 cl::OptionCategory FilterCategory("Filtering and Sorting Options");
@@ -145,10 +153,65 @@ cl::ValuesClass ChunkValues = cl::values(
                "Any subsection not covered by another option"),
     clEnumValN(ModuleSubsection::All, "all", "All known subsections"));
 
+namespace diadump {
+cl::list<std::string> InputFilenames(cl::Positional,
+                                     cl::desc("<input PDB files>"),
+                                     cl::OneOrMore, cl::sub(DiaDumpSubcommand));
+
+cl::opt<bool> Native("native", cl::desc("Use native PDB reader instead of DIA"),
+                     cl::sub(DiaDumpSubcommand));
+
+static cl::opt<bool>
+    ShowClassHierarchy("hierarchy", cl::desc("Show lexical and class parents"),
+                       cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> NoSymIndexIds(
+    "no-ids",
+    cl::desc("Don't show any SymIndexId fields (overrides -hierarchy)"),
+    cl::sub(DiaDumpSubcommand));
+
+static cl::opt<bool>
+    Recurse("recurse",
+            cl::desc("When dumping a SymIndexId, dump the full details of the "
+                     "corresponding record"),
+            cl::sub(DiaDumpSubcommand));
+
+static cl::opt<bool> Enums("enums", cl::desc("Dump enum types"),
+                           cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Pointers("pointers", cl::desc("Dump enum types"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> UDTs("udts", cl::desc("Dump udt types"),
+                          cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Compilands("compilands",
+                                cl::desc("Dump compiland information"),
+                                cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Funcsigs("funcsigs",
+                              cl::desc("Dump function signature information"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Arrays("arrays", cl::desc("Dump array types"),
+                            cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> VTShapes("vtshapes", cl::desc("Dump virtual table shapes"),
+                              cl::sub(DiaDumpSubcommand));
+static cl::opt<bool> Typedefs("typedefs", cl::desc("Dump typedefs"),
+                              cl::sub(DiaDumpSubcommand));
+} // namespace diadump
+
 namespace pretty {
 cl::list<std::string> InputFilenames(cl::Positional,
                                      cl::desc("<input PDB files>"),
                                      cl::OneOrMore, cl::sub(PrettySubcommand));
+
+cl::opt<bool> InjectedSources("injected-sources",
+                              cl::desc("Display injected sources"),
+                              cl::cat(OtherOptions), cl::sub(PrettySubcommand));
+cl::opt<bool> ShowInjectedSourceContent(
+    "injected-source-content",
+    cl::desc("When displaying an injected source, display the file content"),
+    cl::cat(OtherOptions), cl::sub(PrettySubcommand));
+
+cl::list<std::string> WithName(
+    "with-name",
+    cl::desc("Display any symbol or type with the specified exact name"),
+    cl::cat(TypeCategory), cl::ZeroOrMore, cl::sub(PrettySubcommand));
 
 cl::opt<bool> Compilands("compilands", cl::desc("Display compilands"),
                          cl::cat(TypeCategory), cl::sub(PrettySubcommand));
@@ -178,6 +241,15 @@ cl::opt<bool> Enums("enums", cl::desc("Display enum types"),
                     cl::cat(TypeCategory), cl::sub(PrettySubcommand));
 cl::opt<bool> Typedefs("typedefs", cl::desc("Display typedef types"),
                        cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Funcsigs("funcsigs", cl::desc("Display function signatures"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Pointers("pointers", cl::desc("Display pointer types"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> Arrays("arrays", cl::desc("Display arrays"),
+                     cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+cl::opt<bool> VTShapes("vtshapes", cl::desc("Display vftable shapes"),
+                       cl::cat(TypeCategory), cl::sub(PrettySubcommand));
+
 cl::opt<SymbolSortMode> SymbolOrder(
     "symbol-order", cl::desc("symbol sort order"),
     cl::init(SymbolSortMode::None),
@@ -287,44 +359,6 @@ cl::opt<bool>
 cl::opt<bool> NoEnumDefs("no-enum-definitions",
                          cl::desc("Don't display full enum definitions"),
                          cl::cat(FilterCategory), cl::sub(PrettySubcommand));
-}
-
-namespace diff {
-cl::opt<bool> PrintValueColumns(
-    "values", cl::init(true),
-    cl::desc("Print one column for each PDB with the field value"),
-    cl::Optional, cl::sub(DiffSubcommand));
-cl::opt<bool>
-    PrintResultColumn("result", cl::init(false),
-                      cl::desc("Print a column with the result status"),
-                      cl::Optional, cl::sub(DiffSubcommand));
-
-cl::list<std::string>
-    RawModiEquivalences("modi-equivalence", cl::ZeroOrMore,
-                        cl::value_desc("left,right"),
-                        cl::desc("Modules with the specified indices will be "
-                                 "treated as referring to the same module"),
-                        cl::sub(DiffSubcommand));
-
-cl::opt<std::string> LeftRoot(
-    "left-bin-root", cl::Optional,
-    cl::desc("Treats the specified path as the root of the tree containing "
-             "binaries referenced by the left PDB.  The root is stripped from "
-             "embedded paths when doing equality comparisons."),
-    cl::sub(DiffSubcommand));
-cl::opt<std::string> RightRoot(
-    "right-bin-root", cl::Optional,
-    cl::desc("Treats the specified path as the root of the tree containing "
-             "binaries referenced by the right PDB.  The root is stripped from "
-             "embedded paths when doing equality comparisons"),
-    cl::sub(DiffSubcommand));
-
-cl::opt<std::string> Left(cl::Positional, cl::desc("<left>"),
-                          cl::sub(DiffSubcommand));
-cl::opt<std::string> Right(cl::Positional, cl::desc("<right>"),
-                           cl::sub(DiffSubcommand));
-
-llvm::DenseMap<uint32_t, uint32_t> Equivalences;
 }
 
 cl::OptionCategory FileOptions("Module & File Options");
@@ -447,6 +481,12 @@ cl::opt<bool> DumpTypeExtras("type-extras",
                              cl::desc("dump type hashes and index offsets"),
                              cl::cat(TypeOptions), cl::sub(DumpSubcommand));
 
+cl::opt<bool> DontResolveForwardRefs(
+    "dont-resolve-forward-refs",
+    cl::desc("When dumping type records for classes, unions, enums, and "
+             "structs, don't try to resolve forward references"),
+    cl::cat(TypeOptions), cl::sub(DumpSubcommand));
+
 cl::list<uint32_t> DumpTypeIndex(
     "type-index", cl::ZeroOrMore, cl::CommaSeparated,
     cl::desc("only dump types with the specified hexadecimal type index"),
@@ -480,11 +520,20 @@ cl::opt<bool> DumpGlobals("globals", cl::desc("dump Globals symbol records"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpGlobalExtras("global-extras", cl::desc("dump Globals hashes"),
                                cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
+cl::list<std::string> DumpGlobalNames(
+    "global-name",
+    cl::desc(
+        "With -globals, only dump globals whose name matches the given value"),
+    cl::cat(SymbolOptions), cl::sub(DumpSubcommand), cl::ZeroOrMore);
 cl::opt<bool> DumpPublics("publics", cl::desc("dump Publics stream data"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpPublicExtras("public-extras",
                                cl::desc("dump Publics hashes and address maps"),
                                cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
+cl::opt<bool>
+    DumpGSIRecords("gsi-records",
+                   cl::desc("dump public / global common record stream"),
+                   cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 cl::opt<bool> DumpSymbols("symbols", cl::desc("dump module symbols"),
                           cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 
@@ -492,6 +541,9 @@ cl::opt<bool>
     DumpSymRecordBytes("sym-data",
                        cl::desc("dump CodeView symbol record raw bytes"),
                        cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
+
+cl::opt<bool> DumpFpo("fpo", cl::desc("dump FPO records"),
+                      cl::cat(SymbolOptions), cl::sub(DumpSubcommand));
 
 // MODULE & FILE OPTIONS
 cl::opt<bool> DumpModules("modules", cl::desc("dump compiland information"),
@@ -528,8 +580,16 @@ cl::opt<bool> JustMyCode("jmc", cl::Optional,
                          cl::cat(FileOptions), cl::sub(DumpSubcommand));
 
 // MISCELLANEOUS OPTIONS
+cl::opt<bool> DumpNamedStreams("named-streams",
+                               cl::desc("dump PDB named stream table"),
+                               cl::cat(MiscOptions), cl::sub(DumpSubcommand));
+
 cl::opt<bool> DumpStringTable("string-table", cl::desc("dump PDB String Table"),
                               cl::cat(MiscOptions), cl::sub(DumpSubcommand));
+cl::opt<bool> DumpStringTableDetails("string-table-details",
+                                     cl::desc("dump PDB String Table Details"),
+                                     cl::cat(MiscOptions),
+                                     cl::sub(DumpSubcommand));
 
 cl::opt<bool> DumpSectionContribs("section-contribs",
                                   cl::desc("dump section contributions"),
@@ -597,6 +657,10 @@ cl::opt<bool> IpiStream("ipi-stream",
                         cl::desc("Dump the IPI Stream (Stream 5)"),
                         cl::sub(PdbToYamlSubcommand), cl::init(false));
 
+cl::opt<bool> PublicsStream("publics-stream",
+                            cl::desc("Dump the Publics Stream"),
+                            cl::sub(PdbToYamlSubcommand), cl::init(false));
+
 // MODULE & FILE OPTIONS
 cl::opt<bool> DumpModules("modules", cl::desc("dump compiland information"),
                           cl::cat(FileOptions), cl::sub(PdbToYamlSubcommand));
@@ -616,14 +680,6 @@ cl::list<std::string> InputFilename(cl::Positional,
                                     cl::sub(PdbToYamlSubcommand));
 } // namespace pdb2yaml
 
-namespace analyze {
-cl::opt<bool> StringTable("hash-collisions", cl::desc("Find hash collisions"),
-                          cl::sub(AnalyzeSubcommand), cl::init(false));
-cl::list<std::string> InputFilename(cl::Positional,
-                                    cl::desc("<input PDB file>"), cl::Required,
-                                    cl::sub(AnalyzeSubcommand));
-}
-
 namespace merge {
 cl::list<std::string> InputFilenames(cl::Positional,
                                      cl::desc("<input PDB files>"),
@@ -632,6 +688,47 @@ cl::opt<std::string>
     PdbOutputFile("pdb", cl::desc("the name of the PDB file to write"),
                   cl::sub(MergeSubcommand));
 }
+
+namespace explain {
+cl::list<std::string> InputFilename(cl::Positional,
+                                    cl::desc("<input PDB file>"), cl::Required,
+                                    cl::sub(ExplainSubcommand));
+
+cl::list<uint64_t> Offsets("offset", cl::desc("The file offset to explain"),
+                           cl::sub(ExplainSubcommand), cl::OneOrMore);
+
+cl::opt<InputFileType> InputType(
+    "input-type", cl::desc("Specify how to interpret the input file"),
+    cl::init(InputFileType::PDBFile), cl::Optional, cl::sub(ExplainSubcommand),
+    cl::values(clEnumValN(InputFileType::PDBFile, "pdb-file",
+                          "Treat input as a PDB file (default)"),
+               clEnumValN(InputFileType::PDBStream, "pdb-stream",
+                          "Treat input as raw contents of PDB stream"),
+               clEnumValN(InputFileType::DBIStream, "dbi-stream",
+                          "Treat input as raw contents of DBI stream"),
+               clEnumValN(InputFileType::Names, "names-stream",
+                          "Treat input as raw contents of /names named stream"),
+               clEnumValN(InputFileType::ModuleStream, "mod-stream",
+                          "Treat input as raw contents of a module stream")));
+} // namespace explain
+
+namespace exportstream {
+cl::list<std::string> InputFilename(cl::Positional,
+                                    cl::desc("<input PDB file>"), cl::Required,
+                                    cl::sub(ExportSubcommand));
+cl::opt<std::string> OutputFile("out",
+                                cl::desc("The file to write the stream to"),
+                                cl::Required, cl::sub(ExportSubcommand));
+cl::opt<std::string>
+    Stream("stream", cl::Required,
+           cl::desc("The index or name of the stream whose contents to export"),
+           cl::sub(ExportSubcommand));
+cl::opt<bool> ForceName("name",
+                        cl::desc("Force the interpretation of -stream as a "
+                                 "string, even if it is a valid integer"),
+                        cl::sub(ExportSubcommand), cl::Optional,
+                        cl::init(false));
+} // namespace exportstream
 }
 
 static ExitOnError ExitOnErr;
@@ -643,7 +740,7 @@ static void yamlToPdb(StringRef Path) {
                                    /*RequiresNullTerminator=*/false);
 
   if (ErrorOrBuffer.getError()) {
-    ExitOnErr(make_error<GenericError>(generic_error_code::invalid_path, Path));
+    ExitOnErr(createFileError(Path, errorCodeToError(ErrorOrBuffer.getError())));
   }
 
   std::unique_ptr<MemoryBuffer> &Buffer = ErrorOrBuffer.get();
@@ -727,8 +824,9 @@ static void yamlToPdb(StringRef Path) {
   auto &TpiBuilder = Builder.getTpiBuilder();
   const auto &Tpi = YamlObj.TpiStream.getValueOr(DefaultTpiStream);
   TpiBuilder.setVersionHeader(Tpi.Version);
+  AppendingTypeTableBuilder TS(Allocator);
   for (const auto &R : Tpi.Records) {
-    CVType Type = R.toCodeViewRecord(Allocator);
+    CVType Type = R.toCodeViewRecord(TS);
     TpiBuilder.addTypeRecord(Type.RecordData, None);
   }
 
@@ -736,13 +834,14 @@ static void yamlToPdb(StringRef Path) {
   auto &IpiBuilder = Builder.getIpiBuilder();
   IpiBuilder.setVersionHeader(Ipi.Version);
   for (const auto &R : Ipi.Records) {
-    CVType Type = R.toCodeViewRecord(Allocator);
+    CVType Type = R.toCodeViewRecord(TS);
     IpiBuilder.addTypeRecord(Type.RecordData, None);
   }
 
   Builder.getStringTableBuilder().setStrings(*Strings.strings());
 
-  ExitOnErr(Builder.commit(opts::yaml2pdb::YamlPdbOutputFile));
+  codeview::GUID IgnoredOutGuid;
+  ExitOnErr(Builder.commit(opts::yaml2pdb::YamlPdbOutputFile, &IgnoredOutGuid));
 }
 
 static PDBFile &loadPDB(StringRef Path, std::unique_ptr<IPDBSession> &Session) {
@@ -763,7 +862,6 @@ static void pdb2Yaml(StringRef Path) {
 }
 
 static void dumpRaw(StringRef Path) {
-
   InputFile IF = ExitOnErr(InputFile::open(Path));
 
   auto O = llvm::make_unique<DumpOutputStyle>(IF);
@@ -775,26 +873,6 @@ static void dumpBytes(StringRef Path) {
   auto &File = loadPDB(Path, Session);
 
   auto O = llvm::make_unique<BytesOutputStyle>(File);
-
-  ExitOnErr(O->dump());
-}
-
-static void dumpAnalysis(StringRef Path) {
-  std::unique_ptr<IPDBSession> Session;
-  auto &File = loadPDB(Path, Session);
-  auto O = llvm::make_unique<AnalysisStyle>(File);
-
-  ExitOnErr(O->dump());
-}
-
-static void diff(StringRef Path1, StringRef Path2) {
-  std::unique_ptr<IPDBSession> Session1;
-  std::unique_ptr<IPDBSession> Session2;
-
-  auto &File1 = loadPDB(Path1, Session1);
-  auto &File2 = loadPDB(Path2, Session2);
-
-  auto O = llvm::make_unique<DiffStyle>(File1, File2);
 
   ExitOnErr(O->dump());
 }
@@ -842,6 +920,125 @@ bool opts::pretty::compareDataSymbols(
   return getTypeLength(*F1) > getTypeLength(*F2);
 }
 
+static std::string stringOr(std::string Str, std::string IfEmpty) {
+  return (Str.empty()) ? IfEmpty : Str;
+}
+
+static void dumpInjectedSources(LinePrinter &Printer, IPDBSession &Session) {
+  auto Sources = Session.getInjectedSources();
+  if (0 == Sources->getChildCount()) {
+    Printer.printLine("There are no injected sources.");
+    return;
+  }
+
+  while (auto IS = Sources->getNext()) {
+    Printer.NewLine();
+    std::string File = stringOr(IS->getFileName(), "<null>");
+    uint64_t Size = IS->getCodeByteSize();
+    std::string Obj = stringOr(IS->getObjectFileName(), "<null>");
+    std::string VFName = stringOr(IS->getVirtualFileName(), "<null>");
+    uint32_t CRC = IS->getCrc32();
+
+    std::string CompressionStr;
+    llvm::raw_string_ostream Stream(CompressionStr);
+    Stream << IS->getCompression();
+    WithColor(Printer, PDB_ColorItem::Path).get() << File;
+    Printer << " (";
+    WithColor(Printer, PDB_ColorItem::LiteralValue).get() << Size;
+    Printer << " bytes): ";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "obj";
+    Printer << "=";
+    WithColor(Printer, PDB_ColorItem::Path).get() << Obj;
+    Printer << ", ";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "vname";
+    Printer << "=";
+    WithColor(Printer, PDB_ColorItem::Path).get() << VFName;
+    Printer << ", ";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "crc";
+    Printer << "=";
+    WithColor(Printer, PDB_ColorItem::LiteralValue).get() << CRC;
+    Printer << ", ";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "compression";
+    Printer << "=";
+    WithColor(Printer, PDB_ColorItem::LiteralValue).get() << Stream.str();
+
+    if (!opts::pretty::ShowInjectedSourceContent)
+      continue;
+
+    // Set the indent level to 0 when printing file content.
+    int Indent = Printer.getIndentLevel();
+    Printer.Unindent(Indent);
+
+    Printer.printLine(IS->getCode());
+
+    // Re-indent back to the original level.
+    Printer.Indent(Indent);
+  }
+}
+
+template <typename OuterT, typename ChildT>
+void diaDumpChildren(PDBSymbol &Outer, PdbSymbolIdField Ids,
+                     PdbSymbolIdField Recurse) {
+  OuterT *ConcreteOuter = dyn_cast<OuterT>(&Outer);
+  if (!ConcreteOuter)
+    return;
+
+  auto Children = ConcreteOuter->template findAllChildren<ChildT>();
+  while (auto Child = Children->getNext()) {
+    outs() << "  {";
+    Child->defaultDump(outs(), 4, Ids, Recurse);
+    outs() << "\n  }\n";
+  }
+}
+
+static void dumpDia(StringRef Path) {
+  std::unique_ptr<IPDBSession> Session;
+
+  const auto ReaderType =
+      opts::diadump::Native ? PDB_ReaderType::Native : PDB_ReaderType::DIA;
+  ExitOnErr(loadDataForPDB(ReaderType, Path, Session));
+
+  auto GlobalScope = Session->getGlobalScope();
+
+  std::vector<PDB_SymType> SymTypes;
+
+  if (opts::diadump::Compilands)
+    SymTypes.push_back(PDB_SymType::Compiland);
+  if (opts::diadump::Enums)
+    SymTypes.push_back(PDB_SymType::Enum);
+  if (opts::diadump::Pointers)
+    SymTypes.push_back(PDB_SymType::PointerType);
+  if (opts::diadump::UDTs)
+    SymTypes.push_back(PDB_SymType::UDT);
+  if (opts::diadump::Funcsigs)
+    SymTypes.push_back(PDB_SymType::FunctionSig);
+  if (opts::diadump::Arrays)
+    SymTypes.push_back(PDB_SymType::ArrayType);
+  if (opts::diadump::VTShapes)
+    SymTypes.push_back(PDB_SymType::VTableShape);
+  if (opts::diadump::Typedefs)
+    SymTypes.push_back(PDB_SymType::Typedef);
+  PdbSymbolIdField Ids = opts::diadump::NoSymIndexIds ? PdbSymbolIdField::None
+                                                      : PdbSymbolIdField::All;
+
+  PdbSymbolIdField Recurse = PdbSymbolIdField::None;
+  if (opts::diadump::Recurse)
+    Recurse = PdbSymbolIdField::All;
+  if (!opts::diadump::ShowClassHierarchy)
+    Ids &= ~(PdbSymbolIdField::ClassParent | PdbSymbolIdField::LexicalParent);
+
+  for (PDB_SymType ST : SymTypes) {
+    auto Children = GlobalScope->findAllChildren(ST);
+    while (auto Child = Children->getNext()) {
+      outs() << "{";
+      Child->defaultDump(outs(), 2, Ids, Recurse);
+
+      diaDumpChildren<PDBSymbolTypeEnum, PDBSymbolData>(*Child, Ids, Recurse);
+      outs() << "\n}\n";
+    }
+  }
+}
+
 static void dumpPretty(StringRef Path) {
   std::unique_ptr<IPDBSession> Session;
 
@@ -859,6 +1056,8 @@ static void dumpPretty(StringRef Path) {
   LinePrinter Printer(2, UseColor, Stream);
 
   auto GlobalScope(Session->getGlobalScope());
+  if (!GlobalScope)
+    return;
   std::string FileName(GlobalScope->getSymbolsFileName());
 
   WithColor(Printer, PDB_ColorItem::None).get() << "Summary for ";
@@ -891,22 +1090,103 @@ static void dumpPretty(StringRef Path) {
     outs() << "HasPrivateSymbols ";
   Printer.Unindent();
 
+  if (!opts::pretty::WithName.empty()) {
+    Printer.NewLine();
+    WithColor(Printer, PDB_ColorItem::SectionHeader).get()
+        << "---SYMBOLS & TYPES BY NAME---";
+
+    for (StringRef Name : opts::pretty::WithName) {
+      auto Symbols = GlobalScope->findChildren(
+          PDB_SymType::None, Name, PDB_NameSearchFlags::NS_CaseSensitive);
+      if (!Symbols || Symbols->getChildCount() == 0) {
+        Printer.formatLine("[not found] - {0}", Name);
+        continue;
+      }
+      Printer.formatLine("[{0} occurrences] - {1}", Symbols->getChildCount(),
+                         Name);
+
+      AutoIndent Indent(Printer);
+      Printer.NewLine();
+
+      while (auto Symbol = Symbols->getNext()) {
+        switch (Symbol->getSymTag()) {
+        case PDB_SymType::Typedef: {
+          TypedefDumper TD(Printer);
+          std::unique_ptr<PDBSymbolTypeTypedef> T =
+              llvm::unique_dyn_cast<PDBSymbolTypeTypedef>(std::move(Symbol));
+          TD.start(*T);
+          break;
+        }
+        case PDB_SymType::Enum: {
+          EnumDumper ED(Printer);
+          std::unique_ptr<PDBSymbolTypeEnum> E =
+              llvm::unique_dyn_cast<PDBSymbolTypeEnum>(std::move(Symbol));
+          ED.start(*E);
+          break;
+        }
+        case PDB_SymType::UDT: {
+          ClassDefinitionDumper CD(Printer);
+          std::unique_ptr<PDBSymbolTypeUDT> C =
+              llvm::unique_dyn_cast<PDBSymbolTypeUDT>(std::move(Symbol));
+          CD.start(*C);
+          break;
+        }
+        case PDB_SymType::BaseClass:
+        case PDB_SymType::Friend: {
+          TypeDumper TD(Printer);
+          Symbol->dump(TD);
+          break;
+        }
+        case PDB_SymType::Function: {
+          FunctionDumper FD(Printer);
+          std::unique_ptr<PDBSymbolFunc> F =
+              llvm::unique_dyn_cast<PDBSymbolFunc>(std::move(Symbol));
+          FD.start(*F, FunctionDumper::PointerType::None);
+          break;
+        }
+        case PDB_SymType::Data: {
+          VariableDumper VD(Printer);
+          std::unique_ptr<PDBSymbolData> D =
+              llvm::unique_dyn_cast<PDBSymbolData>(std::move(Symbol));
+          VD.start(*D);
+          break;
+        }
+        case PDB_SymType::PublicSymbol: {
+          ExternalSymbolDumper ED(Printer);
+          std::unique_ptr<PDBSymbolPublicSymbol> PS =
+              llvm::unique_dyn_cast<PDBSymbolPublicSymbol>(std::move(Symbol));
+          ED.dump(*PS);
+          break;
+        }
+        default:
+          llvm_unreachable("Unexpected symbol tag!");
+        }
+      }
+    }
+    llvm::outs().flush();
+  }
+
   if (opts::pretty::Compilands) {
     Printer.NewLine();
     WithColor(Printer, PDB_ColorItem::SectionHeader).get()
         << "---COMPILANDS---";
-    Printer.Indent();
     auto Compilands = GlobalScope->findAllChildren<PDBSymbolCompiland>();
-    CompilandDumper Dumper(Printer);
-    CompilandDumpFlags options = CompilandDumper::Flags::None;
-    if (opts::pretty::Lines)
-      options = options | CompilandDumper::Flags::Lines;
-    while (auto Compiland = Compilands->getNext())
-      Dumper.start(*Compiland, options);
-    Printer.Unindent();
+
+    if (Compilands) {
+      Printer.Indent();
+      CompilandDumper Dumper(Printer);
+      CompilandDumpFlags options = CompilandDumper::Flags::None;
+      if (opts::pretty::Lines)
+        options = options | CompilandDumper::Flags::Lines;
+      while (auto Compiland = Compilands->getNext())
+        Dumper.start(*Compiland, options);
+      Printer.Unindent();
+    }
   }
 
-  if (opts::pretty::Classes || opts::pretty::Enums || opts::pretty::Typedefs) {
+  if (opts::pretty::Classes || opts::pretty::Enums || opts::pretty::Typedefs ||
+      opts::pretty::Funcsigs || opts::pretty::Pointers ||
+      opts::pretty::Arrays || opts::pretty::VTShapes) {
     Printer.NewLine();
     WithColor(Printer, PDB_ColorItem::SectionHeader).get() << "---TYPES---";
     Printer.Indent();
@@ -918,12 +1198,13 @@ static void dumpPretty(StringRef Path) {
   if (opts::pretty::Symbols) {
     Printer.NewLine();
     WithColor(Printer, PDB_ColorItem::SectionHeader).get() << "---SYMBOLS---";
-    Printer.Indent();
-    auto Compilands = GlobalScope->findAllChildren<PDBSymbolCompiland>();
-    CompilandDumper Dumper(Printer);
-    while (auto Compiland = Compilands->getNext())
-      Dumper.start(*Compiland, true);
-    Printer.Unindent();
+    if (auto Compilands = GlobalScope->findAllChildren<PDBSymbolCompiland>()) {
+      Printer.Indent();
+      CompilandDumper Dumper(Printer);
+      while (auto Compiland = Compilands->getNext())
+        Dumper.start(*Compiland, true);
+      Printer.Unindent();
+    }
   }
 
   if (opts::pretty::Globals) {
@@ -931,45 +1212,47 @@ static void dumpPretty(StringRef Path) {
     WithColor(Printer, PDB_ColorItem::SectionHeader).get() << "---GLOBALS---";
     Printer.Indent();
     if (shouldDumpSymLevel(opts::pretty::SymLevel::Functions)) {
-      FunctionDumper Dumper(Printer);
-      auto Functions = GlobalScope->findAllChildren<PDBSymbolFunc>();
-      if (opts::pretty::SymbolOrder == opts::pretty::SymbolSortMode::None) {
-        while (auto Function = Functions->getNext()) {
-          Printer.NewLine();
-          Dumper.start(*Function, FunctionDumper::PointerType::None);
-        }
-      } else {
-        std::vector<std::unique_ptr<PDBSymbolFunc>> Funcs;
-        while (auto Func = Functions->getNext())
-          Funcs.push_back(std::move(Func));
-        std::sort(Funcs.begin(), Funcs.end(),
-                  opts::pretty::compareFunctionSymbols);
-        for (const auto &Func : Funcs) {
-          Printer.NewLine();
-          Dumper.start(*Func, FunctionDumper::PointerType::None);
+      if (auto Functions = GlobalScope->findAllChildren<PDBSymbolFunc>()) {
+        FunctionDumper Dumper(Printer);
+        if (opts::pretty::SymbolOrder == opts::pretty::SymbolSortMode::None) {
+          while (auto Function = Functions->getNext()) {
+            Printer.NewLine();
+            Dumper.start(*Function, FunctionDumper::PointerType::None);
+          }
+        } else {
+          std::vector<std::unique_ptr<PDBSymbolFunc>> Funcs;
+          while (auto Func = Functions->getNext())
+            Funcs.push_back(std::move(Func));
+          llvm::sort(Funcs, opts::pretty::compareFunctionSymbols);
+          for (const auto &Func : Funcs) {
+            Printer.NewLine();
+            Dumper.start(*Func, FunctionDumper::PointerType::None);
+          }
         }
       }
     }
     if (shouldDumpSymLevel(opts::pretty::SymLevel::Data)) {
-      auto Vars = GlobalScope->findAllChildren<PDBSymbolData>();
-      VariableDumper Dumper(Printer);
-      if (opts::pretty::SymbolOrder == opts::pretty::SymbolSortMode::None) {
-        while (auto Var = Vars->getNext())
-          Dumper.start(*Var);
-      } else {
-        std::vector<std::unique_ptr<PDBSymbolData>> Datas;
-        while (auto Var = Vars->getNext())
-          Datas.push_back(std::move(Var));
-        std::sort(Datas.begin(), Datas.end(), opts::pretty::compareDataSymbols);
-        for (const auto &Var : Datas)
-          Dumper.start(*Var);
+      if (auto Vars = GlobalScope->findAllChildren<PDBSymbolData>()) {
+        VariableDumper Dumper(Printer);
+        if (opts::pretty::SymbolOrder == opts::pretty::SymbolSortMode::None) {
+          while (auto Var = Vars->getNext())
+            Dumper.start(*Var);
+        } else {
+          std::vector<std::unique_ptr<PDBSymbolData>> Datas;
+          while (auto Var = Vars->getNext())
+            Datas.push_back(std::move(Var));
+          llvm::sort(Datas, opts::pretty::compareDataSymbols);
+          for (const auto &Var : Datas)
+            Dumper.start(*Var);
+        }
       }
     }
     if (shouldDumpSymLevel(opts::pretty::SymLevel::Thunks)) {
-      auto Thunks = GlobalScope->findAllChildren<PDBSymbolThunk>();
-      CompilandDumper Dumper(Printer);
-      while (auto Thunk = Thunks->getNext())
-        Dumper.dump(*Thunk);
+      if (auto Thunks = GlobalScope->findAllChildren<PDBSymbolThunk>()) {
+        CompilandDumper Dumper(Printer);
+        while (auto Thunk = Thunks->getNext())
+          Dumper.dump(*Thunk);
+      }
     }
     Printer.Unindent();
   }
@@ -983,13 +1266,27 @@ static void dumpPretty(StringRef Path) {
   if (opts::pretty::Lines) {
     Printer.NewLine();
   }
+  if (opts::pretty::InjectedSources) {
+    Printer.NewLine();
+    WithColor(Printer, PDB_ColorItem::SectionHeader).get()
+        << "---INJECTED SOURCES---";
+    AutoIndent Indent1(Printer);
+
+    if (ReaderType == PDB_ReaderType::Native)
+      Printer.printLine(
+          "Injected sources are not supported with the native reader.");
+    else
+      dumpInjectedSources(Printer, *Session);
+  }
+
+  Printer.NewLine();
   outs().flush();
 }
 
 static void mergePdbs() {
   BumpPtrAllocator Allocator;
-  TypeTableBuilder MergedTpi(Allocator);
-  TypeTableBuilder MergedIpi(Allocator);
+  MergingTypeTableBuilder MergedTpi(Allocator);
+  MergingTypeTableBuilder MergedIpi(Allocator);
 
   // Create a Tpi and Ipi type table with all types from all input files.
   for (const auto &Path : opts::merge::InputFilenames) {
@@ -1019,11 +1316,11 @@ static void mergePdbs() {
 
   auto &DestTpi = Builder.getTpiBuilder();
   auto &DestIpi = Builder.getIpiBuilder();
-  MergedTpi.ForEachRecord([&DestTpi](TypeIndex TI, ArrayRef<uint8_t> Data) {
-    DestTpi.addTypeRecord(Data, None);
+  MergedTpi.ForEachRecord([&DestTpi](TypeIndex TI, const CVType &Type) {
+    DestTpi.addTypeRecord(Type.RecordData, None);
   });
-  MergedIpi.ForEachRecord([&DestIpi](TypeIndex TI, ArrayRef<uint8_t> Data) {
-    DestIpi.addTypeRecord(Data, None);
+  MergedIpi.ForEachRecord([&DestIpi](TypeIndex TI, const CVType &Type) {
+    DestIpi.addTypeRecord(Type.RecordData, None);
   });
   Builder.getInfoBuilder().addFeature(PdbRaw_FeatureSig::VC140);
 
@@ -1032,7 +1329,61 @@ static void mergePdbs() {
     OutFile = opts::merge::InputFilenames[0];
     llvm::sys::path::replace_extension(OutFile, "merged.pdb");
   }
-  ExitOnErr(Builder.commit(OutFile));
+
+  codeview::GUID IgnoredOutGuid;
+  ExitOnErr(Builder.commit(OutFile, &IgnoredOutGuid));
+}
+
+static void explain() {
+  std::unique_ptr<IPDBSession> Session;
+  InputFile IF =
+      ExitOnErr(InputFile::open(opts::explain::InputFilename.front(), true));
+
+  for (uint64_t Off : opts::explain::Offsets) {
+    auto O = llvm::make_unique<ExplainOutputStyle>(IF, Off);
+
+    ExitOnErr(O->dump());
+  }
+}
+
+static void exportStream() {
+  std::unique_ptr<IPDBSession> Session;
+  PDBFile &File = loadPDB(opts::exportstream::InputFilename.front(), Session);
+
+  std::unique_ptr<MappedBlockStream> SourceStream;
+  uint32_t Index = 0;
+  bool Success = false;
+  std::string OutFileName = opts::exportstream::OutputFile;
+
+  if (!opts::exportstream::ForceName) {
+    // First try to parse it as an integer, if it fails fall back to treating it
+    // as a named stream.
+    if (to_integer(opts::exportstream::Stream, Index)) {
+      if (Index >= File.getNumStreams()) {
+        errs() << "Error: " << Index << " is not a valid stream index.\n";
+        exit(1);
+      }
+      Success = true;
+      outs() << "Dumping contents of stream index " << Index << " to file "
+             << OutFileName << ".\n";
+    }
+  }
+
+  if (!Success) {
+    InfoStream &IS = cantFail(File.getPDBInfoStream());
+    Index = ExitOnErr(IS.getNamedStreamIndex(opts::exportstream::Stream));
+    outs() << "Dumping contents of stream '" << opts::exportstream::Stream
+           << "' (index " << Index << ") to file " << OutFileName << ".\n";
+  }
+
+  SourceStream = MappedBlockStream::createIndexedStream(
+      File.getMsfLayout(), File.getMsfBuffer(), Index, File.getAllocator());
+  auto OutFile = ExitOnErr(
+      FileOutputBuffer::create(OutFileName, SourceStream->getLength()));
+  FileBufferByteStream DestStream(std::move(OutFile), llvm::support::little);
+  BinaryStreamWriter Writer(DestStream);
+  ExitOnErr(Writer.writeStreamRef(*SourceStream));
+  ExitOnErr(DestStream.commit());
 }
 
 static bool parseRange(StringRef Str,
@@ -1066,21 +1417,11 @@ static void simplifyChunkList(llvm::cl::list<opts::ModuleSubsection> &Chunks) {
   Chunks.push_back(opts::ModuleSubsection::All);
 }
 
-int main(int argc_, const char *argv_[]) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv_[0]);
-  PrettyStackTraceProgram X(argc_, argv_);
-
+int main(int Argc, const char **Argv) {
+  InitLLVM X(Argc, Argv);
   ExitOnErr.setBanner("llvm-pdbutil: ");
 
-  SmallVector<const char *, 256> argv;
-  SpecificBumpPtrAllocator<char> ArgAllocator;
-  ExitOnErr(errorCodeToError(sys::Process::GetArgumentVector(
-      argv, makeArrayRef(argv_, argc_), ArgAllocator)));
-
-  llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
-
-  cl::ParseCommandLineOptions(argv.size(), argv.data(), "LLVM PDB Dumper\n");
+  cl::ParseCommandLineOptions(Argc, Argv, "LLVM PDB Dumper\n");
 
   if (opts::BytesSubcommand) {
     if (!parseRange(opts::bytes::DumpBlockRangeOpt,
@@ -1102,6 +1443,7 @@ int main(int argc_, const char *argv_[]) {
   if (opts::DumpSubcommand) {
     if (opts::dump::RawAll) {
       opts::dump::DumpGlobals = true;
+      opts::dump::DumpFpo = true;
       opts::dump::DumpInlineeLines = true;
       opts::dump::DumpIds = true;
       opts::dump::DumpIdExtras = true;
@@ -1115,6 +1457,7 @@ int main(int argc_, const char *argv_[]) {
       opts::dump::DumpStreams = true;
       opts::dump::DumpStreamBlocks = true;
       opts::dump::DumpStringTable = true;
+      opts::dump::DumpStringTableDetails = true;
       opts::dump::DumpSummary = true;
       opts::dump::DumpSymbols = true;
       opts::dump::DumpSymbolStats = true;
@@ -1134,6 +1477,7 @@ int main(int argc_, const char *argv_[]) {
       opts::pdb2yaml::DbiStream = true;
       opts::pdb2yaml::TpiStream = true;
       opts::pdb2yaml::IpiStream = true;
+      opts::pdb2yaml::PublicsStream = true;
       opts::pdb2yaml::DumpModules = true;
       opts::pdb2yaml::DumpModuleFiles = true;
       opts::pdb2yaml::DumpModuleSyms = true;
@@ -1148,11 +1492,6 @@ int main(int argc_, const char *argv_[]) {
     if (opts::pdb2yaml::DumpModules)
       opts::pdb2yaml::DbiStream = true;
   }
-  if (opts::DiffSubcommand) {
-    if (!opts::diff::PrintResultColumn && !opts::diff::PrintValueColumns) {
-      llvm::errs() << "WARNING: No diff columns specified\n";
-    }
-  }
 
   llvm::sys::InitializeCOMRAII COM(llvm::sys::COMThreadingMode::MultiThreaded);
 
@@ -1165,8 +1504,8 @@ int main(int argc_, const char *argv_[]) {
       opts::yaml2pdb::YamlPdbOutputFile = OutputFilename.str();
     }
     yamlToPdb(opts::yaml2pdb::InputFilename);
-  } else if (opts::AnalyzeSubcommand) {
-    dumpAnalysis(opts::analyze::InputFilename.front());
+  } else if (opts::DiaDumpSubcommand) {
+    llvm::for_each(opts::diadump::InputFilenames, dumpDia);
   } else if (opts::PrettySubcommand) {
     if (opts::pretty::Lines)
       opts::pretty::Compilands = true;
@@ -1184,6 +1523,8 @@ int main(int argc_, const char *argv_[]) {
       opts::pretty::Classes = true;
       opts::pretty::Typedefs = true;
       opts::pretty::Enums = true;
+      opts::pretty::Pointers = true;
+      opts::pretty::Funcsigs = true;
     }
 
     // When adding filters for excluded compilands and types, we need to
@@ -1202,35 +1543,21 @@ int main(int argc_, const char *argv_[]) {
       opts::pretty::ExcludeCompilands.push_back(
           "d:\\\\th.obj.x86fre\\\\minkernel");
     }
-    std::for_each(opts::pretty::InputFilenames.begin(),
-                  opts::pretty::InputFilenames.end(), dumpPretty);
+    llvm::for_each(opts::pretty::InputFilenames, dumpPretty);
   } else if (opts::DumpSubcommand) {
-    std::for_each(opts::dump::InputFilenames.begin(),
-                  opts::dump::InputFilenames.end(), dumpRaw);
+    llvm::for_each(opts::dump::InputFilenames, dumpRaw);
   } else if (opts::BytesSubcommand) {
-    std::for_each(opts::bytes::InputFilenames.begin(),
-                  opts::bytes::InputFilenames.end(), dumpBytes);
-  } else if (opts::DiffSubcommand) {
-    for (StringRef S : opts::diff::RawModiEquivalences) {
-      StringRef Left;
-      StringRef Right;
-      std::tie(Left, Right) = S.split(',');
-      uint32_t X, Y;
-      if (!to_integer(Left, X) || !to_integer(Right, Y)) {
-        errs() << formatv("invalid value {0} specified for modi equivalence\n",
-                          S);
-        exit(1);
-      }
-      opts::diff::Equivalences[X] = Y;
-    }
-
-    diff(opts::diff::Left, opts::diff::Right);
+    llvm::for_each(opts::bytes::InputFilenames, dumpBytes);
   } else if (opts::MergeSubcommand) {
     if (opts::merge::InputFilenames.size() < 2) {
       errs() << "merge subcommand requires at least 2 input files.\n";
       exit(1);
     }
     mergePdbs();
+  } else if (opts::ExplainSubcommand) {
+    explain();
+  } else if (opts::ExportSubcommand) {
+    exportStream();
   }
 
   outs().flush();

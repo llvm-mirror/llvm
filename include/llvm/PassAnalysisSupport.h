@@ -1,9 +1,8 @@
 //===- llvm/PassAnalysisSupport.h - Analysis Pass Support code --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -174,7 +173,7 @@ public:
     AnalysisImpls.push_back(pir);
   }
 
-  /// Clear cache that is used to connect a pass to the the analysis (PassInfo).
+  /// Clear cache that is used to connect a pass to the analysis (PassInfo).
   void clearAnalysisImpls() {
     AnalysisImpls.clear();
   }
@@ -231,7 +230,7 @@ AnalysisType &Pass::getAnalysisID(AnalysisID PI) const {
   // should be a small number, we just do a linear search over a (dense)
   // vector.
   Pass *ResultPass = Resolver->findImplPass(PI);
-  assert(ResultPass && 
+  assert(ResultPass &&
          "getAnalysis*() called on an analysis that was not "
          "'required' by pass!");
 

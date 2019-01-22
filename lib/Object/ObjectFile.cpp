@@ -1,9 +1,8 @@
 //===- ObjectFile.cpp - File format independent object file ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -77,6 +76,14 @@ bool ObjectFile::isSectionBitcode(DataRefImpl Sec) const {
 
 bool ObjectFile::isSectionStripped(DataRefImpl Sec) const { return false; }
 
+bool ObjectFile::isBerkeleyText(DataRefImpl Sec) const {
+  return isSectionText(Sec);
+}
+
+bool ObjectFile::isBerkeleyData(DataRefImpl Sec) const {
+  return isSectionData(Sec);
+}
+
 section_iterator ObjectFile::getRelocatedSection(DataRefImpl Sec) const {
   return section_iterator(SectionRef(Sec, this));
 }
@@ -119,6 +126,7 @@ ObjectFile::createObjectFile(MemoryBufferRef Object, file_magic Type) {
   case file_magic::archive:
   case file_magic::macho_universal_binary:
   case file_magic::windows_resource:
+  case file_magic::pdb:
     return errorCodeToError(object_error::invalid_file_type);
   case file_magic::elf:
   case file_magic::elf_relocatable:

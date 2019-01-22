@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/StringSwitchTest.cpp - StringSwitch unit tests ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -158,7 +157,8 @@ TEST(StringSwitchTest, Cases) {
 
   auto Translate = [](StringRef S) {
     return llvm::StringSwitch<OSType>(S)
-        .Cases("wind\0ws", "win32", "winnt", OSType::Windows)
+        .Cases(StringLiteral::withInnerNUL("wind\0ws"), "win32", "winnt",
+               OSType::Windows)
         .Cases("linux", "unix", "*nix", "posix", OSType::Linux)
         .Default(OSType::Unknown);
   };
@@ -184,7 +184,8 @@ TEST(StringSwitchTest, CasesLower) {
 
   auto Translate = [](StringRef S) {
     return llvm::StringSwitch<OSType>(S)
-        .CasesLower("wind\0ws", "win32", "winnt", OSType::Windows)
+        .CasesLower(StringLiteral::withInnerNUL("wind\0ws"), "win32", "winnt",
+                    OSType::Windows)
         .CasesLower("linux", "unix", "*nix", "posix", OSType::Linux)
         .Default(OSType::Unknown);
   };

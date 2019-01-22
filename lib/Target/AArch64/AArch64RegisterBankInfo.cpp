@@ -1,9 +1,8 @@
 //===- AArch64RegisterBankInfo.cpp ----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -22,10 +21,10 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetOpcodes.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 
@@ -87,9 +86,9 @@ AArch64RegisterBankInfo::AArch64RegisterBankInfo(const TargetRegisterInfo &TRI)
   assert(checkPartialMappingIdx(PMI_FirstGPR, PMI_LastGPR,
                                 {PMI_GPR32, PMI_GPR64}) &&
          "PartialMappingIdx's are incorrectly ordered");
-  assert(checkPartialMappingIdx(
-             PMI_FirstFPR, PMI_LastFPR,
-             {PMI_FPR32, PMI_FPR64, PMI_FPR128, PMI_FPR256, PMI_FPR512}) &&
+  assert(checkPartialMappingIdx(PMI_FirstFPR, PMI_LastFPR,
+                                {PMI_FPR16, PMI_FPR32, PMI_FPR64, PMI_FPR128,
+                                 PMI_FPR256, PMI_FPR512}) &&
          "PartialMappingIdx's are incorrectly ordered");
 // Now, the content.
 // Check partial mapping.
@@ -102,6 +101,7 @@ AArch64RegisterBankInfo::AArch64RegisterBankInfo(const TargetRegisterInfo &TRI)
 
   CHECK_PARTIALMAP(PMI_GPR32, 0, 32, RBGPR);
   CHECK_PARTIALMAP(PMI_GPR64, 0, 64, RBGPR);
+  CHECK_PARTIALMAP(PMI_FPR16, 0, 16, RBFPR);
   CHECK_PARTIALMAP(PMI_FPR32, 0, 32, RBFPR);
   CHECK_PARTIALMAP(PMI_FPR64, 0, 64, RBFPR);
   CHECK_PARTIALMAP(PMI_FPR128, 0, 128, RBFPR);
@@ -121,6 +121,7 @@ AArch64RegisterBankInfo::AArch64RegisterBankInfo(const TargetRegisterInfo &TRI)
 
   CHECK_VALUEMAP(GPR, 32);
   CHECK_VALUEMAP(GPR, 64);
+  CHECK_VALUEMAP(FPR, 16);
   CHECK_VALUEMAP(FPR, 32);
   CHECK_VALUEMAP(FPR, 64);
   CHECK_VALUEMAP(FPR, 128);
@@ -172,6 +173,30 @@ AArch64RegisterBankInfo::AArch64RegisterBankInfo(const TargetRegisterInfo &TRI)
   CHECK_VALUEMAP_CROSSREGCPY(FPR, GPR, 32);
   CHECK_VALUEMAP_CROSSREGCPY(FPR, FPR, 64);
   CHECK_VALUEMAP_CROSSREGCPY(FPR, GPR, 64);
+
+#define CHECK_VALUEMAP_FPEXT(DstSize, SrcSize)                                 \
+  do {                                                                         \
+    unsigned PartialMapDstIdx = PMI_FPR##DstSize - PMI_Min;                    \
+    unsigned PartialMapSrcIdx = PMI_FPR##SrcSize - PMI_Min;                    \
+    (void)PartialMapDstIdx;                                                    \
+    (void)PartialMapSrcIdx;                                                    \
+    const ValueMapping *Map = getFPExtMapping(DstSize, SrcSize);               \
+    (void)Map;                                                                 \
+    assert(Map[0].BreakDown ==                                                 \
+               &AArch64GenRegisterBankInfo::PartMappings[PartialMapDstIdx] &&  \
+           Map[0].NumBreakDowns == 1 && "FPR" #DstSize                         \
+                                        " Dst is incorrectly initialized");    \
+    assert(Map[1].BreakDown ==                                                 \
+               &AArch64GenRegisterBankInfo::PartMappings[PartialMapSrcIdx] &&  \
+           Map[1].NumBreakDowns == 1 && "FPR" #SrcSize                         \
+                                        " Src is incorrectly initialized");    \
+                                                                               \
+  } while (false)
+
+  CHECK_VALUEMAP_FPEXT(32, 16);
+  CHECK_VALUEMAP_FPEXT(64, 16);
+  CHECK_VALUEMAP_FPEXT(64, 32);
+  CHECK_VALUEMAP_FPEXT(128, 64);
 
   assert(verify(TRI) && "Invalid register bank information");
 }
@@ -363,6 +388,7 @@ static bool isPreISelGenericFloatingPointOpcode(unsigned Opc) {
   case TargetOpcode::G_FCONSTANT:
   case TargetOpcode::G_FPEXT:
   case TargetOpcode::G_FPTRUNC:
+  case TargetOpcode::G_FCEIL:
     return true;
   }
   return false;
@@ -453,6 +479,14 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case TargetOpcode::G_FMUL:
   case TargetOpcode::G_FDIV:
     return getSameKindOfOperandsMapping(MI);
+  case TargetOpcode::G_FPEXT: {
+    LLT DstTy = MRI.getType(MI.getOperand(0).getReg());
+    LLT SrcTy = MRI.getType(MI.getOperand(1).getReg());
+    return getInstructionMapping(
+        DefaultMappingID, /*Cost*/ 1,
+        getFPExtMapping(DstTy.getSizeInBits(), SrcTy.getSizeInBits()),
+        /*NumOperands*/ 2);
+  }
   case TargetOpcode::COPY: {
     unsigned DstReg = MI.getOperand(0).getReg();
     unsigned SrcReg = MI.getOperand(1).getReg();
@@ -560,15 +594,24 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       // In that case, we want the default mapping to be on FPR
       // instead of blind map every scalar to GPR.
       for (const MachineInstr &UseMI :
-           MRI.use_instructions(MI.getOperand(0).getReg()))
+           MRI.use_instructions(MI.getOperand(0).getReg())) {
         // If we have at least one direct use in a FP instruction,
         // assume this was a floating point load in the IR.
         // If it was not, we would have had a bitcast before
         // reaching that instruction.
-        if (isPreISelGenericFloatingPointOpcode(UseMI.getOpcode())) {
+        unsigned UseOpc = UseMI.getOpcode();
+        if (isPreISelGenericFloatingPointOpcode(UseOpc) ||
+            // Check if we feed a copy-like instruction with
+            // floating point constraints. In that case, we are still
+            // feeding fp instructions, but indirectly
+            // (e.g., through ABI copies).
+            ((UseOpc == TargetOpcode::COPY || UseMI.isPHI()) &&
+             getRegBank(UseMI.getOperand(0).getReg(), MRI, TRI) ==
+                 &AArch64::FPRRegBank)) {
           OpRegBankIdx[0] = PMI_FirstFPR;
           break;
         }
+      }
     break;
   case TargetOpcode::G_STORE:
     // Check if that store is fed by fp instructions.
@@ -577,7 +620,15 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       if (!VReg)
         break;
       MachineInstr *DefMI = MRI.getVRegDef(VReg);
-      if (isPreISelGenericFloatingPointOpcode(DefMI->getOpcode()))
+      unsigned DefOpc = DefMI->getOpcode();
+      if (isPreISelGenericFloatingPointOpcode(DefOpc) ||
+          // Check if we come from a copy-like instruction with
+          // floating point constraints. In that case, we are still
+          // fed by fp instructions, but indirectly
+          // (e.g., through ABI copies).
+          ((DefOpc == TargetOpcode::COPY || DefMI->isPHI()) &&
+           getRegBank(DefMI->getOperand(0).getReg(), MRI, TRI) ==
+               &AArch64::FPRRegBank))
         OpRegBankIdx[0] = PMI_FirstFPR;
       break;
     }

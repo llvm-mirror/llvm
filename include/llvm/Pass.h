@@ -1,9 +1,8 @@
 //===- llvm/Pass.h - Base class for Passes ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -353,13 +352,8 @@ protected:
 
 /// If the user specifies the -time-passes argument on an LLVM tool command line
 /// then the value of this boolean will be true, otherwise false.
-/// @brief This is the storage for the -time-passes option.
+/// This is the storage for the -time-passes option.
 extern bool TimePassesIsEnabled;
-
-/// isFunctionInPrintList - returns true if a function should be printed via
-//  debugging options like -print-after-all/-print-before-all.
-//  @brief Tells if the function IR should be printed by PrinterPass.
-extern bool isFunctionInPrintList(StringRef FunctionName);
 
 } // end namespace llvm
 

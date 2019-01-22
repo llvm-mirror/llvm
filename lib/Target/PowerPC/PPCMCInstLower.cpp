@@ -1,9 +1,8 @@
 //===-- PPCMCInstLower.cpp - Convert PPC MachineInstr to an MCInst --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,13 +19,13 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 using namespace llvm;
 
@@ -75,7 +74,7 @@ static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO,
     }
     return Sym;
   }
-  
+
   return Sym;
 }
 
@@ -107,10 +106,20 @@ static MCOperand GetSymbolRef(const MachineOperand &MO, const MCSymbol *Symbol,
       break;
   }
 
-  if (MO.getTargetFlags() == PPCII::MO_PLT)
+ if (MO.getTargetFlags() == PPCII::MO_PLT)
     RefKind = MCSymbolRefExpr::VK_PLT;
 
+  const MachineFunction *MF = MO.getParent()->getParent()->getParent();
+  const PPCSubtarget *Subtarget = &(MF->getSubtarget<PPCSubtarget>());
+  const TargetMachine &TM = Printer.TM;
   const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, RefKind, Ctx);
+  // -msecure-plt option works only in PIC mode. If secure plt mode
+  // is on add 32768 to symbol.
+  if (Subtarget->isSecurePlt() && TM.isPositionIndependent() &&
+      MO.getTargetFlags() == PPCII::MO_PLT)
+    Expr = MCBinaryExpr::createAdd(Expr,
+                                   MCConstantExpr::create(32768, Ctx),
+                                   Ctx);
 
   if (!MO.isJTI() && MO.getOffset())
     Expr = MCBinaryExpr::createAdd(Expr,
@@ -120,7 +129,7 @@ static MCOperand GetSymbolRef(const MachineOperand &MO, const MCSymbol *Symbol,
   // Subtract off the PIC base if required.
   if (MO.getTargetFlags() & PPCII::MO_PIC_FLAG) {
     const MachineFunction *MF = MO.getParent()->getParent()->getParent();
-    
+
     const MCExpr *PB = MCSymbolRefExpr::create(MF->getPICBaseSymbol(), Ctx);
     Expr = MCBinaryExpr::createSub(Expr, PB, Ctx);
   }
@@ -141,7 +150,7 @@ static MCOperand GetSymbolRef(const MachineOperand &MO, const MCSymbol *Symbol,
 void llvm::LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                         AsmPrinter &AP, bool isDarwin) {
   OutMI.setOpcode(MI->getOpcode());
-  
+
   for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
     MCOperand MCOp;
     if (LowerPPCMachineOperandToMCOperand(MI->getOperand(i), MCOp, AP,

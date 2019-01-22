@@ -1,9 +1,8 @@
 //===- ARMTargetTransformInfo.h - ARM specific TTI --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -57,7 +56,7 @@ class ARMTTIImpl : public BasicTTIImplBase<ARMTTIImpl> {
   const FeatureBitset InlineFeatureWhitelist = {
       ARM::FeatureVFP2, ARM::FeatureVFP3, ARM::FeatureNEON, ARM::FeatureThumb2,
       ARM::FeatureFP16, ARM::FeatureVFP4, ARM::FeatureFPARMv8,
-      ARM::FeatureFullFP16, ARM::FeatureHWDivThumb,
+      ARM::FeatureFullFP16, ARM::FeatureFP16FML, ARM::FeatureHWDivThumb,
       ARM::FeatureHWDivARM, ARM::FeatureDB, ARM::FeatureV7Clrex,
       ARM::FeatureAcquireRelease, ARM::FeatureSlowFPBrcc,
       ARM::FeaturePerfMon, ARM::FeatureTrustZone, ARM::Feature8MSecExt,
@@ -153,10 +152,8 @@ public:
 
   int getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index);
 
-  int getAddressComputationCost(Type *Val, ScalarEvolution *SE, 
+  int getAddressComputationCost(Type *Val, ScalarEvolution *SE,
                                 const SCEV *Ptr);
-
-  int getFPOpCost(Type *Ty);
 
   int getArithmeticInstrCost(
       unsigned Opcode, Type *Ty,
@@ -171,7 +168,9 @@ public:
 
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy, unsigned Factor,
                                  ArrayRef<unsigned> Indices, unsigned Alignment,
-                                 unsigned AddressSpace);
+                                 unsigned AddressSpace,
+                                 bool UseMaskForCond = false,
+                                 bool UseMaskForGaps = false);
 
   void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
                                TTI::UnrollingPreferences &UP);

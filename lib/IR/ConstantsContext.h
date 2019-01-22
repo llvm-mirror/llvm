@@ -1,9 +1,8 @@
 //===-- ConstantsContext.h - Constants-related Context Interals -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -529,7 +528,9 @@ struct ConstantExprKeyType {
   ConstantExpr *create(TypeClass *Ty) const {
     switch (Opcode) {
     default:
-      if (Instruction::isCast(Opcode))
+      if (Instruction::isCast(Opcode) ||
+          (Opcode >= Instruction::UnaryOpsBegin &&
+           Opcode < Instruction::UnaryOpsEnd))
         return new UnaryConstantExpr(Opcode, Ops[0], Ty);
       if ((Opcode >= Instruction::BinaryOpsBegin &&
            Opcode < Instruction::BinaryOpsEnd))
@@ -695,7 +696,9 @@ public:
     return nullptr;
   }
 
-  void dump() const { DEBUG(dbgs() << "Constant.cpp: ConstantUniqueMap\n"); }
+  void dump() const {
+    LLVM_DEBUG(dbgs() << "Constant.cpp: ConstantUniqueMap\n");
+  }
 };
 
 } // end namespace llvm

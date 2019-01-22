@@ -1,9 +1,8 @@
 //===- llvm/Module.h - C++ class to represent a VM module -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 #define LLVM_IR_MODULE_H
 
 #include "llvm-c/Types.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -48,6 +48,7 @@ class MemoryBuffer;
 class RandomNumberGenerator;
 template <class PtrType> class SmallPtrSetImpl;
 class StructType;
+class VersionTuple;
 
 /// A Module instance is used to store all the information related to an
 /// LLVM module. Modules are the top level container of all other LLVM
@@ -59,7 +60,7 @@ class StructType;
 /// A module maintains a GlobalValRefMap object that is used to hold all
 /// constant references to global variables in the module.  When a global
 /// variable is destroyed, it should have no entries in the GlobalValueRefMap.
-/// @brief The main container class for the LLVM Intermediate Representation.
+/// The main container class for the LLVM Intermediate Representation.
 class Module {
 /// @name Types And Enumerations
 /// @{
@@ -207,13 +208,18 @@ public:
   /// @returns the module identifier as a string
   const std::string &getModuleIdentifier() const { return ModuleID; }
 
+  /// Returns the number of non-debug IR instructions in the module.
+  /// This is equivalent to the sum of the IR instruction counts of each
+  /// function contained in the module.
+  unsigned getInstructionCount();
+
   /// Get the module's original source file name. When compiling from
   /// bitcode, this is taken from a bitcode record where it was recorded.
   /// For other compiles it is the same as the ModuleID, which would
   /// contain the source file name.
   const std::string &getSourceFileName() const { return SourceFileName; }
 
-  /// \brief Get a short "name" for the module.
+  /// Get a short "name" for the module.
   ///
   /// This is useful for debugging or logging. It is essentially a convenience
   /// wrapper around getModuleIdentifier().
@@ -251,9 +257,16 @@ public:
   /// versions when the pass does not change.
   std::unique_ptr<RandomNumberGenerator> createRNG(const Pass* P) const;
 
-/// @}
-/// @name Module Level Mutators
-/// @{
+  /// Return true if size-info optimization remark is enabled, false
+  /// otherwise.
+  bool shouldEmitInstrCountChangedRemark() {
+    return getContext().getDiagHandlerPtr()->isAnalysisRemarkEnabled(
+        "size-info");
+  }
+
+  /// @}
+  /// @name Module Level Mutators
+  /// @{
 
   /// Set the module identifier.
   void setModuleIdentifier(StringRef ID) { ModuleID = ID; }
@@ -353,6 +366,11 @@ public:
     return getOrInsertFunction(Name, AttributeList{}, RetTy, Args...);
   }
 
+  // Avoid an incorrect ordering that'd otherwise compile incorrectly.
+  template <typename... ArgsTy>
+  Constant *getOrInsertFunction(StringRef Name, AttributeList AttributeList,
+                                FunctionType *Invalid, ArgsTy... Args) = delete;
+
   /// Look up the specified function in the module symbol table. If it does not
   /// exist, return null.
   Function *getFunction(StringRef Name) const;
@@ -389,11 +407,15 @@ public:
   }
 
   /// Look up the specified global in the module symbol table.
-  ///   1. If it does not exist, add a declaration of the global and return it.
-  ///   2. Else, the global exists but has the wrong type: return the function
-  ///      with a constantexpr cast to the right type.
-  ///   3. Finally, if the existing global is the correct declaration, return
-  ///      the existing global.
+  /// If it does not exist, invoke a callback to create a declaration of the
+  /// global and return it. The global is constantexpr casted to the expected
+  /// type if necessary.
+  Constant *
+  getOrInsertGlobal(StringRef Name, Type *Ty,
+                    function_ref<GlobalVariable *()> CreateGlobalCallback);
+
+  /// Look up the specified global in the module symbol table. If required, this
+  /// overload constructs the global variable using its constructor's defaults.
   Constant *getOrInsertGlobal(StringRef Name, Type *Ty);
 
 /// @}
@@ -795,14 +817,14 @@ public:
 /// @name Utility functions for querying Debug information.
 /// @{
 
-  /// \brief Returns the Number of Register ParametersDwarf Version by checking
+  /// Returns the Number of Register ParametersDwarf Version by checking
   /// module flags.
   unsigned getNumberRegisterParameters() const;
 
-  /// \brief Returns the Dwarf Version by checking module flags.
+  /// Returns the Dwarf Version by checking module flags.
   unsigned getDwarfVersion() const;
 
-  /// \brief Returns the CodeView Version by checking module flags.
+  /// Returns the CodeView Version by checking module flags.
   /// Returns zero if not present in module.
   unsigned getCodeViewFlag() const;
 
@@ -810,10 +832,10 @@ public:
 /// @name Utility functions for querying and setting PIC level
 /// @{
 
-  /// \brief Returns the PIC level (small or large model)
+  /// Returns the PIC level (small or large model)
   PICLevel::Level getPICLevel() const;
 
-  /// \brief Set the PIC level (small or large model)
+  /// Set the PIC level (small or large model)
   void setPICLevel(PICLevel::Level PL);
 /// @}
 
@@ -821,28 +843,57 @@ public:
 /// @name Utility functions for querying and setting PIE level
 /// @{
 
-  /// \brief Returns the PIE level (small or large model)
+  /// Returns the PIE level (small or large model)
   PIELevel::Level getPIELevel() const;
 
-  /// \brief Set the PIE level (small or large model)
+  /// Set the PIE level (small or large model)
   void setPIELevel(PIELevel::Level PL);
 /// @}
+
+  /// @}
+  /// @name Utility function for querying and setting code model
+  /// @{
+
+  /// Returns the code model (tiny, small, kernel, medium or large model)
+  Optional<CodeModel::Model> getCodeModel() const;
+
+  /// Set the code model (tiny, small, kernel, medium or large)
+  void setCodeModel(CodeModel::Model CL);
+  /// @}
 
   /// @name Utility functions for querying and setting PGO summary
   /// @{
 
-  /// \brief Attach profile summary metadata to this module.
+  /// Attach profile summary metadata to this module.
   void setProfileSummary(Metadata *M);
 
-  /// \brief Returns profile summary metadata
+  /// Returns profile summary metadata
   Metadata *getProfileSummary();
+  /// @}
+
+  /// Returns true if PLT should be avoided for RTLib calls.
+  bool getRtLibUseGOT() const;
+
+  /// Set that PLT should be avoid for RTLib calls.
+  void setRtLibUseGOT();
+
+  /// @name Utility functions for querying and setting the build SDK version
+  /// @{
+
+  /// Attach a build SDK version metadata to this module.
+  void setSDKVersion(const VersionTuple &V);
+
+  /// Get the build SDK version metadata.
+  ///
+  /// An empty version is returned if no such metadata is attached.
+  VersionTuple getSDKVersion() const;
   /// @}
 
   /// Take ownership of the given memory buffer.
   void setOwnedMemoryBuffer(std::unique_ptr<MemoryBuffer> MB);
 };
 
-/// \brief Given "llvm.used" or "llvm.compiler.used" as a global name, collect
+/// Given "llvm.used" or "llvm.compiler.used" as a global name, collect
 /// the initializer elements of that global in Set and return the global itself.
 GlobalVariable *collectUsedGlobalVariables(const Module &M,
                                            SmallPtrSetImpl<GlobalValue *> &Set,

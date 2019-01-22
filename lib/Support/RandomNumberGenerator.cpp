@@ -1,9 +1,8 @@
 //===-- RandomNumberGenerator.cpp - Implement RNG class -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
 #include "Windows/WindowsSupport.h"
 #else
 #include "Unix/Unix.h"
@@ -32,14 +31,12 @@ using namespace llvm;
 //
 // Do not change to cl::opt<uint64_t> since this silently breaks argument parsing.
 static cl::opt<unsigned long long>
-Seed("rng-seed", cl::value_desc("seed"),
-     cl::desc("Seed for the random number generator"), cl::init(0));
+    Seed("rng-seed", cl::value_desc("seed"), cl::Hidden,
+         cl::desc("Seed for the random number generator"), cl::init(0));
 
 RandomNumberGenerator::RandomNumberGenerator(StringRef Salt) {
-  DEBUG(
-    if (Seed == 0)
-      dbgs() << "Warning! Using unseeded random number generator.\n"
-  );
+  LLVM_DEBUG(if (Seed == 0) dbgs()
+             << "Warning! Using unseeded random number generator.\n");
 
   // Combine seed and salts using std::seed_seq.
   // Data: Seed-low, Seed-high, Salt
@@ -51,7 +48,7 @@ RandomNumberGenerator::RandomNumberGenerator(StringRef Salt) {
   Data[0] = Seed;
   Data[1] = Seed >> 32;
 
-  std::copy(Salt.begin(), Salt.end(), Data.begin() + 2);
+  llvm::copy(Salt, Data.begin() + 2);
 
   std::seed_seq SeedSeq(Data.begin(), Data.end());
   Generator.seed(SeedSeq);
@@ -63,7 +60,7 @@ RandomNumberGenerator::result_type RandomNumberGenerator::operator()() {
 
 // Get random vector of specified size
 std::error_code llvm::getRandomBytes(void *Buffer, size_t Size) {
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
   HCRYPTPROV hProvider;
   if (CryptAcquireContext(&hProvider, 0, 0, PROV_RSA_FULL,
                            CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {

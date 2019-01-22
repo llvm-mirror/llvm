@@ -25,7 +25,7 @@ function(tablegen project ofn)
     file(RELATIVE_PATH ofn_rel
       ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${ofn})
     set(additional_cmdline
-      -o ${ofn_rel}.tmp
+      -o ${ofn_rel}
       -d ${ofn_rel}.d
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
       DEPFILE ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.d
@@ -36,7 +36,7 @@ function(tablegen project ofn)
     file(GLOB local_tds "*.td")
     file(GLOB_RECURSE global_tds "${LLVM_MAIN_INCLUDE_DIR}/llvm/*.td")
     set(additional_cmdline
-      -o ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
+      -o ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
       )
   endif()
 
@@ -52,6 +52,13 @@ function(tablegen project ofn)
       list(APPEND LLVM_TABLEGEN_FLAGS "-instrument-coverage")
     endif()
   endif()
+  if (LLVM_ENABLE_GISEL_COV)
+    list(FIND ARGN "-gen-global-isel" idx)
+    if( NOT idx EQUAL -1 )
+      list(APPEND LLVM_TABLEGEN_FLAGS "-instrument-gisel-coverage")
+      list(APPEND LLVM_TABLEGEN_FLAGS "-gisel-coverage-file=${LLVM_GISEL_COV_PREFIX}all")
+    endif()
+  endif()
 
   # We need both _TABLEGEN_TARGET and _TABLEGEN_EXE in the  DEPENDS list
   # (both the target and the file) to have .inc files rebuilt on
@@ -62,8 +69,7 @@ function(tablegen project ofn)
   # dependency twice in the result file when
   # ("${${project}_TABLEGEN_TARGET}" STREQUAL "${${project}_TABLEGEN_EXE}")
   # but lets us having smaller and cleaner code here.
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
-    # Generate tablegen output in a temporary file.
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
     COMMAND ${${project}_TABLEGEN_EXE} ${ARGN} -I ${CMAKE_CURRENT_SOURCE_DIR}
     ${LLVM_TABLEGEN_FLAGS}
     ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
@@ -76,20 +82,9 @@ function(tablegen project ofn)
     ${LLVM_TARGET_DEFINITIONS_ABSOLUTE}
     COMMENT "Building ${ofn}..."
     )
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
-    # Only update the real output file if there are any differences.
-    # This prevents recompilation of all the files depending on it if there
-    # aren't any.
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
-        ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${ofn}.tmp
-    COMMENT "Updating ${ofn}..."
-    )
 
   # `make clean' must remove all those generated files:
-  set_property(DIRECTORY APPEND
-    PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${ofn}.tmp ${ofn})
+  set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${ofn})
 
   set(TABLEGEN_OUTPUT ${TABLEGEN_OUTPUT} ${CMAKE_CURRENT_BINARY_DIR}/${ofn} PARENT_SCOPE)
   set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${ofn} PROPERTIES
@@ -109,19 +104,6 @@ function(add_public_tablegen_target target)
   set_target_properties(${target} PROPERTIES FOLDER "Tablegenning")
   set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} ${target} PARENT_SCOPE)
 endfunction()
-
-if(LLVM_USE_HOST_TOOLS AND NOT TARGET NATIVE_LIB_LLVMTABLEGEN)
-  llvm_ExternalProject_BuildCmd(tblgen_build_cmd LLVMSupport
-    ${LLVM_NATIVE_BUILD}
-    CONFIGURATION Release)
-  add_custom_command(OUTPUT LIB_LLVMTABLEGEN
-      COMMAND ${tblgen_build_cmd}
-      DEPENDS CONFIGURE_LLVM_NATIVE
-      WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
-      COMMENT "Building libLLVMTableGen for native TableGen..."
-      USES_TERMINAL)
-  add_custom_target(NATIVE_LIB_LLVMTABLEGEN DEPENDS LIB_LLVMTABLEGEN)
-endif()
 
 macro(add_tablegen target project)
   set(${target}_OLD_LLVM_LINK_COMPONENTS ${LLVM_LINK_COMPONENTS})
@@ -164,9 +146,15 @@ macro(add_tablegen target project)
       llvm_ExternalProject_BuildCmd(tblgen_build_cmd ${target}
                                     ${LLVM_NATIVE_BUILD}
                                     CONFIGURATION Release)
+      # Create an artificial dependency between tablegen projects, because they
+      # compile the same dependencies, thus using the same build folders.
+      # FIXME: A proper fix requires sequentially chaining tablegens.
+      if (NOT ${project} STREQUAL LLVM AND TARGET ${project}-tablegen-host)
+        add_dependencies(${project}-tablegen-host LLVM-tablegen-host)
+      endif()
       add_custom_command(OUTPUT ${${project}_TABLEGEN_EXE}
         COMMAND ${tblgen_build_cmd}
-        DEPENDS ${target} NATIVE_LIB_LLVMTABLEGEN
+        DEPENDS CONFIGURE_LLVM_NATIVE ${target}
         WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
         COMMENT "Building native TableGen..."
         USES_TERMINAL)

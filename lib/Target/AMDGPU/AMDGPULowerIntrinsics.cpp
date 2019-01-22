@@ -1,9 +1,8 @@
 //===-- AMDGPULowerIntrinsics.cpp -----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -117,7 +116,6 @@ bool AMDGPULowerIntrinsics::makeLIDRangeMetadata(Function &F) const {
     return false;
 
   const TargetMachine &TM = TPC->getTM<TargetMachine>();
-  const AMDGPUSubtarget &ST = TM.getSubtarget<AMDGPUSubtarget>(F);
   bool Changed = false;
 
   for (auto *U : F.users()) {
@@ -125,7 +123,7 @@ bool AMDGPULowerIntrinsics::makeLIDRangeMetadata(Function &F) const {
     if (!CI)
       continue;
 
-    Changed |= ST.makeLIDRangeMetadata(CI);
+    Changed |= AMDGPUSubtarget::get(TM, F).makeLIDRangeMetadata(CI);
   }
   return Changed;
 }

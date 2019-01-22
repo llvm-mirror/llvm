@@ -1,9 +1,8 @@
 //===- CoverageFilters.cpp - Function coverage mapping filters ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,6 +27,10 @@ bool NameRegexCoverageFilter::matches(
     const coverage::CoverageMapping &,
     const coverage::FunctionRecord &Function) const {
   return llvm::Regex(Regex).match(Function.Name);
+}
+
+bool NameRegexCoverageFilter::matchesFilename(StringRef Filename) const {
+  return llvm::Regex(Regex).match(Filename);
 }
 
 bool NameWhitelistCoverageFilter::matches(
@@ -58,6 +61,14 @@ bool CoverageFilters::matches(const coverage::CoverageMapping &CM,
                               const coverage::FunctionRecord &Function) const {
   for (const auto &Filter : Filters) {
     if (Filter->matches(CM, Function))
+      return true;
+  }
+  return false;
+}
+
+bool CoverageFilters::matchesFilename(StringRef Filename) const {
+  for (const auto &Filter : Filters) {
+    if (Filter->matchesFilename(Filename))
       return true;
   }
   return false;

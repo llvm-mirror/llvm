@@ -1,9 +1,8 @@
 //===-- MachODump.cpp - Object file dumping utility for llvm --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,12 +31,14 @@ public:
       : ObjDumper(Writer), Obj(Obj) {}
 
   void printFileHeaders() override;
-  void printSections() override;
+  void printSectionHeaders() override;
   void printRelocations() override;
   void printSymbols() override;
   void printDynamicSymbols() override;
   void printUnwindInfo() override;
   void printStackMap() const override;
+
+  void printNeededLibraries() override;
 
   // MachO-specific.
   void printMachODataInCode() override;
@@ -57,7 +58,7 @@ private:
 
   void printRelocation(const MachOObjectFile *Obj, const RelocationRef &Reloc);
 
-  void printSections(const MachOObjectFile *Obj);
+  void printSectionHeaders(const MachOObjectFile *Obj);
 
   const MachOObjectFile *Obj;
 };
@@ -426,11 +427,9 @@ void MachODumper::printFileHeaders(const MachHeader &Header) {
   W.printFlags("Flags", Header.flags, makeArrayRef(MachOHeaderFlags));
 }
 
-void MachODumper::printSections() {
-  return printSections(Obj);
-}
+void MachODumper::printSectionHeaders() { return printSectionHeaders(Obj); }
 
-void MachODumper::printSections(const MachOObjectFile *Obj) {
+void MachODumper::printSectionHeaders(const MachOObjectFile *Obj) {
   ListScope Group(W, "Sections");
 
   int SectionIndex = -1;
@@ -667,12 +666,39 @@ void MachODumper::printStackMap() const {
       StackMapContents.size());
 
   if (Obj->isLittleEndian())
-     prettyPrintStackMap(
-                      llvm::outs(),
-                      StackMapV2Parser<support::little>(StackMapContentsArray));
+    prettyPrintStackMap(
+        W, StackMapV2Parser<support::little>(StackMapContentsArray));
   else
-     prettyPrintStackMap(llvm::outs(),
-                         StackMapV2Parser<support::big>(StackMapContentsArray));
+    prettyPrintStackMap(W,
+                        StackMapV2Parser<support::big>(StackMapContentsArray));
+}
+
+void MachODumper::printNeededLibraries() {
+  ListScope D(W, "NeededLibraries");
+
+  using LibsTy = std::vector<StringRef>;
+  LibsTy Libs;
+
+  for (const auto &Command : Obj->load_commands()) {
+    if (Command.C.cmd == MachO::LC_LOAD_DYLIB ||
+        Command.C.cmd == MachO::LC_ID_DYLIB ||
+        Command.C.cmd == MachO::LC_LOAD_WEAK_DYLIB ||
+        Command.C.cmd == MachO::LC_REEXPORT_DYLIB ||
+        Command.C.cmd == MachO::LC_LAZY_LOAD_DYLIB ||
+        Command.C.cmd == MachO::LC_LOAD_UPWARD_DYLIB) {
+      MachO::dylib_command Dl = Obj->getDylibIDLoadCommand(Command);
+      if (Dl.dylib.name < Dl.cmdsize) {
+        auto *P = static_cast<const char*>(Command.Ptr) + Dl.dylib.name;
+        Libs.push_back(P);
+      }
+    }
+  }
+
+  std::stable_sort(Libs.begin(), Libs.end());
+
+  for (const auto &L : Libs) {
+    outs() << "  " << L << "\n";
+  }
 }
 
 void MachODumper::printMachODataInCode() {

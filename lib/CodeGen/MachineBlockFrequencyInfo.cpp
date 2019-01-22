@@ -1,9 +1,8 @@
 //===- MachineBlockFrequencyInfo.cpp - MBB Frequency Analysis -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -224,14 +223,20 @@ MachineBlockFrequencyInfo::getBlockFreq(const MachineBasicBlock *MBB) const {
 
 Optional<uint64_t> MachineBlockFrequencyInfo::getBlockProfileCount(
     const MachineBasicBlock *MBB) const {
-  const Function *F = MBFI->getFunction()->getFunction();
-  return MBFI ? MBFI->getBlockProfileCount(*F, MBB) : None;
+  const Function &F = MBFI->getFunction()->getFunction();
+  return MBFI ? MBFI->getBlockProfileCount(F, MBB) : None;
 }
 
 Optional<uint64_t>
 MachineBlockFrequencyInfo::getProfileCountFromFreq(uint64_t Freq) const {
-  const Function *F = MBFI->getFunction()->getFunction();
-  return MBFI ? MBFI->getProfileCountFromFreq(*F, Freq) : None;
+  const Function &F = MBFI->getFunction()->getFunction();
+  return MBFI ? MBFI->getProfileCountFromFreq(F, Freq) : None;
+}
+
+bool
+MachineBlockFrequencyInfo::isIrrLoopHeader(const MachineBasicBlock *MBB) {
+  assert(MBFI && "Expected analysis to be available");
+  return MBFI->isIrrLoopHeader(MBB);
 }
 
 const MachineFunction *MachineBlockFrequencyInfo::getFunction() const {

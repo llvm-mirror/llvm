@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,7 +26,7 @@ void ArgDescriptor::print(raw_ostream &OS,
   }
 
   if (isRegister())
-    OS << "Reg " << PrintReg(getRegister(), TRI) << '\n';
+    OS << "Reg " << printReg(getRegister(), TRI) << '\n';
   else
     OS << "Stack offset " << getStackOffset() << '\n';
 }
@@ -55,9 +54,6 @@ void AMDGPUArgumentUsageInfo::print(raw_ostream &OS, const Module *M) const {
        << "  DispatchID: " << FI.second.DispatchID
        << "  FlatScratchInit: " << FI.second.FlatScratchInit
        << "  PrivateSegmentSize: " << FI.second.PrivateSegmentSize
-       << "  GridWorkgroupCountX: " << FI.second.GridWorkGroupCountX
-       << "  GridWorkgroupCountY: " << FI.second.GridWorkGroupCountY
-       << "  GridWorkgroupCountZ: " << FI.second.GridWorkGroupCountZ
        << "  WorkGroupIDX: " << FI.second.WorkGroupIDX
        << "  WorkGroupIDY: " << FI.second.WorkGroupIDY
        << "  WorkGroupIDZ: " << FI.second.WorkGroupIDZ

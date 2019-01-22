@@ -1,9 +1,8 @@
 //===-- SimplifyIndVar.cpp - Induction variable simplification ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,16 +17,15 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/Local.h"
 
 using namespace llvm;
 
@@ -82,7 +80,9 @@ namespace {
     bool replaceIVUserWithLoopInvariant(Instruction *UseInst);
 
     bool eliminateOverflowIntrinsic(CallInst *CI);
+    bool eliminateTrunc(TruncInst *TI);
     bool eliminateIVUser(Instruction *UseInst, Instruction *IVOperand);
+    bool makeIVComparisonInvariant(ICmpInst *ICmp, Value *IVOperand);
     void eliminateIVComparison(ICmpInst *ICmp, Value *IVOperand);
     void simplifyIVRemainder(BinaryOperator *Rem, Value *IVOperand,
                              bool IsSigned);
@@ -105,8 +105,9 @@ namespace {
 /// Otherwise return null.
 Value *SimplifyIndvar::foldIVUser(Instruction *UseInst, Instruction *IVOperand) {
   Value *IVSrc = nullptr;
-  unsigned OperIdx = 0;
+  const unsigned OperIdx = 0;
   const SCEV *FoldedExpr = nullptr;
+  bool MustDropExactFlag = false;
   switch (UseInst->getOpcode()) {
   default:
     return nullptr;
@@ -139,6 +140,11 @@ Value *SimplifyIndvar::foldIVUser(Instruction *UseInst, Instruction *IVOperand) 
                            APInt::getOneBitSet(BitWidth, D->getZExtValue()));
     }
     FoldedExpr = SE->getUDivExpr(SE->getSCEV(IVSrc), SE->getSCEV(D));
+    // We might have 'exact' flag set at this point which will no longer be
+    // correct after we make the replacement.
+    if (UseInst->isExact() &&
+        SE->getSCEV(IVSrc) != SE->getMulExpr(FoldedExpr, SE->getSCEV(D)))
+      MustDropExactFlag = true;
   }
   // We have something that might fold it's operand. Compare SCEVs.
   if (!SE->isSCEVable(UseInst->getType()))
@@ -148,17 +154,88 @@ Value *SimplifyIndvar::foldIVUser(Instruction *UseInst, Instruction *IVOperand) 
   if (SE->getSCEV(UseInst) != FoldedExpr)
     return nullptr;
 
-  DEBUG(dbgs() << "INDVARS: Eliminated IV operand: " << *IVOperand
-        << " -> " << *UseInst << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Eliminated IV operand: " << *IVOperand
+                    << " -> " << *UseInst << '\n');
 
   UseInst->setOperand(OperIdx, IVSrc);
   assert(SE->getSCEV(UseInst) == FoldedExpr && "bad SCEV with folded oper");
+
+  if (MustDropExactFlag)
+    UseInst->dropPoisonGeneratingFlags();
 
   ++NumElimOperand;
   Changed = true;
   if (IVOperand->use_empty())
     DeadInsts.emplace_back(IVOperand);
   return IVSrc;
+}
+
+bool SimplifyIndvar::makeIVComparisonInvariant(ICmpInst *ICmp,
+                                               Value *IVOperand) {
+  unsigned IVOperIdx = 0;
+  ICmpInst::Predicate Pred = ICmp->getPredicate();
+  if (IVOperand != ICmp->getOperand(0)) {
+    // Swapped
+    assert(IVOperand == ICmp->getOperand(1) && "Can't find IVOperand");
+    IVOperIdx = 1;
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  }
+
+  // Get the SCEVs for the ICmp operands (in the specific context of the
+  // current loop)
+  const Loop *ICmpLoop = LI->getLoopFor(ICmp->getParent());
+  const SCEV *S = SE->getSCEVAtScope(ICmp->getOperand(IVOperIdx), ICmpLoop);
+  const SCEV *X = SE->getSCEVAtScope(ICmp->getOperand(1 - IVOperIdx), ICmpLoop);
+
+  ICmpInst::Predicate InvariantPredicate;
+  const SCEV *InvariantLHS, *InvariantRHS;
+
+  auto *PN = dyn_cast<PHINode>(IVOperand);
+  if (!PN)
+    return false;
+  if (!SE->isLoopInvariantPredicate(Pred, S, X, L, InvariantPredicate,
+                                    InvariantLHS, InvariantRHS))
+    return false;
+
+  // Rewrite the comparison to a loop invariant comparison if it can be done
+  // cheaply, where cheaply means "we don't need to emit any new
+  // instructions".
+
+  SmallDenseMap<const SCEV*, Value*> CheapExpansions;
+  CheapExpansions[S] = ICmp->getOperand(IVOperIdx);
+  CheapExpansions[X] = ICmp->getOperand(1 - IVOperIdx);
+
+  // TODO: Support multiple entry loops?  (We currently bail out of these in
+  // the IndVarSimplify pass)
+  if (auto *BB = L->getLoopPredecessor()) {
+    const int Idx = PN->getBasicBlockIndex(BB);
+    if (Idx >= 0) {
+      Value *Incoming = PN->getIncomingValue(Idx);
+      const SCEV *IncomingS = SE->getSCEV(Incoming);
+      CheapExpansions[IncomingS] = Incoming;
+    }
+  }
+  Value *NewLHS = CheapExpansions[InvariantLHS];
+  Value *NewRHS = CheapExpansions[InvariantRHS];
+
+  if (!NewLHS)
+    if (auto *ConstLHS = dyn_cast<SCEVConstant>(InvariantLHS))
+      NewLHS = ConstLHS->getValue();
+  if (!NewRHS)
+    if (auto *ConstRHS = dyn_cast<SCEVConstant>(InvariantRHS))
+      NewRHS = ConstRHS->getValue();
+
+  if (!NewLHS || !NewRHS)
+    // We could not find an existing value to replace either LHS or RHS.
+    // Generating new instructions has subtler tradeoffs, so avoid doing that
+    // for now.
+    return false;
+
+  LLVM_DEBUG(dbgs() << "INDVARS: Simplified comparison: " << *ICmp << '\n');
+  ICmp->setPredicate(InvariantPredicate);
+  ICmp->setOperand(0, NewLHS);
+  ICmp->setOperand(1, NewRHS);
+  return true;
 }
 
 /// SimplifyIVUsers helper for eliminating useless
@@ -180,98 +257,18 @@ void SimplifyIndvar::eliminateIVComparison(ICmpInst *ICmp, Value *IVOperand) {
   const SCEV *S = SE->getSCEVAtScope(ICmp->getOperand(IVOperIdx), ICmpLoop);
   const SCEV *X = SE->getSCEVAtScope(ICmp->getOperand(1 - IVOperIdx), ICmpLoop);
 
-  ICmpInst::Predicate InvariantPredicate;
-  const SCEV *InvariantLHS, *InvariantRHS;
-
   // If the condition is always true or always false, replace it with
   // a constant value.
   if (SE->isKnownPredicate(Pred, S, X)) {
     ICmp->replaceAllUsesWith(ConstantInt::getTrue(ICmp->getContext()));
     DeadInsts.emplace_back(ICmp);
-    DEBUG(dbgs() << "INDVARS: Eliminated comparison: " << *ICmp << '\n');
+    LLVM_DEBUG(dbgs() << "INDVARS: Eliminated comparison: " << *ICmp << '\n');
   } else if (SE->isKnownPredicate(ICmpInst::getInversePredicate(Pred), S, X)) {
     ICmp->replaceAllUsesWith(ConstantInt::getFalse(ICmp->getContext()));
     DeadInsts.emplace_back(ICmp);
-    DEBUG(dbgs() << "INDVARS: Eliminated comparison: " << *ICmp << '\n');
-  } else if (isa<PHINode>(IVOperand) &&
-             SE->isLoopInvariantPredicate(Pred, S, X, L, InvariantPredicate,
-                                          InvariantLHS, InvariantRHS)) {
-
-    // Rewrite the comparison to a loop invariant comparison if it can be done
-    // cheaply, where cheaply means "we don't need to emit any new
-    // instructions".
-
-    Value *NewLHS = nullptr, *NewRHS = nullptr;
-
-    if (S == InvariantLHS || X == InvariantLHS)
-      NewLHS =
-          ICmp->getOperand(S == InvariantLHS ? IVOperIdx : (1 - IVOperIdx));
-
-    if (S == InvariantRHS || X == InvariantRHS)
-      NewRHS =
-          ICmp->getOperand(S == InvariantRHS ? IVOperIdx : (1 - IVOperIdx));
-
-    auto *PN = cast<PHINode>(IVOperand);
-    for (unsigned i = 0, e = PN->getNumIncomingValues();
-         i != e && (!NewLHS || !NewRHS);
-         ++i) {
-
-      // If this is a value incoming from the backedge, then it cannot be a loop
-      // invariant value (since we know that IVOperand is an induction variable).
-      if (L->contains(PN->getIncomingBlock(i)))
-        continue;
-
-      // NB! This following assert does not fundamentally have to be true, but
-      // it is true today given how SCEV analyzes induction variables.
-      // Specifically, today SCEV will *not* recognize %iv as an induction
-      // variable in the following case:
-      //
-      // define void @f(i32 %k) {
-      // entry:
-      //   br i1 undef, label %r, label %l
-      //
-      // l:
-      //   %k.inc.l = add i32 %k, 1
-      //   br label %loop
-      //
-      // r:
-      //   %k.inc.r = add i32 %k, 1
-      //   br label %loop
-      //
-      // loop:
-      //   %iv = phi i32 [ %k.inc.l, %l ], [ %k.inc.r, %r ], [ %iv.inc, %loop ]
-      //   %iv.inc = add i32 %iv, 1
-      //   br label %loop
-      // }
-      //
-      // but if it starts to, at some point, then the assertion below will have
-      // to be changed to a runtime check.
-
-      Value *Incoming = PN->getIncomingValue(i);
-
-#ifndef NDEBUG
-      if (auto *I = dyn_cast<Instruction>(Incoming))
-        assert(DT->dominates(I, ICmp) && "Should be a unique loop dominating value!");
-#endif
-
-      const SCEV *IncomingS = SE->getSCEV(Incoming);
-
-      if (!NewLHS && IncomingS == InvariantLHS)
-        NewLHS = Incoming;
-      if (!NewRHS && IncomingS == InvariantRHS)
-        NewRHS = Incoming;
-    }
-
-    if (!NewLHS || !NewRHS)
-      // We could not find an existing value to replace either LHS or RHS.
-      // Generating new instructions has subtler tradeoffs, so avoid doing that
-      // for now.
-      return;
-
-    DEBUG(dbgs() << "INDVARS: Simplified comparison: " << *ICmp << '\n');
-    ICmp->setPredicate(InvariantPredicate);
-    ICmp->setOperand(0, NewLHS);
-    ICmp->setOperand(1, NewRHS);
+    LLVM_DEBUG(dbgs() << "INDVARS: Eliminated comparison: " << *ICmp << '\n');
+  } else if (makeIVComparisonInvariant(ICmp, IVOperand)) {
+    // fallthrough to end of function
   } else if (ICmpInst::isSigned(OriginalPred) &&
              SE->isKnownNonNegative(S) && SE->isKnownNonNegative(X)) {
     // If we were unable to make anything above, all we can is to canonicalize
@@ -280,7 +277,8 @@ void SimplifyIndvar::eliminateIVComparison(ICmpInst *ICmp, Value *IVOperand) {
     // we turn the instruction's predicate to its unsigned version. Note that
     // we cannot rely on Pred here unless we check if we have swapped it.
     assert(ICmp->getPredicate() == OriginalPred && "Predicate changed?");
-    DEBUG(dbgs() << "INDVARS: Turn to unsigned comparison: " << *ICmp << '\n');
+    LLVM_DEBUG(dbgs() << "INDVARS: Turn to unsigned comparison: " << *ICmp
+                      << '\n');
     ICmp->setPredicate(ICmpInst::getUnsignedPredicate(OriginalPred));
   } else
     return;
@@ -306,7 +304,7 @@ bool SimplifyIndvar::eliminateSDiv(BinaryOperator *SDiv) {
         SDiv->getName() + ".udiv", SDiv);
     UDiv->setIsExact(SDiv->isExact());
     SDiv->replaceAllUsesWith(UDiv);
-    DEBUG(dbgs() << "INDVARS: Simplified sdiv: " << *SDiv << '\n');
+    LLVM_DEBUG(dbgs() << "INDVARS: Simplified sdiv: " << *SDiv << '\n');
     ++NumSimplifiedSDiv;
     Changed = true;
     DeadInsts.push_back(SDiv);
@@ -322,7 +320,7 @@ void SimplifyIndvar::replaceSRemWithURem(BinaryOperator *Rem) {
   auto *URem = BinaryOperator::Create(BinaryOperator::URem, N, D,
                                       Rem->getName() + ".urem", Rem);
   Rem->replaceAllUsesWith(URem);
-  DEBUG(dbgs() << "INDVARS: Simplified srem: " << *Rem << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Simplified srem: " << *Rem << '\n');
   ++NumSimplifiedSRem;
   Changed = true;
   DeadInsts.emplace_back(Rem);
@@ -331,7 +329,7 @@ void SimplifyIndvar::replaceSRemWithURem(BinaryOperator *Rem) {
 // i % n  -->  i  if i is in [0,n).
 void SimplifyIndvar::replaceRemWithNumerator(BinaryOperator *Rem) {
   Rem->replaceAllUsesWith(Rem->getOperand(0));
-  DEBUG(dbgs() << "INDVARS: Simplified rem: " << *Rem << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Simplified rem: " << *Rem << '\n');
   ++NumElimRem;
   Changed = true;
   DeadInsts.emplace_back(Rem);
@@ -345,7 +343,7 @@ void SimplifyIndvar::replaceRemWithNumeratorOrZero(BinaryOperator *Rem) {
   SelectInst *Sel =
       SelectInst::Create(ICmp, ConstantInt::get(T, 0), N, "iv.rem", Rem);
   Rem->replaceAllUsesWith(Sel);
-  DEBUG(dbgs() << "INDVARS: Simplified rem: " << *Rem << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Simplified rem: " << *Rem << '\n');
   ++NumElimRem;
   Changed = true;
   DeadInsts.emplace_back(Rem);
@@ -505,6 +503,118 @@ bool SimplifyIndvar::eliminateOverflowIntrinsic(CallInst *CI) {
   return true;
 }
 
+bool SimplifyIndvar::eliminateTrunc(TruncInst *TI) {
+  // It is always legal to replace
+  //   icmp <pred> i32 trunc(iv), n
+  // with
+  //   icmp <pred> i64 sext(trunc(iv)), sext(n), if pred is signed predicate.
+  // Or with
+  //   icmp <pred> i64 zext(trunc(iv)), zext(n), if pred is unsigned predicate.
+  // Or with either of these if pred is an equality predicate.
+  //
+  // If we can prove that iv == sext(trunc(iv)) or iv == zext(trunc(iv)) for
+  // every comparison which uses trunc, it means that we can replace each of
+  // them with comparison of iv against sext/zext(n). We no longer need trunc
+  // after that.
+  //
+  // TODO: Should we do this if we can widen *some* comparisons, but not all
+  // of them? Sometimes it is enough to enable other optimizations, but the
+  // trunc instruction will stay in the loop.
+  Value *IV = TI->getOperand(0);
+  Type *IVTy = IV->getType();
+  const SCEV *IVSCEV = SE->getSCEV(IV);
+  const SCEV *TISCEV = SE->getSCEV(TI);
+
+  // Check if iv == zext(trunc(iv)) and if iv == sext(trunc(iv)). If so, we can
+  // get rid of trunc
+  bool DoesSExtCollapse = false;
+  bool DoesZExtCollapse = false;
+  if (IVSCEV == SE->getSignExtendExpr(TISCEV, IVTy))
+    DoesSExtCollapse = true;
+  if (IVSCEV == SE->getZeroExtendExpr(TISCEV, IVTy))
+    DoesZExtCollapse = true;
+
+  // If neither sext nor zext does collapse, it is not profitable to do any
+  // transform. Bail.
+  if (!DoesSExtCollapse && !DoesZExtCollapse)
+    return false;
+
+  // Collect users of the trunc that look like comparisons against invariants.
+  // Bail if we find something different.
+  SmallVector<ICmpInst *, 4> ICmpUsers;
+  for (auto *U : TI->users()) {
+    // We don't care about users in unreachable blocks.
+    if (isa<Instruction>(U) &&
+        !DT->isReachableFromEntry(cast<Instruction>(U)->getParent()))
+      continue;
+    if (ICmpInst *ICI = dyn_cast<ICmpInst>(U)) {
+      if (ICI->getOperand(0) == TI && L->isLoopInvariant(ICI->getOperand(1))) {
+        assert(L->contains(ICI->getParent()) && "LCSSA form broken?");
+        // If we cannot get rid of trunc, bail.
+        if (ICI->isSigned() && !DoesSExtCollapse)
+          return false;
+        if (ICI->isUnsigned() && !DoesZExtCollapse)
+          return false;
+        // For equality, either signed or unsigned works.
+        ICmpUsers.push_back(ICI);
+      } else
+        return false;
+    } else
+      return false;
+  }
+
+  auto CanUseZExt = [&](ICmpInst *ICI) {
+    // Unsigned comparison can be widened as unsigned.
+    if (ICI->isUnsigned())
+      return true;
+    // Is it profitable to do zext?
+    if (!DoesZExtCollapse)
+      return false;
+    // For equality, we can safely zext both parts.
+    if (ICI->isEquality())
+      return true;
+    // Otherwise we can only use zext when comparing two non-negative or two
+    // negative values. But in practice, we will never pass DoesZExtCollapse
+    // check for a negative value, because zext(trunc(x)) is non-negative. So
+    // it only make sense to check for non-negativity here.
+    const SCEV *SCEVOP1 = SE->getSCEV(ICI->getOperand(0));
+    const SCEV *SCEVOP2 = SE->getSCEV(ICI->getOperand(1));
+    return SE->isKnownNonNegative(SCEVOP1) && SE->isKnownNonNegative(SCEVOP2);
+  };
+  // Replace all comparisons against trunc with comparisons against IV.
+  for (auto *ICI : ICmpUsers) {
+    auto *Op1 = ICI->getOperand(1);
+    Instruction *Ext = nullptr;
+    // For signed/unsigned predicate, replace the old comparison with comparison
+    // of immediate IV against sext/zext of the invariant argument. If we can
+    // use either sext or zext (i.e. we are dealing with equality predicate),
+    // then prefer zext as a more canonical form.
+    // TODO: If we see a signed comparison which can be turned into unsigned,
+    // we can do it here for canonicalization purposes.
+    ICmpInst::Predicate Pred = ICI->getPredicate();
+    if (CanUseZExt(ICI)) {
+      assert(DoesZExtCollapse && "Unprofitable zext?");
+      Ext = new ZExtInst(Op1, IVTy, "zext", ICI);
+      Pred = ICmpInst::getUnsignedPredicate(Pred);
+    } else {
+      assert(DoesSExtCollapse && "Unprofitable sext?");
+      Ext = new SExtInst(Op1, IVTy, "sext", ICI);
+      assert(Pred == ICmpInst::getSignedPredicate(Pred) && "Must be signed!");
+    }
+    bool Changed;
+    L->makeLoopInvariant(Ext, Changed);
+    (void)Changed;
+    ICmpInst *NewICI = new ICmpInst(ICI, Pred, IV, Ext);
+    ICI->replaceAllUsesWith(NewICI);
+    DeadInsts.emplace_back(ICI);
+  }
+
+  // Trunc no longer needed.
+  TI->replaceAllUsesWith(UndefValue::get(TI->getType()));
+  DeadInsts.emplace_back(TI);
+  return true;
+}
+
 /// Eliminate an operation that consumes a simple IV and has no observable
 /// side-effect given the range of IV values.  IVOperand is guaranteed SCEVable,
 /// but UseInst may not be.
@@ -527,6 +637,10 @@ bool SimplifyIndvar::eliminateIVUser(Instruction *UseInst,
 
   if (auto *CI = dyn_cast<CallInst>(UseInst))
     if (eliminateOverflowIntrinsic(CI))
+      return true;
+
+  if (auto *TI = dyn_cast<TruncInst>(UseInst))
+    if (eliminateTrunc(TI))
       return true;
 
   if (eliminateIdentitySCEV(UseInst, IVOperand))
@@ -561,8 +675,8 @@ bool SimplifyIndvar::replaceIVUserWithLoopInvariant(Instruction *I) {
   auto *Invariant = Rewriter.expandCodeFor(S, I->getType(), IP);
 
   I->replaceAllUsesWith(Invariant);
-  DEBUG(dbgs() << "INDVARS: Replace IV user: " << *I
-               << " with loop invariant: " << *S << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Replace IV user: " << *I
+                    << " with loop invariant: " << *S << '\n');
   ++NumFoldedUser;
   Changed = true;
   DeadInsts.emplace_back(I);
@@ -602,7 +716,7 @@ bool SimplifyIndvar::eliminateIdentitySCEV(Instruction *UseInst,
   if (!LI->replacementPreservesLCSSAForm(UseInst, IVOperand))
     return false;
 
-  DEBUG(dbgs() << "INDVARS: Eliminated identity: " << *UseInst << '\n');
+  LLVM_DEBUG(dbgs() << "INDVARS: Eliminated identity: " << *UseInst << '\n');
 
   UseInst->replaceAllUsesWith(IVOperand);
   ++NumElimIdentity;
@@ -784,6 +898,15 @@ void SimplifyIndvar::simplifyUsers(PHINode *CurrIV, IVVisitor *V) {
       SimpleIVUsers.pop_back_val();
     Instruction *UseInst = UseOper.first;
 
+    // If a user of the IndVar is trivially dead, we prefer just to mark it dead
+    // rather than try to do some complex analysis or transformation (such as
+    // widening) basing on it.
+    // TODO: Propagate TLI and pass it here to handle more cases.
+    if (isInstructionTriviallyDead(UseInst, /* TLI */ nullptr)) {
+      DeadInsts.emplace_back(UseInst);
+      continue;
+    }
+
     // Bypass back edges to avoid extra work.
     if (UseInst == CurrIV) continue;
 
@@ -796,7 +919,7 @@ void SimplifyIndvar::simplifyUsers(PHINode *CurrIV, IVVisitor *V) {
     for (unsigned N = 0; IVOperand; ++N) {
       assert(N <= Simplified.size() && "runaway iteration");
 
-      Value *NewOper = foldIVUser(UseOper.first, IVOperand);
+      Value *NewOper = foldIVUser(UseInst, IVOperand);
       if (!NewOper)
         break; // done folding
       IVOperand = dyn_cast<Instruction>(NewOper);
@@ -804,12 +927,12 @@ void SimplifyIndvar::simplifyUsers(PHINode *CurrIV, IVVisitor *V) {
     if (!IVOperand)
       continue;
 
-    if (eliminateIVUser(UseOper.first, IVOperand)) {
+    if (eliminateIVUser(UseInst, IVOperand)) {
       pushIVUsers(IVOperand, L, Simplified, SimpleIVUsers);
       continue;
     }
 
-    if (BinaryOperator *BO = dyn_cast<BinaryOperator>(UseOper.first)) {
+    if (BinaryOperator *BO = dyn_cast<BinaryOperator>(UseInst)) {
       if ((isa<OverflowingBinaryOperator>(BO) &&
            strengthenOverflowingOperation(BO, IVOperand)) ||
           (isa<ShlOperator>(BO) && strengthenRightShift(BO, IVOperand))) {
@@ -819,13 +942,13 @@ void SimplifyIndvar::simplifyUsers(PHINode *CurrIV, IVVisitor *V) {
       }
     }
 
-    CastInst *Cast = dyn_cast<CastInst>(UseOper.first);
+    CastInst *Cast = dyn_cast<CastInst>(UseInst);
     if (V && Cast) {
       V->visitCast(Cast);
       continue;
     }
-    if (isSimpleIVUser(UseOper.first, L, SE)) {
-      pushIVUsers(UseOper.first, L, Simplified, SimpleIVUsers);
+    if (isSimpleIVUser(UseInst, L, SE)) {
+      pushIVUsers(UseInst, L, Simplified, SimpleIVUsers);
     }
   }
 }

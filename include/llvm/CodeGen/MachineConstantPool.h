@@ -1,9 +1,8 @@
 //===- CodeGen/MachineConstantPool.h - Abstract Constant Pool ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -63,7 +62,7 @@ inline raw_ostream &operator<<(raw_ostream &OS,
 /// This class is a data container for one entry in a MachineConstantPool.
 /// It contains a pointer to the value and an offset from the start of
 /// the constant pool.
-/// @brief An entry in a MachineConstantPool
+/// An entry in a MachineConstantPool
 class MachineConstantPoolEntry {
 public:
   /// The constant itself.
@@ -117,7 +116,7 @@ public:
 /// the use of MO_ConstantPoolIndex values.  When emitting assembly or machine
 /// code, these virtual address references are converted to refer to the
 /// address of the function constant pool values.
-/// @brief The machine constant pool.
+/// The machine constant pool.
 class MachineConstantPool {
   unsigned PoolAlignment;       ///< The alignment for the pool.
   std::vector<MachineConstantPoolEntry> Constants; ///< The pool of constants.
@@ -128,7 +127,7 @@ class MachineConstantPool {
   const DataLayout &getDataLayout() const { return DL; }
 
 public:
-  /// @brief The only constructor.
+  /// The only constructor.
   explicit MachineConstantPool(const DataLayout &DL)
       : PoolAlignment(1), DL(DL) {}
   ~MachineConstantPool();

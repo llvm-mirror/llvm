@@ -8,10 +8,8 @@
 
 define <4 x i64> @foo(<4 x i64> %A) {
 ; CHECK-LABEL: foo:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vpcmpeqd %xmm1, %xmm1, %xmm1
-; CHECK-NEXT:    vmovdqa %xmm1, %xmm1
-; CHECK-NEXT:    vandps %ymm0, %ymm1, %ymm0
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vmovaps %xmm0, %xmm0
 ; CHECK-NEXT:    retl
   %1 = select <4 x i1> <i1 true, i1 true, i1 false, i1 false>, <4 x i64> %A, <4 x i64><i64 undef, i64 undef, i64 0, i64 0>
   ret <4 x i64> %1

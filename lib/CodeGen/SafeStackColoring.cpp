@@ -1,9 +1,8 @@
 //===- SafeStackColoring.cpp - SafeStack frame coloring -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,6 +11,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instruction.h"
@@ -45,11 +45,10 @@ const StackColoring::LiveRange &StackColoring::getLiveRange(AllocaInst *AI) {
 }
 
 bool StackColoring::readMarker(Instruction *I, bool *IsStart) {
-  auto *II = dyn_cast<IntrinsicInst>(I);
-  if (!II || (II->getIntrinsicID() != Intrinsic::lifetime_start &&
-              II->getIntrinsicID() != Intrinsic::lifetime_end))
+  if (!I->isLifetimeStartOrEnd())
     return false;
 
+  auto *II = cast<IntrinsicInst>(I);
   *IsStart = II->getIntrinsicID() == Intrinsic::lifetime_start;
   return true;
 }
@@ -101,10 +100,10 @@ void StackColoring::collectMarkers() {
   // For each basic block, compute
   // * the list of markers in the instruction order
   // * the sets of allocas whose lifetime starts or ends in this BB
-  DEBUG(dbgs() << "Instructions:\n");
+  LLVM_DEBUG(dbgs() << "Instructions:\n");
   unsigned InstNo = 0;
   for (BasicBlock *BB : depth_first(&F)) {
-    DEBUG(dbgs() << "  " << InstNo << ": BB " << BB->getName() << "\n");
+    LLVM_DEBUG(dbgs() << "  " << InstNo << ": BB " << BB->getName() << "\n");
     unsigned BBStart = InstNo++;
 
     BlockLifetimeInfo &BlockInfo = BlockLiveness[BB];
@@ -121,9 +120,9 @@ void StackColoring::collectMarkers() {
     }
 
     auto ProcessMarker = [&](Instruction *I, const Marker &M) {
-      DEBUG(dbgs() << "  " << InstNo << ":  "
-                   << (M.IsStart ? "start " : "end   ") << M.AllocaNo << ", "
-                   << *I << "\n");
+      LLVM_DEBUG(dbgs() << "  " << InstNo << ":  "
+                        << (M.IsStart ? "start " : "end   ") << M.AllocaNo
+                        << ", " << *I << "\n");
 
       BBMarkers[BB].push_back({InstNo, M});
 
@@ -171,7 +170,9 @@ void StackColoring::calculateLocalLiveness() {
       BitVector LocalLiveIn;
       for (auto *PredBB : predecessors(BB)) {
         LivenessMap::const_iterator I = BlockLiveness.find(PredBB);
-        assert(I != BlockLiveness.end() && "Predecessor not found");
+        // If a predecessor is unreachable, ignore it.
+        if (I == BlockLiveness.end())
+          continue;
         LocalLiveIn |= I->second.LiveOut;
       }
 
@@ -280,7 +281,7 @@ LLVM_DUMP_METHOD void StackColoring::dumpLiveRanges() {
 #endif
 
 void StackColoring::run() {
-  DEBUG(dumpAllocas());
+  LLVM_DEBUG(dumpAllocas());
 
   for (unsigned I = 0; I < NumAllocas; ++I)
     AllocaNumbering[Allocas[I]] = I;
@@ -303,7 +304,7 @@ void StackColoring::run() {
       LiveRanges[I] = getFullLiveRange();
 
   calculateLocalLiveness();
-  DEBUG(dumpBlockLiveness());
+  LLVM_DEBUG(dumpBlockLiveness());
   calculateLiveIntervals();
-  DEBUG(dumpLiveRanges());
+  LLVM_DEBUG(dumpLiveRanges());
 }

@@ -1,9 +1,8 @@
 //===- ValueEnumerator.cpp - Number values and types for bitcode writer ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 #include "ValueEnumerator.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -183,7 +183,7 @@ static void predictValueUseListOrderImpl(const Value *V, const Function *F,
     return;
 
   bool IsGlobalValue = OM.isGlobalValue(ID);
-  std::sort(List.begin(), List.end(), [&](const Entry &L, const Entry &R) {
+  llvm::sort(List, [&](const Entry &L, const Entry &R) {
     const Use *LU = L.first;
     const Use *RU = R.first;
     if (LU == RU)
@@ -488,7 +488,7 @@ void ValueEnumerator::print(raw_ostream &OS, const ValueMapType &Map,
     V->print(errs());
     errs() << '\n';
 
-    OS << " Uses(" << std::distance(V->use_begin(),V->use_end()) << "):";
+    OS << " Uses(" << V->getNumUses() << "):";
     for (const Use &U : V->uses()) {
       if (&U != &*V->use_begin())
         OS << ",";
@@ -744,7 +744,7 @@ void ValueEnumerator::organizeMetadata() {
   // and then sort by the original/current ID.  Since the IDs are guaranteed to
   // be unique, the result of std::sort will be deterministic.  There's no need
   // for std::stable_sort.
-  std::sort(Order.begin(), Order.end(), [this](MDIndex LHS, MDIndex RHS) {
+  llvm::sort(Order, [this](MDIndex LHS, MDIndex RHS) {
     return std::make_tuple(LHS.F, getMetadataTypeOrder(LHS.get(MDs)), LHS.ID) <
            std::make_tuple(RHS.F, getMetadataTypeOrder(RHS.get(MDs)), RHS.ID);
   });

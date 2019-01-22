@@ -1,10 +1,9 @@
 #!/bin/bash
 #===- llvm/utils/docker/build_docker_image.sh ----------------------------===//
 #
-#                     The LLVM Compiler Infrastructure
-#
-# This file is distributed under the University of Illinois Open Source
-# License. See LICENSE.TXT for details.
+# Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 #===----------------------------------------------------------------------===//
 set -e
@@ -13,6 +12,8 @@ IMAGE_SOURCE=""
 DOCKER_REPOSITORY=""
 DOCKER_TAG=""
 BUILDSCRIPT_ARGS=""
+CHECKOUT_ARGS=""
+CMAKE_ENABLED_PROJECTS=""
 
 function show_usage() {
   cat << EOF
@@ -25,22 +26,27 @@ Available options:
     -s|--source             image source dir (i.e. debian8, nvidia-cuda, etc)
     -d|--docker-repository  docker repository for the image
     -t|--docker-tag         docker tag for the image
-  LLVM-specific:
+  Checkout arguments:
     -b|--branch         svn branch to checkout, i.e. 'trunk',
                         'branches/release_40'
                         (default: 'trunk')
     -r|--revision       svn revision to checkout
+    -c|--cherrypick     revision to cherry-pick. Can be specified multiple times.
+                        Cherry-picks are performed in the sorted order using the
+                        following command:
+                        'svn patch <(svn diff -c \$rev)'.
     -p|--llvm-project   name of an svn project to checkout. Will also add the
                         project to a list LLVM_ENABLE_PROJECTS, passed to CMake.
                         For clang, please use 'clang', not 'cfe'.
                         Project 'llvm' is always included and ignored, if
                         specified.
                         Can be specified multiple times.
-    -i|--install-target name of a cmake install target to build and include in
-                        the resulting archive. Can be specified multiple times.
     -c|--checksums      name of a file, containing checksums of llvm checkout.
                         Script will fail if checksums of the checkout do not
                         match.
+  Build-specific:
+    -i|--install-target name of a cmake install target to build and include in
+                        the resulting archive. Can be specified multiple times.
 
 Required options: --source and --docker-repository, at least one
   --install-target.
@@ -71,6 +77,7 @@ EOF
 
 CHECKSUMS_FILE=""
 SEEN_INSTALL_TARGET=0
+SEEN_CMAKE_ARGS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
@@ -92,11 +99,26 @@ while [[ $# -gt 0 ]]; do
       DOCKER_TAG="$1"
       shift
       ;;
-    -i|--install-target|-r|--revision|-b|--branch|-p|--llvm-project)
-      if [ "$1" == "-i" ] || [ "$1" == "--install-target" ]; then
-        SEEN_INSTALL_TARGET=1
-      fi
+    -r|--revision|-c|-cherrypick|-b|--branch)
+      CHECKOUT_ARGS="$CHECKOUT_ARGS $1 $2"
+      shift 2
+      ;;
+    -i|--install-target)
+      SEEN_INSTALL_TARGET=1
       BUILDSCRIPT_ARGS="$BUILDSCRIPT_ARGS $1 $2"
+      shift 2
+      ;;
+    -p|--llvm-project)
+      PROJ="$2"
+      if [ "$PROJ" == "cfe" ]; then
+        PROJ="clang"
+      fi
+
+      CHECKOUT_ARGS="$CHECKOUT_ARGS $1 $PROJ"
+      if [ "$PROJ" != "clang-tools-extra" ]; then
+        CMAKE_ENABLED_PROJECTS="$CMAKE_ENABLED_PROJECTS;$PROJ"
+      fi
+
       shift 2
       ;;
     -c|--checksums)
@@ -107,6 +129,7 @@ while [[ $# -gt 0 ]]; do
     --)
       shift
       BUILDSCRIPT_ARGS="$BUILDSCRIPT_ARGS -- $*"
+      SEEN_CMAKE_ARGS=1
       shift $#
       ;;
     *)
@@ -115,6 +138,17 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+
+if [ "$CMAKE_ENABLED_PROJECTS" != "" ]; then
+  # Remove the leading ';' character.
+  CMAKE_ENABLED_PROJECTS="${CMAKE_ENABLED_PROJECTS:1}"
+
+  if [[ $SEEN_CMAKE_ARGS -eq 0 ]]; then
+    BUILDSCRIPT_ARGS="$BUILDSCRIPT_ARGS --"
+  fi
+  BUILDSCRIPT_ARGS="$BUILDSCRIPT_ARGS -DLLVM_ENABLE_PROJECTS=$CMAKE_ENABLED_PROJECTS"
+fi
 
 command -v docker >/dev/null ||
   {
@@ -159,19 +193,10 @@ if [ "$DOCKER_TAG" != "" ]; then
   DOCKER_TAG=":$DOCKER_TAG"
 fi
 
-echo "Building from $IMAGE_SOURCE"
-echo "Building $DOCKER_REPOSITORY-build$DOCKER_TAG"
-docker build -t "$DOCKER_REPOSITORY-build$DOCKER_TAG" \
-  --build-arg "buildscript_args=$BUILDSCRIPT_ARGS" \
-  -f "$BUILD_DIR/$IMAGE_SOURCE/build/Dockerfile" \
-  "$BUILD_DIR"
-
-echo "Copying clang installation to release image sources"
-docker run -v "$BUILD_DIR/$IMAGE_SOURCE:/workspace" "$DOCKER_REPOSITORY-build$DOCKER_TAG" \
-  cp /tmp/clang.tar.gz /workspace/release
-
-echo "Building release image"
+echo "Building ${DOCKER_REPOSITORY}${DOCKER_TAG} from $IMAGE_SOURCE"
 docker build -t "${DOCKER_REPOSITORY}${DOCKER_TAG}" \
-  "$BUILD_DIR/$IMAGE_SOURCE/release"
-
+  --build-arg "checkout_args=$CHECKOUT_ARGS" \
+  --build-arg "buildscript_args=$BUILDSCRIPT_ARGS" \
+  -f "$BUILD_DIR/$IMAGE_SOURCE/Dockerfile" \
+  "$BUILD_DIR"
 echo "Done"

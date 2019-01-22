@@ -1,9 +1,8 @@
 //===-- MipsMCNaCl.h - NaCl-related declarations --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,7 +23,7 @@ bool baseRegNeedsLoadStoreMask(unsigned Reg);
 // This function creates an MCELFStreamer for Mips NaCl.
 MCELFStreamer *createMipsNaClELFStreamer(MCContext &Context,
                                          std::unique_ptr<MCAsmBackend> TAB,
-                                         raw_pwrite_stream &OS,
+                                         std::unique_ptr<MCObjectWriter> OW,
                                          std::unique_ptr<MCCodeEmitter> Emitter,
                                          bool RelaxAll);
 }

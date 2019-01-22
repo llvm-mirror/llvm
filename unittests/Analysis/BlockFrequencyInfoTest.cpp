@@ -1,9 +1,8 @@
 //===- BlockFrequencyInfoTest.cpp - BlockFrequencyInfo unit tests ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -78,8 +77,10 @@ TEST_F(BlockFrequencyInfoTest, Basic) {
 
   EXPECT_EQ(BFI.getBlockProfileCount(&BB0).getValue(), UINT64_C(100));
   EXPECT_EQ(BFI.getBlockProfileCount(BB3).getValue(), UINT64_C(100));
-  EXPECT_EQ(BFI.getBlockProfileCount(BB1).getValue(), 100 * BB1Freq / BB0Freq);
-  EXPECT_EQ(BFI.getBlockProfileCount(BB2).getValue(), 100 * BB2Freq / BB0Freq);
+  EXPECT_EQ(BFI.getBlockProfileCount(BB1).getValue(),
+            (100 * BB1Freq + BB0Freq / 2) / BB0Freq);
+  EXPECT_EQ(BFI.getBlockProfileCount(BB2).getValue(),
+            (100 * BB2Freq + BB0Freq / 2) / BB0Freq);
 
   // Scale the frequencies of BB0, BB1 and BB2 by a factor of two.
   SmallPtrSet<BasicBlock *, 4> BlocksToScale({BB1, BB2});
@@ -89,6 +90,9 @@ TEST_F(BlockFrequencyInfoTest, Basic) {
   EXPECT_EQ(BFI.getBlockFreq(BB2).getFrequency(), 2 * BB2Freq);
   EXPECT_EQ(BFI.getBlockFreq(BB3).getFrequency(), BB3Freq);
 }
+
+static_assert(is_trivially_copyable<bfi_detail::BlockMass>::value,
+              "trivially copyable");
 
 } // end anonymous namespace
 } // end namespace llvm

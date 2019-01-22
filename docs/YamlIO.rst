@@ -466,7 +466,7 @@ looks like:
         return StringRef();
       }
       // Determine if this scalar needs quotes.
-      static bool mustQuote(StringRef) { return true; }
+      static QuotingType mustQuote(StringRef) { return QuotingType::Single; }
     };
 
 Block Scalars
@@ -1020,7 +1020,7 @@ object.  For example:
      // Reading multiple documents in one file
      using llvm::yaml::Input;
 
-     LLVM_YAML_IS_DOCUMENT_LIST_VECTOR(std::vector<MyDocType>)
+     LLVM_YAML_IS_DOCUMENT_LIST_VECTOR(MyDocType)
      
      Input yin(mb.getBuffer());
      

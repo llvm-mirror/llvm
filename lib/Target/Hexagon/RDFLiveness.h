@@ -1,9 +1,8 @@
 //===- RDFLiveness.h --------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -53,8 +52,8 @@ namespace rdf {
     using RefMap = std::map<RegisterId, NodeRefSet>;
 
     Liveness(MachineRegisterInfo &mri, const DataFlowGraph &g)
-      : DFG(g), TRI(g.getTRI()), PRI(g.getPRI()), MDT(g.getDT()),
-        MDF(g.getDF()), LiveMap(g.getPRI()), NoRegs(g.getPRI()) {}
+        : DFG(g), TRI(g.getTRI()), PRI(g.getPRI()), MDT(g.getDT()),
+          MDF(g.getDF()), LiveMap(g.getPRI()), Empty(), NoRegs(g.getPRI()) {}
 
     NodeList getAllReachingDefs(RegisterRef RefRR, NodeAddr<RefNode*> RefA,
         bool TopShadows, bool FullChain, const RegisterAggr &DefRRs);

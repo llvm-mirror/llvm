@@ -1,9 +1,8 @@
 //===-- AArch64PBQPRegAlloc.cpp - AArch64 specific PBQP constraints -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This file contains the AArch64 / Cortex-A57 specific register allocation
@@ -20,7 +19,7 @@
 #include "AArch64PBQPRegAlloc.h"
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -164,10 +163,10 @@ bool A57ChainingConstraint::addIntraChainConstraint(PBQPRAGraph &G, unsigned Rd,
   LiveIntervals &LIs = G.getMetadata().LIS;
 
   if (TRI->isPhysicalRegister(Rd) || TRI->isPhysicalRegister(Ra)) {
-    DEBUG(dbgs() << "Rd is a physical reg:" << TRI->isPhysicalRegister(Rd)
-          << '\n');
-    DEBUG(dbgs() << "Ra is a physical reg:" << TRI->isPhysicalRegister(Ra)
-          << '\n');
+    LLVM_DEBUG(dbgs() << "Rd is a physical reg:" << TRI->isPhysicalRegister(Rd)
+                      << '\n');
+    LLVM_DEBUG(dbgs() << "Ra is a physical reg:" << TRI->isPhysicalRegister(Ra)
+                      << '\n');
     return false;
   }
 
@@ -247,14 +246,14 @@ void A57ChainingConstraint::addInterChainConstraint(PBQPRAGraph &G, unsigned Rd,
   // Do some Chain management
   if (Chains.count(Ra)) {
     if (Rd != Ra) {
-      DEBUG(dbgs() << "Moving acc chain from " << PrintReg(Ra, TRI) << " to "
-                   << PrintReg(Rd, TRI) << '\n';);
+      LLVM_DEBUG(dbgs() << "Moving acc chain from " << printReg(Ra, TRI)
+                        << " to " << printReg(Rd, TRI) << '\n';);
       Chains.remove(Ra);
       Chains.insert(Rd);
     }
   } else {
-    DEBUG(dbgs() << "Creating new acc chain for " << PrintReg(Rd, TRI)
-                 << '\n';);
+    LLVM_DEBUG(dbgs() << "Creating new acc chain for " << printReg(Rd, TRI)
+                      << '\n';);
     Chains.insert(Rd);
   }
 
@@ -279,7 +278,7 @@ void A57ChainingConstraint::addInterChainConstraint(PBQPRAGraph &G, unsigned Rd,
       assert(edge != G.invalidEdgeId() &&
              "PBQP error ! The edge should exist !");
 
-      DEBUG(dbgs() << "Refining constraint !\n";);
+      LLVM_DEBUG(dbgs() << "Refining constraint !\n";);
 
       if (G.getEdgeNode1Id(edge) == node2) {
         std::swap(node1, node2);
@@ -329,7 +328,7 @@ void A57ChainingConstraint::apply(PBQPRAGraph &G) {
   LiveIntervals &LIs = G.getMetadata().LIS;
 
   TRI = MF.getSubtarget().getRegisterInfo();
-  DEBUG(MF.dump());
+  LLVM_DEBUG(MF.dump());
 
   for (const auto &MBB: MF) {
     Chains.clear(); // FIXME: really needed ? Could not work at MF level ?
@@ -340,8 +339,8 @@ void A57ChainingConstraint::apply(PBQPRAGraph &G) {
       for (auto r : Chains) {
         SmallVector<unsigned, 8> toDel;
         if(regJustKilledBefore(LIs, r, MI)) {
-          DEBUG(dbgs() << "Killing chain " << PrintReg(r, TRI) << " at ";
-                MI.print(dbgs()););
+          LLVM_DEBUG(dbgs() << "Killing chain " << printReg(r, TRI) << " at ";
+                     MI.print(dbgs()););
           toDel.push_back(r);
         }
 

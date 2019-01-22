@@ -1,9 +1,8 @@
 //===- SymbolRecordMapping.cpp -----------------------------------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -462,4 +461,86 @@ Error SymbolRecordMapping::visitKnownRecord(CVSymbol &CVR, UDTSym &UDT) {
   error(IO.mapStringZ(UDT.Name));
 
   return Error::success();
+}
+
+Error SymbolRecordMapping::visitKnownRecord(CVSymbol &CVR,
+                                            UsingNamespaceSym &UN) {
+
+  error(IO.mapStringZ(UN.Name));
+
+  return Error::success();
+}
+
+RegisterId codeview::decodeFramePtrReg(EncodedFramePtrReg EncodedReg,
+                                       CPUType CPU) {
+  assert(unsigned(EncodedReg) < 4);
+  switch (CPU) {
+  // FIXME: Add ARM and AArch64 variants here.
+  default:
+    break;
+  case CPUType::Intel8080:
+  case CPUType::Intel8086:
+  case CPUType::Intel80286:
+  case CPUType::Intel80386:
+  case CPUType::Intel80486:
+  case CPUType::Pentium:
+  case CPUType::PentiumPro:
+  case CPUType::Pentium3:
+    switch (EncodedReg) {
+    case EncodedFramePtrReg::None:     return RegisterId::NONE;
+    case EncodedFramePtrReg::StackPtr: return RegisterId::VFRAME;
+    case EncodedFramePtrReg::FramePtr: return RegisterId::EBP;
+    case EncodedFramePtrReg::BasePtr:  return RegisterId::EBX;
+    }
+    llvm_unreachable("bad encoding");
+  case CPUType::X64:
+    switch (EncodedReg) {
+    case EncodedFramePtrReg::None:     return RegisterId::NONE;
+    case EncodedFramePtrReg::StackPtr: return RegisterId::RSP;
+    case EncodedFramePtrReg::FramePtr: return RegisterId::RBP;
+    case EncodedFramePtrReg::BasePtr:  return RegisterId::R13;
+    }
+    llvm_unreachable("bad encoding");
+  }
+  return RegisterId::NONE;
+}
+
+EncodedFramePtrReg codeview::encodeFramePtrReg(RegisterId Reg, CPUType CPU) {
+  switch (CPU) {
+  // FIXME: Add ARM and AArch64 variants here.
+  default:
+    break;
+  case CPUType::Intel8080:
+  case CPUType::Intel8086:
+  case CPUType::Intel80286:
+  case CPUType::Intel80386:
+  case CPUType::Intel80486:
+  case CPUType::Pentium:
+  case CPUType::PentiumPro:
+  case CPUType::Pentium3:
+    switch (Reg) {
+    case RegisterId::VFRAME:
+      return EncodedFramePtrReg::StackPtr;
+    case RegisterId::EBP:
+      return EncodedFramePtrReg::FramePtr;
+    case RegisterId::EBX:
+      return EncodedFramePtrReg::BasePtr;
+    default:
+      break;
+    }
+    break;
+  case CPUType::X64:
+    switch (Reg) {
+    case RegisterId::RSP:
+      return EncodedFramePtrReg::StackPtr;
+    case RegisterId::RBP:
+      return EncodedFramePtrReg::FramePtr;
+    case RegisterId::R13:
+      return EncodedFramePtrReg::BasePtr;
+    default:
+      break;
+    }
+    break;
+  }
+  return EncodedFramePtrReg::None;
 }

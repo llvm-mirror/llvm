@@ -1,9 +1,8 @@
 //===-- MipsMCTargetDesc.h - Mips Target Descriptions -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,7 +22,7 @@ class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
-class MCObjectWriter;
+class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
@@ -45,12 +44,12 @@ MCCodeEmitter *createMipsMCCodeEmitterEL(const MCInstrInfo &MCII,
                                          const MCRegisterInfo &MRI,
                                          MCContext &Ctx);
 
-MCAsmBackend *createMipsAsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                                   const Triple &TT, StringRef CPU,
+MCAsmBackend *createMipsAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                   const MCRegisterInfo &MRI,
                                    const MCTargetOptions &Options);
 
-std::unique_ptr<MCObjectWriter>
-createMipsELFObjectWriter(raw_pwrite_stream &OS, const Triple &TT, bool IsN32);
+std::unique_ptr<MCObjectTargetWriter>
+createMipsELFObjectWriter(const Triple &TT, bool IsN32);
 
 namespace MIPS_MC {
 StringRef selectMipsCPU(const Triple &TT, StringRef CPU);

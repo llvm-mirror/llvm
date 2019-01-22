@@ -1,14 +1,13 @@
 //=- WebAssemblyInstPrinter.cpp - WebAssembly assembly instruction printing -=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief Print MCInst instructions to wasm format.
+/// Print MCInst instructions to wasm format.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -18,6 +17,7 @@
 #include "WebAssemblyMachineFunctionInfo.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -25,7 +25,6 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
@@ -35,18 +34,18 @@ using namespace llvm;
 WebAssemblyInstPrinter::WebAssemblyInstPrinter(const MCAsmInfo &MAI,
                                                const MCInstrInfo &MII,
                                                const MCRegisterInfo &MRI)
-    : MCInstPrinter(MAI, MII, MRI), ControlFlowCounter(0) {}
+    : MCInstPrinter(MAI, MII, MRI) {}
 
 void WebAssemblyInstPrinter::printRegName(raw_ostream &OS,
                                           unsigned RegNo) const {
   assert(RegNo != WebAssemblyFunctionInfo::UnusedReg);
-  // Note that there's an implicit get_local/set_local here!
+  // Note that there's an implicit local.get/local.set here!
   OS << "$" << RegNo;
 }
 
 void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
                                        StringRef Annot,
-                                       const MCSubtargetInfo & /*STI*/) {
+                                       const MCSubtargetInfo &STI) {
   // Print the instruction (this uses the AsmStrings from the .td files).
   printInstruction(MI, OS);
 
@@ -57,9 +56,9 @@ void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
       // FIXME: For CALL_INDIRECT_VOID, don't print a leading comma, because
       // we have an extra flags operand which is not currently printed, for
       // compatiblity reasons.
-      if (i != 0 &&
-          (MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID ||
-           i != Desc.getNumOperands()))
+      if (i != 0 && ((MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID &&
+                      MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID_S) ||
+                     i != Desc.getNumOperands()))
         OS << ", ";
       printOperand(MI, i, OS);
     }
@@ -70,23 +69,76 @@ void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   if (CommentStream) {
     // Observe any effects on the control flow stack, for use in annotating
     // control flow label references.
-    switch (MI->getOpcode()) {
+    unsigned Opc = MI->getOpcode();
+    switch (Opc) {
     default:
       break;
-    case WebAssembly::LOOP: {
+
+    case WebAssembly::LOOP:
+    case WebAssembly::LOOP_S:
       printAnnotation(OS, "label" + utostr(ControlFlowCounter) + ':');
       ControlFlowStack.push_back(std::make_pair(ControlFlowCounter++, true));
       break;
-    }
+
     case WebAssembly::BLOCK:
+    case WebAssembly::BLOCK_S:
       ControlFlowStack.push_back(std::make_pair(ControlFlowCounter++, false));
       break;
-    case WebAssembly::END_LOOP:
-      ControlFlowStack.pop_back();
+
+    case WebAssembly::TRY:
+    case WebAssembly::TRY_S:
+      ControlFlowStack.push_back(std::make_pair(ControlFlowCounter++, false));
+      EHPadStack.push_back(EHPadStackCounter++);
+      LastSeenEHInst = TRY;
       break;
+
+    case WebAssembly::END_LOOP:
+    case WebAssembly::END_LOOP_S:
+      if (ControlFlowStack.empty()) {
+        printAnnotation(OS, "End marker mismatch!");
+      } else {
+        ControlFlowStack.pop_back();
+      }
+      break;
+
     case WebAssembly::END_BLOCK:
-      printAnnotation(
-          OS, "label" + utostr(ControlFlowStack.pop_back_val().first) + ':');
+    case WebAssembly::END_BLOCK_S:
+      if (ControlFlowStack.empty()) {
+        printAnnotation(OS, "End marker mismatch!");
+      } else {
+        printAnnotation(
+            OS, "label" + utostr(ControlFlowStack.pop_back_val().first) + ':');
+      }
+      break;
+
+    case WebAssembly::END_TRY:
+    case WebAssembly::END_TRY_S:
+      if (ControlFlowStack.empty()) {
+        printAnnotation(OS, "End marker mismatch!");
+      } else {
+        printAnnotation(
+            OS, "label" + utostr(ControlFlowStack.pop_back_val().first) + ':');
+        LastSeenEHInst = END_TRY;
+      }
+      break;
+
+    case WebAssembly::CATCH_I32:
+    case WebAssembly::CATCH_I32_S:
+    case WebAssembly::CATCH_I64:
+    case WebAssembly::CATCH_I64_S:
+    case WebAssembly::CATCH_ALL:
+    case WebAssembly::CATCH_ALL_S:
+      // There can be multiple catch instructions for one try instruction, so we
+      // print a label only for the first 'catch' label.
+      if (LastSeenEHInst != CATCH) {
+        if (EHPadStack.empty()) {
+          printAnnotation(OS, "try-catch mismatch!");
+        } else {
+          printAnnotation(OS,
+                          "catch" + utostr(EHPadStack.pop_back_val()) + ':');
+        }
+      }
+      LastSeenEHInst = CATCH;
       break;
     }
 
@@ -94,34 +146,61 @@ void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
     unsigned NumFixedOperands = Desc.NumOperands;
     SmallSet<uint64_t, 8> Printed;
     for (unsigned i = 0, e = MI->getNumOperands(); i < e; ++i) {
-      if (!(i < NumFixedOperands
-                ? (Desc.OpInfo[i].OperandType ==
-                   WebAssembly::OPERAND_BASIC_BLOCK)
-                : (Desc.TSFlags & WebAssemblyII::VariableOpImmediateIsLabel)))
-        continue;
+      // See if this operand denotes a basic block target.
+      if (i < NumFixedOperands) {
+        // A non-variable_ops operand, check its type.
+        if (Desc.OpInfo[i].OperandType != WebAssembly::OPERAND_BASIC_BLOCK)
+          continue;
+      } else {
+        // A variable_ops operand, which currently can be immediates (used in
+        // br_table) which are basic block targets, or for call instructions
+        // when using -wasm-keep-registers (in which case they are registers,
+        // and should not be processed).
+        if (!MI->getOperand(i).isImm())
+          continue;
+      }
       uint64_t Depth = MI->getOperand(i).getImm();
       if (!Printed.insert(Depth).second)
         continue;
-      const auto &Pair = ControlFlowStack.rbegin()[Depth];
-      printAnnotation(OS, utostr(Depth) + ": " + (Pair.second ? "up" : "down") +
-                              " to label" + utostr(Pair.first));
+
+      if (Opc == WebAssembly::RETHROW || Opc == WebAssembly::RETHROW_S) {
+        if (Depth > EHPadStack.size()) {
+          printAnnotation(OS, "Invalid depth argument!");
+        } else if (Depth == EHPadStack.size()) {
+          // This can happen when rethrow instruction breaks out of all nests
+          // and throws up to the current function's caller.
+          printAnnotation(OS, utostr(Depth) + ": " + "to caller");
+        } else {
+          uint64_t CatchNo = EHPadStack.rbegin()[Depth];
+          printAnnotation(OS, utostr(Depth) + ": " + "down to catch" +
+                                  utostr(CatchNo));
+        }
+
+      } else {
+        if (Depth >= ControlFlowStack.size()) {
+          printAnnotation(OS, "Invalid depth argument!");
+        } else {
+          const auto &Pair = ControlFlowStack.rbegin()[Depth];
+          printAnnotation(OS, utostr(Depth) + ": " +
+                                  (Pair.second ? "up" : "down") + " to label" +
+                                  utostr(Pair.first));
+        }
+      }
     }
   }
 }
 
 static std::string toString(const APFloat &FP) {
   // Print NaNs with custom payloads specially.
-  if (FP.isNaN() &&
-      !FP.bitwiseIsEqual(APFloat::getQNaN(FP.getSemantics())) &&
+  if (FP.isNaN() && !FP.bitwiseIsEqual(APFloat::getQNaN(FP.getSemantics())) &&
       !FP.bitwiseIsEqual(
           APFloat::getQNaN(FP.getSemantics(), /*Negative=*/true))) {
     APInt AI = FP.bitcastToAPInt();
-    return
-        std::string(AI.isNegative() ? "-" : "") + "nan:0x" +
-        utohexstr(AI.getZExtValue() &
-                  (AI.getBitWidth() == 32 ? INT64_C(0x007fffff) :
-                                            INT64_C(0x000fffffffffffff)),
-                  /*LowerCase=*/true);
+    return std::string(AI.isNegative() ? "-" : "") + "nan:0x" +
+           utohexstr(AI.getZExtValue() &
+                         (AI.getBitWidth() == 32 ? INT64_C(0x007fffff)
+                                                 : INT64_C(0x000fffffffffffff)),
+                     /*LowerCase=*/true);
   }
 
   // Use C99's hexadecimal floating-point representation.
@@ -139,9 +218,6 @@ void WebAssemblyInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                           raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
-    assert((OpNo < MII.get(MI->getOpcode()).getNumOperands() ||
-            MII.get(MI->getOpcode()).TSFlags == 0) &&
-           "WebAssembly variable_ops register ops don't use TSFlags");
     unsigned WAReg = Op.getReg();
     if (int(WAReg) >= 0)
       printRegName(O, WAReg);
@@ -155,104 +231,79 @@ void WebAssemblyInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     if (OpNo < MII.get(MI->getOpcode()).getNumDefs())
       O << '=';
   } else if (Op.isImm()) {
-    const MCInstrDesc &Desc = MII.get(MI->getOpcode());
-    assert((OpNo < Desc.getNumOperands() ||
-            (Desc.TSFlags & WebAssemblyII::VariableOpIsImmediate)) &&
-           "WebAssemblyII::VariableOpIsImmediate should be set for "
-           "variable_ops immediate ops");
-    (void)Desc;
-    // TODO: (MII.get(MI->getOpcode()).TSFlags &
-    //        WebAssemblyII::VariableOpImmediateIsLabel)
-    // can tell us whether this is an immediate referencing a label in the
-    // control flow stack, and it may be nice to pretty-print.
     O << Op.getImm();
   } else if (Op.isFPImm()) {
     const MCInstrDesc &Desc = MII.get(MI->getOpcode());
-    assert(OpNo < Desc.getNumOperands() &&
-           "Unexpected floating-point immediate as a non-fixed operand");
-    assert(Desc.TSFlags == 0 &&
-           "WebAssembly variable_ops floating point ops don't use TSFlags");
     const MCOperandInfo &Info = Desc.OpInfo[OpNo];
     if (Info.OperandType == WebAssembly::OPERAND_F32IMM) {
       // TODO: MC converts all floating point immediate operands to double.
       // This is fine for numeric values, but may cause NaNs to change bits.
-      O << toString(APFloat(float(Op.getFPImm())));
+      O << ::toString(APFloat(float(Op.getFPImm())));
     } else {
       assert(Info.OperandType == WebAssembly::OPERAND_F64IMM);
-      O << toString(APFloat(Op.getFPImm()));
+      O << ::toString(APFloat(Op.getFPImm()));
     }
   } else {
-    assert((OpNo < MII.get(MI->getOpcode()).getNumOperands() ||
-            (MII.get(MI->getOpcode()).TSFlags &
-             WebAssemblyII::VariableOpIsImmediate)) &&
-           "WebAssemblyII::VariableOpIsImmediate should be set for "
-           "variable_ops expr ops");
     assert(Op.isExpr() && "unknown operand kind in printOperand");
     Op.getExpr()->print(O, &MAI);
   }
 }
 
-void
-WebAssemblyInstPrinter::printWebAssemblyP2AlignOperand(const MCInst *MI,
-                                                       unsigned OpNo,
-                                                       raw_ostream &O) {
+void WebAssemblyInstPrinter::printBrList(const MCInst *MI, unsigned OpNo,
+                                         raw_ostream &O) {
+  O << "{";
+  for (unsigned I = OpNo, E = MI->getNumOperands(); I != E; ++I) {
+    if (I != OpNo)
+      O << ", ";
+    O << MI->getOperand(I).getImm();
+  }
+  O << "}";
+}
+
+void WebAssemblyInstPrinter::printWebAssemblyP2AlignOperand(const MCInst *MI,
+                                                            unsigned OpNo,
+                                                            raw_ostream &O) {
   int64_t Imm = MI->getOperand(OpNo).getImm();
   if (Imm == WebAssembly::GetDefaultP2Align(MI->getOpcode()))
     return;
   O << ":p2align=" << Imm;
 }
 
-void
-WebAssemblyInstPrinter::printWebAssemblySignatureOperand(const MCInst *MI,
-                                                         unsigned OpNo,
-                                                         raw_ostream &O) {
-  int64_t Imm = MI->getOperand(OpNo).getImm();
-  switch (WebAssembly::ExprType(Imm)) {
-  case WebAssembly::ExprType::Void: break;
-  case WebAssembly::ExprType::I32: O << "i32"; break;
-  case WebAssembly::ExprType::I64: O << "i64"; break;
-  case WebAssembly::ExprType::F32: O << "f32"; break;
-  case WebAssembly::ExprType::F64: O << "f64"; break;
-  case WebAssembly::ExprType::I8x16: O << "i8x16"; break;
-  case WebAssembly::ExprType::I16x8: O << "i16x8"; break;
-  case WebAssembly::ExprType::I32x4: O << "i32x4"; break;
-  case WebAssembly::ExprType::F32x4: O << "f32x4"; break;
-  case WebAssembly::ExprType::B8x16: O << "b8x16"; break;
-  case WebAssembly::ExprType::B16x8: O << "b16x8"; break;
-  case WebAssembly::ExprType::B32x4: O << "b32x4"; break;
-  }
+void WebAssemblyInstPrinter::printWebAssemblySignatureOperand(const MCInst *MI,
+                                                              unsigned OpNo,
+                                                              raw_ostream &O) {
+  auto Imm = static_cast<unsigned>(MI->getOperand(OpNo).getImm());
+  if (Imm != wasm::WASM_TYPE_NORESULT)
+    O << WebAssembly::anyTypeToString(Imm);
 }
 
-const char *llvm::WebAssembly::TypeToString(MVT Ty) {
-  switch (Ty.SimpleTy) {
-  case MVT::i32:
+// We have various enums representing a subset of these types, use this
+// function to convert any of them to text.
+const char *llvm::WebAssembly::anyTypeToString(unsigned Ty) {
+  switch (Ty) {
+  case wasm::WASM_TYPE_I32:
     return "i32";
-  case MVT::i64:
+  case wasm::WASM_TYPE_I64:
     return "i64";
-  case MVT::f32:
+  case wasm::WASM_TYPE_F32:
     return "f32";
-  case MVT::f64:
+  case wasm::WASM_TYPE_F64:
     return "f64";
-  case MVT::v16i8:
-  case MVT::v8i16:
-  case MVT::v4i32:
-  case MVT::v4f32:
+  case wasm::WASM_TYPE_V128:
     return "v128";
+  case wasm::WASM_TYPE_FUNCREF:
+    return "funcref";
+  case wasm::WASM_TYPE_FUNC:
+    return "func";
+  case wasm::WASM_TYPE_EXCEPT_REF:
+    return "except_ref";
+  case wasm::WASM_TYPE_NORESULT:
+    return "void";
   default:
-    llvm_unreachable("unsupported type");
+    return "invalid_type";
   }
 }
 
-const char *llvm::WebAssembly::TypeToString(wasm::ValType Type) {
-  switch (Type) {
-  case wasm::ValType::I32:
-    return "i32";
-  case wasm::ValType::I64:
-    return "i64";
-  case wasm::ValType::F32:
-    return "f32";
-  case wasm::ValType::F64:
-    return "f64";
-  }
-  llvm_unreachable("unsupported type");
+const char *llvm::WebAssembly::typeToString(wasm::ValType Ty) {
+  return anyTypeToString(static_cast<unsigned>(Ty));
 }

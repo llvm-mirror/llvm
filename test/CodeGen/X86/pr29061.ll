@@ -6,15 +6,16 @@
 
 define void @t1(i8 signext %c) {
 ; CHECK-LABEL: t1:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    pushl %edi
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    .cfi_offset %edi, -8
 ; CHECK-NEXT:    movzbl {{[0-9]+}}(%esp), %edi
-; CHECK-NEXT:    # kill: %DI<def> %DI<kill> %EDI<kill>
+; CHECK-NEXT:    # kill: def $di killed $di killed $edi
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    #NO_APP
 ; CHECK-NEXT:    popl %edi
+; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    retl
 entry:
   tail call void asm sideeffect "", "{di},~{dirflag},~{fpsr},~{flags}"(i8 %c)
@@ -23,15 +24,16 @@ entry:
 
 define void @t2(i8 signext %c) {
 ; CHECK-LABEL: t2:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    pushl %esi
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    .cfi_offset %esi, -8
 ; CHECK-NEXT:    movzbl {{[0-9]+}}(%esp), %esi
-; CHECK-NEXT:    # kill: %SI<def> %SI<kill> %ESI<kill>
+; CHECK-NEXT:    # kill: def $si killed $si killed $esi
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    #NO_APP
 ; CHECK-NEXT:    popl %esi
+; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    retl
 entry:
   tail call void asm sideeffect "", "{si},~{dirflag},~{fpsr},~{flags}"(i8 %c)

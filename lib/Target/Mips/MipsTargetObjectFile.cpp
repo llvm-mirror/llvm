@@ -1,15 +1,15 @@
 //===-- MipsTargetObjectFile.cpp - Mips Object Files ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "MipsTargetObjectFile.h"
 #include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
+#include "MCTargetDesc/MipsMCExpr.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -136,6 +136,13 @@ IsGlobalInSmallSectionImpl(const GlobalObject *GO,
     return false;
 
   Type *Ty = GVA->getValueType();
+
+  // It is possible that the type of the global is unsized, i.e. a declaration
+  // of a extern struct. In this case don't presume it is in the small data
+  // section. This happens e.g. when building the FreeBSD kernel.
+  if (!Ty->isSized())
+    return false;
+
   return IsInSmallSection(
       GVA->getParent()->getDataLayout().getTypeAllocSize(Ty));
 }
@@ -182,6 +189,7 @@ const MCExpr *
 MipsTargetObjectFile::getDebugThreadLocalSymbol(const MCSymbol *Sym) const {
   const MCExpr *Expr =
       MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
-  return MCBinaryExpr::createAdd(
+  Expr = MCBinaryExpr::createAdd(
       Expr, MCConstantExpr::create(0x8000, getContext()), getContext());
+  return MipsMCExpr::create(MipsMCExpr::MEK_DTPREL, Expr, getContext());
 }

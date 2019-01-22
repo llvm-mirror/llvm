@@ -1,15 +1,15 @@
 //===-- llvm/Support/Timer.h - Interval Timing Support ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_SUPPORT_TIMER_H
 #define LLVM_SUPPORT_TIMER_H
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 #include <cassert>
@@ -194,6 +194,10 @@ class TimerGroup {
 
 public:
   explicit TimerGroup(StringRef Name, StringRef Description);
+
+  explicit TimerGroup(StringRef Name, StringRef Description,
+                      const StringMap<TimeRecord> &Records);
+
   ~TimerGroup();
 
   void setName(StringRef NewName, StringRef NewDescription) {
@@ -201,13 +205,23 @@ public:
     Description.assign(NewDescription.begin(), NewDescription.end());
   }
 
-  /// Print any started timers in this group and zero them.
+  /// Print any started timers in this group.
   void print(raw_ostream &OS);
 
-  /// This static method prints all timers and clears them all out.
+  /// Clear all timers in this group.
+  void clear();
+
+  /// This static method prints all timers.
   static void printAll(raw_ostream &OS);
 
-  /// Prints all timers as JSON key/value pairs, and clears them all out.
+  /// Clear out all timers. This is mostly used to disable automatic
+  /// printing on shutdown, when timers have already been printed explicitly
+  /// using \c printAll or \c printJSONValues.
+  static void clearAll();
+
+  const char *printJSONValues(raw_ostream &OS, const char *delim);
+
+  /// Prints all timers as JSON key/value pairs.
   static const char *printAllJSONValues(raw_ostream &OS, const char *delim);
 
   /// Ensure global timer group lists are initialized. This function is mostly
@@ -223,7 +237,6 @@ private:
   void PrintQueuedTimers(raw_ostream &OS);
   void printJSONValue(raw_ostream &OS, const PrintRecord &R,
                       const char *suffix, double Value);
-  const char *printJSONValues(raw_ostream &OS, const char *delim);
 };
 
 } // end namespace llvm

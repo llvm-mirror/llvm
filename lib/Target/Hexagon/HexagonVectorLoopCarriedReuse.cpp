@@ -1,9 +1,8 @@
 //===- HexagonVectorLoopCarriedReuse.cpp ----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -138,6 +137,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -363,17 +363,18 @@ bool HexagonVectorLoopCarriedReuse::canReplace(Instruction *I) {
   if (II &&
       (II->getIntrinsicID() == Intrinsic::hexagon_V6_hi ||
        II->getIntrinsicID() == Intrinsic::hexagon_V6_lo)) {
-    DEBUG(dbgs() << "Not considering for reuse: " << *II << "\n");
+    LLVM_DEBUG(dbgs() << "Not considering for reuse: " << *II << "\n");
     return false;
   }
   return true;
 }
 void HexagonVectorLoopCarriedReuse::findValueToReuse() {
   for (auto *D : Dependences) {
-    DEBUG(dbgs() << "Processing dependence " << *(D->front()) << "\n");
+    LLVM_DEBUG(dbgs() << "Processing dependence " << *(D->front()) << "\n");
     if (D->iterations() > HexagonVLCRIterationLim) {
-      DEBUG(dbgs() <<
-            ".. Skipping because number of iterations > than the limit\n");
+      LLVM_DEBUG(
+          dbgs()
+          << ".. Skipping because number of iterations > than the limit\n");
       continue;
     }
 
@@ -381,7 +382,8 @@ void HexagonVectorLoopCarriedReuse::findValueToReuse() {
     Instruction *BEInst = D->back();
     int Iters = D->iterations();
     BasicBlock *BB = PN->getParent();
-    DEBUG(dbgs() << "Checking if any uses of " << *PN << " can be reused\n");
+    LLVM_DEBUG(dbgs() << "Checking if any uses of " << *PN
+                      << " can be reused\n");
 
     SmallVector<Instruction *, 4> PNUsers;
     for (auto UI = PN->use_begin(), E = PN->use_end(); UI != E; ++UI) {
@@ -391,7 +393,8 @@ void HexagonVectorLoopCarriedReuse::findValueToReuse() {
       if (User->getParent() != BB)
         continue;
       if (ReplacedInsts.count(User)) {
-        DEBUG(dbgs() << *User << " has already been replaced. Skipping...\n");
+        LLVM_DEBUG(dbgs() << *User
+                          << " has already been replaced. Skipping...\n");
         continue;
       }
       if (isa<PHINode>(User))
@@ -403,7 +406,7 @@ void HexagonVectorLoopCarriedReuse::findValueToReuse() {
 
       PNUsers.push_back(User);
     }
-    DEBUG(dbgs() << PNUsers.size() << " use(s) of the PHI in the block\n");
+    LLVM_DEBUG(dbgs() << PNUsers.size() << " use(s) of the PHI in the block\n");
 
     // For each interesting use I of PN, find an Instruction BEUser that
     // performs the same operation as I on BEInst and whose other operands,
@@ -439,7 +442,7 @@ void HexagonVectorLoopCarriedReuse::findValueToReuse() {
           }
         }
         if (BEUser) {
-          DEBUG(dbgs() << "Found Value for reuse.\n");
+          LLVM_DEBUG(dbgs() << "Found Value for reuse.\n");
           ReuseCandidate.Inst2Replace = I;
           ReuseCandidate.BackedgeInst = BEUser;
           return;
@@ -460,7 +463,7 @@ Value *HexagonVectorLoopCarriedReuse::findValueInBlock(Value *Op,
 }
 
 void HexagonVectorLoopCarriedReuse::reuseValue() {
-  DEBUG(dbgs() << ReuseCandidate);
+  LLVM_DEBUG(dbgs() << ReuseCandidate);
   Instruction *Inst2Replace = ReuseCandidate.Inst2Replace;
   Instruction *BEInst = ReuseCandidate.BackedgeInst;
   int NumOperands = Inst2Replace->getNumOperands();
@@ -485,7 +488,7 @@ void HexagonVectorLoopCarriedReuse::reuseValue() {
     }
   }
 
-  DEBUG(dbgs() << "reuseValue is making the following changes\n");
+  LLVM_DEBUG(dbgs() << "reuseValue is making the following changes\n");
 
   SmallVector<Instruction *, 4> InstsInPreheader;
   for (int i = 0; i < Iterations; ++i) {
@@ -506,8 +509,8 @@ void HexagonVectorLoopCarriedReuse::reuseValue() {
     InstsInPreheader.push_back(InstInPreheader);
     InstInPreheader->setName(Inst2Replace->getName() + ".hexagon.vlcr");
     InstInPreheader->insertBefore(LoopPH->getTerminator());
-    DEBUG(dbgs() << "Added " << *InstInPreheader << " to " << LoopPH->getName()
-          << "\n");
+    LLVM_DEBUG(dbgs() << "Added " << *InstInPreheader << " to "
+                      << LoopPH->getName() << "\n");
   }
   BasicBlock *BB = BEInst->getParent();
   IRBuilder<> IRB(BB);
@@ -519,7 +522,8 @@ void HexagonVectorLoopCarriedReuse::reuseValue() {
     NewPhi = IRB.CreatePHI(InstInPreheader->getType(), 2);
     NewPhi->addIncoming(InstInPreheader, LoopPH);
     NewPhi->addIncoming(BEVal, BB);
-    DEBUG(dbgs() << "Adding " << *NewPhi << " to " << BB->getName() << "\n");
+    LLVM_DEBUG(dbgs() << "Adding " << *NewPhi << " to " << BB->getName()
+                      << "\n");
     BEVal = NewPhi;
   }
   // We are in LCSSA form. So, a value defined inside the Loop is used only
@@ -538,7 +542,7 @@ bool HexagonVectorLoopCarriedReuse::doVLCR() {
   bool Changed = false;
   bool Continue;
 
-  DEBUG(dbgs() << "Working on Loop: " << *CurLoop->getHeader() << "\n");
+  LLVM_DEBUG(dbgs() << "Working on Loop: " << *CurLoop->getHeader() << "\n");
   do {
     // Reset datastructures.
     Dependences.clear();
@@ -551,8 +555,7 @@ bool HexagonVectorLoopCarriedReuse::doVLCR() {
       Changed = true;
       Continue = true;
     }
-    std::for_each(Dependences.begin(), Dependences.end(),
-                  std::default_delete<DepChain>());
+    llvm::for_each(Dependences, std::default_delete<DepChain>());
   } while (Continue);
   return Changed;
 }
@@ -626,10 +629,9 @@ void HexagonVectorLoopCarriedReuse::findLoopCarriedDeps() {
     else
       delete D;
   }
-  DEBUG(dbgs() << "Found " << Dependences.size() << " dependences\n");
-  DEBUG(for (size_t i = 0; i < Dependences.size(); ++i) {
-      dbgs() << *Dependences[i] << "\n";
-    });
+  LLVM_DEBUG(dbgs() << "Found " << Dependences.size() << " dependences\n");
+  LLVM_DEBUG(for (size_t i = 0; i < Dependences.size();
+                  ++i) { dbgs() << *Dependences[i] << "\n"; });
 }
 
 Pass *llvm::createHexagonVectorLoopCarriedReusePass() {

@@ -1,9 +1,8 @@
 //=== HexagonSplitConst32AndConst64.cpp - split CONST32/Const64 into HI/LO ===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,8 +22,8 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 using namespace llvm;
 
@@ -60,14 +59,14 @@ INITIALIZE_PASS(HexagonSplitConst32AndConst64, "split-const-for-sdata",
       "Hexagon Split Const32s and Const64s", false, false)
 
 bool HexagonSplitConst32AndConst64::runOnMachineFunction(MachineFunction &Fn) {
-  const HexagonTargetObjectFile &TLOF =
-      *static_cast<const HexagonTargetObjectFile *>(
-          Fn.getTarget().getObjFileLowering());
-  if (TLOF.isSmallDataEnabled())
-    return true;
+  auto &HST = Fn.getSubtarget<HexagonSubtarget>();
+  auto &HTM = static_cast<const HexagonTargetMachine&>(Fn.getTarget());
+  auto &TLOF = *HTM.getObjFileLowering();
+  if (HST.useSmallData() && TLOF.isSmallDataEnabled(HTM))
+    return false;
 
-  const TargetInstrInfo *TII = Fn.getSubtarget().getInstrInfo();
-  const TargetRegisterInfo *TRI = Fn.getSubtarget().getRegisterInfo();
+  const TargetInstrInfo *TII = HST.getInstrInfo();
+  const TargetRegisterInfo *TRI = HST.getRegisterInfo();
 
   // Loop over all of the basic blocks
   for (MachineBasicBlock &B : Fn) {
@@ -109,7 +108,6 @@ bool HexagonSplitConst32AndConst64::runOnMachineFunction(MachineFunction &Fn) {
 //===----------------------------------------------------------------------===//
 //                         Public Constructor Functions
 //===----------------------------------------------------------------------===//
-
 FunctionPass *llvm::createHexagonSplitConst32AndConst64() {
   return new HexagonSplitConst32AndConst64();
 }

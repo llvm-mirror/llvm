@@ -1,9 +1,8 @@
 //===- llvm/ADT/BitVector.h - Bit vectors -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -503,6 +502,23 @@ public:
     return (*this)[Idx];
   }
 
+  // Push single bit to end of vector.
+  void push_back(bool Val) {
+    unsigned OldSize = Size;
+    unsigned NewSize = Size + 1;
+
+    // Resize, which will insert zeros.
+    // If we already fit then the unused bits will be already zero.
+    if (NewSize > getBitCapacity())
+      resize(NewSize, false);
+    else
+      Size = NewSize;
+
+    // If true, set single bit.
+    if (Val)
+      set(OldSize);
+  }
+
   /// Test if any common bits are set.
   bool anyCommon(const BitVector &RHS) const {
     unsigned ThisWords = NumBitWords(size());
@@ -779,7 +795,7 @@ public:
   }
 
 private:
-  /// \brief Perform a logical left shift of \p Count words by moving everything
+  /// Perform a logical left shift of \p Count words by moving everything
   /// \p Count words to the right in memory.
   ///
   /// While confusing, words are stored from least significant at Bits[0] to
@@ -810,7 +826,7 @@ private:
     clear_unused_bits();
   }
 
-  /// \brief Perform a logical right shift of \p Count words by moving those
+  /// Perform a logical right shift of \p Count words by moving those
   /// words to the left in memory.  See wordShl for more information.
   ///
   void wordShr(uint32_t Count) {
@@ -828,7 +844,8 @@ private:
   }
 
   MutableArrayRef<BitWord> allocate(size_t NumWords) {
-    BitWord *RawBits = (BitWord *)std::malloc(NumWords * sizeof(BitWord));
+    BitWord *RawBits = static_cast<BitWord *>(
+        safe_malloc(NumWords * sizeof(BitWord)));
     return MutableArrayRef<BitWord>(RawBits, NumWords);
   }
 
@@ -867,8 +884,8 @@ private:
   void grow(unsigned NewSize) {
     size_t NewCapacity = std::max<size_t>(NumBitWords(NewSize), Bits.size() * 2);
     assert(NewCapacity > 0 && "realloc-ing zero space");
-    BitWord *NewBits =
-        (BitWord *)std::realloc(Bits.data(), NewCapacity * sizeof(BitWord));
+    BitWord *NewBits = static_cast<BitWord *>(
+        safe_realloc(Bits.data(), NewCapacity * sizeof(BitWord)));
     Bits = MutableArrayRef<BitWord>(NewBits, NewCapacity);
     clear_unused_bits();
   }

@@ -1,9 +1,8 @@
 //===- InstCombineWorklist.h - Worklist for InstCombine pass ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -40,7 +39,7 @@ public:
   /// in it.
   void Add(Instruction *I) {
     if (WorklistMap.insert(std::make_pair(I, Worklist.size())).second) {
-      DEBUG(dbgs() << "IC: ADD: " << *I << '\n');
+      LLVM_DEBUG(dbgs() << "IC: ADD: " << *I << '\n');
       Worklist.push_back(I);
     }
   }
@@ -57,7 +56,8 @@ public:
     assert(Worklist.empty() && "Worklist must be empty to add initial group");
     Worklist.reserve(List.size()+16);
     WorklistMap.reserve(List.size());
-    DEBUG(dbgs() << "IC: ADDING: " << List.size() << " instrs to worklist\n");
+    LLVM_DEBUG(dbgs() << "IC: ADDING: " << List.size()
+                      << " instrs to worklist\n");
     unsigned Idx = 0;
     for (Instruction *I : reverse(List)) {
       WorklistMap.insert(std::make_pair(I, Idx++));

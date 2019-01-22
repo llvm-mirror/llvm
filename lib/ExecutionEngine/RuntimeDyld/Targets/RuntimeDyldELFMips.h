@@ -1,9 +1,8 @@
 //===-- RuntimeDyldELFMips.h ---- ELF/Mips specific code. -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,13 +38,13 @@ protected:
                                 uint64_t SymOffset, SID SectionID);
 
 private:
-  /// \brief A object file specific relocation resolver
+  /// A object file specific relocation resolver
   /// \param RE The relocation to be resolved
   /// \param Value Target symbol address to apply the relocation action
   uint64_t evaluateRelocation(const RelocationEntry &RE, uint64_t Value,
                               uint64_t Addend);
 
-  /// \brief A object file specific relocation resolver
+  /// A object file specific relocation resolver
   /// \param RE The relocation to be resolved
   /// \param Value Target symbol address to apply the relocation action
   void applyRelocation(const RelocationEntry &RE, uint64_t Value);

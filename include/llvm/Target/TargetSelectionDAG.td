@@ -1,9 +1,8 @@
 //===- TargetSelectionDAG.td - Common code for DAG isels ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -116,11 +115,17 @@ def SDTIntBinOp : SDTypeProfile<1, 2, [     // add, and, or, xor, udiv, etc.
 def SDTIntShiftOp : SDTypeProfile<1, 2, [   // shl, sra, srl
   SDTCisSameAs<0, 1>, SDTCisInt<0>, SDTCisInt<2>
 ]>;
+def SDTIntShiftDOp: SDTypeProfile<1, 3, [   // fshl, fshr
+  SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisInt<0>, SDTCisInt<3>
+]>;
 def SDTIntSatNoShOp : SDTypeProfile<1, 2, [   // ssat with no shift
   SDTCisSameAs<0, 1>, SDTCisInt<2>
 ]>;
 def SDTIntBinHiLoOp : SDTypeProfile<2, 2, [ // mulhi, mullo, sdivrem, udivrem
   SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>,SDTCisInt<0>
+]>;
+def SDTIntScaledBinOp : SDTypeProfile<1, 3, [  // smulfix
+  SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisInt<0>, SDTCisInt<3>
 ]>;
 
 def SDTFPBinOp : SDTypeProfile<1, 2, [      // fadd, fmul, etc.
@@ -162,7 +167,7 @@ def SDTExtInreg : SDTypeProfile<1, 2, [     // sext_inreg
 ]>;
 def SDTExtInvec : SDTypeProfile<1, 1, [     // sext_invec
   SDTCisInt<0>, SDTCisVec<0>, SDTCisInt<1>, SDTCisVec<1>,
-  SDTCisOpSmallerThanOp<1, 0>, SDTCisSameSizeAs<0,1>
+  SDTCisOpSmallerThanOp<1, 0>
 ]>;
 
 def SDTSetCC : SDTypeProfile<1, 3, [        // setcc
@@ -217,22 +222,12 @@ def SDTIStore : SDTypeProfile<1, 3, [       // indexed store
 ]>;
 
 def SDTMaskedStore: SDTypeProfile<0, 3, [       // masked store
-  SDTCisPtrTy<0>, SDTCisVec<1>, SDTCisVec<2>, SDTCisSameNumEltsAs<1, 2>
+  SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameNumEltsAs<0, 2>
 ]>;
 
 def SDTMaskedLoad: SDTypeProfile<1, 3, [       // masked load
   SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameAs<0, 3>,
   SDTCisSameNumEltsAs<0, 2>
-]>;
-
-def SDTMaskedGather: SDTypeProfile<2, 3, [       // masked gather
-  SDTCisVec<0>, SDTCisVec<1>, SDTCisSameAs<0, 2>, SDTCisSameAs<1, 3>,
-  SDTCisPtrTy<4>, SDTCVecEltisVT<1, i1>, SDTCisSameNumEltsAs<0, 1>
-]>;
-
-def SDTMaskedScatter: SDTypeProfile<1, 3, [       // masked scatter
-  SDTCisVec<0>, SDTCisVec<1>, SDTCisSameAs<0, 2>, SDTCisSameNumEltsAs<0, 1>,
-  SDTCVecEltisVT<0, i1>, SDTCisPtrTy<3>
 ]>;
 
 def SDTVecShuffle : SDTypeProfile<1, 2, [
@@ -284,32 +279,6 @@ class SDCallSeqStart<list<SDTypeConstraint> constraints> :
         SDTypeProfile<0, 2, constraints>;
 class SDCallSeqEnd<list<SDTypeConstraint> constraints> :
         SDTypeProfile<0, 2, constraints>;
-
-//===----------------------------------------------------------------------===//
-// Selection DAG Node Properties.
-//
-// Note: These are hard coded into tblgen.
-//
-class SDNodeProperty;
-def SDNPCommutative : SDNodeProperty;   // X op Y == Y op X
-def SDNPAssociative : SDNodeProperty;   // (X op Y) op Z == X op (Y op Z)
-def SDNPHasChain    : SDNodeProperty;   // R/W chain operand and result
-def SDNPOutGlue     : SDNodeProperty;   // Write a flag result
-def SDNPInGlue      : SDNodeProperty;   // Read a flag operand
-def SDNPOptInGlue   : SDNodeProperty;   // Optionally read a flag operand
-def SDNPMayStore    : SDNodeProperty;   // May write to memory, sets 'mayStore'.
-def SDNPMayLoad     : SDNodeProperty;   // May read memory, sets 'mayLoad'.
-def SDNPSideEffect  : SDNodeProperty;   // Sets 'HasUnmodelledSideEffects'.
-def SDNPMemOperand  : SDNodeProperty;   // Touches memory, has assoc MemOperand
-def SDNPVariadic    : SDNodeProperty;   // Node has variable arguments.
-def SDNPWantRoot    : SDNodeProperty;   // ComplexPattern gets the root of match
-def SDNPWantParent  : SDNodeProperty;   // ComplexPattern gets the parent
-
-//===----------------------------------------------------------------------===//
-// Selection DAG Pattern Operations
-class SDPatternOperator {
-  list<SDNodeProperty> Properties = [];
-}
 
 //===----------------------------------------------------------------------===//
 // Selection DAG Node definitions.
@@ -386,6 +355,8 @@ def sra        : SDNode<"ISD::SRA"       , SDTIntShiftOp>;
 def shl        : SDNode<"ISD::SHL"       , SDTIntShiftOp>;
 def rotl       : SDNode<"ISD::ROTL"      , SDTIntShiftOp>;
 def rotr       : SDNode<"ISD::ROTR"      , SDTIntShiftOp>;
+def fshl       : SDNode<"ISD::FSHL"      , SDTIntShiftDOp>;
+def fshr       : SDNode<"ISD::FSHR"      , SDTIntShiftDOp>;
 def and        : SDNode<"ISD::AND"       , SDTIntBinOp,
                         [SDNPCommutative, SDNPAssociative]>;
 def or         : SDNode<"ISD::OR"        , SDTIntBinOp,
@@ -408,6 +379,12 @@ def umin       : SDNode<"ISD::UMIN"      , SDTIntBinOp,
                                   [SDNPCommutative, SDNPAssociative]>;
 def umax       : SDNode<"ISD::UMAX"      , SDTIntBinOp,
                                   [SDNPCommutative, SDNPAssociative]>;
+
+def saddsat    : SDNode<"ISD::SADDSAT"   , SDTIntBinOp, [SDNPCommutative]>;
+def uaddsat    : SDNode<"ISD::UADDSAT"   , SDTIntBinOp, [SDNPCommutative]>;
+def ssubsat    : SDNode<"ISD::SSUBSAT"   , SDTIntBinOp>;
+def usubsat    : SDNode<"ISD::USUBSAT"   , SDTIntBinOp>;
+def smulfix    : SDNode<"ISD::SMULFIX"   , SDTIntScaledBinOp, [SDNPCommutative]>;
 
 def sext_inreg : SDNode<"ISD::SIGN_EXTEND_INREG", SDTExtInreg>;
 def sext_invec : SDNode<"ISD::SIGN_EXTEND_VECTOR_INREG", SDTExtInvec>;
@@ -442,8 +419,14 @@ def fminnum    : SDNode<"ISD::FMINNUM"    , SDTFPBinOp,
                                   [SDNPCommutative, SDNPAssociative]>;
 def fmaxnum    : SDNode<"ISD::FMAXNUM"    , SDTFPBinOp,
                                   [SDNPCommutative, SDNPAssociative]>;
-def fminnan    : SDNode<"ISD::FMINNAN"    , SDTFPBinOp>;
-def fmaxnan    : SDNode<"ISD::FMAXNAN"    , SDTFPBinOp>;
+def fminnum_ieee : SDNode<"ISD::FMINNUM_IEEE", SDTFPBinOp,
+                          [SDNPCommutative]>;
+def fmaxnum_ieee  : SDNode<"ISD::FMAXNUM_IEEE", SDTFPBinOp,
+                           [SDNPCommutative]>;
+def fminimum   : SDNode<"ISD::FMINIMUM"   , SDTFPBinOp,
+                        [SDNPCommutative, SDNPAssociative]>;
+def fmaximum   : SDNode<"ISD::FMAXIMUM"   , SDTFPBinOp,
+                        [SDNPCommutative, SDNPAssociative]>;
 def fgetsign   : SDNode<"ISD::FGETSIGN"   , SDTFPToIntOp>;
 def fcanonicalize : SDNode<"ISD::FCANONICALIZE", SDTFPUnaryOp>;
 def fneg       : SDNode<"ISD::FNEG"       , SDTFPUnaryOp>;
@@ -511,6 +494,8 @@ def atomic_load_sub : SDNode<"ISD::ATOMIC_LOAD_SUB" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_and : SDNode<"ISD::ATOMIC_LOAD_AND" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+def atomic_load_clr : SDNode<"ISD::ATOMIC_LOAD_CLR" , SDTAtomic2,
+                    [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_or  : SDNode<"ISD::ATOMIC_LOAD_OR" , SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_xor : SDNode<"ISD::ATOMIC_LOAD_XOR" , SDTAtomic2,
@@ -533,10 +518,6 @@ def atomic_store     : SDNode<"ISD::ATOMIC_STORE", SDTAtomicStore,
 def masked_store : SDNode<"ISD::MSTORE",  SDTMaskedStore,
                        [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def masked_load  : SDNode<"ISD::MLOAD",  SDTMaskedLoad,
-                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
-def masked_scatter : SDNode<"ISD::MSCATTER",  SDTMaskedScatter,
-                       [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
-def masked_gather  : SDNode<"ISD::MGATHER",  SDTMaskedGather,
                        [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
 // Do not use ld, st directly. Use load, extload, sextload, zextload, store,
@@ -639,16 +620,29 @@ class CodePatPred<code predicate> : PatPred {
 // compact and readable.
 //
 
-/// PatFrag - Represents a pattern fragment.  This can match something on the
-/// DAG, from a single node to multiple nested other fragments.
+/// PatFrags - Represents a set of pattern fragments.  Each single fragment
+/// can match something on the DAG, from a single node to multiple nested other
+/// fragments.   The whole set of fragments matches if any of the single
+/// fragemnts match.  This allows e.g. matching and "add with overflow" and
+/// a regular "add" with the same fragment set.
 ///
-class PatFrag<dag ops, dag frag, code pred = [{}],
-              SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
+class PatFrags<dag ops, list<dag> frags, code pred = [{}],
+               SDNodeXForm xform = NOOP_SDNodeXForm> : SDPatternOperator {
   dag Operands = ops;
-  dag Fragment = frag;
+  list<dag> Fragments = frags;
   code PredicateCode = pred;
+  code GISelPredicateCode = [{}];
   code ImmediateCode = [{}];
   SDNodeXForm OperandTransform = xform;
+
+  // When this is set, the PredicateCode may refer to a constant Operands
+  // vector which contains the captured nodes of the DAG, in the order listed
+  // by the Operands field above.
+  //
+  // This is useful when Fragments involves associative / commutative
+  // operators: a single piece of code can easily refer to all operands even
+  // when re-associated / commuted variants of the fragment are matched.
+  bit PredicateCodeUsesOperands = 0;
 
   // Define a few pre-packaged predicates. This helps GlobalISel import
   // existing rules from SelectionDAG for many common cases.
@@ -659,6 +653,8 @@ class PatFrag<dag ops, dag frag, code pred = [{}],
   bit IsLoad = ?;
   // Is the desired pre-packaged predicate for a store?
   bit IsStore = ?;
+  // Is the desired pre-packaged predicate for an atomic?
+  bit IsAtomic = ?;
 
   // cast<LoadSDNode>(N)->getAddressingMode() == ISD::UNINDEXED;
   // cast<StoreSDNode>(N)->getAddressingMode() == ISD::UNINDEXED;
@@ -676,6 +672,25 @@ class PatFrag<dag ops, dag frag, code pred = [{}],
   // cast<StoreSDNode>(N)->isTruncatingStore();
   bit IsTruncStore = ?;
 
+  // cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Monotonic
+  bit IsAtomicOrderingMonotonic = ?;
+  // cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Acquire
+  bit IsAtomicOrderingAcquire = ?;
+  // cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Release
+  bit IsAtomicOrderingRelease = ?;
+  // cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::AcquireRelease
+  bit IsAtomicOrderingAcquireRelease = ?;
+  // cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::SequentiallyConsistent
+  bit IsAtomicOrderingSequentiallyConsistent = ?;
+
+  // isAcquireOrStronger(cast<AtomicSDNode>(N)->getOrdering())
+  // !isAcquireOrStronger(cast<AtomicSDNode>(N)->getOrdering())
+  bit IsAtomicOrderingAcquireOrStronger = ?;
+
+  // isReleaseOrStronger(cast<AtomicSDNode>(N)->getOrdering())
+  // !isReleaseOrStronger(cast<AtomicSDNode>(N)->getOrdering())
+  bit IsAtomicOrderingReleaseOrStronger = ?;
+
   // cast<LoadSDNode>(N)->getMemoryVT() == MVT::<VT>;
   // cast<StoreSDNode>(N)->getMemoryVT() == MVT::<VT>;
   ValueType MemoryVT = ?;
@@ -683,6 +698,11 @@ class PatFrag<dag ops, dag frag, code pred = [{}],
   // cast<StoreSDNode>(N)->getMemoryVT().getScalarType() == MVT::<VT>;
   ValueType ScalarMemoryVT = ?;
 }
+
+// PatFrag - A version of PatFrags matching only a single fragment.
+class PatFrag<dag ops, dag frag, code pred = [{}],
+              SDNodeXForm xform = NOOP_SDNodeXForm>
+  : PatFrags<ops, [frag], pred, xform>;
 
 // OutPatFrag is a pattern fragment that is used as part of an output pattern
 // (not an input pattern). These do not have predicates or transforms, but are
@@ -1061,6 +1081,15 @@ def post_truncstf32 : PatFrag<(ops node:$val, node:$base, node:$offset),
   let MemoryVT = f32;
 }
 
+def nonvolatile_load : PatFrag<(ops node:$ptr),
+                               (load node:$ptr), [{
+  return !cast<LoadSDNode>(N)->isVolatile();
+}]>;
+def nonvolatile_store : PatFrag<(ops node:$val, node:$ptr),
+                                (store node:$val, node:$ptr), [{
+  return !cast<StoreSDNode>(N)->isVolatile();
+}]>;
+
 // nontemporal store fragments.
 def nontemporalstore : PatFrag<(ops node:$val, node:$ptr),
                                (store node:$val, node:$ptr), [{
@@ -1135,67 +1164,81 @@ def setne  : PatFrag<(ops node:$lhs, node:$rhs),
 
 multiclass binary_atomic_op_ord<SDNode atomic_op> {
   def #NAME#_monotonic : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Monotonic;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingMonotonic = 1;
+  }
   def #NAME#_acquire : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Acquire;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingAcquire = 1;
+  }
   def #NAME#_release : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Release;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingRelease = 1;
+  }
   def #NAME#_acq_rel : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::AcquireRelease;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingAcquireRelease = 1;
+  }
   def #NAME#_seq_cst : PatFrag<(ops node:$ptr, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::SequentiallyConsistent;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingSequentiallyConsistent = 1;
+  }
 }
 
 multiclass ternary_atomic_op_ord<SDNode atomic_op> {
   def #NAME#_monotonic : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Monotonic;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingMonotonic = 1;
+  }
   def #NAME#_acquire : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Acquire;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingAcquire = 1;
+  }
   def #NAME#_release : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::Release;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingRelease = 1;
+  }
   def #NAME#_acq_rel : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::AcquireRelease;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingAcquireRelease = 1;
+  }
   def #NAME#_seq_cst : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-      (!cast<SDNode>(#NAME) node:$ptr, node:$cmp, node:$val), [{
-        return cast<AtomicSDNode>(N)->getOrdering() == AtomicOrdering::SequentiallyConsistent;
-  }]>;
+      (!cast<SDPatternOperator>(#NAME) node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let IsAtomicOrderingSequentiallyConsistent = 1;
+  }
 }
 
 multiclass binary_atomic_op<SDNode atomic_op> {
   def _8 : PatFrag<(ops node:$ptr, node:$val),
-                   (atomic_op  node:$ptr, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i8;
-  }]>;
+                   (atomic_op  node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i8;
+  }
   def _16 : PatFrag<(ops node:$ptr, node:$val),
-                    (atomic_op node:$ptr, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i16;
-  }]>;
+                    (atomic_op node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i16;
+  }
   def _32 : PatFrag<(ops node:$ptr, node:$val),
-                    (atomic_op node:$ptr, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i32;
-  }]>;
+                    (atomic_op node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i32;
+  }
   def _64 : PatFrag<(ops node:$ptr, node:$val),
-                    (atomic_op node:$ptr, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i64;
-  }]>;
+                    (atomic_op node:$ptr, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i64;
+  }
 
   defm NAME#_8  : binary_atomic_op_ord<atomic_op>;
   defm NAME#_16 : binary_atomic_op_ord<atomic_op>;
@@ -1205,21 +1248,25 @@ multiclass binary_atomic_op<SDNode atomic_op> {
 
 multiclass ternary_atomic_op<SDNode atomic_op> {
   def _8 : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-                   (atomic_op  node:$ptr, node:$cmp, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i8;
-  }]>;
+                   (atomic_op  node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i8;
+  }
   def _16 : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-                    (atomic_op node:$ptr, node:$cmp, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i16;
-  }]>;
+                    (atomic_op node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i16;
+  }
   def _32 : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-                    (atomic_op node:$ptr, node:$cmp, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i32;
-  }]>;
+                    (atomic_op node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i32;
+  }
   def _64 : PatFrag<(ops node:$ptr, node:$cmp, node:$val),
-                    (atomic_op node:$ptr, node:$cmp, node:$val), [{
-    return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i64;
-  }]>;
+                    (atomic_op node:$ptr, node:$cmp, node:$val)> {
+    let IsAtomic = 1;
+    let MemoryVT = i64;
+  }
 
   defm NAME#_8  : ternary_atomic_op_ord<atomic_op>;
   defm NAME#_16 : ternary_atomic_op_ord<atomic_op>;
@@ -1231,6 +1278,7 @@ defm atomic_load_add  : binary_atomic_op<atomic_load_add>;
 defm atomic_swap      : binary_atomic_op<atomic_swap>;
 defm atomic_load_sub  : binary_atomic_op<atomic_load_sub>;
 defm atomic_load_and  : binary_atomic_op<atomic_load_and>;
+defm atomic_load_clr  : binary_atomic_op<atomic_load_clr>;
 defm atomic_load_or   : binary_atomic_op<atomic_load_or>;
 defm atomic_load_xor  : binary_atomic_op<atomic_load_xor>;
 defm atomic_load_nand : binary_atomic_op<atomic_load_nand>;
@@ -1243,24 +1291,28 @@ defm atomic_cmp_swap  : ternary_atomic_op<atomic_cmp_swap>;
 
 def atomic_load_8 :
   PatFrag<(ops node:$ptr),
-          (atomic_load node:$ptr), [{
-  return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i8;
-}]>;
+          (atomic_load node:$ptr)> {
+  let IsAtomic = 1;
+  let MemoryVT = i8;
+}
 def atomic_load_16 :
   PatFrag<(ops node:$ptr),
-          (atomic_load node:$ptr), [{
-  return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i16;
-}]>;
+          (atomic_load node:$ptr)> {
+  let IsAtomic = 1;
+  let MemoryVT = i16;
+}
 def atomic_load_32 :
   PatFrag<(ops node:$ptr),
-          (atomic_load node:$ptr), [{
-  return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i32;
-}]>;
+          (atomic_load node:$ptr)> {
+  let IsAtomic = 1;
+  let MemoryVT = i32;
+}
 def atomic_load_64 :
   PatFrag<(ops node:$ptr),
-          (atomic_load node:$ptr), [{
-  return cast<AtomicSDNode>(N)->getMemoryVT() == MVT::i64;
-}]>;
+          (atomic_load node:$ptr)> {
+  let IsAtomic = 1;
+  let MemoryVT = i64;
+}
 
 //===----------------------------------------------------------------------===//
 // Selection DAG Pattern Support.

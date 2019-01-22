@@ -1,4 +1,4 @@
-; RUN: opt -S -partial-inliner -max-num-inline-blocks=2 -skip-partial-inlining-cost-analysis  < %s |   FileCheck %s
+; RUN: opt -S -partial-inliner -max-num-inline-blocks=3 -skip-partial-inlining-cost-analysis  < %s |   FileCheck %s
 ; RUN: opt -S -passes=partial-inliner -max-num-inline-blocks=2  -skip-partial-inlining-cost-analysis < %s   | FileCheck %s
 
 %class.A = type { i32 }
@@ -16,6 +16,10 @@ bb:
   br i1 %tmp3, label %bb4, label %bb9
 
 bb4:                                              ; preds = %bb
+  %foo = icmp eq i32 %tmp2, 0
+  br i1 %foo, label %bb5, label %bb9
+
+bb5:                                              ; preds = %bb4
   call void @_ZN1A7memfuncEv(%class.A* nonnull %tmp)
   %tmp5 = getelementptr inbounds %class.A, %class.A* %tmp, i64 0, i32 0
   %tmp6 = load i32, i32* %tmp5, align 4, !tbaa !6
@@ -46,7 +50,7 @@ bb:
   ret void
 }
 
-; CHECK-LABEL: define internal void @_Z3foov.1_
+; CHECK-LABEL: define internal void @_Z3foov.1.
 ; CHECK: bb9:
 ; CHECK: call void @llvm.lifetime.end.p0i8(i64 4, i8* nonnull %tmp1)
 ; CHECK:  br label %.exitStub

@@ -87,9 +87,9 @@ End-user Options
 
    llvm-as < /dev/null | llc -march=xyz -mattr=help
 
-.. option:: --disable-fp-elim
+.. option:: --frame-pointer
 
- Disable frame pointer elimination optimization.
+ Specify effect of frame pointer elimination optimization (all,non-leaf,none).
 
 .. option:: --disable-excess-fp-precision
 
@@ -131,6 +131,14 @@ End-user Options
 
  Specify which EABI version should conform to.  Valid EABI versions are *gnu*,
  *4* and *5*.  Default value (*default*) depends on the triple.
+
+.. option:: -stack-size-section
+
+ Emit the .stack_sizes section which contains stack size metadata. The section
+ contains an array of pairs of function symbol values (pointer size) and stack
+ sizes (unsigned LEB128). The stack size values only include the space allocated
+ in the function prologue. Functions with dynamic stack allocations are not
+ included.
 
 
 Tuning/Configuration Options

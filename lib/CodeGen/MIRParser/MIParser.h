@@ -1,9 +1,8 @@
 //===- MIParser.h - Machine Instructions Parser -----------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,6 +55,7 @@ struct PerFunctionMIParsingState {
 
   DenseMap<unsigned, MachineBasicBlock *> MBBSlots;
   DenseMap<unsigned, VRegInfo*> VRegInfos;
+  StringMap<VRegInfo*> VRegInfosNamed;
   DenseMap<unsigned, int> FixedStackObjectSlots;
   DenseMap<unsigned, int> StackObjectSlots;
   DenseMap<unsigned, unsigned> ConstantPoolSlots;
@@ -66,7 +66,8 @@ struct PerFunctionMIParsingState {
                             const Name2RegClassMap &Names2RegClasses,
                             const Name2RegBankMap &Names2RegBanks);
 
-  VRegInfo &getVRegInfo(unsigned VReg);
+  VRegInfo &getVRegInfo(unsigned Num);
+  VRegInfo &getVRegInfoNamed(StringRef RegName);
 };
 
 /// Parse the machine basic block definitions, and skip the machine

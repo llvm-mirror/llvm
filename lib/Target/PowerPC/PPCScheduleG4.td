@@ -1,9 +1,8 @@
 //===-- PPCScheduleG4.td - PPC G4 Scheduling Definitions ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -48,7 +47,8 @@ def G4Itineraries : ProcessorItineraries<
   InstrItinData<IIC_LdStLoadUpd , [InstrStage<2, [G4_SLU]>]>,
   InstrItinData<IIC_LdStLoadUpdX, [InstrStage<2, [G4_SLU]>]>,
   InstrItinData<IIC_LdStStore   , [InstrStage<2, [G4_SLU]>]>,
-  InstrItinData<IIC_LdStStoreUpd, [InstrStage<2, [G4_SLU]>]>,
+  InstrItinData<IIC_LdStSTU     , [InstrStage<2, [G4_SLU]>]>,
+  InstrItinData<IIC_LdStSTUX    , [InstrStage<2, [G4_SLU]>]>,
   InstrItinData<IIC_LdStDSS     , [InstrStage<2, [G4_SLU]>]>,
   InstrItinData<IIC_LdStICBI    , [InstrStage<2, [G4_SLU]>]>,
   InstrItinData<IIC_LdStSTFD    , [InstrStage<2, [G4_SLU]>]>,

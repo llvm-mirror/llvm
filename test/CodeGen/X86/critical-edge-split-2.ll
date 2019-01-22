@@ -10,11 +10,11 @@
 ; PR8642
 define i16 @test1(i1 zeroext %C, i8** nocapture %argv) nounwind ssp {
 ; CHECK-LABEL: test1:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movw $1, %ax
 ; CHECK-NEXT:    testl %edi, %edi
 ; CHECK-NEXT:    jne .LBB0_2
-; CHECK-NEXT:  # BB#1: # %cond.false.i
+; CHECK-NEXT:  # %bb.1: # %cond.false.i
 ; CHECK-NEXT:    movl $g_4, %eax
 ; CHECK-NEXT:    movl $g_2+4, %ecx
 ; CHECK-NEXT:    xorl %esi, %esi
@@ -25,7 +25,7 @@ define i16 @test1(i1 zeroext %C, i8** nocapture %argv) nounwind ssp {
 ; CHECK-NEXT:    divl %esi
 ; CHECK-NEXT:    movl %edx, %eax
 ; CHECK-NEXT:  .LBB0_2: # %cond.end.i
-; CHECK-NEXT:    # kill: %AX<def> %AX<kill> %EAX<kill>
+; CHECK-NEXT:    # kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
 entry:
   br i1 %C, label %cond.end.i, label %cond.false.i

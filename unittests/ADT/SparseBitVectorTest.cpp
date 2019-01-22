@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/SparseBitVectorTest.cpp - SparseBitVector tests --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,6 +30,27 @@ TEST(SparseBitVectorTest, TrivialOperation) {
   EXPECT_TRUE(Vec.test(17));
   Vec.clear();
   EXPECT_FALSE(Vec.test(17));
+
+  Vec.set(5);
+  const SparseBitVector<> ConstVec = Vec;
+  EXPECT_TRUE(ConstVec.test(5));
+  EXPECT_FALSE(ConstVec.test(17));
+
+  Vec.set(1337);
+  EXPECT_TRUE(Vec.test(1337));
+  Vec = ConstVec;
+  EXPECT_FALSE(Vec.test(1337));
+
+  Vec.set(1337);
+  EXPECT_FALSE(Vec.empty());
+  SparseBitVector<> MovedVec(std::move(Vec));
+  EXPECT_TRUE(Vec.empty());
+  EXPECT_TRUE(MovedVec.test(5));
+  EXPECT_TRUE(MovedVec.test(1337));
+
+  Vec = std::move(MovedVec);
+  EXPECT_TRUE(MovedVec.empty());
+  EXPECT_FALSE(Vec.empty());
 }
 
 TEST(SparseBitVectorTest, IntersectWith) {
@@ -68,7 +88,7 @@ TEST(SparseBitVectorTest, SelfAssignment) {
 
   Vec.set(23);
   Vec.set(234);
-  Vec = Vec;
+  Vec = static_cast<SparseBitVector<> &>(Vec);
   EXPECT_TRUE(Vec.test(23));
   EXPECT_TRUE(Vec.test(234));
 

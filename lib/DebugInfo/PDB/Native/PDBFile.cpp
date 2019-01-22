@@ -1,9 +1,8 @@
 //===- PDBFile.cpp - Low level interface to a PDB file ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -125,7 +124,7 @@ Error PDBFile::parseFileHeaders() {
   if (auto EC = Reader.readObject(SB)) {
     consumeError(std::move(EC));
     return make_error<RawError>(raw_error_code::corrupt_file,
-                                "Does not contain superblock");
+                                "MSF superblock is missing");
   }
 
   if (auto EC = msf::validateSuperBlock(*SB))
@@ -289,8 +288,8 @@ Expected<DbiStream &> PDBFile::getPDBDbiStream() {
     auto DbiS = safelyCreateIndexedStream(ContainerLayout, *Buffer, StreamDBI);
     if (!DbiS)
       return DbiS.takeError();
-    auto TempDbi = llvm::make_unique<DbiStream>(*this, std::move(*DbiS));
-    if (auto EC = TempDbi->reload())
+    auto TempDbi = llvm::make_unique<DbiStream>(std::move(*DbiS));
+    if (auto EC = TempDbi->reload(this))
       return std::move(EC);
     Dbi = std::move(TempDbi);
   }
@@ -370,7 +369,10 @@ Expected<PDBStringTable &> PDBFile::getStringTable() {
     if (!IS)
       return IS.takeError();
 
-    uint32_t NameStreamIndex = IS->getNamedStreamIndex("/names");
+    Expected<uint32_t> ExpectedNSI = IS->getNamedStreamIndex("/names");
+    if (!ExpectedNSI)
+      return ExpectedNSI.takeError();
+    uint32_t NameStreamIndex = *ExpectedNSI;
 
     auto NS =
         safelyCreateIndexedStream(ContainerLayout, *Buffer, NameStreamIndex);
@@ -398,7 +400,9 @@ uint32_t PDBFile::getPointerSize() {
   return 4;
 }
 
-bool PDBFile::hasPDBDbiStream() const { return StreamDBI < getNumStreams(); }
+bool PDBFile::hasPDBDbiStream() const {
+  return StreamDBI < getNumStreams() && getStreamByteSize(StreamDBI) > 0;
+}
 
 bool PDBFile::hasPDBGlobalsStream() {
   auto DbiS = getPDBDbiStream();
@@ -445,7 +449,13 @@ bool PDBFile::hasPDBStringTable() {
   auto IS = getPDBInfoStream();
   if (!IS)
     return false;
-  return IS->getNamedStreamIndex("/names") < getNumStreams();
+  Expected<uint32_t> ExpectedNSI = IS->getNamedStreamIndex("/names");
+  if (!ExpectedNSI) {
+    consumeError(ExpectedNSI.takeError());
+    return false;
+  }
+  assert(*ExpectedNSI < getNumStreams());
+  return true;
 }
 
 /// Wrapper around MappedBlockStream::createIndexedStream() that checks if a

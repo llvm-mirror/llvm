@@ -1,9 +1,8 @@
 //===-- BPFISelDAGToDAG.cpp - A dag to dag inst selector for BPF ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -39,13 +38,25 @@ using namespace llvm;
 namespace {
 
 class BPFDAGToDAGISel : public SelectionDAGISel {
+
+  /// Subtarget - Keep a pointer to the BPFSubtarget around so that we can
+  /// make the right decision when generating code for different subtargets.
+  const BPFSubtarget *Subtarget;
+
 public:
-  explicit BPFDAGToDAGISel(BPFTargetMachine &TM) : SelectionDAGISel(TM) {
+  explicit BPFDAGToDAGISel(BPFTargetMachine &TM)
+      : SelectionDAGISel(TM), Subtarget(nullptr) {
     curr_func_ = nullptr;
   }
 
   StringRef getPassName() const override {
     return "BPF DAG->DAG Pattern Instruction Selection";
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    // Reset the subtarget each time through.
+    Subtarget = &MF.getSubtarget<BPFSubtarget>();
+    return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
   void PreprocessISelDAG() override;
@@ -65,9 +76,9 @@ private:
   bool SelectFIAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
 
   // Node preprocessing cases
-  void PreprocessLoad(SDNode *Node, SelectionDAG::allnodes_iterator I);
+  void PreprocessLoad(SDNode *Node, SelectionDAG::allnodes_iterator &I);
   void PreprocessCopyToReg(SDNode *Node);
-  void PreprocessTrunc(SDNode *Node, SelectionDAG::allnodes_iterator I);
+  void PreprocessTrunc(SDNode *Node, SelectionDAG::allnodes_iterator &I);
 
   // Find constants from a constant structure
   typedef std::vector<unsigned char> val_vec_type;
@@ -176,12 +187,9 @@ bool BPFDAGToDAGISel::SelectInlineAsmMemoryOperand(
 void BPFDAGToDAGISel::Select(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
 
-  // Dump information about the Node being selected
-  DEBUG(dbgs() << "Selecting: "; Node->dump(CurDAG); dbgs() << '\n');
-
   // If we have a custom node, we already have selected!
   if (Node->isMachineOpcode()) {
-    DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << '\n');
+    LLVM_DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << '\n');
     return;
   }
 
@@ -241,7 +249,7 @@ void BPFDAGToDAGISel::Select(SDNode *Node) {
 }
 
 void BPFDAGToDAGISel::PreprocessLoad(SDNode *Node,
-                                     SelectionDAG::allnodes_iterator I) {
+                                     SelectionDAG::allnodes_iterator &I) {
   union {
     uint8_t c[8];
     uint16_t s;
@@ -268,7 +276,7 @@ void BPFDAGToDAGISel::PreprocessLoad(SDNode *Node,
     if (OP1N->getOpcode() <= ISD::BUILTIN_OP_END || OP1N->getNumOperands() == 0)
       return;
 
-    DEBUG(dbgs() << "Check candidate load: "; LD->dump(); dbgs() << '\n');
+    LLVM_DEBUG(dbgs() << "Check candidate load: "; LD->dump(); dbgs() << '\n');
 
     const GlobalAddressSDNode *GADN =
         dyn_cast<GlobalAddressSDNode>(OP1N->getOperand(0).getNode());
@@ -278,7 +286,7 @@ void BPFDAGToDAGISel::PreprocessLoad(SDNode *Node,
           getConstantFieldValue(GADN, CDN->getZExtValue(), size, new_val.c);
   } else if (LDAddrNode->getOpcode() > ISD::BUILTIN_OP_END &&
              LDAddrNode->getNumOperands() > 0) {
-    DEBUG(dbgs() << "Check candidate load: "; LD->dump(); dbgs() << '\n');
+    LLVM_DEBUG(dbgs() << "Check candidate load: "; LD->dump(); dbgs() << '\n');
 
     SDValue OP1 = LDAddrNode->getOperand(0);
     if (const GlobalAddressSDNode *GADN =
@@ -301,8 +309,8 @@ void BPFDAGToDAGISel::PreprocessLoad(SDNode *Node,
     val = new_val.d;
   }
 
-  DEBUG(dbgs() << "Replacing load of size " << size << " with constant " << val
-               << '\n');
+  LLVM_DEBUG(dbgs() << "Replacing load of size " << size << " with constant "
+                    << val << '\n');
   SDValue NVal = CurDAG->getConstant(val, DL, MVT::i64);
 
   // After replacement, the current node is dead, we need to
@@ -418,8 +426,8 @@ bool BPFDAGToDAGISel::fillGenericConstant(const DataLayout &DL,
 
   if (const ConstantInt *CI = dyn_cast<ConstantInt>(CV)) {
     uint64_t val = CI->getZExtValue();
-    DEBUG(dbgs() << "Byte array at offset " << Offset << " with value " << val
-                 << '\n');
+    LLVM_DEBUG(dbgs() << "Byte array at offset " << Offset << " with value "
+                      << val << '\n');
 
     if (Size > 8 || (Size & (Size - 1)))
       return false;
@@ -508,15 +516,47 @@ void BPFDAGToDAGISel::PreprocessCopyToReg(SDNode *Node) {
     break;
   }
 
-  DEBUG(dbgs() << "Find Load Value to VReg "
-               << TargetRegisterInfo::virtReg2Index(RegN->getReg()) << '\n');
+  LLVM_DEBUG(dbgs() << "Find Load Value to VReg "
+                    << TargetRegisterInfo::virtReg2Index(RegN->getReg())
+                    << '\n');
   load_to_vreg_[RegN->getReg()] = mem_load_op;
 }
 
 void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
-                                      SelectionDAG::allnodes_iterator I) {
+                                      SelectionDAG::allnodes_iterator &I) {
   ConstantSDNode *MaskN = dyn_cast<ConstantSDNode>(Node->getOperand(1));
   if (!MaskN)
+    return;
+
+  // The Reg operand should be a virtual register, which is defined
+  // outside the current basic block. DAG combiner has done a pretty
+  // good job in removing truncating inside a single basic block except
+  // when the Reg operand comes from bpf_load_[byte | half | word] for
+  // which the generic optimizer doesn't understand their results are
+  // zero extended.
+  SDValue BaseV = Node->getOperand(0);
+  if (BaseV.getOpcode() == ISD::INTRINSIC_W_CHAIN) {
+    unsigned IntNo = cast<ConstantSDNode>(BaseV->getOperand(1))->getZExtValue();
+    uint64_t MaskV = MaskN->getZExtValue();
+
+    if (!((IntNo == Intrinsic::bpf_load_byte && MaskV == 0xFF) ||
+          (IntNo == Intrinsic::bpf_load_half && MaskV == 0xFFFF) ||
+          (IntNo == Intrinsic::bpf_load_word && MaskV == 0xFFFFFFFF)))
+      return;
+
+    LLVM_DEBUG(dbgs() << "Remove the redundant AND operation in: ";
+               Node->dump(); dbgs() << '\n');
+
+    I--;
+    CurDAG->ReplaceAllUsesWith(SDValue(Node, 0), BaseV);
+    I++;
+    CurDAG->DeleteNode(Node);
+
+    return;
+  }
+
+  // Multiple basic blocks case.
+  if (BaseV.getOpcode() != ISD::CopyFromReg)
     return;
 
   unsigned match_load_op = 0;
@@ -534,20 +574,12 @@ void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
     break;
   }
 
-  // The Reg operand should be a virtual register, which is defined
-  // outside the current basic block. DAG combiner has done a pretty
-  // good job in removing truncating inside a single basic block.
-  SDValue BaseV = Node->getOperand(0);
-  if (BaseV.getOpcode() != ISD::CopyFromReg)
-    return;
-
   const RegisterSDNode *RegN =
       dyn_cast<RegisterSDNode>(BaseV.getNode()->getOperand(1));
   if (!RegN || !TargetRegisterInfo::isVirtualRegister(RegN->getReg()))
     return;
   unsigned AndOpReg = RegN->getReg();
-  DEBUG(dbgs() << "Examine %vreg" << TargetRegisterInfo::virtReg2Index(AndOpReg)
-               << '\n');
+  LLVM_DEBUG(dbgs() << "Examine " << printReg(AndOpReg) << '\n');
 
   // Examine the PHI insns in the MachineBasicBlock to found out the
   // definitions of this virtual register. At this stage (DAG2DAG
@@ -574,11 +606,11 @@ void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
       return;
   } else {
     // The PHI node looks like:
-    //   %vreg2<def> = PHI %vreg0, <BB#1>, %vreg1, <BB#3>
-    // Trace each incoming definition, e.g., (%vreg0, BB#1) and (%vreg1, BB#3)
-    // The AND operation can be removed if both %vreg0 in BB#1 and %vreg1 in
-    // BB#3 are defined with with a load matching the MaskN.
-    DEBUG(dbgs() << "Check PHI Insn: "; MII->dump(); dbgs() << '\n');
+    //   %2 = PHI %0, <%bb.1>, %1, <%bb.3>
+    // Trace each incoming definition, e.g., (%0, %bb.1) and (%1, %bb.3)
+    // The AND operation can be removed if both %0 in %bb.1 and %1 in
+    // %bb.3 are defined with a load matching the MaskN.
+    LLVM_DEBUG(dbgs() << "Check PHI Insn: "; MII->dump(); dbgs() << '\n');
     unsigned PrevReg = -1;
     for (unsigned i = 0; i < MII->getNumOperands(); ++i) {
       const MachineOperand &MOP = MII->getOperand(i);
@@ -594,8 +626,8 @@ void BPFDAGToDAGISel::PreprocessTrunc(SDNode *Node,
     }
   }
 
-  DEBUG(dbgs() << "Remove the redundant AND operation in: "; Node->dump();
-        dbgs() << '\n');
+  LLVM_DEBUG(dbgs() << "Remove the redundant AND operation in: "; Node->dump();
+             dbgs() << '\n');
 
   I--;
   CurDAG->ReplaceAllUsesWith(SDValue(Node, 0), BaseV);

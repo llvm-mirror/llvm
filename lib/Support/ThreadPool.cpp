@@ -1,9 +1,8 @@
 //==-- llvm/Support/ThreadPool.cpp - A ThreadPool implementation -*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -47,8 +46,8 @@ ThreadPool::ThreadPool(unsigned ThreadCount)
           // in order for wait() to properly detect that even if the queue is
           // empty, there is still a task in flight.
           {
-            ++ActiveThreads;
             std::unique_lock<std::mutex> LockGuard(CompletionLock);
+            ++ActiveThreads;
           }
           Task = std::move(Tasks.front());
           Tasks.pop();

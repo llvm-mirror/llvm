@@ -1,10 +1,10 @@
 RUN: rm -rf %t
 RUN: mkdir -p %t
-RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x400559" > %t.input
-RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64.debuglink 0x400559" >> %t.input
-RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x400436" >> %t.input
-RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x400528" >> %t.input
-RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x400586" >> %t.input
+RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x40113f" > %t.input
+RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64.debuglink 0x40113f" >> %t.input
+RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x401020" >> %t.input
+RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x40110e" >> %t.input
+RUN: echo "%p/Inputs/dwarfdump-test.elf-x86-64 0x401160" >> %t.input
 RUN: echo "%p/Inputs/dwarfdump-test2.elf-x86-64 0x4004e8" >> %t.input
 RUN: echo "%p/Inputs/dwarfdump-test2.elf-x86-64 0x4004f4" >> %t.input
 RUN: echo "%p/Inputs/dwarfdump-test4.elf-x86-64 0x62c" >> %t.input
@@ -20,6 +20,7 @@ RUN: echo "%p/Inputs/macho-universal 0x1f84" >> %t.input
 RUN: echo "%p/Inputs/macho-universal:i386 0x1f67" >> %t.input
 RUN: echo "%p/Inputs/macho-universal:x86_64 0x100000f05" >> %t.input
 RUN: echo "%p/Inputs/llvm-symbolizer-dwo-test 0x400514" >> %t.input
+RUN: echo "%p/Inputs/llvm-symbolizer-local-mem-func-gcc.elf-x86-64 0x61a" >> %t.input
 RUN: echo "%p/Inputs/fission-ranges.elf-x86_64 0x720" >> %t.input
 RUN: echo "%p/Inputs/arange-overlap.elf-x86_64 0x714" >> %t.input
 RUN: cp %p/Inputs/split-dwarf-test.dwo %t
@@ -127,6 +128,10 @@ CHECK:      _Z3inci
 CHECK: main
 CHECK-NEXT: llvm-symbolizer-dwo-test.cc:11
 
+CHECK-NOT: local_mem_func
+CHECK: _ZZ2f1vEN3foo14local_mem_funcEv
+CHECK-NEXT: {{.*}}local-mem-func.cpp:3:0
+
 CHECK: main
 CHECK-NEXT: {{.*}}fission-ranges.cc:6
 
@@ -176,8 +181,8 @@ UNKNOWN-ARCH-NOT: main
 UNKNOWN-ARCH: ??
 UNKNOWN-ARCH-NOT: main
 
-RUN: echo "0x400559" > %t.input4
-RUN: echo "0x400436" >> %t.input4
+RUN: echo "0x40113f" > %t.input4
+RUN: echo "0x401020" >> %t.input4
 RUN: llvm-symbolizer --obj %p/Inputs/dwarfdump-test.elf-x86-64 < %t.input4 \
 RUN:   | FileCheck %s --check-prefix=BINARY
 
@@ -185,9 +190,9 @@ BINARY:       main
 BINARY-NEXT: /tmp/dbginfo{{[/\\]}}dwarfdump-test.cc:16
 BINARY:      _start
 
-RUN: echo "0x400720" > %t.input5
-RUN: echo "0x4004a0" >> %t.input5
-RUN: echo "0x4006f0" >> %t.input5
+RUN: echo "0x401140" > %t.input5
+RUN: echo "0x401020" >> %t.input5
+RUN: echo "0x401120" >> %t.input5
 RUN: llvm-symbolizer --obj %p/Inputs/llvm-symbolizer-test.elf-x86-64 < %t.input5 \
 RUN:   | FileCheck %s --check-prefix=BINARY_C
 
@@ -205,5 +210,20 @@ STRIPPED:  global_func
 RUN: echo "%p/Inputs/dwarfdump-test4.elf-x86-64 0x62c" > %t.input7
 RUN: llvm-symbolizer --functions=short --demangle=false < %t.input7 \
 RUN:    | FileCheck %s --check-prefix=SHORT_FUNCTION_NAME
+RUN: llvm-symbolizer --functions=short -C=false < %t.input7 \
+RUN:    | FileCheck %s --check-prefix=SHORT_FUNCTION_NAME
 
 SHORT_FUNCTION_NAME-NOT: _Z1cv
+
+; Check that the last of --demangle and --no-demangle wins.
+RUN: llvm-symbolizer --demangle < %t.input7 \
+RUN:    | FileCheck %s --check-prefix=DEMANGLED_FUNCTION_NAME
+RUN: llvm-symbolizer --no-demangle < %t.input7 \
+RUN:    | FileCheck %s --check-prefix=MANGLED_FUNCTION_NAME
+RUN: llvm-symbolizer --demangle --no-demangle < %t.input7 \
+RUN:    | FileCheck %s --check-prefix=MANGLED_FUNCTION_NAME
+RUN: llvm-symbolizer --no-demangle --demangle < %t.input7 \
+RUN:    | FileCheck %s --check-prefix=DEMANGLED_FUNCTION_NAME
+
+MANGLED_FUNCTION_NAME: _Z1cv
+DEMANGLED_FUNCTION_NAME: c()

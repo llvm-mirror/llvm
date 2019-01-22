@@ -1,9 +1,8 @@
 //===- SampleProfWriter.cpp - Write LLVM sample profile data --------------===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,9 +21,12 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/ProfileData/SampleProf.h"
+#include "llvm/Support/Endian.h"
+#include "llvm/Support/EndianStream.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/LEB128.h"
+#include "llvm/Support/MD5.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdint>
@@ -63,7 +65,16 @@ SampleProfileWriter::write(const StringMap<FunctionSamples> &ProfileMap) {
   return sampleprof_error::success;
 }
 
-/// \brief Write samples to a text file.
+std::error_code SampleProfileWriterCompactBinary::write(
+    const StringMap<FunctionSamples> &ProfileMap) {
+  if (std::error_code EC = SampleProfileWriter::write(ProfileMap))
+    return EC;
+  if (std::error_code EC = writeFuncOffsetTable())
+    return EC;
+  return sampleprof_error::success;
+}
+
+/// Write samples to a text file.
 ///
 /// Note: it may be tempting to implement this in terms of
 /// FunctionSamples::print().  Please don't.  The dump functionality is intended
@@ -144,13 +155,85 @@ void SampleProfileWriterBinary::addNames(const FunctionSamples &S) {
     }
 }
 
-std::error_code SampleProfileWriterBinary::writeHeader(
-    const StringMap<FunctionSamples> &ProfileMap) {
+void SampleProfileWriterBinary::stablizeNameTable(std::set<StringRef> &V) {
+  // Sort the names to make NameTable deterministic.
+  for (const auto &I : NameTable)
+    V.insert(I.first);
+  int i = 0;
+  for (const StringRef &N : V)
+    NameTable[N] = i++;
+}
+
+std::error_code SampleProfileWriterRawBinary::writeNameTable() {
+  auto &OS = *OutputStream;
+  std::set<StringRef> V;
+  stablizeNameTable(V);
+
+  // Write out the name table.
+  encodeULEB128(NameTable.size(), OS);
+  for (auto N : V) {
+    OS << N;
+    encodeULEB128(0, OS);
+  }
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileWriterCompactBinary::writeFuncOffsetTable() {
   auto &OS = *OutputStream;
 
+  // Fill the slot remembered by TableOffset with the offset of FuncOffsetTable.
+  auto &OFS = static_cast<raw_fd_ostream &>(OS);
+  uint64_t FuncOffsetTableStart = OS.tell();
+  if (OFS.seek(TableOffset) == (uint64_t)-1)
+    return sampleprof_error::ostream_seek_unsupported;
+  support::endian::Writer Writer(*OutputStream, support::little);
+  Writer.write(FuncOffsetTableStart);
+  if (OFS.seek(FuncOffsetTableStart) == (uint64_t)-1)
+    return sampleprof_error::ostream_seek_unsupported;
+
+  // Write out the table size.
+  encodeULEB128(FuncOffsetTable.size(), OS);
+
+  // Write out FuncOffsetTable.
+  for (auto entry : FuncOffsetTable) {
+    writeNameIdx(entry.first);
+    encodeULEB128(entry.second, OS);
+  }
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileWriterCompactBinary::writeNameTable() {
+  auto &OS = *OutputStream;
+  std::set<StringRef> V;
+  stablizeNameTable(V);
+
+  // Write out the name table.
+  encodeULEB128(NameTable.size(), OS);
+  for (auto N : V) {
+    encodeULEB128(MD5Hash(N), OS);
+  }
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileWriterRawBinary::writeMagicIdent() {
+  auto &OS = *OutputStream;
   // Write file magic identifier.
   encodeULEB128(SPMagic(), OS);
   encodeULEB128(SPVersion(), OS);
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileWriterCompactBinary::writeMagicIdent() {
+  auto &OS = *OutputStream;
+  // Write file magic identifier.
+  encodeULEB128(SPMagic(SPF_Compact_Binary), OS);
+  encodeULEB128(SPVersion(), OS);
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileWriterBinary::writeHeader(
+    const StringMap<FunctionSamples> &ProfileMap) {
+  writeMagicIdent();
 
   computeSummary(ProfileMap);
   if (auto EC = writeSummary())
@@ -162,20 +245,20 @@ std::error_code SampleProfileWriterBinary::writeHeader(
     addNames(I.second);
   }
 
-  // Sort the names to make NameTable is deterministic.
-  std::set<StringRef> V;
-  for (const auto &I : NameTable)
-    V.insert(I.first);
-  int i = 0;
-  for (const StringRef &N : V)
-    NameTable[N] = i++;
+  writeNameTable();
+  return sampleprof_error::success;
+}
 
-  // Write out the name table.
-  encodeULEB128(NameTable.size(), OS);
-  for (auto N : V) {
-    OS << N;
-    encodeULEB128(0, OS);
-  }
+std::error_code SampleProfileWriterCompactBinary::writeHeader(
+    const StringMap<FunctionSamples> &ProfileMap) {
+  support::endian::Writer Writer(*OutputStream, support::little);
+  if (auto EC = SampleProfileWriterBinary::writeHeader(ProfileMap))
+    return EC;
+
+  // Reserve a slot for the offset of function offset table. The slot will
+  // be populated with the offset of FuncOffsetTable later.
+  TableOffset = OutputStream->tell();
+  Writer.write(static_cast<uint64_t>(-2));
   return sampleprof_error::success;
 }
 
@@ -239,7 +322,7 @@ std::error_code SampleProfileWriterBinary::writeBody(const FunctionSamples &S) {
   return sampleprof_error::success;
 }
 
-/// \brief Write samples of a top-level function to a binary file.
+/// Write samples of a top-level function to a binary file.
 ///
 /// \returns true if the samples were written successfully, false otherwise.
 std::error_code SampleProfileWriterBinary::write(const FunctionSamples &S) {
@@ -247,7 +330,16 @@ std::error_code SampleProfileWriterBinary::write(const FunctionSamples &S) {
   return writeBody(S);
 }
 
-/// \brief Create a sample profile file writer based on the specified format.
+std::error_code
+SampleProfileWriterCompactBinary::write(const FunctionSamples &S) {
+  uint64_t Offset = OutputStream->tell();
+  StringRef Name = S.getName();
+  FuncOffsetTable[Name] = Offset;
+  encodeULEB128(S.getHeadSamples(), *OutputStream);
+  return writeBody(S);
+}
+
+/// Create a sample profile file writer based on the specified format.
 ///
 /// \param Filename The file to create.
 ///
@@ -258,7 +350,7 @@ ErrorOr<std::unique_ptr<SampleProfileWriter>>
 SampleProfileWriter::create(StringRef Filename, SampleProfileFormat Format) {
   std::error_code EC;
   std::unique_ptr<raw_ostream> OS;
-  if (Format == SPF_Binary)
+  if (Format == SPF_Binary || Format == SPF_Compact_Binary)
     OS.reset(new raw_fd_ostream(Filename, EC, sys::fs::F_None));
   else
     OS.reset(new raw_fd_ostream(Filename, EC, sys::fs::F_Text));
@@ -268,7 +360,7 @@ SampleProfileWriter::create(StringRef Filename, SampleProfileFormat Format) {
   return create(OS, Format);
 }
 
-/// \brief Create a sample profile stream writer based on the specified format.
+/// Create a sample profile stream writer based on the specified format.
 ///
 /// \param OS The output stream to store the profile data to.
 ///
@@ -282,7 +374,9 @@ SampleProfileWriter::create(std::unique_ptr<raw_ostream> &OS,
   std::unique_ptr<SampleProfileWriter> Writer;
 
   if (Format == SPF_Binary)
-    Writer.reset(new SampleProfileWriterBinary(OS));
+    Writer.reset(new SampleProfileWriterRawBinary(OS));
+  else if (Format == SPF_Compact_Binary)
+    Writer.reset(new SampleProfileWriterCompactBinary(OS));
   else if (Format == SPF_Text)
     Writer.reset(new SampleProfileWriterText(OS));
   else if (Format == SPF_GCC)

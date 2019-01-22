@@ -1,9 +1,8 @@
 //===-- ImportedFunctionsInliningStats.h ------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Generating inliner statistics for imported functions, mostly useful for
@@ -22,7 +21,7 @@
 namespace llvm {
 class Module;
 class Function;
-/// \brief Calculate and dump ThinLTO specific inliner stats.
+/// Calculate and dump ThinLTO specific inliner stats.
 /// The main statistics are:
 /// (1) Number of inlined imported functions,
 /// (2) Number of imported functions inlined into importing module (indirect),

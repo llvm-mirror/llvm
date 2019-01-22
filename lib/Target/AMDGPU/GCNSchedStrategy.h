@@ -1,9 +1,8 @@
 //===-- GCNSchedStrategy.h - GCN Scheduler Strategy -*- C++ -*-------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,7 +20,7 @@ namespace llvm {
 
 class SIMachineFunctionInfo;
 class SIRegisterInfo;
-class SISubtarget;
+class GCNSubtarget;
 
 /// This is a minimal scheduler strategy.  The main difference between this
 /// and the GenericScheduler is that GCNSchedStrategy uses different
@@ -62,9 +61,9 @@ public:
 
 class GCNScheduleDAGMILive : public ScheduleDAGMILive {
 
-  const SISubtarget &ST;
+  const GCNSubtarget &ST;
 
-  const SIMachineFunctionInfo &MFI;
+  SIMachineFunctionInfo &MFI;
 
   // Occupancy target at the beginning of function scheduling cycle.
   unsigned StartingOccupancy;

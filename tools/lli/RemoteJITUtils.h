@@ -1,9 +1,8 @@
 //===-- RemoteJITUtils.h - Utilities for remote-JITing with LLI -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -84,7 +83,7 @@ public:
     this->MemMgr = std::move(MemMgr);
   }
 
-  void setResolver(std::shared_ptr<JITSymbolResolver> Resolver) {
+  void setResolver(std::shared_ptr<LegacyJITSymbolResolver> Resolver) {
     this->Resolver = std::move(Resolver);
   }
 
@@ -145,7 +144,7 @@ public:
 
 private:
   std::unique_ptr<RuntimeDyld::MemoryManager> MemMgr;
-  std::shared_ptr<JITSymbolResolver> Resolver;
+  std::shared_ptr<LegacyJITSymbolResolver> Resolver;
 };
 }
 

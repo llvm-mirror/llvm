@@ -1,14 +1,13 @@
 //===--- AMDGPUMetadata.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief AMDGPU metadata definitions and in-memory representations.
+/// AMDGPU metadata definitions and in-memory representations.
 ///
 //
 //===----------------------------------------------------------------------===//
@@ -148,6 +147,10 @@ struct MappingTraits<Kernel::CodeProps::Metadata> {
                     MD.mIsDynamicCallStack, false);
     YIO.mapOptional(Kernel::CodeProps::Key::IsXNACKEnabled,
                     MD.mIsXNACKEnabled, false);
+    YIO.mapOptional(Kernel::CodeProps::Key::NumSpilledSGPRs,
+                    MD.mNumSpilledSGPRs, uint16_t(0));
+    YIO.mapOptional(Kernel::CodeProps::Key::NumSpilledVGPRs,
+                    MD.mNumSpilledVGPRs, uint16_t(0));
   }
 };
 

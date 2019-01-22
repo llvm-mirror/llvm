@@ -1,9 +1,8 @@
 //===-- llvm-strings.cpp - Printable String dumping utility ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,10 +15,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Program.h"
-#include "llvm/Support/Signals.h"
 #include <cctype>
 #include <string>
 
@@ -41,6 +39,12 @@ static cl::opt<int>
               cl::init(4));
 static cl::alias MinLengthShort("n", cl::desc(""), cl::aliasopt(MinLength));
 
+static cl::opt<bool>
+    AllSections("all",
+                  cl::desc("Check all sections, not just the data section"));
+static cl::alias AllSectionsShort("a", cl::desc(""),
+                                    cl::aliasopt(AllSections));
+
 enum radix { none, octal, hexadecimal, decimal };
 static cl::opt<radix>
     Radix("radix", cl::desc("print the offset within the file"),
@@ -55,27 +59,27 @@ static void strings(raw_ostream &OS, StringRef FileName, StringRef Contents) {
     if (L.size() < static_cast<size_t>(MinLength))
       return;
     if (PrintFileName)
-      OS << FileName << ":";
+      OS << FileName << ": ";
     switch (Radix) {
     case none:
       break;
     case octal:
-      OS << format("%8o", Offset);
+      OS << format("%7o ", Offset);
       break;
     case hexadecimal:
-      OS << format("%8x", Offset);
+      OS << format("%7x ", Offset);
       break;
     case decimal:
-      OS << format("%8u", Offset);
+      OS << format("%7u ", Offset);
       break;
     }
-    OS << " " << L << '\n';
+    OS << L << '\n';
   };
 
   const char *B = Contents.begin();
   const char *P = nullptr, *E = nullptr, *S = nullptr;
   for (P = Contents.begin(), E = Contents.end(); P < E; ++P) {
-    if (std::isgraph(*P) || std::isblank(*P)) {
+    if (isPrint(*P) || *P == '\t') {
       if (S == nullptr)
         S = P;
     } else if (S) {
@@ -88,8 +92,7 @@ static void strings(raw_ostream &OS, StringRef FileName, StringRef Contents) {
 }
 
 int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
+  InitLLVM X(argc, argv);
 
   cl::ParseCommandLineOptions(argc, argv, "llvm string dumper\n");
   if (MinLength == 0) {

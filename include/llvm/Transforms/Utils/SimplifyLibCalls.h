@@ -1,9 +1,8 @@
 //===- SimplifyLibCalls.h - Library call simplifier -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -30,7 +29,7 @@ class BasicBlock;
 class Function;
 class OptimizationRemarkEmitter;
 
-/// \brief This class implements simplifications for calls to fortified library
+/// This class implements simplifications for calls to fortified library
 /// functions (__st*cpy_chk, __memcpy_chk, __memmove_chk, __memset_chk), to,
 /// when possible, replace them with their non-checking counterparts.
 /// Other optimizations can also be done, but it's possible to disable them and
@@ -45,7 +44,7 @@ public:
   FortifiedLibCallSimplifier(const TargetLibraryInfo *TLI,
                              bool OnlyLowerUnknownSize = false);
 
-  /// \brief Take the given call instruction and return a more
+  /// Take the given call instruction and return a more
   /// optimal value to replace the instruction with or 0 if a more
   /// optimal form can't be found.
   /// The call must not be an indirect call.
@@ -60,7 +59,7 @@ private:
   Value *optimizeStrpCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc Func);
   Value *optimizeStrpNCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc Func);
 
-  /// \brief Checks whether the call \p CI to a fortified libcall is foldable
+  /// Checks whether the call \p CI to a fortified libcall is foldable
   /// to the non-fortified version.
   bool isFortifiedCallFoldable(CallInst *CI, unsigned ObjSizeOp,
                                unsigned SizeOp, bool isString);
@@ -77,21 +76,34 @@ private:
   OptimizationRemarkEmitter &ORE;
   bool UnsafeFPShrink;
   function_ref<void(Instruction *, Value *)> Replacer;
+  function_ref<void(Instruction *)> Eraser;
 
-  /// \brief Internal wrapper for RAUW that is the default implementation.
+  /// Internal wrapper for RAUW that is the default implementation.
   ///
   /// Other users may provide an alternate function with this signature instead
   /// of this one.
-  static void replaceAllUsesWithDefault(Instruction *I, Value *With);
+  static void replaceAllUsesWithDefault(Instruction *I, Value *With) {
+    I->replaceAllUsesWith(With);
+  }
 
-  /// \brief Replace an instruction's uses with a value using our replacer.
+  /// Internal wrapper for eraseFromParent that is the default implementation.
+  static void eraseFromParentDefault(Instruction *I) { I->eraseFromParent(); }
+
+  /// Replace an instruction's uses with a value using our replacer.
   void replaceAllUsesWith(Instruction *I, Value *With);
 
+  /// Erase an instruction from its parent with our eraser.
+  void eraseFromParent(Instruction *I);
+
+  Value *foldMallocMemset(CallInst *Memset, IRBuilder<> &B);
+
 public:
-  LibCallSimplifier(const DataLayout &DL, const TargetLibraryInfo *TLI,
-                    OptimizationRemarkEmitter &ORE,
-                    function_ref<void(Instruction *, Value *)> Replacer =
-                        &replaceAllUsesWithDefault);
+  LibCallSimplifier(
+      const DataLayout &DL, const TargetLibraryInfo *TLI,
+      OptimizationRemarkEmitter &ORE,
+      function_ref<void(Instruction *, Value *)> Replacer =
+          &replaceAllUsesWithDefault,
+      function_ref<void(Instruction *)> Eraser = &eraseFromParentDefault);
 
   /// optimizeCall - Take the given call instruction and return a more
   /// optimal value to replace the instruction with or 0 if a more
@@ -124,13 +136,16 @@ private:
   Value *optimizeMemCpy(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemMove(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemSet(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeRealloc(CallInst *CI, IRBuilder<> &B);
   Value *optimizeWcslen(CallInst *CI, IRBuilder<> &B);
   // Wrapper for all String/Memory Library Call Optimizations
   Value *optimizeStringMemoryLibCall(CallInst *CI, IRBuilder<> &B);
 
   // Math Library Optimizations
-  Value *optimizeCos(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeCAbs(CallInst *CI, IRBuilder<> &B);
   Value *optimizePow(CallInst *CI, IRBuilder<> &B);
+  Value *replacePowWithExp(CallInst *Pow, IRBuilder<> &B);
+  Value *replacePowWithSqrt(CallInst *Pow, IRBuilder<> &B);
   Value *optimizeExp2(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFMinFMax(CallInst *CI, IRBuilder<> &B);
   Value *optimizeLog(CallInst *CI, IRBuilder<> &B);
@@ -148,15 +163,22 @@ private:
   Value *optimizeIsDigit(CallInst *CI, IRBuilder<> &B);
   Value *optimizeIsAscii(CallInst *CI, IRBuilder<> &B);
   Value *optimizeToAscii(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeAtoi(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeStrtol(CallInst *CI, IRBuilder<> &B);
 
   // Formatting and IO Library Call Optimizations
   Value *optimizeErrorReporting(CallInst *CI, IRBuilder<> &B,
                                 int StreamArg = -1);
   Value *optimizePrintF(CallInst *CI, IRBuilder<> &B);
   Value *optimizeSPrintF(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeSnPrintF(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFPrintF(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFWrite(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeFRead(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFPuts(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeFGets(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeFPutc(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeFGetc(CallInst *CI, IRBuilder<> &B);
   Value *optimizePuts(CallInst *CI, IRBuilder<> &B);
 
   // Helper methods
@@ -167,6 +189,7 @@ private:
                       SmallVectorImpl<CallInst *> &SinCosCalls);
   Value *optimizePrintFString(CallInst *CI, IRBuilder<> &B);
   Value *optimizeSPrintFString(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeSnPrintFString(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFPrintFString(CallInst *CI, IRBuilder<> &B);
 
   /// hasFloatVersion - Checks if there is a float version of the specified

@@ -1,9 +1,8 @@
 //===- MipsDisassembler.cpp - Disassembler for Mips -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -277,11 +276,6 @@ static DecodeStatus DecodeMemEVA(MCInst &Inst,
                                  uint64_t Address,
                                  const void *Decoder);
 
-static DecodeStatus DecodeLoadByte9(MCInst &Inst,
-                                    unsigned Insn,
-                                    uint64_t Address,
-                                    const void *Decoder);
-
 static DecodeStatus DecodeLoadByte15(MCInst &Inst,
                                      unsigned Insn,
                                      uint64_t Address,
@@ -300,11 +294,6 @@ static DecodeStatus DecodeCacheOpMM(MCInst &Inst,
                                     uint64_t Address,
                                     const void *Decoder);
 
-static DecodeStatus DecodeStoreEvaOpMM(MCInst &Inst,
-                                       unsigned Insn,
-                                       uint64_t Address,
-                                       const void *Decoder);
-
 static DecodeStatus DecodePrefeOpMM(MCInst &Inst,
                                     unsigned Insn,
                                     uint64_t Address,
@@ -314,6 +303,11 @@ static DecodeStatus DecodeSyncI(MCInst &Inst,
                                 unsigned Insn,
                                 uint64_t Address,
                                 const void *Decoder);
+
+static DecodeStatus DecodeSyncI_MM(MCInst &Inst,
+                                   unsigned Insn,
+                                   uint64_t Address,
+                                   const void *Decoder);
 
 static DecodeStatus DecodeSynciR6(MCInst &Inst,
                                   unsigned Insn,
@@ -527,6 +521,10 @@ template <typename InsnType>
 static DecodeStatus DecodeDEXT(MCInst &MI, InsnType Insn, uint64_t Address,
                                const void *Decoder);
 
+template <typename InsnType>
+static DecodeStatus DecodeCRC(MCInst &MI, InsnType Insn, uint64_t Address,
+                              const void *Decoder);
+
 static DecodeStatus DecodeRegListOperand(MCInst &Inst, unsigned Insn,
                                          uint64_t Address,
                                          const void *Decoder);
@@ -535,9 +533,12 @@ static DecodeStatus DecodeRegListOperand16(MCInst &Inst, unsigned Insn,
                                            uint64_t Address,
                                            const void *Decoder);
 
-static DecodeStatus DecodeMovePRegPair(MCInst &Inst, unsigned Insn,
+static DecodeStatus DecodeMovePRegPair(MCInst &Inst, unsigned RegPair,
                                        uint64_t Address,
                                        const void *Decoder);
+
+static DecodeStatus DecodeMovePOperands(MCInst &Inst, unsigned Insn,
+                                        uint64_t Address, const void *Decoder);
 
 namespace llvm {
 
@@ -1068,26 +1069,16 @@ static DecodeStatus DecodeDEXT(MCInst &MI, InsnType Insn, uint64_t Address,
   unsigned Lsb = fieldFromInstruction(Insn, 6, 5);
   unsigned Size = 0;
   unsigned Pos = 0;
-  bool IsMicroMips = false;
 
   switch (MI.getOpcode()) {
-    case Mips::DEXT_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DEXT:
       Pos = Lsb;
       Size = Msbd + 1;
       break;
-    case Mips::DEXTM_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DEXTM:
       Pos = Lsb;
       Size = Msbd + 1 + 32;
       break;
-    case Mips::DEXTU_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DEXTU:
       Pos = Lsb + 32;
       Size = Msbd + 1;
@@ -1096,14 +1087,10 @@ static DecodeStatus DecodeDEXT(MCInst &MI, InsnType Insn, uint64_t Address,
       llvm_unreachable("Unknown DEXT instruction!");
   }
 
-  MI.setOpcode(IsMicroMips ? Mips::DEXT_MM64R6 : Mips::DEXT);
+  MI.setOpcode(Mips::DEXT);
 
-  // Although the format of the instruction is similar, rs and rt are swapped
-  // for microMIPS64R6.
   InsnType Rs = fieldFromInstruction(Insn, 21, 5);
   InsnType Rt = fieldFromInstruction(Insn, 16, 5);
-  if (IsMicroMips)
-    std::swap(Rs, Rt);
 
   MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR64RegClassID, Rt)));
   MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR64RegClassID, Rs)));
@@ -1122,26 +1109,16 @@ static DecodeStatus DecodeDINS(MCInst &MI, InsnType Insn, uint64_t Address,
   unsigned Lsb = fieldFromInstruction(Insn, 6, 5);
   unsigned Size = 0;
   unsigned Pos = 0;
-  bool IsMicroMips = false;
 
   switch (MI.getOpcode()) {
-    case Mips::DINS_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DINS:
       Pos = Lsb;
       Size = Msbd + 1 - Pos;
       break;
-    case Mips::DINSM_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DINSM:
       Pos = Lsb;
       Size = Msbd + 33 - Pos;
       break;
-    case Mips::DINSU_MM64R6:
-      IsMicroMips = true;
-      LLVM_FALLTHROUGH;
     case Mips::DINSU:
       Pos = Lsb + 32;
       // mbsd = pos + size - 33
@@ -1152,14 +1129,10 @@ static DecodeStatus DecodeDINS(MCInst &MI, InsnType Insn, uint64_t Address,
       llvm_unreachable("Unknown DINS instruction!");
   }
 
-  // Although the format of the instruction is similar, rs and rt are swapped
-  // for microMIPS64R6.
   InsnType Rs = fieldFromInstruction(Insn, 21, 5);
   InsnType Rt = fieldFromInstruction(Insn, 16, 5);
-  if (IsMicroMips)
-    std::swap(Rs, Rt);
 
-  MI.setOpcode(IsMicroMips ? Mips::DINS_MM64R6 : Mips::DINS);
+  MI.setOpcode(Mips::DINS);
   MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR64RegClassID, Rt)));
   MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR64RegClassID, Rs)));
   MI.addOperand(MCOperand::createImm(Pos));
@@ -1167,6 +1140,22 @@ static DecodeStatus DecodeDINS(MCInst &MI, InsnType Insn, uint64_t Address,
 
   return MCDisassembler::Success;
 }
+
+// Auto-generated decoder wouldn't add the third operand for CRC32*.
+template <typename InsnType>
+static DecodeStatus DecodeCRC(MCInst &MI, InsnType Insn, uint64_t Address,
+                              const void *Decoder) {
+  InsnType Rs = fieldFromInstruction(Insn, 21, 5);
+  InsnType Rt = fieldFromInstruction(Insn, 16, 5);
+  MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID,
+                                     Rt)));
+  MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID,
+                                     Rs)));
+  MI.addOperand(MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID,
+                                     Rt)));
+  return MCDisassembler::Success;
+}
+
 /// Read two bytes from the ArrayRef and return 16 bit halfword sorted
 /// according to the given endianness.
 static DecodeStatus readInstruction16(ArrayRef<uint8_t> Bytes, uint64_t Address,
@@ -1238,9 +1227,10 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       return MCDisassembler::Fail;
 
     if (hasMips32r6()) {
-      DEBUG(dbgs() << "Trying MicroMipsR616 table (16-bit instructions):\n");
+      LLVM_DEBUG(
+          dbgs() << "Trying MicroMipsR616 table (16-bit instructions):\n");
       // Calling the auto-generated decoder function for microMIPS32R6
-      // (and microMIPS64R6) 16-bit instructions.
+      // 16-bit instructions.
       Result = decodeInstruction(DecoderTableMicroMipsR616, Instr, Insn,
                                  Address, this, STI);
       if (Result != MCDisassembler::Fail) {
@@ -1249,7 +1239,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       }
     }
 
-    DEBUG(dbgs() << "Trying MicroMips16 table (16-bit instructions):\n");
+    LLVM_DEBUG(dbgs() << "Trying MicroMips16 table (16-bit instructions):\n");
     // Calling the auto-generated decoder function for microMIPS 16-bit
     // instructions.
     Result = decodeInstruction(DecoderTableMicroMips16, Instr, Insn, Address,
@@ -1264,7 +1254,8 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       return MCDisassembler::Fail;
 
     if (hasMips32r6()) {
-      DEBUG(dbgs() << "Trying MicroMips32r632 table (32-bit instructions):\n");
+      LLVM_DEBUG(
+          dbgs() << "Trying MicroMips32r632 table (32-bit instructions):\n");
       // Calling the auto-generated decoder function.
       Result = decodeInstruction(DecoderTableMicroMipsR632, Instr, Insn, Address,
                                  this, STI);
@@ -1274,7 +1265,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       }
     }
 
-    DEBUG(dbgs() << "Trying MicroMips32 table (32-bit instructions):\n");
+    LLVM_DEBUG(dbgs() << "Trying MicroMips32 table (32-bit instructions):\n");
     // Calling the auto-generated decoder function.
     Result = decodeInstruction(DecoderTableMicroMips32, Instr, Insn, Address,
                                this, STI);
@@ -1284,7 +1275,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
     }
 
     if (isFP64()) {
-      DEBUG(dbgs() << "Trying MicroMipsFP64 table (32-bit opcodes):\n");
+      LLVM_DEBUG(dbgs() << "Trying MicroMipsFP64 table (32-bit opcodes):\n");
       Result = decodeInstruction(DecoderTableMicroMipsFP6432, Instr, Insn,
                                  Address, this, STI);
       if (Result != MCDisassembler::Fail) {
@@ -1313,7 +1304,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   Size = 4;
 
   if (hasCOP3()) {
-    DEBUG(dbgs() << "Trying COP3_ table (32-bit opcodes):\n");
+    LLVM_DEBUG(dbgs() << "Trying COP3_ table (32-bit opcodes):\n");
     Result =
         decodeInstruction(DecoderTableCOP3_32, Instr, Insn, Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1321,7 +1312,8 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (hasMips32r6() && isGP64()) {
-    DEBUG(dbgs() << "Trying Mips32r6_64r6 (GPR64) table (32-bit opcodes):\n");
+    LLVM_DEBUG(
+        dbgs() << "Trying Mips32r6_64r6 (GPR64) table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMips32r6_64r6_GP6432, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1329,7 +1321,8 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (hasMips32r6() && isPTR64()) {
-    DEBUG(dbgs() << "Trying Mips32r6_64r6 (PTR64) table (32-bit opcodes):\n");
+    LLVM_DEBUG(
+        dbgs() << "Trying Mips32r6_64r6 (PTR64) table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMips32r6_64r6_PTR6432, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1337,7 +1330,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (hasMips32r6()) {
-    DEBUG(dbgs() << "Trying Mips32r6_64r6 table (32-bit opcodes):\n");
+    LLVM_DEBUG(dbgs() << "Trying Mips32r6_64r6 table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMips32r6_64r632, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1345,7 +1338,8 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (hasMips2() && isPTR64()) {
-    DEBUG(dbgs() << "Trying Mips32r6_64r6 (PTR64) table (32-bit opcodes):\n");
+    LLVM_DEBUG(
+        dbgs() << "Trying Mips32r6_64r6 (PTR64) table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMips32_64_PTR6432, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1353,7 +1347,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (hasCnMips()) {
-    DEBUG(dbgs() << "Trying CnMips table (32-bit opcodes):\n");
+    LLVM_DEBUG(dbgs() << "Trying CnMips table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableCnMips32, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1361,7 +1355,7 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (isGP64()) {
-    DEBUG(dbgs() << "Trying Mips64 (GPR64) table (32-bit opcodes):\n");
+    LLVM_DEBUG(dbgs() << "Trying Mips64 (GPR64) table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMips6432, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
@@ -1369,14 +1363,15 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   if (isFP64()) {
-    DEBUG(dbgs() << "Trying MipsFP64 (64 bit FPU) table (32-bit opcodes):\n");
+    LLVM_DEBUG(
+        dbgs() << "Trying MipsFP64 (64 bit FPU) table (32-bit opcodes):\n");
     Result = decodeInstruction(DecoderTableMipsFP6432, Instr, Insn,
                                Address, this, STI);
     if (Result != MCDisassembler::Fail)
       return Result;
   }
 
-  DEBUG(dbgs() << "Trying Mips table (32-bit opcodes):\n");
+  LLVM_DEBUG(dbgs() << "Trying Mips table (32-bit opcodes):\n");
   // Calling the auto-generated decoder function.
   Result =
       decodeInstruction(DecoderTableMips32, Instr, Insn, Address, this, STI);
@@ -1566,24 +1561,6 @@ static DecodeStatus DecodeMemEVA(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeLoadByte9(MCInst &Inst,
-                                    unsigned Insn,
-                                    uint64_t Address,
-                                    const void *Decoder) {
-  int Offset = SignExtend32<9>(Insn & 0x1ff);
-  unsigned Base = fieldFromInstruction(Insn, 16, 5);
-  unsigned Reg = fieldFromInstruction(Insn, 21, 5);
-
-  Base = getReg(Decoder, Mips::GPR32RegClassID, Base);
-  Reg = getReg(Decoder, Mips::GPR32RegClassID, Reg);
-
-  Inst.addOperand(MCOperand::createReg(Reg));
-  Inst.addOperand(MCOperand::createReg(Base));
-  Inst.addOperand(MCOperand::createImm(Offset));
-
-  return MCDisassembler::Success;
-}
-
 static DecodeStatus DecodeLoadByte15(MCInst &Inst,
                                      unsigned Insn,
                                      uint64_t Address,
@@ -1670,30 +1647,25 @@ static DecodeStatus DecodeCacheeOp_CacheOpR6(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeStoreEvaOpMM(MCInst &Inst,
-                                       unsigned Insn,
-                                       uint64_t Address,
-                                       const void *Decoder) {
-  int Offset = SignExtend32<9>(Insn & 0x1ff);
-  unsigned Reg = fieldFromInstruction(Insn, 21, 5);
-  unsigned Base = fieldFromInstruction(Insn, 16, 5);
-
-  Reg = getReg(Decoder, Mips::GPR32RegClassID, Reg);
-  Base = getReg(Decoder, Mips::GPR32RegClassID, Base);
-
-  Inst.addOperand(MCOperand::createReg(Reg));
-  Inst.addOperand(MCOperand::createReg(Base));
-  Inst.addOperand(MCOperand::createImm(Offset));
-
-  return MCDisassembler::Success;
-}
-
 static DecodeStatus DecodeSyncI(MCInst &Inst,
                               unsigned Insn,
                               uint64_t Address,
                               const void *Decoder) {
   int Offset = SignExtend32<16>(Insn & 0xffff);
   unsigned Base = fieldFromInstruction(Insn, 21, 5);
+
+  Base = getReg(Decoder, Mips::GPR32RegClassID, Base);
+
+  Inst.addOperand(MCOperand::createReg(Base));
+  Inst.addOperand(MCOperand::createImm(Offset));
+
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeSyncI_MM(MCInst &Inst, unsigned Insn,
+                                   uint64_t Address, const void *Decoder) {
+  int Offset = SignExtend32<16>(Insn & 0xffff);
+  unsigned Base = fieldFromInstruction(Insn, 16, 5);
 
   Base = getReg(Decoder, Mips::GPR32RegClassID, Base);
 
@@ -1890,7 +1862,7 @@ static DecodeStatus DecodeMemMMImm9(MCInst &Inst,
   Reg = getReg(Decoder, Mips::GPR32RegClassID, Reg);
   Base = getReg(Decoder, Mips::GPR32RegClassID, Base);
 
-  if (Inst.getOpcode() == Mips::SCE_MM)
+  if (Inst.getOpcode() == Mips::SCE_MM || Inst.getOpcode() == Mips::SC_MMR6)
     Inst.addOperand(MCOperand::createReg(Reg));
 
   Inst.addOperand(MCOperand::createReg(Reg));
@@ -1925,8 +1897,7 @@ static DecodeStatus DecodeMemMMImm12(MCInst &Inst,
     LLVM_FALLTHROUGH;
   default:
     Inst.addOperand(MCOperand::createReg(Reg));
-    if (Inst.getOpcode() == Mips::LWP_MM || Inst.getOpcode() == Mips::SWP_MM ||
-        Inst.getOpcode() == Mips::LWP_MMR6 || Inst.getOpcode() == Mips::SWP_MMR6)
+    if (Inst.getOpcode() == Mips::LWP_MM || Inst.getOpcode() == Mips::SWP_MM)
       Inst.addOperand(MCOperand::createReg(Reg+1));
 
     Inst.addOperand(MCOperand::createReg(Base));
@@ -2481,10 +2452,34 @@ static DecodeStatus DecodeRegListOperand16(MCInst &Inst, unsigned Insn,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeMovePRegPair(MCInst &Inst, unsigned Insn,
-                                       uint64_t Address, const void *Decoder) {
+static DecodeStatus DecodeMovePOperands(MCInst &Inst, unsigned Insn,
+                                          uint64_t Address,
+                                          const void *Decoder) {
   unsigned RegPair = fieldFromInstruction(Insn, 7, 3);
+  if (DecodeMovePRegPair(Inst, RegPair, Address, Decoder) ==
+      MCDisassembler::Fail)
+    return MCDisassembler::Fail;
 
+  unsigned RegRs;
+  if (static_cast<const MipsDisassembler*>(Decoder)->hasMips32r6())
+    RegRs = fieldFromInstruction(Insn, 0, 2) |
+            (fieldFromInstruction(Insn, 3, 1) << 2);
+  else
+    RegRs = fieldFromInstruction(Insn, 1, 3);
+  if (DecodeGPRMM16MovePRegisterClass(Inst, RegRs, Address, Decoder) ==
+      MCDisassembler::Fail)
+    return MCDisassembler::Fail;
+
+  unsigned RegRt = fieldFromInstruction(Insn, 4, 3);
+  if (DecodeGPRMM16MovePRegisterClass(Inst, RegRt, Address, Decoder) ==
+      MCDisassembler::Fail)
+    return MCDisassembler::Fail;
+
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeMovePRegPair(MCInst &Inst, unsigned RegPair,
+                                       uint64_t Address, const void *Decoder) {
   switch (RegPair) {
   default:
     return MCDisassembler::Fail;

@@ -1,9 +1,8 @@
 //===- PDB.cpp - base header file for creating a PDB reader ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,6 +15,7 @@
 #endif
 #include "llvm/DebugInfo/PDB/Native/NativeSession.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBuffer.h"
 
 using namespace llvm;
 using namespace llvm::pdb;
@@ -28,7 +28,7 @@ Error llvm::pdb::loadDataForPDB(PDB_ReaderType Type, StringRef Path,
         MemoryBuffer::getFileOrSTDIN(Path, /*FileSize=*/-1,
                                      /*RequiresNullTerminator=*/false);
     if (!ErrorOrBuffer)
-      return make_error<GenericError>(generic_error_code::invalid_path, Path);
+      return errorCodeToError(ErrorOrBuffer.getError());
 
     return NativeSession::createFromPdb(std::move(*ErrorOrBuffer), Session);
   }
@@ -36,7 +36,7 @@ Error llvm::pdb::loadDataForPDB(PDB_ReaderType Type, StringRef Path,
 #if LLVM_ENABLE_DIA_SDK
   return DIASession::createFromPdb(Path, Session);
 #else
-  return make_error<GenericError>("DIA is not installed on the system");
+  return make_error<PDBError>(pdb_error_code::dia_sdk_not_present);
 #endif
 }
 
@@ -49,6 +49,6 @@ Error llvm::pdb::loadDataForEXE(PDB_ReaderType Type, StringRef Path,
 #if LLVM_ENABLE_DIA_SDK
   return DIASession::createFromExe(Path, Session);
 #else
-  return make_error<GenericError>("DIA is not installed on the system");
+  return make_error<PDBError>(pdb_error_code::dia_sdk_not_present);
 #endif
 }

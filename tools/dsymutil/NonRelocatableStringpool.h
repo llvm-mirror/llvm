@@ -1,70 +1,89 @@
-//===-- NonRelocatableStringpool.h - A simple stringpool  -----------------===//
+//===- NonRelocatableStringpool.h - A simple stringpool  --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef LLVM_TOOLS_DSYMUTIL_NONRELOCATABLESTRINGPOOL_H
 #define LLVM_TOOLS_DSYMUTIL_NONRELOCATABLESTRINGPOOL_H
 
+#include "SymbolMap.h"
+
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/DwarfStringPoolEntry.h"
+#include "llvm/Support/Allocator.h"
+#include <cstdint>
+#include <vector>
 
 namespace llvm {
 namespace dsymutil {
 
-/// \brief A string table that doesn't need relocations.
+/// A string table that doesn't need relocations.
 ///
-/// We are doing a final link, no need for a string table that
-/// has relocation entries for every reference to it. This class
-/// provides this ablitity by just associating offsets with
-/// strings.
+/// We are doing a final link, no need for a string table that has relocation
+/// entries for every reference to it. This class provides this ability by just
+/// associating offsets with strings.
 class NonRelocatableStringpool {
 public:
-  /// \brief Entries are stored into the StringMap and simply linked
-  /// together through the second element of this pair in order to
-  /// keep track of insertion order.
-  typedef StringMap<std::pair<uint32_t, StringMapEntryBase *>, BumpPtrAllocator>
-      MapTy;
+  /// Entries are stored into the StringMap and simply linked together through
+  /// the second element of this pair in order to keep track of insertion
+  /// order.
+  using MapTy = StringMap<DwarfStringPoolEntry, BumpPtrAllocator>;
 
-  NonRelocatableStringpool()
-      : CurrentEndOffset(0), Sentinel(0), Last(&Sentinel) {
-    // Legacy dsymutil puts an empty string at the start of the line
-    // table.
-    getStringOffset("");
+  NonRelocatableStringpool(
+      SymbolMapTranslator Translator = SymbolMapTranslator())
+      : Translator(Translator) {
+    // Legacy dsymutil puts an empty string at the start of the line table.
+    EmptyString = getEntry("");
   }
 
-  /// \brief Get the offset of string \p S in the string table. This
-  /// can insert a new element or return the offset of a preexisitng
-  /// one.
-  uint32_t getStringOffset(StringRef S);
+  DwarfStringPoolEntryRef getEntry(StringRef S);
 
-  /// \brief Get permanent storage for \p S (but do not necessarily
-  /// emit \p S in the output section).
+  /// Get the offset of string \p S in the string table. This can insert a new
+  /// element or return the offset of a pre-existing one.
+  uint32_t getStringOffset(StringRef S) { return getEntry(S).getOffset(); }
+
+  /// Get permanent storage for \p S (but do not necessarily emit \p S in the
+  /// output section). A latter call to getStringOffset() with the same string
+  /// will chain it though.
+  ///
   /// \returns The StringRef that points to permanent storage to use
   /// in place of \p S.
   StringRef internString(StringRef S);
 
-  // \brief Return the first entry of the string table.
-  const MapTy::MapEntryTy *getFirstEntry() const {
-    return getNextEntry(&Sentinel);
-  }
-
-  // \brief Get the entry following \p E in the string table or null
-  // if \p E was the last entry.
-  const MapTy::MapEntryTy *getNextEntry(const MapTy::MapEntryTy *E) const {
-    return static_cast<const MapTy::MapEntryTy *>(E->getValue().second);
-  }
-
   uint64_t getSize() { return CurrentEndOffset; }
+
+  /// Return the list of strings to be emitted. This does not contain the
+  /// strings which were added via internString only.
+  std::vector<DwarfStringPoolEntryRef> getEntriesForEmission() const;
 
 private:
   MapTy Strings;
-  uint32_t CurrentEndOffset;
-  MapTy::MapEntryTy Sentinel, *Last;
+  uint32_t CurrentEndOffset = 0;
+  unsigned NumEntries = 0;
+  DwarfStringPoolEntryRef EmptyString;
+  SymbolMapTranslator Translator;
 };
-}
-}
 
-#endif
+/// Helper for making strong types.
+template <typename T, typename S> class StrongType : public T {
+public:
+  template <typename... Args>
+  explicit StrongType(Args... A) : T(std::forward<Args>(A)...) {}
+};
+
+/// It's very easy to introduce bugs by passing the wrong string pool in the
+/// dwarf linker. By using strong types the interface enforces that the right
+/// kind of pool is used.
+struct UniqueTag {};
+struct OffsetsTag {};
+using UniquingStringPool = StrongType<NonRelocatableStringpool, UniqueTag>;
+using OffsetsStringPool = StrongType<NonRelocatableStringpool, OffsetsTag>;
+
+} // end namespace dsymutil
+} // end namespace llvm
+
+#endif // LLVM_TOOLS_DSYMUTIL_NONRELOCATABLESTRINGPOOL_H

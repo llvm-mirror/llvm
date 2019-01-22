@@ -1,9 +1,8 @@
 //===- BranchFolding.h - Fold machine code branch instructions --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,11 +37,11 @@ class TargetRegisterInfo;
 
     explicit BranchFolder(bool defaultEnableTailMerge,
                           bool CommonHoist,
-                          MBFIWrapper &MBFI,
-                          const MachineBranchProbabilityInfo &MBPI,
+                          MBFIWrapper &FreqInfo,
+                          const MachineBranchProbabilityInfo &ProbInfo,
                           // Min tail length to merge. Defaults to commandline
                           // flag. Ignored for optsize.
-                          unsigned MinCommonTailLength = 0);
+                          unsigned MinTailLength = 0);
 
     /// Perhaps branch folding, tail merging and other CFG optimizations on the
     /// given function.  Block placement changes the layout and may create new
@@ -75,7 +74,7 @@ class TargetRegisterInfo;
 
     std::vector<MergePotentialsElt> MergePotentials;
     SmallPtrSet<const MachineBasicBlock*, 2> TriedMerging;
-    DenseMap<const MachineBasicBlock *, int> FuncletMembership;
+    DenseMap<const MachineBasicBlock *, int> EHScopeMembership;
 
     class SameTailElt {
       MPIterator MPIter;
@@ -132,7 +131,7 @@ class TargetRegisterInfo;
     LivePhysRegs LiveRegs;
 
   public:
-    /// \brief This class keeps track of branch frequencies of newly created
+    /// This class keeps track of branch frequencies of newly created
     /// blocks and tail-merged blocks.
     class MBFIWrapper {
     public:

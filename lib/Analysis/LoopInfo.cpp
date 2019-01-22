@@ -1,9 +1,8 @@
 //===- LoopInfo.cpp - Natural Loop Calculator -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,10 +20,12 @@
 #include "llvm/Analysis/LoopInfoImpl.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
@@ -47,7 +48,7 @@ bool llvm::VerifyLoopInfo = false;
 #endif
 static cl::opt<bool, true>
     VerifyLoopInfoX("verify-loop-info", cl::location(VerifyLoopInfo),
-                    cl::desc("Verify loop info (time consuming)"));
+                    cl::Hidden, cl::desc("Verify loop info (time consuming)"));
 
 //===----------------------------------------------------------------------===//
 // Loop implementation
@@ -212,33 +213,21 @@ bool Loop::isSafeToClone() const {
 
 MDNode *Loop::getLoopID() const {
   MDNode *LoopID = nullptr;
-  if (BasicBlock *Latch = getLoopLatch()) {
-    LoopID = Latch->getTerminator()->getMetadata(LLVMContext::MD_loop);
-  } else {
-    assert(!getLoopLatch() &&
-           "The loop should have no single latch at this point");
-    // Go through each predecessor of the loop header and check the
-    // terminator for the metadata.
-    BasicBlock *H = getHeader();
-    for (BasicBlock *BB : this->blocks()) {
-      TerminatorInst *TI = BB->getTerminator();
-      MDNode *MD = nullptr;
 
-      // Check if this terminator branches to the loop header.
-      for (BasicBlock *Successor : TI->successors()) {
-        if (Successor == H) {
-          MD = TI->getMetadata(LLVMContext::MD_loop);
-          break;
-        }
-      }
-      if (!MD)
-        return nullptr;
+  // Go through the latch blocks and check the terminator for the metadata.
+  SmallVector<BasicBlock *, 4> LatchesBlocks;
+  getLoopLatches(LatchesBlocks);
+  for (BasicBlock *BB : LatchesBlocks) {
+    Instruction *TI = BB->getTerminator();
+    MDNode *MD = TI->getMetadata(LLVMContext::MD_loop);
 
-      if (!LoopID)
-        LoopID = MD;
-      else if (MD != LoopID)
-        return nullptr;
-    }
+    if (!MD)
+      return nullptr;
+
+    if (!LoopID)
+      LoopID = MD;
+    else if (MD != LoopID)
+      return nullptr;
   }
   if (!LoopID || LoopID->getNumOperands() == 0 ||
       LoopID->getOperand(0) != LoopID)
@@ -247,23 +236,19 @@ MDNode *Loop::getLoopID() const {
 }
 
 void Loop::setLoopID(MDNode *LoopID) const {
-  assert(LoopID && "Loop ID should not be null");
-  assert(LoopID->getNumOperands() > 0 && "Loop ID needs at least one operand");
-  assert(LoopID->getOperand(0) == LoopID && "Loop ID should refer to itself");
+  assert((!LoopID || LoopID->getNumOperands() > 0) &&
+         "Loop ID needs at least one operand");
+  assert((!LoopID || LoopID->getOperand(0) == LoopID) &&
+         "Loop ID should refer to itself");
 
-  if (BasicBlock *Latch = getLoopLatch()) {
-    Latch->getTerminator()->setMetadata(LLVMContext::MD_loop, LoopID);
-    return;
-  }
-
-  assert(!getLoopLatch() &&
-         "The loop should have no single latch at this point");
   BasicBlock *H = getHeader();
   for (BasicBlock *BB : this->blocks()) {
-    TerminatorInst *TI = BB->getTerminator();
-    for (BasicBlock *Successor : TI->successors()) {
-      if (Successor == H)
+    Instruction *TI = BB->getTerminator();
+    for (BasicBlock *Successor : successors(TI)) {
+      if (Successor == H) {
         TI->setMetadata(LLVMContext::MD_loop, LoopID);
+        break;
+      }
     }
   }
 }
@@ -307,15 +292,49 @@ bool Loop::isAnnotatedParallel() const {
   if (!DesiredLoopIdMetadata)
     return false;
 
+  MDNode *ParallelAccesses =
+      findOptionMDForLoop(this, "llvm.loop.parallel_accesses");
+  SmallPtrSet<MDNode *, 4>
+      ParallelAccessGroups; // For scalable 'contains' check.
+  if (ParallelAccesses) {
+    for (const MDOperand &MD : drop_begin(ParallelAccesses->operands(), 1)) {
+      MDNode *AccGroup = cast<MDNode>(MD.get());
+      assert(isValidAsAccessGroup(AccGroup) &&
+             "List item must be an access group");
+      ParallelAccessGroups.insert(AccGroup);
+    }
+  }
+
   // The loop branch contains the parallel loop metadata. In order to ensure
   // that any parallel-loop-unaware optimization pass hasn't added loop-carried
   // dependencies (thus converted the loop back to a sequential loop), check
-  // that all the memory instructions in the loop contain parallelism metadata
-  // that point to the same unique "loop id metadata" the loop branch does.
+  // that all the memory instructions in the loop belong to an access group that
+  // is parallel to this loop.
   for (BasicBlock *BB : this->blocks()) {
     for (Instruction &I : *BB) {
       if (!I.mayReadOrWriteMemory())
         continue;
+
+      if (MDNode *AccessGroup = I.getMetadata(LLVMContext::MD_access_group)) {
+        auto ContainsAccessGroup = [&ParallelAccessGroups](MDNode *AG) -> bool {
+          if (AG->getNumOperands() == 0) {
+            assert(isValidAsAccessGroup(AG) && "Item must be an access group");
+            return ParallelAccessGroups.count(AG);
+          }
+
+          for (const MDOperand &AccessListItem : AG->operands()) {
+            MDNode *AccGroup = cast<MDNode>(AccessListItem.get());
+            assert(isValidAsAccessGroup(AccGroup) &&
+                   "List item must be an access group");
+            if (ParallelAccessGroups.count(AccGroup))
+              return true;
+          }
+          return false;
+        };
+
+        if (ContainsAccessGroup(AccessGroup))
+          continue;
+      }
 
       // The memory instruction can refer to the loop identifier metadata
       // directly or indirectly through another list metadata (in case of
@@ -375,69 +394,6 @@ Loop::LocRange Loop::getLocRange() const {
     return LocRange(HeadBB->getTerminator()->getDebugLoc());
 
   return LocRange();
-}
-
-bool Loop::hasDedicatedExits() const {
-  // Each predecessor of each exit block of a normal loop is contained
-  // within the loop.
-  SmallVector<BasicBlock *, 4> ExitBlocks;
-  getExitBlocks(ExitBlocks);
-  for (BasicBlock *BB : ExitBlocks)
-    for (BasicBlock *Predecessor : predecessors(BB))
-      if (!contains(Predecessor))
-        return false;
-  // All the requirements are met.
-  return true;
-}
-
-void Loop::getUniqueExitBlocks(
-    SmallVectorImpl<BasicBlock *> &ExitBlocks) const {
-  assert(hasDedicatedExits() &&
-         "getUniqueExitBlocks assumes the loop has canonical form exits!");
-
-  SmallVector<BasicBlock *, 32> SwitchExitBlocks;
-  for (BasicBlock *BB : this->blocks()) {
-    SwitchExitBlocks.clear();
-    for (BasicBlock *Successor : successors(BB)) {
-      // If block is inside the loop then it is not an exit block.
-      if (contains(Successor))
-        continue;
-
-      pred_iterator PI = pred_begin(Successor);
-      BasicBlock *FirstPred = *PI;
-
-      // If current basic block is this exit block's first predecessor
-      // then only insert exit block in to the output ExitBlocks vector.
-      // This ensures that same exit block is not inserted twice into
-      // ExitBlocks vector.
-      if (BB != FirstPred)
-        continue;
-
-      // If a terminator has more then two successors, for example SwitchInst,
-      // then it is possible that there are multiple edges from current block
-      // to one exit block.
-      if (std::distance(succ_begin(BB), succ_end(BB)) <= 2) {
-        ExitBlocks.push_back(Successor);
-        continue;
-      }
-
-      // In case of multiple edges from current block to exit block, collect
-      // only one edge in ExitBlocks. Use switchExitBlocks to keep track of
-      // duplicate edges.
-      if (!is_contained(SwitchExitBlocks, Successor)) {
-        SwitchExitBlocks.push_back(Successor);
-        ExitBlocks.push_back(Successor);
-      }
-    }
-  }
-}
-
-BasicBlock *Loop::getUniqueExitBlock() const {
-  SmallVector<BasicBlock *, 8> UniqueExitBlocks;
-  getUniqueExitBlocks(UniqueExitBlocks);
-  if (UniqueExitBlocks.size() == 1)
-    return UniqueExitBlocks[0];
-  return nullptr;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -731,12 +687,77 @@ PreservedAnalyses LoopPrinterPass::run(Function &F,
 }
 
 void llvm::printLoop(Loop &L, raw_ostream &OS, const std::string &Banner) {
+
+  if (forcePrintModuleIR()) {
+    // handling -print-module-scope
+    OS << Banner << " (loop: ";
+    L.getHeader()->printAsOperand(OS, false);
+    OS << ")\n";
+
+    // printing whole module
+    OS << *L.getHeader()->getModule();
+    return;
+  }
+
   OS << Banner;
+
+  auto *PreHeader = L.getLoopPreheader();
+  if (PreHeader) {
+    OS << "\n; Preheader:";
+    PreHeader->print(OS);
+    OS << "\n; Loop:";
+  }
+
   for (auto *Block : L.blocks())
     if (Block)
       Block->print(OS);
     else
       OS << "Printing <null> block";
+
+  SmallVector<BasicBlock *, 8> ExitBlocks;
+  L.getExitBlocks(ExitBlocks);
+  if (!ExitBlocks.empty()) {
+    OS << "\n; Exit blocks";
+    for (auto *Block : ExitBlocks)
+      if (Block)
+        Block->print(OS);
+      else
+        OS << "Printing <null> block";
+  }
+}
+
+MDNode *llvm::findOptionMDForLoopID(MDNode *LoopID, StringRef Name) {
+  // No loop metadata node, no loop properties.
+  if (!LoopID)
+    return nullptr;
+
+  // First operand should refer to the metadata node itself, for legacy reasons.
+  assert(LoopID->getNumOperands() > 0 && "requires at least one operand");
+  assert(LoopID->getOperand(0) == LoopID && "invalid loop id");
+
+  // Iterate over the metdata node operands and look for MDString metadata.
+  for (unsigned i = 1, e = LoopID->getNumOperands(); i < e; ++i) {
+    MDNode *MD = dyn_cast<MDNode>(LoopID->getOperand(i));
+    if (!MD || MD->getNumOperands() < 1)
+      continue;
+    MDString *S = dyn_cast<MDString>(MD->getOperand(0));
+    if (!S)
+      continue;
+    // Return the operand node if MDString holds expected metadata.
+    if (Name.equals(S->getString()))
+      return MD;
+  }
+
+  // Loop property not found.
+  return nullptr;
+}
+
+MDNode *llvm::findOptionMDForLoop(const Loop *TheLoop, StringRef Name) {
+  return findOptionMDForLoopID(TheLoop->getLoopID(), Name);
+}
+
+bool llvm::isValidAsAccessGroup(MDNode *Node) {
+  return Node->getNumOperands() == 0 && Node->isDistinct();
 }
 
 //===----------------------------------------------------------------------===//

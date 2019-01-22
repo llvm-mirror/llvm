@@ -1,9 +1,8 @@
 //===- TargetTransformInfo.h ------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -49,7 +48,7 @@ class Type;
 class User;
 class Value;
 
-/// \brief Information about a load/store intrinsic defined by the target.
+/// Information about a load/store intrinsic defined by the target.
 struct MemIntrinsicInfo {
   /// This is the pointer that the intrinsic is loading from or storing to.
   /// If this is non-null, then analysis/optimization passes can assume that
@@ -73,18 +72,18 @@ struct MemIntrinsicInfo {
   }
 };
 
-/// \brief This pass provides access to the codegen interfaces that are needed
+/// This pass provides access to the codegen interfaces that are needed
 /// for IR-level transformations.
 class TargetTransformInfo {
 public:
-  /// \brief Construct a TTI object using a type implementing the \c Concept
+  /// Construct a TTI object using a type implementing the \c Concept
   /// API below.
   ///
   /// This is used by targets to construct a TTI wrapping their target-specific
   /// implementaion that encodes appropriate costs for their target.
   template <typename T> TargetTransformInfo(T Impl);
 
-  /// \brief Construct a baseline TTI object using a minimal implementation of
+  /// Construct a baseline TTI object using a minimal implementation of
   /// the \c Concept API below.
   ///
   /// The TTI implementation will reflect the information in the DataLayout
@@ -99,7 +98,7 @@ public:
   // out-of-line.
   ~TargetTransformInfo();
 
-  /// \brief Handle the invalidation of this information.
+  /// Handle the invalidation of this information.
   ///
   /// When used as a result of \c TargetIRAnalysis this method will be called
   /// when the function this was computed for changes. When it returns false,
@@ -114,7 +113,7 @@ public:
   /// \name Generic Target Information
   /// @{
 
-  /// \brief The kind of cost model.
+  /// The kind of cost model.
   ///
   /// There are several different cost models that can be customized by the
   /// target. The normalization of each cost model may be target specific.
@@ -124,7 +123,7 @@ public:
     TCK_CodeSize         ///< Instruction code size.
   };
 
-  /// \brief Query the cost of a specified instruction.
+  /// Query the cost of a specified instruction.
   ///
   /// Clients should use this interface to query the cost of an existing
   /// instruction. The instruction must have a valid parent (basic block).
@@ -145,7 +144,7 @@ public:
     llvm_unreachable("Unknown instruction cost kind");
   }
 
-  /// \brief Underlying constants for 'cost' values in this interface.
+  /// Underlying constants for 'cost' values in this interface.
   ///
   /// Many APIs in this interface return a cost. This enum defines the
   /// fundamental values that should be used to interpret (and produce) those
@@ -169,7 +168,7 @@ public:
     TCC_Expensive = 4 ///< The cost of a 'div' instruction on x86.
   };
 
-  /// \brief Estimate the cost of a specific operation when lowered.
+  /// Estimate the cost of a specific operation when lowered.
   ///
   /// Note that this is designed to work on an arbitrary synthetic opcode, and
   /// thus work for hypothetical queries before an instruction has even been
@@ -185,7 +184,7 @@ public:
   /// comments for a detailed explanation of the cost values.
   int getOperationCost(unsigned Opcode, Type *Ty, Type *OpTy = nullptr) const;
 
-  /// \brief Estimate the cost of a GEP operation when lowered.
+  /// Estimate the cost of a GEP operation when lowered.
   ///
   /// The contract for this function is the same as \c getOperationCost except
   /// that it supports an interface that provides extra information specific to
@@ -193,14 +192,14 @@ public:
   int getGEPCost(Type *PointeeType, const Value *Ptr,
                  ArrayRef<const Value *> Operands) const;
 
-  /// \brief Estimate the cost of a EXT operation when lowered.
+  /// Estimate the cost of a EXT operation when lowered.
   ///
   /// The contract for this function is the same as \c getOperationCost except
   /// that it supports an interface that provides extra information specific to
   /// the EXT operation.
   int getExtCost(const Instruction *I, const Value *Src) const;
 
-  /// \brief Estimate the cost of a function call when lowered.
+  /// Estimate the cost of a function call when lowered.
   ///
   /// The contract for this is the same as \c getOperationCost except that it
   /// supports an interface that provides extra information specific to call
@@ -211,13 +210,13 @@ public:
   /// The latter is only interesting for varargs function types.
   int getCallCost(FunctionType *FTy, int NumArgs = -1) const;
 
-  /// \brief Estimate the cost of calling a specific function when lowered.
+  /// Estimate the cost of calling a specific function when lowered.
   ///
   /// This overload adds the ability to reason about the particular function
   /// being called in the event it is a library call with special lowering.
   int getCallCost(const Function *F, int NumArgs = -1) const;
 
-  /// \brief Estimate the cost of calling a specific function when lowered.
+  /// Estimate the cost of calling a specific function when lowered.
   ///
   /// This overload allows specifying a set of candidate argument values.
   int getCallCost(const Function *F, ArrayRef<const Value *> Arguments) const;
@@ -230,13 +229,13 @@ public:
   /// individual classes of instructions would be better.
   unsigned getInliningThresholdMultiplier() const;
 
-  /// \brief Estimate the cost of an intrinsic when lowered.
+  /// Estimate the cost of an intrinsic when lowered.
   ///
   /// Mirrors the \c getCallCost method but uses an intrinsic identifier.
   int getIntrinsicCost(Intrinsic::ID IID, Type *RetTy,
                        ArrayRef<Type *> ParamTys) const;
 
-  /// \brief Estimate the cost of an intrinsic when lowered.
+  /// Estimate the cost of an intrinsic when lowered.
   ///
   /// Mirrors the \c getCallCost method but uses an intrinsic identifier.
   int getIntrinsicCost(Intrinsic::ID IID, Type *RetTy,
@@ -248,7 +247,7 @@ public:
   unsigned getEstimatedNumberOfCaseClusters(const SwitchInst &SI,
                                             unsigned &JTSize) const;
 
-  /// \brief Estimate the cost of a given IR user when lowered.
+  /// Estimate the cost of a given IR user when lowered.
   ///
   /// This can estimate the cost of either a ConstantExpr or Instruction when
   /// lowered. It has two primary advantages over the \c getOperationCost and
@@ -271,7 +270,7 @@ public:
   /// comments for a detailed explanation of the cost values.
   int getUserCost(const User *U, ArrayRef<const Value *> Operands) const;
 
-  /// \brief This is a helper function which calls the two-argument getUserCost
+  /// This is a helper function which calls the two-argument getUserCost
   /// with \p Operands which are the current operands U has.
   int getUserCost(const User *U) const {
     SmallVector<const Value *, 4> Operands(U->value_op_begin(),
@@ -279,22 +278,22 @@ public:
     return getUserCost(U, Operands);
   }
 
-  /// \brief Return true if branch divergence exists.
+  /// Return true if branch divergence exists.
   ///
   /// Branch divergence has a significantly negative impact on GPU performance
   /// when threads in the same wavefront take different paths due to conditional
   /// branches.
   bool hasBranchDivergence() const;
 
-  /// \brief Returns whether V is a source of divergence.
+  /// Returns whether V is a source of divergence.
   ///
   /// This function provides the target-dependent information for
-  /// the target-independent DivergenceAnalysis. DivergenceAnalysis first
+  /// the target-independent LegacyDivergenceAnalysis. LegacyDivergenceAnalysis first
   /// builds the dependency graph, and then runs the reachability algorithm
   /// starting with the sources of divergence.
   bool isSourceOfDivergence(const Value *V) const;
 
-  // \brief Returns true for the target specific
+  // Returns true for the target specific
   // set of operations which produce uniform result
   // even taking non-unform arguments
   bool isAlwaysUniform(const Value *V) const;
@@ -308,7 +307,7 @@ public:
   /// compared to the same memory location accessed through a pointer with a
   /// different address space.
   //
-  /// This is for for targets with different pointer representations which can
+  /// This is for targets with different pointer representations which can
   /// be converted with the addrspacecast instruction. If a pointer is converted
   /// to this address space, optimizations should attempt to replace the access
   /// with the source address space.
@@ -317,7 +316,7 @@ public:
   /// optimize away.
   unsigned getFlatAddressSpace() const;
 
-  /// \brief Test whether calls to a function lower to actual program function
+  /// Test whether calls to a function lower to actual program function
   /// calls.
   ///
   /// The idea is to test whether the program is likely to require a 'call'
@@ -422,9 +421,16 @@ public:
     bool AllowPeeling;
     /// Allow unrolling of all the iterations of the runtime loop remainder.
     bool UnrollRemainder;
+    /// Allow unroll and jam. Used to enable unroll and jam for the target.
+    bool UnrollAndJam;
+    /// Threshold for unroll and jam, for inner loop size. The 'Threshold'
+    /// value above is used during unroll and jam for the outer loop size.
+    /// This value is used in the same manner to limit the size of the inner
+    /// loop.
+    unsigned UnrollAndJamInnerLoopThreshold;
   };
 
-  /// \brief Get target-customized preferences for the generic loop unrolling
+  /// Get target-customized preferences for the generic loop unrolling
   /// transformation. The caller will initialize UP with the current
   /// target-independent defaults.
   void getUnrollingPreferences(Loop *L, ScalarEvolution &,
@@ -435,7 +441,7 @@ public:
   /// \name Scalar Target Information
   /// @{
 
-  /// \brief Flags indicating the kind of support for population count.
+  /// Flags indicating the kind of support for population count.
   ///
   /// Compared to the SW implementation, HW support is supposed to
   /// significantly boost the performance when the population is dense, and it
@@ -445,18 +451,18 @@ public:
   /// considered as "Slow".
   enum PopcntSupportKind { PSK_Software, PSK_SlowHardware, PSK_FastHardware };
 
-  /// \brief Return true if the specified immediate is legal add immediate, that
+  /// Return true if the specified immediate is legal add immediate, that
   /// is the target has add instructions which can add a register with the
   /// immediate without having to materialize the immediate into a register.
   bool isLegalAddImmediate(int64_t Imm) const;
 
-  /// \brief Return true if the specified immediate is legal icmp immediate,
+  /// Return true if the specified immediate is legal icmp immediate,
   /// that is the target has icmp instructions which can compare a register
   /// against the immediate without having to materialize the immediate into a
   /// register.
   bool isLegalICmpImmediate(int64_t Imm) const;
 
-  /// \brief Return true if the addressing mode represented by AM is legal for
+  /// Return true if the addressing mode represented by AM is legal for
   /// this target, for a load/store of the specified type.
   /// The type may be VoidTy, in which case only return true if the addressing
   /// mode is legal for a load/store of any legal type.
@@ -467,16 +473,25 @@ public:
                              unsigned AddrSpace = 0,
                              Instruction *I = nullptr) const;
 
-  /// \brief Return true if LSR cost of C1 is lower than C1.
+  /// Return true if LSR cost of C1 is lower than C1.
   bool isLSRCostLess(TargetTransformInfo::LSRCost &C1,
                      TargetTransformInfo::LSRCost &C2) const;
 
-  /// \brief Return true if the target supports masked load/store
+  /// Return true if the target can fuse a compare and branch.
+  /// Loop-strength-reduction (LSR) uses that knowledge to adjust its cost
+  /// calculation for the instructions in a loop.
+  bool canMacroFuseCmp() const;
+
+  /// \return True is LSR should make efforts to create/preserve post-inc
+  /// addressing mode expressions.
+  bool shouldFavorPostInc() const;
+
+  /// Return true if the target supports masked load/store
   /// AVX2 and AVX-512 targets allow masks for consecutive load and store
   bool isLegalMaskedStore(Type *DataType) const;
   bool isLegalMaskedLoad(Type *DataType) const;
 
-  /// \brief Return true if the target supports masked gather/scatter
+  /// Return true if the target supports masked gather/scatter
   /// AVX-512 fully supports gather and scatter for vectors with 32 and 64
   /// bits scalar type.
   bool isLegalMaskedScatter(Type *DataType) const;
@@ -499,7 +514,7 @@ public:
   /// Return true if target doesn't mind addresses in vectors.
   bool prefersVectorizedAddressing() const;
 
-  /// \brief Return the cost of the scaling factor used in the addressing
+  /// Return the cost of the scaling factor used in the addressing
   /// mode represented by AM for this target, for a load/store
   /// of the specified type.
   /// If the AM is supported, the return value must be >= 0.
@@ -509,37 +524,43 @@ public:
                            bool HasBaseReg, int64_t Scale,
                            unsigned AddrSpace = 0) const;
 
-  /// \brief Return true if the loop strength reduce pass should make
+  /// Return true if the loop strength reduce pass should make
   /// Instruction* based TTI queries to isLegalAddressingMode(). This is
   /// needed on SystemZ, where e.g. a memcpy can only have a 12 bit unsigned
   /// immediate offset and no index register.
   bool LSRWithInstrQueries() const;
 
-  /// \brief Return true if it's free to truncate a value of type Ty1 to type
+  /// Return true if it's free to truncate a value of type Ty1 to type
   /// Ty2. e.g. On x86 it's free to truncate a i32 value in register EAX to i16
   /// by referencing its sub-register AX.
   bool isTruncateFree(Type *Ty1, Type *Ty2) const;
 
-  /// \brief Return true if it is profitable to hoist instruction in the
+  /// Return true if it is profitable to hoist instruction in the
   /// then/else to before if.
   bool isProfitableToHoist(Instruction *I) const;
 
-  /// \brief Return true if this type is legal.
+  bool useAA() const;
+
+  /// Return true if this type is legal.
   bool isTypeLegal(Type *Ty) const;
 
-  /// \brief Returns the target's jmp_buf alignment in bytes.
+  /// Returns the target's jmp_buf alignment in bytes.
   unsigned getJumpBufAlignment() const;
 
-  /// \brief Returns the target's jmp_buf size in bytes.
+  /// Returns the target's jmp_buf size in bytes.
   unsigned getJumpBufSize() const;
 
-  /// \brief Return true if switches should be turned into lookup tables for the
+  /// Return true if switches should be turned into lookup tables for the
   /// target.
   bool shouldBuildLookupTables() const;
 
-  /// \brief Return true if switches should be turned into lookup tables
+  /// Return true if switches should be turned into lookup tables
   /// containing this constant value for the target.
   bool shouldBuildLookupTablesForConstant(Constant *C) const;
+
+  /// Return true if the input function which is cold at all call sites,
+  ///  should use coldcc calling convention.
+  bool useColdCCForColdCall(Function &F) const;
 
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
 
@@ -551,16 +572,30 @@ public:
   /// the scalarization cost of a load/store.
   bool supportsEfficientVectorElementLoadStore() const;
 
-  /// \brief Don't restrict interleaved unrolling to small loops.
+  /// Don't restrict interleaved unrolling to small loops.
   bool enableAggressiveInterleaving(bool LoopHasReductions) const;
 
-  /// \brief Enable inline expansion of memcmp
-  bool enableMemCmpExpansion(unsigned &MaxLoadSize) const;
+  /// If not nullptr, enable inline expansion of memcmp. IsZeroCmp is
+  /// true if this is the expansion of memcmp(p1, p2, s) == 0.
+  struct MemCmpExpansionOptions {
+    // The list of available load sizes (in bytes), sorted in decreasing order.
+    SmallVector<unsigned, 8> LoadSizes;
+    // Set to true to allow overlapping loads. For example, 7-byte compares can
+    // be done with two 4-byte compares instead of 4+2+1-byte compares. This
+    // requires all loads in LoadSizes to be doable in an unaligned way.
+    bool AllowOverlappingLoads = false;
+  };
+  const MemCmpExpansionOptions *enableMemCmpExpansion(bool IsZeroCmp) const;
 
-  /// \brief Enable matching of interleaved access groups.
+  /// Enable matching of interleaved access groups.
   bool enableInterleavedAccessVectorization() const;
 
-  /// \brief Indicate that it is potentially unsafe to automatically vectorize
+  /// Enable matching of interleaved access groups that contain predicated
+  /// accesses or gaps and therefore vectorized using masked
+  /// vector loads/stores.
+  bool enableMaskedInterleavedAccessVectorization() const;
+
+  /// Indicate that it is potentially unsafe to automatically vectorize
   /// floating-point operations because the semantics of vector and scalar
   /// floating-point semantics may differ. For example, ARM NEON v7 SIMD math
   /// does not support IEEE-754 denormal numbers, while depending on the
@@ -569,27 +604,33 @@ public:
   /// operations, shuffles, or casts.
   bool isFPVectorizationPotentiallyUnsafe() const;
 
-  /// \brief Determine if the target supports unaligned memory accesses.
+  /// Determine if the target supports unaligned memory accesses.
   bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
                                       unsigned BitWidth, unsigned AddressSpace = 0,
                                       unsigned Alignment = 1,
                                       bool *Fast = nullptr) const;
 
-  /// \brief Return hardware support for population count.
+  /// Return hardware support for population count.
   PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) const;
 
-  /// \brief Return true if the hardware has a fast square-root instruction.
+  /// Return true if the hardware has a fast square-root instruction.
   bool haveFastSqrt(Type *Ty) const;
 
-  /// \brief Return the expected cost of supporting the floating point operation
+  /// Return true if it is faster to check if a floating-point value is NaN
+  /// (or not-NaN) versus a comparison against a constant FP zero value.
+  /// Targets should override this if materializing a 0.0 for comparison is
+  /// generally as cheap as checking for ordered/unordered.
+  bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) const;
+
+  /// Return the expected cost of supporting the floating point operation
   /// of the specified type.
   int getFPOpCost(Type *Ty) const;
 
-  /// \brief Return the expected cost of materializing for the given integer
+  /// Return the expected cost of materializing for the given integer
   /// immediate of the specified type.
   int getIntImmCost(const APInt &Imm, Type *Ty) const;
 
-  /// \brief Return the expected cost of materialization for the given integer
+  /// Return the expected cost of materialization for the given integer
   /// immediate of the specified type for a given instruction. The cost can be
   /// zero if the immediate can be folded into the specified instruction.
   int getIntImmCost(unsigned Opc, unsigned Idx, const APInt &Imm,
@@ -597,7 +638,7 @@ public:
   int getIntImmCost(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                     Type *Ty) const;
 
-  /// \brief Return the expected cost for the given integer when optimising
+  /// Return the expected cost for the given integer when optimising
   /// for size. This is different than the other integer immediate cost
   /// functions in that it is subtarget agnostic. This is useful when you e.g.
   /// target one ISA such as Aarch32 but smaller encodings could be possible
@@ -611,11 +652,14 @@ public:
   /// \name Vector Target Information
   /// @{
 
-  /// \brief The various kinds of shuffle patterns for vector queries.
+  /// The various kinds of shuffle patterns for vector queries.
   enum ShuffleKind {
     SK_Broadcast,       ///< Broadcast element 0 to all other elements.
     SK_Reverse,         ///< Reverse the order of the vector.
-    SK_Alternate,       ///< Choose alternate elements from vector.
+    SK_Select,          ///< Selects elements from the corresponding lane of
+                        ///< either source operand. This is equivalent to a
+                        ///< vector select with a constant condition operand.
+    SK_Transpose,       ///< Transpose two vectors.
     SK_InsertSubvector, ///< InsertSubvector. Index indicates start offset.
     SK_ExtractSubvector,///< ExtractSubvector Index indicates start offset.
     SK_PermuteTwoSrc,   ///< Merge elements from two source vectors into one
@@ -624,7 +668,7 @@ public:
                         ///< shuffle mask.
   };
 
-  /// \brief Additional information about an operand's possible values.
+  /// Additional information about an operand's possible values.
   enum OperandValueKind {
     OK_AnyValue,               // Operand can have any value.
     OK_UniformValue,           // Operand is uniform (splat of a value).
@@ -632,7 +676,7 @@ public:
     OK_NonUniformConstantValue // Operand is a non uniform constant value.
   };
 
-  /// \brief Additional properties of an operand's values.
+  /// Additional properties of an operand's values.
   enum OperandValueProperties { OP_None = 0, OP_PowerOf2 = 1 };
 
   /// \return The number of scalar or vector registers that the target has.
@@ -645,6 +689,19 @@ public:
 
   /// \return The width of the smallest vector register type.
   unsigned getMinVectorRegisterBitWidth() const;
+
+  /// \return True if the vectorization factor should be chosen to
+  /// make the vector of the smallest element type match the size of a
+  /// vector register. For wider element types, this could result in
+  /// creating vectors that span multiple vector registers.
+  /// If false, the vectorization factor will be chosen based on the
+  /// size of the widest element type.
+  bool shouldMaximizeVectorBandwidth(bool OptSize) const;
+
+  /// \return The minimum vectorization factor for types of given element
+  /// bit width, or 0 if there is no mimimum VF. The returned value only
+  /// applies when shouldMaximizeVectorBandwidth returns true.
+  unsigned getMinimumVF(unsigned ElemWidth) const;
 
   /// \return True if it should be considered for address type promotion.
   /// \p AllowPromotionWithoutCommonHeader Set true if promoting \p I is
@@ -690,10 +747,24 @@ public:
   /// and the number of execution units in the CPU.
   unsigned getMaxInterleaveFactor(unsigned VF) const;
 
-  /// \return The expected cost of arithmetic ops, such as mul, xor, fsub, etc.
-  /// \p Args is an optional argument which holds the instruction operands  
-  /// values so the TTI can analyize those values searching for special 
-  /// cases\optimizations based on those values.
+  /// Collect properties of V used in cost analysis, e.g. OP_PowerOf2.
+  static OperandValueKind getOperandInfo(Value *V,
+                                         OperandValueProperties &OpProps);
+
+  /// This is an approximation of reciprocal throughput of a math/logic op.
+  /// A higher cost indicates less expected throughput.
+  /// From Agner Fog's guides, reciprocal throughput is "the average number of
+  /// clock cycles per instruction when the instructions are not part of a
+  /// limiting dependency chain."
+  /// Therefore, costs should be scaled to account for multiple execution units
+  /// on the target that can process this type of instruction. For example, if
+  /// there are 5 scalar integer units and 2 vector integer units that can
+  /// calculate an 'add' in a single cycle, this model should indicate that the
+  /// cost of the vector add instruction is 2.5 times the cost of the scalar
+  /// add instruction.
+  /// \p Args is an optional argument which holds the instruction operands
+  /// values so the TTI can analyze those values searching for special
+  /// cases or optimizations based on those values.
   int getArithmeticInstrCost(
       unsigned Opcode, Type *Ty, OperandValueKind Opd1Info = OK_AnyValue,
       OperandValueKind Opd2Info = OK_AnyValue,
@@ -703,7 +774,9 @@ public:
 
   /// \return The cost of a shuffle instruction of kind Kind and of type Tp.
   /// The index and subtype parameters are used by the subvector insertion and
-  /// extraction shuffle kinds.
+  /// extraction shuffle kinds to show the insert/extract point and the type of
+  /// the subvector being inserted/extracted.
+  /// NOTE: For subvector extractions Tp represents the source type.
   int getShuffleCost(ShuffleKind Kind, Type *Tp, int Index = 0,
                      Type *SubTp = nullptr) const;
 
@@ -758,11 +831,15 @@ public:
   ///    load allows gaps)
   /// \p Alignment is the alignment of the memory operation
   /// \p AddressSpace is address space of the pointer.
+  /// \p UseMaskForCond indicates if the memory access is predicated.
+  /// \p UseMaskForGaps indicates if gaps should be masked.
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy, unsigned Factor,
                                  ArrayRef<unsigned> Indices, unsigned Alignment,
-                                 unsigned AddressSpace) const;
+                                 unsigned AddressSpace,
+                                 bool UseMaskForCond = false,
+                                 bool UseMaskForGaps = false) const;
 
-  /// \brief Calculate the cost of performing a vector reduction.
+  /// Calculate the cost of performing a vector reduction.
   ///
   /// This is the cost of reducing the vector value of type \p Ty to a scalar
   /// value using the operation denoted by \p Opcode. The form of the reduction
@@ -851,16 +928,33 @@ public:
                                          unsigned SrcAlign,
                                          unsigned DestAlign) const;
 
-  /// \returns True if we want to test the new memcpy lowering functionality in
-  /// Transform/Utils.
-  /// Temporary. Will be removed once we move to the new functionality and
-  /// remove the old.
-  bool useWideIRMemcpyLoopLowering() const;
-
   /// \returns True if the two functions have compatible attributes for inlining
   /// purposes.
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const;
+
+  /// \returns True if the caller and callee agree on how \p Args will be passed
+  /// to the callee.
+  /// \param[out] Args The list of compatible arguments.  The implementation may
+  /// filter out any incompatible args from this list.
+  bool areFunctionArgsABICompatible(const Function *Caller,
+                                    const Function *Callee,
+                                    SmallPtrSetImpl<Argument *> &Args) const;
+
+  /// The type of load/store indexing.
+  enum MemIndexedMode {
+    MIM_Unindexed,  ///< No indexing.
+    MIM_PreInc,     ///< Pre-incrementing.
+    MIM_PreDec,     ///< Pre-decrementing.
+    MIM_PostInc,    ///< Post-incrementing.
+    MIM_PostDec     ///< Post-decrementing.
+  };
+
+  /// \returns True if the specified indexed load for the given type is legal.
+  bool isIndexedLoadLegal(enum MemIndexedMode Mode, Type *Ty) const;
+
+  /// \returns True if the specified indexed store for the given type is legal.
+  bool isIndexedStoreLegal(enum MemIndexedMode Mode, Type *Ty) const;
 
   /// \returns The bitwidth of the largest vector type that should be used to
   /// load/store in the given address space.
@@ -913,19 +1007,19 @@ public:
   /// @}
 
 private:
-  /// \brief Estimate the latency of specified instruction.
+  /// Estimate the latency of specified instruction.
   /// Returns 1 as the default value.
   int getInstructionLatency(const Instruction *I) const;
 
-  /// \brief Returns the expected throughput cost of the instruction.
+  /// Returns the expected throughput cost of the instruction.
   /// Returns -1 if the cost is unknown.
   int getInstructionThroughput(const Instruction *I) const;
 
-  /// \brief The abstract base class used to type erase specific TTI
+  /// The abstract base class used to type erase specific TTI
   /// implementations.
   class Concept;
 
-  /// \brief The template model for the base class which wraps a concrete
+  /// The template model for the base class which wraps a concrete
   /// implementation in a type erased interface.
   template <typename T> class Model;
 
@@ -969,6 +1063,8 @@ public:
                                      Instruction *I) = 0;
   virtual bool isLSRCostLess(TargetTransformInfo::LSRCost &C1,
                              TargetTransformInfo::LSRCost &C2) = 0;
+  virtual bool canMacroFuseCmp() = 0;
+  virtual bool shouldFavorPostInc() const = 0;
   virtual bool isLegalMaskedStore(Type *DataType) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType) = 0;
   virtual bool isLegalMaskedScatter(Type *DataType) = 0;
@@ -982,19 +1078,23 @@ public:
   virtual bool LSRWithInstrQueries() = 0;
   virtual bool isTruncateFree(Type *Ty1, Type *Ty2) = 0;
   virtual bool isProfitableToHoist(Instruction *I) = 0;
+  virtual bool useAA() = 0;
   virtual bool isTypeLegal(Type *Ty) = 0;
   virtual unsigned getJumpBufAlignment() = 0;
   virtual unsigned getJumpBufSize() = 0;
   virtual bool shouldBuildLookupTables() = 0;
   virtual bool shouldBuildLookupTablesForConstant(Constant *C) = 0;
+  virtual bool useColdCCForColdCall(Function &F) = 0;
   virtual unsigned
   getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) = 0;
   virtual unsigned getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
                                                     unsigned VF) = 0;
   virtual bool supportsEfficientVectorElementLoadStore() = 0;
   virtual bool enableAggressiveInterleaving(bool LoopHasReductions) = 0;
-  virtual bool enableMemCmpExpansion(unsigned &MaxLoadSize) = 0;
+  virtual const MemCmpExpansionOptions *enableMemCmpExpansion(
+      bool IsZeroCmp) const = 0;
   virtual bool enableInterleavedAccessVectorization() = 0;
+  virtual bool enableMaskedInterleavedAccessVectorization() = 0;
   virtual bool isFPVectorizationPotentiallyUnsafe() = 0;
   virtual bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
                                               unsigned BitWidth,
@@ -1003,6 +1103,7 @@ public:
                                               bool *Fast) = 0;
   virtual PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) = 0;
   virtual bool haveFastSqrt(Type *Ty) = 0;
+  virtual bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) = 0;
   virtual int getFPOpCost(Type *Ty) = 0;
   virtual int getIntImmCodeSizeCost(unsigned Opc, unsigned Idx, const APInt &Imm,
                                     Type *Ty) = 0;
@@ -1014,6 +1115,8 @@ public:
   virtual unsigned getNumberOfRegisters(bool Vector) = 0;
   virtual unsigned getRegisterBitWidth(bool Vector) const = 0;
   virtual unsigned getMinVectorRegisterBitWidth() = 0;
+  virtual bool shouldMaximizeVectorBandwidth(bool OptSize) const = 0;
+  virtual unsigned getMinimumVF(unsigned ElemWidth) const = 0;
   virtual bool shouldConsiderAddressTypePromotion(
       const Instruction &I, bool &AllowPromotionWithoutCommonHeader) = 0;
   virtual unsigned getCacheLineSize() = 0;
@@ -1052,7 +1155,9 @@ public:
                                          unsigned Factor,
                                          ArrayRef<unsigned> Indices,
                                          unsigned Alignment,
-                                         unsigned AddressSpace) = 0;
+                                         unsigned AddressSpace,
+                                         bool UseMaskForCond = false,
+                                         bool UseMaskForGaps = false) = 0;
   virtual int getArithmeticReductionCost(unsigned Opcode, Type *Ty,
                                          bool IsPairwiseForm) = 0;
   virtual int getMinMaxReductionCost(Type *Ty, Type *CondTy,
@@ -1081,6 +1186,11 @@ public:
       unsigned RemainingBytes, unsigned SrcAlign, unsigned DestAlign) const = 0;
   virtual bool areInlineCompatible(const Function *Caller,
                                    const Function *Callee) const = 0;
+  virtual bool
+  areFunctionArgsABICompatible(const Function *Caller, const Function *Callee,
+                               SmallPtrSetImpl<Argument *> &Args) const = 0;
+  virtual bool isIndexedLoadLegal(MemIndexedMode Mode, Type *Ty) const = 0;
+  virtual bool isIndexedStoreLegal(MemIndexedMode Mode,Type *Ty) const = 0;
   virtual unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const = 0;
   virtual bool isLegalToVectorizeLoad(LoadInst *LI) const = 0;
   virtual bool isLegalToVectorizeStore(StoreInst *SI) const = 0;
@@ -1185,6 +1295,12 @@ public:
                      TargetTransformInfo::LSRCost &C2) override {
     return Impl.isLSRCostLess(C1, C2);
   }
+  bool canMacroFuseCmp() override {
+    return Impl.canMacroFuseCmp();
+  }
+  bool shouldFavorPostInc() const override {
+    return Impl.shouldFavorPostInc();
+  }
   bool isLegalMaskedStore(Type *DataType) override {
     return Impl.isLegalMaskedStore(DataType);
   }
@@ -1221,6 +1337,7 @@ public:
   bool isProfitableToHoist(Instruction *I) override {
     return Impl.isProfitableToHoist(I);
   }
+  bool useAA() override { return Impl.useAA(); }
   bool isTypeLegal(Type *Ty) override { return Impl.isTypeLegal(Ty); }
   unsigned getJumpBufAlignment() override { return Impl.getJumpBufAlignment(); }
   unsigned getJumpBufSize() override { return Impl.getJumpBufSize(); }
@@ -1230,6 +1347,10 @@ public:
   bool shouldBuildLookupTablesForConstant(Constant *C) override {
     return Impl.shouldBuildLookupTablesForConstant(C);
   }
+  bool useColdCCForColdCall(Function &F) override {
+    return Impl.useColdCCForColdCall(F);
+  }
+
   unsigned getScalarizationOverhead(Type *Ty, bool Insert,
                                     bool Extract) override {
     return Impl.getScalarizationOverhead(Ty, Insert, Extract);
@@ -1246,11 +1367,15 @@ public:
   bool enableAggressiveInterleaving(bool LoopHasReductions) override {
     return Impl.enableAggressiveInterleaving(LoopHasReductions);
   }
-  bool enableMemCmpExpansion(unsigned &MaxLoadSize) override {
-    return Impl.enableMemCmpExpansion(MaxLoadSize);
+  const MemCmpExpansionOptions *enableMemCmpExpansion(
+      bool IsZeroCmp) const override {
+    return Impl.enableMemCmpExpansion(IsZeroCmp);
   }
   bool enableInterleavedAccessVectorization() override {
     return Impl.enableInterleavedAccessVectorization();
+  }
+  bool enableMaskedInterleavedAccessVectorization() override {
+    return Impl.enableMaskedInterleavedAccessVectorization();
   }
   bool isFPVectorizationPotentiallyUnsafe() override {
     return Impl.isFPVectorizationPotentiallyUnsafe();
@@ -1265,6 +1390,10 @@ public:
     return Impl.getPopcntSupport(IntTyWidthInBit);
   }
   bool haveFastSqrt(Type *Ty) override { return Impl.haveFastSqrt(Ty); }
+
+  bool isFCmpOrdCheaperThanFCmpZero(Type *Ty) override {
+    return Impl.isFCmpOrdCheaperThanFCmpZero(Ty);
+  }
 
   int getFPOpCost(Type *Ty) override { return Impl.getFPOpCost(Ty); }
 
@@ -1291,6 +1420,12 @@ public:
   }
   unsigned getMinVectorRegisterBitWidth() override {
     return Impl.getMinVectorRegisterBitWidth();
+  }
+  bool shouldMaximizeVectorBandwidth(bool OptSize) const override {
+    return Impl.shouldMaximizeVectorBandwidth(OptSize);
+  }
+  unsigned getMinimumVF(unsigned ElemWidth) const override {
+    return Impl.getMinimumVF(ElemWidth);
   }
   bool shouldConsiderAddressTypePromotion(
       const Instruction &I, bool &AllowPromotionWithoutCommonHeader) override {
@@ -1367,9 +1502,11 @@ public:
   }
   int getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy, unsigned Factor,
                                  ArrayRef<unsigned> Indices, unsigned Alignment,
-                                 unsigned AddressSpace) override {
+                                 unsigned AddressSpace, bool UseMaskForCond,
+                                 bool UseMaskForGaps) override {
     return Impl.getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
-                                           Alignment, AddressSpace);
+                                           Alignment, AddressSpace,
+                                           UseMaskForCond, UseMaskForGaps);
   }
   int getArithmeticReductionCost(unsigned Opcode, Type *Ty,
                                  bool IsPairwiseForm) override {
@@ -1430,6 +1567,17 @@ public:
                            const Function *Callee) const override {
     return Impl.areInlineCompatible(Caller, Callee);
   }
+  bool areFunctionArgsABICompatible(
+      const Function *Caller, const Function *Callee,
+      SmallPtrSetImpl<Argument *> &Args) const override {
+    return Impl.areFunctionArgsABICompatible(Caller, Callee, Args);
+  }
+  bool isIndexedLoadLegal(MemIndexedMode Mode, Type *Ty) const override {
+    return Impl.isIndexedLoadLegal(Mode, Ty, getDataLayout());
+  }
+  bool isIndexedStoreLegal(MemIndexedMode Mode, Type *Ty) const override {
+    return Impl.isIndexedStoreLegal(Mode, Ty, getDataLayout());
+  }
   unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const override {
     return Impl.getLoadStoreVecRegBitWidth(AddrSpace);
   }
@@ -1477,7 +1625,7 @@ template <typename T>
 TargetTransformInfo::TargetTransformInfo(T Impl)
     : TTIImpl(new Model<T>(Impl)) {}
 
-/// \brief Analysis pass providing the \c TargetTransformInfo.
+/// Analysis pass providing the \c TargetTransformInfo.
 ///
 /// The core idea of the TargetIRAnalysis is to expose an interface through
 /// which LLVM targets can analyze and provide information about the middle
@@ -1492,13 +1640,13 @@ class TargetIRAnalysis : public AnalysisInfoMixin<TargetIRAnalysis> {
 public:
   typedef TargetTransformInfo Result;
 
-  /// \brief Default construct a target IR analysis.
+  /// Default construct a target IR analysis.
   ///
   /// This will use the module's datalayout to construct a baseline
   /// conservative TTI result.
   TargetIRAnalysis();
 
-  /// \brief Construct an IR analysis pass around a target-provide callback.
+  /// Construct an IR analysis pass around a target-provide callback.
   ///
   /// The callback will be called with a particular function for which the TTI
   /// is needed and must return a TTI object for that function.
@@ -1524,7 +1672,7 @@ private:
   friend AnalysisInfoMixin<TargetIRAnalysis>;
   static AnalysisKey Key;
 
-  /// \brief The callback used to produce a result.
+  /// The callback used to produce a result.
   ///
   /// We use a completely opaque callback so that targets can provide whatever
   /// mechanism they desire for constructing the TTI for a given function.
@@ -1536,11 +1684,11 @@ private:
   /// the external TargetMachine, and that reference needs to never dangle.
   std::function<Result(const Function &)> TTICallback;
 
-  /// \brief Helper function used as the callback in the default constructor.
+  /// Helper function used as the callback in the default constructor.
   static Result getDefaultTTI(const Function &F);
 };
 
-/// \brief Wrapper pass for TargetTransformInfo.
+/// Wrapper pass for TargetTransformInfo.
 ///
 /// This pass can be constructed from a TTI object which it stores internally
 /// and is queried by passes.
@@ -1553,7 +1701,7 @@ class TargetTransformInfoWrapperPass : public ImmutablePass {
 public:
   static char ID;
 
-  /// \brief We must provide a default constructor for the pass but it should
+  /// We must provide a default constructor for the pass but it should
   /// never be used.
   ///
   /// Use the constructor below or call one of the creation routines.
@@ -1564,7 +1712,7 @@ public:
   TargetTransformInfo &getTTI(const Function &F);
 };
 
-/// \brief Create an analysis pass wrapper around a TTI object.
+/// Create an analysis pass wrapper around a TTI object.
 ///
 /// This analysis pass just holds the TTI instance and makes it available to
 /// clients.

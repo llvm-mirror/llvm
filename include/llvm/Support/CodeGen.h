@@ -1,9 +1,8 @@
 //===-- llvm/Support/CodeGen.h - CodeGen Concepts ---------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,7 +24,7 @@ namespace llvm {
   // Code model types.
   namespace CodeModel {
     // Sync changes with CodeGenCWrappers.h.
-  enum Model { Small, Kernel, Medium, Large };
+  enum Model { Tiny, Small, Kernel, Medium, Large };
   }
 
   namespace PICLevel {
@@ -55,6 +54,11 @@ namespace llvm {
       Default,     // -O2, -Os
       Aggressive   // -O3
     };
+  }
+
+  // Specify effect of frame pointer elimination optimization.
+  namespace FramePointer {
+    enum FP {All, NonLeaf, None};
   }
 
 }  // end llvm namespace

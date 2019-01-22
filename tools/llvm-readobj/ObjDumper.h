@@ -1,9 +1,8 @@
 //===-- ObjDumper.h ---------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,13 +12,16 @@
 #include <memory>
 #include <system_error>
 
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Object/ObjectFile.h"
+
 namespace llvm {
 namespace object {
 class COFFImportFile;
 class ObjectFile;
 }
 namespace codeview {
-class TypeTableBuilder;
+class MergingTypeTableBuilder;
 }
 
 class ScopedPrinter;
@@ -30,7 +32,7 @@ public:
   virtual ~ObjDumper();
 
   virtual void printFileHeaders() = 0;
-  virtual void printSections() = 0;
+  virtual void printSectionHeaders() = 0;
   virtual void printRelocations() = 0;
   virtual void printSymbols() = 0;
   virtual void printDynamicSymbols() = 0;
@@ -41,13 +43,18 @@ public:
   virtual void printDynamicTable() { }
   virtual void printNeededLibraries() { }
   virtual void printProgramHeaders() { }
+  virtual void printSectionAsHex(StringRef SectionName) {}
   virtual void printHashTable() { }
   virtual void printGnuHashTable() { }
+  virtual void printHashSymbols() {}
   virtual void printLoadName() {}
   virtual void printVersionInfo() {}
   virtual void printGroupSections() {}
   virtual void printHashHistogram() {}
+  virtual void printCGProfile() {}
+  virtual void printAddrsig() {}
   virtual void printNotes() {}
+  virtual void printELFLinkerOptions() {}
 
   // Only implemented for ARM ELF at this time.
   virtual void printAttributes() { }
@@ -67,8 +74,9 @@ public:
   virtual void printCOFFResources() {}
   virtual void printCOFFLoadConfig() { }
   virtual void printCodeViewDebugInfo() { }
-  virtual void mergeCodeViewTypes(llvm::codeview::TypeTableBuilder &CVIDs,
-                                  llvm::codeview::TypeTableBuilder &CVTypes) {}
+  virtual void
+  mergeCodeViewTypes(llvm::codeview::MergingTypeTableBuilder &CVIDs,
+                     llvm::codeview::MergingTypeTableBuilder &CVTypes) {}
 
   // Only implemented for MachO.
   virtual void printMachODataInCode() { }
@@ -79,6 +87,9 @@ public:
   virtual void printMachOLinkerOptions() { }
 
   virtual void printStackMap() const = 0;
+
+  void printSectionAsString(const object::ObjectFile *Obj, StringRef SecName);
+  void printSectionAsHex(const object::ObjectFile *Obj, StringRef SecName);
 
 protected:
   ScopedPrinter &W;
@@ -100,11 +111,12 @@ std::error_code createWasmDumper(const object::ObjectFile *Obj,
                                  ScopedPrinter &Writer,
                                  std::unique_ptr<ObjDumper> &Result);
 
-void dumpCOFFImportFile(const object::COFFImportFile *File);
+void dumpCOFFImportFile(const object::COFFImportFile *File,
+                        ScopedPrinter &Writer);
 
-void dumpCodeViewMergedTypes(ScopedPrinter &Writer,
-                             llvm::codeview::TypeTableBuilder &IDTable,
-                             llvm::codeview::TypeTableBuilder &TypeTable);
+void dumpCodeViewMergedTypes(
+    ScopedPrinter &Writer, llvm::codeview::MergingTypeTableBuilder &IDTable,
+    llvm::codeview::MergingTypeTableBuilder &TypeTable);
 
 } // namespace llvm
 

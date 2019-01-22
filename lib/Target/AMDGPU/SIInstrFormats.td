@@ -1,9 +1,8 @@
 //===-- SIInstrFormats.td - SI Instruction Encodings ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,16 +11,16 @@
 //===----------------------------------------------------------------------===//
 
 def isGCN : Predicate<"Subtarget->getGeneration() "
-                      ">= SISubtarget::SOUTHERN_ISLANDS">,
+                      ">= AMDGPUSubtarget::SOUTHERN_ISLANDS">,
             AssemblerPredicate<"FeatureGCN">;
 def isSI : Predicate<"Subtarget->getGeneration() "
-                      "== SISubtarget::SOUTHERN_ISLANDS">,
+                      "== AMDGPUSubtarget::SOUTHERN_ISLANDS">,
            AssemblerPredicate<"FeatureSouthernIslands">;
 
 
 class InstSI <dag outs, dag ins, string asm = "",
               list<dag> pattern = []> :
-  AMDGPUInst<outs, ins, asm, pattern>, PredicateControl {
+  AMDGPUInst<outs, ins, asm, pattern>, GCNPredicateControl {
   let SubtargetPredicate = isGCN;
 
   // Low bits - basic encoding information.
@@ -95,9 +94,9 @@ class InstSI <dag outs, dag ins, string asm = "",
   // Is it possible for this instruction to be atomic?
   field bit maybeAtomic = 0;
 
-  // This bit indicates that this is a 16-bit instruction which zero-fills
-  // unused bits in dst. Note that new GFX9 opcodes preserve unused bits.
-  field bit F16_ZFILL = 0;
+  // This bit indicates that this is a VI instruction which is renamed
+  // in GFX9. Required for correct mapping from pseudo to MC.
+  field bit renamedInGFX9 = 0;
 
   // This bit indicates that this has a floating point result type, so
   // the clamp modifier has floating point semantics.
@@ -114,6 +113,16 @@ class InstSI <dag outs, dag ins, string asm = "",
   // This field indicates that the clamp applies to the high component
   // of a packed output register.
   field bit ClampHi = 0;
+
+  // This bit indicates that this is a packed VOP3P instruction
+  field bit IsPacked = 0;
+
+  // This bit indicates that this is a D16 buffer instruction.
+  field bit D16Buf = 0;
+
+  // This bit indicates that this uses the floating point double precision
+  // rounding mode flags
+  field bit FPDPRounding = 0;
 
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = SALU;
@@ -161,12 +170,18 @@ class InstSI <dag outs, dag ins, string asm = "",
   let TSFlags{42} = VOP3_OPSEL;
 
   let TSFlags{43} = maybeAtomic;
-  let TSFlags{44} = F16_ZFILL;
+  let TSFlags{44} = renamedInGFX9;
 
   let TSFlags{45} = FPClamp;
   let TSFlags{46} = IntClamp;
   let TSFlags{47} = ClampLo;
   let TSFlags{48} = ClampHi;
+
+  let TSFlags{49} = IsPacked;
+
+  let TSFlags{50} = D16Buf;
+
+  let TSFlags{51} = FPDPRounding;
 
   let SchedRW = [Write32Bit];
 
@@ -176,6 +191,9 @@ class InstSI <dag outs, dag ins, string asm = "",
 
   let isAsmParserOnly = !if(!eq(DisableDecoder{0}, {0}), 0, 1);
   let AsmVariantName = AMDGPUAsmVariants.Default;
+
+  // Avoid changing source registers in a way that violates constant bus read limitations.
+  let hasExtraSrcRegAllocReq = !if(VOP1,1,!if(VOP2,1,!if(VOP3,1,!if(VOPC,1,!if(SDWA,1, !if(VALU,1,0))))));
 }
 
 class PseudoInstSI<dag outs, dag ins, list<dag> pattern = [], string asm = "">
@@ -242,6 +260,7 @@ class MIMGe <bits<7> op> : Enc64 {
   bits<1> tfe;
   bits<1> lwe;
   bits<1> slc;
+  bit d16;
   bits<8> vaddr;
   bits<7> srsrc;
   bits<7> ssamp;
@@ -260,6 +279,7 @@ class MIMGe <bits<7> op> : Enc64 {
   let Inst{47-40} = vdata;
   let Inst{52-48} = srsrc{6-2};
   let Inst{57-53} = ssamp{6-2};
+  let Inst{63} = d16;
 }
 
 class EXPe : Enc64 {
@@ -304,6 +324,7 @@ class VINTRPCommon <dag outs, dag ins, string asm, list<dag> pattern> :
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
+  let VALU = 1;
 }
 
 class EXPCommon<dag outs, dag ins, string asm, list<dag> pattern> :
@@ -318,15 +339,3 @@ class EXPCommon<dag outs, dag ins, string asm, list<dag> pattern> :
 }
 
 } // End Uses = [EXEC]
-
-class MIMG <dag outs, dag ins, string asm, list<dag> pattern> :
-    InstSI <outs, ins, asm, pattern> {
-
-  let VM_CNT = 1;
-  let EXP_CNT = 1;
-  let MIMG = 1;
-  let Uses = [EXEC];
-
-  let UseNamedOperandTable = 1;
-  let hasSideEffects = 0; // XXX ????
-}

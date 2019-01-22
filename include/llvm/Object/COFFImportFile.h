@@ -1,9 +1,8 @@
 //===- COFFImportFile.h - COFF short import file implementation -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -74,16 +73,13 @@ struct COFFShortExport {
   std::string Name;
   std::string ExtName;
   std::string SymbolName;
+  std::string AliasTarget;
 
   uint16_t Ordinal = 0;
   bool Noname = false;
   bool Data = false;
   bool Private = false;
   bool Constant = false;
-
-  bool isWeak() {
-    return ExtName.size() && ExtName != Name;
-  }
 
   friend bool operator==(const COFFShortExport &L, const COFFShortExport &R) {
     return L.Name == R.Name && L.ExtName == R.ExtName &&
@@ -98,7 +94,7 @@ struct COFFShortExport {
 
 Error writeImportLibrary(StringRef ImportName, StringRef Path,
                          ArrayRef<COFFShortExport> Exports,
-                         COFF::MachineTypes Machine, bool MakeWeakAliases);
+                         COFF::MachineTypes Machine, bool MinGW);
 
 } // namespace object
 } // namespace llvm

@@ -1,9 +1,8 @@
 //=====-- AArch64MCAsmInfo.h - AArch64 asm properties ---------*- C++ -*--====//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -34,15 +33,11 @@ struct AArch64MCAsmInfoELF : public MCAsmInfoELF {
   explicit AArch64MCAsmInfoELF(const Triple &T);
 };
 
-struct AArch64MCAsmInfoCOFF : public MCAsmInfoCOFF {
-  explicit AArch64MCAsmInfoCOFF();
-};
-
-struct AArch64MCAsmInfoMicrosoftCOFF : public AArch64MCAsmInfoCOFF {
+struct AArch64MCAsmInfoMicrosoftCOFF : public MCAsmInfoMicrosoft {
   explicit AArch64MCAsmInfoMicrosoftCOFF();
 };
 
-struct AArch64MCAsmInfoGNUCOFF : public AArch64MCAsmInfoCOFF {
+struct AArch64MCAsmInfoGNUCOFF : public MCAsmInfoGNUCOFF {
   explicit AArch64MCAsmInfoGNUCOFF();
 };
 

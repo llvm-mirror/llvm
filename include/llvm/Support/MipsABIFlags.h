@@ -1,9 +1,8 @@
 //===--- MipsABIFlags.h - MIPS ABI flags ----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -42,7 +41,9 @@ enum AFL_ASE {
   AFL_ASE_MSA = 0x00000200,       // MSA ASE
   AFL_ASE_MIPS16 = 0x00000400,    // MIPS16 ASE
   AFL_ASE_MICROMIPS = 0x00000800, // MICROMIPS ASE
-  AFL_ASE_XPA = 0x00001000        // XPA ASE
+  AFL_ASE_XPA = 0x00001000,       // XPA ASE
+  AFL_ASE_CRC = 0x00008000,       // CRC ASE
+  AFL_ASE_GINV = 0x00020000       // GINV ASE
 };
 
 // Values for the isa_ext word of an ABI flags structure.

@@ -1,9 +1,8 @@
 //===- CFLSteensAliasAnalysis.cpp - Unification-based Alias Analysis ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -276,8 +275,9 @@ AliasResult CFLSteensAAResult::query(const MemoryLocation &LocA,
   if (!MaybeFnA && !MaybeFnB) {
     // The only times this is known to happen are when globals + InlineAsm are
     // involved
-    DEBUG(dbgs()
-          << "CFLSteensAA: could not extract parent function information.\n");
+    LLVM_DEBUG(
+        dbgs()
+        << "CFLSteensAA: could not extract parent function information.\n");
     return MayAlias;
   }
 

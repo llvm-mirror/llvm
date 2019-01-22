@@ -1,9 +1,8 @@
 //===- DbiModuleDescriptor.cpp - PDB module information -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -47,6 +46,10 @@ bool DbiModuleDescriptor::hasECInfo() const {
 uint16_t DbiModuleDescriptor::getTypeServerIndex() const {
   return (Layout->Flags & ModInfoFlags::TypeServerIndexMask) >>
          ModInfoFlags::TypeServerIndexShift;
+}
+
+const SectionContrib &DbiModuleDescriptor::getSectionContrib() const {
+  return Layout->SC;
 }
 
 uint16_t DbiModuleDescriptor::getModuleStreamIndex() const {

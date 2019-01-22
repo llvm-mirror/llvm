@@ -1,3 +1,4 @@
+; RUN: opt < %s -S -passes=msan 2>&1 | FileCheck %s
 ; RUN: opt < %s -msan -S | FileCheck %s
 
 target datalayout = "e-m:e-i64:64-i128:128-n32:64-S128"
@@ -32,19 +33,19 @@ define i32 @foo(i32 %guard, ...) {
 ; issue the memcpy.
 ; CHECK: [[GRP:%.*]] = getelementptr inbounds i8, i8* {{%.*}}, i64 {{%.*}}
 ; CHECK: [[GRSIZE:%.*]] = sub i64 64, {{%.*}}
-; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* {{%.*}}, i8* [[GRP]], i64 [[GRSIZE]], i32 8, i1 false)
+; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 8 {{%.*}}, i8* align 8 [[GRP]], i64 [[GRSIZE]], i1 false)
 
 ; Propagate the VR shadow values on for the va_list::__vr_top, adjust the 
 ; offset in the __msan_va_arg_tls based on va_list:__vr_off, and finally
 ; issue the memcpy.
 ; CHECK: [[VRP:%.*]] = getelementptr inbounds i8, i8* {{%.*}}, i64 {{%.*}}
 ; CHECK: [[VRSIZE:%.*]] = sub i64 128, {{%.*}}
-; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* {{%.*}}, i8* [[VRP]], i64 [[VRSIZE]], i32 8, i1 false)
+; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 8 {{%.*}}, i8* align 8 [[VRP]], i64 [[VRSIZE]], i1 false)
 
 ; Copy the remaining shadow values on the va_list::__stack position (it is
 ; on the constant offset of 192 from __msan_va_arg_tls).
 ; CHECK: [[STACK:%.*]] = getelementptr inbounds i8, i8* {{%.*}}, i32 192
-; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* {{%.*}}, i8* [[STACK]], i64 {{%.*}}, i32 16, i1 false)
+; CHECK: call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 16 {{%.*}}, i8* align 16 [[STACK]], i64 {{%.*}}, i1 false)
 
 declare void @llvm.lifetime.start.p0i8(i64, i8* nocapture) #1
 declare void @llvm.va_start(i8*) #2
@@ -74,3 +75,30 @@ define i32 @bar() {
 ; CHECK: store {{.*}} @__msan_va_arg_tls {{.*}} 56
 ; CHECK: store {{.*}} @__msan_va_arg_tls {{.*}} 192
 ; CHECK: store {{.*}} 8, {{.*}} @__msan_va_arg_overflow_size_tls
+
+; Test that MSan doesn't generate code overflowing __msan_va_arg_tls when too many arguments are
+; passed to a variadic function.
+
+define dso_local i64 @many_args() {
+entry:
+  %ret = call i64 (i64, ...) @sum(i64 120,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1,
+    i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1, i64 1
+  )
+  ret i64 %ret
+}
+
+; If the size of __msan_va_arg_tls changes the second argument of `add` must also be changed.
+; CHECK: i64 add (i64 ptrtoint ([100 x i64]* @__msan_va_arg_tls to i64), i64 792)
+; CHECK-NOT: i64 add (i64 ptrtoint ([100 x i64]* @__msan_va_arg_tls to i64), i64 800)
+declare i64 @sum(i64 %n, ...)

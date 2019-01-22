@@ -1,7 +1,8 @@
-// RUN: llvm-tblgen -gen-intrinsic %s | FileCheck %s
+// RUN: llvm-tblgen -gen-intrinsic-enums %s | FileCheck %s
 // XFAIL: vg_leak
 
 class IntrinsicProperty;
+class SDNodeProperty;
 
 class ValueType<int size, int value> {
   string Namespace = "MVT";
@@ -20,6 +21,7 @@ class Intrinsic<string name, list<LLVMType> param_types = []> {
   list<LLVMType> RetTypes = [];
   list<LLVMType> ParamTypes = param_types;
   list<IntrinsicProperty> IntrProperties = [];
+  list<SDNodeProperty> Properties = [];
 }
 
 def iAny : ValueType<0, 253>;

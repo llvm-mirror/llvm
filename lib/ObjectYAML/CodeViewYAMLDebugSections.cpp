@@ -1,9 +1,8 @@
 //===- CodeViewYAMLDebugSections.cpp - CodeView YAMLIO debug sections -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -66,7 +65,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(CrossModuleExport)
 LLVM_YAML_IS_SEQUENCE_VECTOR(YAMLCrossModuleImport)
 LLVM_YAML_IS_SEQUENCE_VECTOR(YAMLFrameData)
 
-LLVM_YAML_DECLARE_SCALAR_TRAITS(HexFormattedString, false)
+LLVM_YAML_DECLARE_SCALAR_TRAITS(HexFormattedString, QuotingType::None)
 LLVM_YAML_DECLARE_ENUM_TRAITS(DebugSubsectionKind)
 LLVM_YAML_DECLARE_ENUM_TRAITS(FileChecksumKind)
 LLVM_YAML_DECLARE_BITSET_TRAITS(LineFlags)
@@ -511,7 +510,7 @@ std::shared_ptr<DebugSubsection> YAMLFrameDataSubsection::toCodeViewSubsection(
     const codeview::StringsAndChecksums &SC) const {
   assert(SC.hasStrings());
 
-  auto Result = std::make_shared<DebugFrameDataSubsection>();
+  auto Result = std::make_shared<DebugFrameDataSubsection>(true);
   for (const auto &YF : Frames) {
     codeview::FrameData F;
     F.CodeSize = YF.CodeSize;

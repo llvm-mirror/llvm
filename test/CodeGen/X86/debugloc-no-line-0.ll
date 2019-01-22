@@ -4,7 +4,7 @@
 ; annotation, and that the annotation is identical to the one on e.g.,
 ; the jmp to bb4.
 ;
-; CHECK: JMP{{.*}}%bb.4.entry, debug-location ![[JUMPLOC:[0-9]+]]
+; CHECK: JMP{{.*}}%bb.4, debug-location ![[JUMPLOC:[0-9]+]]
 ; CHECK: bb.4.entry:
 ; CHECK: successors:
 ; CHECK: JE{{.*}}debug-location ![[JUMPLOC]]
@@ -38,7 +38,7 @@ sw.epilog:                                        ; preds = %sw.bb2, %sw.bb, %en
 !8 = !{i32 2, !"Dwarf Version", i32 4}
 !9 = !{i32 2, !"Debug Info Version", i32 3}
 !11 = !{!"clang"}
-!12 = distinct !DISubprogram(name: "main", scope: !3, file: !3, line: 4, type: !13, isLocal: false, isDefinition: true, scopeLine: 5, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!12 = distinct !DISubprogram(name: "main", scope: !3, file: !3, line: 4, type: !13, isLocal: false, isDefinition: true, scopeLine: 5, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !13 = !DISubroutineType(types: !14)
 !14 = !{!7}
 !16 = !DILocation(line: 6, column: 13, scope: !12)

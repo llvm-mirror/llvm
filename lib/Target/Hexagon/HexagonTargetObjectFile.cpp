@@ -1,9 +1,8 @@
 //===-- HexagonTargetObjectFile.cpp ---------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -74,7 +73,7 @@ static cl::opt<bool>
     if (TraceGVPlacement) {                                                    \
       TRACE_TO(errs(), X);                                                     \
     } else {                                                                   \
-      DEBUG(TRACE_TO(dbgs(), X));                                              \
+      LLVM_DEBUG(TRACE_TO(dbgs(), X));                                         \
     }                                                                          \
   } while (false)
 #endif
@@ -199,12 +198,16 @@ MCSection *HexagonTargetObjectFile::getExplicitSectionGlobal(
 /// section.
 bool HexagonTargetObjectFile::isGlobalInSmallSection(const GlobalObject *GO,
       const TargetMachine &TM) const {
+  bool HaveSData = isSmallDataEnabled(TM);
+  if (!HaveSData)
+    LLVM_DEBUG(dbgs() << "Small-data allocation is disabled, but symbols "
+                         "may have explicit section assignments...\n");
   // Only global variables, not functions.
-  DEBUG(dbgs() << "Checking if value is in small-data, -G"
-               << SmallDataThreshold << ": \"" << GO->getName() << "\": ");
+  LLVM_DEBUG(dbgs() << "Checking if value is in small-data, -G"
+                    << SmallDataThreshold << ": \"" << GO->getName() << "\": ");
   const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GO);
   if (!GVar) {
-    DEBUG(dbgs() << "no, not a global variable\n");
+    LLVM_DEBUG(dbgs() << "no, not a global variable\n");
     return false;
   }
 
@@ -213,19 +216,25 @@ bool HexagonTargetObjectFile::isGlobalInSmallSection(const GlobalObject *GO,
   // small data or not. This is how we can support mixing -G0/-G8 in LTO.
   if (GVar->hasSection()) {
     bool IsSmall = isSmallDataSection(GVar->getSection());
-    DEBUG(dbgs() << (IsSmall ? "yes" : "no") << ", has section: "
-                 << GVar->getSection() << '\n');
+    LLVM_DEBUG(dbgs() << (IsSmall ? "yes" : "no")
+                      << ", has section: " << GVar->getSection() << '\n');
     return IsSmall;
   }
 
+  // If sdata is disabled, stop the checks here.
+  if (!HaveSData) {
+    LLVM_DEBUG(dbgs() << "no, small-data allocation is disabled\n");
+    return false;
+  }
+
   if (GVar->isConstant()) {
-    DEBUG(dbgs() << "no, is a constant\n");
+    LLVM_DEBUG(dbgs() << "no, is a constant\n");
     return false;
   }
 
   bool IsLocal = GVar->hasLocalLinkage();
   if (!StaticsInSData && IsLocal) {
-    DEBUG(dbgs() << "no, is static\n");
+    LLVM_DEBUG(dbgs() << "no, is static\n");
     return false;
   }
 
@@ -234,7 +243,7 @@ bool HexagonTargetObjectFile::isGlobalInSmallSection(const GlobalObject *GO,
     GType = PT->getElementType();
 
   if (isa<ArrayType>(GType)) {
-    DEBUG(dbgs() << "no, is an array\n");
+    LLVM_DEBUG(dbgs() << "no, is an array\n");
     return false;
   }
 
@@ -244,27 +253,28 @@ bool HexagonTargetObjectFile::isGlobalInSmallSection(const GlobalObject *GO,
   // these objects end up in the sdata, the references will still be valid.
   if (StructType *ST = dyn_cast<StructType>(GType)) {
     if (ST->isOpaque()) {
-      DEBUG(dbgs() << "no, has opaque type\n");
+      LLVM_DEBUG(dbgs() << "no, has opaque type\n");
       return false;
     }
   }
 
   unsigned Size = GVar->getParent()->getDataLayout().getTypeAllocSize(GType);
   if (Size == 0) {
-    DEBUG(dbgs() << "no, has size 0\n");
+    LLVM_DEBUG(dbgs() << "no, has size 0\n");
     return false;
   }
   if (Size > SmallDataThreshold) {
-    DEBUG(dbgs() << "no, size exceeds sdata threshold: " << Size << '\n');
+    LLVM_DEBUG(dbgs() << "no, size exceeds sdata threshold: " << Size << '\n');
     return false;
   }
 
-  DEBUG(dbgs() << "yes\n");
+  LLVM_DEBUG(dbgs() << "yes\n");
   return true;
 }
 
-bool HexagonTargetObjectFile::isSmallDataEnabled() const {
-  return SmallDataThreshold > 0;
+bool HexagonTargetObjectFile::isSmallDataEnabled(const TargetMachine &TM)
+    const {
+  return SmallDataThreshold > 0 && !TM.isPositionIndependent();
 }
 
 unsigned HexagonTargetObjectFile::getSmallDataSize() const {

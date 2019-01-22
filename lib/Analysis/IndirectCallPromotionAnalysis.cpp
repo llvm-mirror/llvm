@@ -1,9 +1,8 @@
 //===-- IndirectCallPromotionAnalysis.cpp - Find promotion candidates ===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,9 +14,8 @@
 
 #include "llvm/Analysis/IndirectCallPromotionAnalysis.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Analysis/IndirectCallSiteVisitor.h"
+#include "llvm/Analysis/IndirectCallVisitor.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -72,19 +70,19 @@ uint32_t ICallPromotionAnalysis::getProfitablePromotionCandidates(
     const Instruction *Inst, uint32_t NumVals, uint64_t TotalCount) {
   ArrayRef<InstrProfValueData> ValueDataRef(ValueDataArray.get(), NumVals);
 
-  DEBUG(dbgs() << " \nWork on callsite " << *Inst << " Num_targets: " << NumVals
-               << "\n");
+  LLVM_DEBUG(dbgs() << " \nWork on callsite " << *Inst
+                    << " Num_targets: " << NumVals << "\n");
 
   uint32_t I = 0;
   uint64_t RemainingCount = TotalCount;
   for (; I < MaxNumPromotions && I < NumVals; I++) {
     uint64_t Count = ValueDataRef[I].Count;
     assert(Count <= RemainingCount);
-    DEBUG(dbgs() << " Candidate " << I << " Count=" << Count
-                 << "  Target_func: " << ValueDataRef[I].Value << "\n");
+    LLVM_DEBUG(dbgs() << " Candidate " << I << " Count=" << Count
+                      << "  Target_func: " << ValueDataRef[I].Value << "\n");
 
     if (!isPromotionProfitable(Count, TotalCount, RemainingCount)) {
-      DEBUG(dbgs() << " Not promote: Cold target.\n");
+      LLVM_DEBUG(dbgs() << " Not promote: Cold target.\n");
       return I;
     }
     RemainingCount -= Count;

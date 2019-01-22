@@ -1,9 +1,8 @@
 //===-- AArch64MCExpr.cpp - AArch64 specific MC expression classes --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,12 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AArch64MCExpr.h"
-#include "llvm/MC/MCAssembler.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
-#include "llvm/Object/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -63,14 +61,18 @@ StringRef AArch64MCExpr::getVariantKindName() const {
   case VK_TLSDESC_LO12:        return ":tlsdesc_lo12:";
   case VK_ABS_PAGE:            return "";
   case VK_ABS_PAGE_NC:         return ":pg_hi21_nc:";
+  case VK_GOT:                 return ":got:";
   case VK_GOT_PAGE:            return ":got:";
   case VK_GOT_LO12:            return ":got_lo12:";
+  case VK_GOTTPREL:            return ":gottprel:";
   case VK_GOTTPREL_PAGE:       return ":gottprel:";
   case VK_GOTTPREL_LO12_NC:    return ":gottprel_lo12:";
   case VK_GOTTPREL_G1:         return ":gottprel_g1:";
   case VK_GOTTPREL_G0_NC:      return ":gottprel_g0_nc:";
   case VK_TLSDESC:             return "";
   case VK_TLSDESC_PAGE:        return ":tlsdesc:";
+  case VK_SECREL_LO12:         return ":secrel_lo12:";
+  case VK_SECREL_HI12:         return ":secrel_hi12:";
   default:
     llvm_unreachable("Invalid ELF symbol kind");
   }

@@ -1,9 +1,8 @@
 //===- X86RegisterBankInfo.cpp -----------------------------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -16,7 +15,7 @@
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 #define GET_TARGET_REGBANK_IMPL
 #include "X86GenRegisterBank.inc"
@@ -73,6 +72,8 @@ X86GenRegisterBankInfo::getPartialMappingIdx(const LLT &Ty, bool isFP) {
       return PMI_GPR32;
     case 64:
       return PMI_GPR64;
+    case 128:
+      return PMI_VEC128;
       break;
     default:
       llvm_unreachable("Unsupported register size.");
@@ -83,6 +84,8 @@ X86GenRegisterBankInfo::getPartialMappingIdx(const LLT &Ty, bool isFP) {
       return PMI_FP32;
     case 64:
       return PMI_FP64;
+    case 128:
+      return PMI_VEC128;
     default:
       llvm_unreachable("Unsupported register size.");
     }
@@ -169,6 +172,10 @@ X86RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   switch (Opc) {
   case TargetOpcode::G_ADD:
   case TargetOpcode::G_SUB:
+  case TargetOpcode::G_MUL:
+  case TargetOpcode::G_SHL:
+  case TargetOpcode::G_LSHR:
+  case TargetOpcode::G_ASHR:
     return getSameOperandsMapping(MI, false);
     break;
   case TargetOpcode::G_FADD:
@@ -186,10 +193,59 @@ X86RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
 
   switch (Opc) {
   case TargetOpcode::G_FPEXT:
+  case TargetOpcode::G_FPTRUNC:
   case TargetOpcode::G_FCONSTANT:
     // Instruction having only floating-point operands (all scalars in VECRReg)
     getInstrPartialMappingIdxs(MI, MRI, /* isFP */ true, OpRegBankIdx);
     break;
+  case TargetOpcode::G_SITOFP:
+  case TargetOpcode::G_FPTOSI: {
+    // Some of the floating-point instructions have mixed GPR and FP operands:
+    // fine-tune the computed mapping.
+    auto &Op0 = MI.getOperand(0);
+    auto &Op1 = MI.getOperand(1);
+    const LLT Ty0 = MRI.getType(Op0.getReg());
+    const LLT Ty1 = MRI.getType(Op1.getReg());
+
+    bool FirstArgIsFP = Opc == TargetOpcode::G_SITOFP;
+    bool SecondArgIsFP = Opc == TargetOpcode::G_FPTOSI;
+    OpRegBankIdx[0] = getPartialMappingIdx(Ty0, /* isFP */ FirstArgIsFP);
+    OpRegBankIdx[1] = getPartialMappingIdx(Ty1, /* isFP */ SecondArgIsFP);
+    break;
+  }
+  case TargetOpcode::G_FCMP: {
+    LLT Ty1 = MRI.getType(MI.getOperand(2).getReg());
+    LLT Ty2 = MRI.getType(MI.getOperand(3).getReg());
+    (void)Ty2;
+    assert(Ty1.getSizeInBits() == Ty2.getSizeInBits() &&
+           "Mismatched operand sizes for G_FCMP");
+
+    unsigned Size = Ty1.getSizeInBits();
+    (void)Size;
+    assert((Size == 32 || Size == 64) && "Unsupported size for G_FCMP");
+
+    auto FpRegBank = getPartialMappingIdx(Ty1, /* isFP */ true);
+    OpRegBankIdx = {PMI_GPR8,
+                    /* Predicate */ PMI_None, FpRegBank, FpRegBank};
+    break;
+  }
+  case TargetOpcode::G_TRUNC:
+  case TargetOpcode::G_ANYEXT: {
+    auto &Op0 = MI.getOperand(0);
+    auto &Op1 = MI.getOperand(1);
+    const LLT Ty0 = MRI.getType(Op0.getReg());
+    const LLT Ty1 = MRI.getType(Op1.getReg());
+
+    bool isFPTrunc = (Ty0.getSizeInBits() == 32 || Ty0.getSizeInBits() == 64) &&
+                     Ty1.getSizeInBits() == 128 && Opc == TargetOpcode::G_TRUNC;
+    bool isFPAnyExt =
+        Ty0.getSizeInBits() == 128 &&
+        (Ty1.getSizeInBits() == 32 || Ty1.getSizeInBits() == 64) &&
+        Opc == TargetOpcode::G_ANYEXT;
+
+    getInstrPartialMappingIdxs(MI, MRI, /* isFP */ isFPTrunc || isFPAnyExt,
+                               OpRegBankIdx);
+  } break;
   default:
     // Track the bank of each register, use NotFP mapping (all scalars in GPRs)
     getInstrPartialMappingIdxs(MI, MRI, /* isFP */ false, OpRegBankIdx);

@@ -1,14 +1,13 @@
 //===-- SIWholeQuadMode.cpp - enter and suspend whole quad mode -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief This pass adds instructions to enable whole quad mode for pixel
+/// This pass adds instructions to enable whole quad mode for pixel
 /// shaders, and whole wavefront mode for all programs.
 ///
 /// Whole quad mode is required for derivative computations, but it interferes
@@ -60,12 +59,13 @@
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -74,13 +74,13 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <vector>
 
@@ -103,6 +103,7 @@ public:
   explicit PrintState(int State) : State(State) {}
 };
 
+#ifndef NDEBUG
 static raw_ostream &operator<<(raw_ostream &OS, const PrintState &PS) {
   if (PS.State & StateWQM)
     OS << "WQM";
@@ -119,6 +120,7 @@ static raw_ostream &operator<<(raw_ostream &OS, const PrintState &PS) {
 
   return OS;
 }
+#endif
 
 struct InstrInfo {
   char Needs = 0;
@@ -219,9 +221,11 @@ FunctionPass *llvm::createSIWholeQuadModePass() {
   return new SIWholeQuadMode;
 }
 
-void SIWholeQuadMode::printInfo() {
+#ifndef NDEBUG
+LLVM_DUMP_METHOD void SIWholeQuadMode::printInfo() {
   for (const auto &BII : Blocks) {
-    dbgs() << "\nBB#" << BII.first->getNumber() << ":\n"
+    dbgs() << "\n"
+           << printMBBReference(*BII.first) << ":\n"
            << "  InNeeds = " << PrintState(BII.second.InNeeds)
            << ", Needs = " << PrintState(BII.second.Needs)
            << ", OutNeeds = " << PrintState(BII.second.OutNeeds) << "\n\n";
@@ -236,6 +240,7 @@ void SIWholeQuadMode::printInfo() {
     }
   }
 }
+#endif
 
 void SIWholeQuadMode::markInstruction(MachineInstr &MI, char Flag,
                                       std::vector<WorkItem> &Worklist) {
@@ -302,7 +307,7 @@ void SIWholeQuadMode::markInstructionUses(const MachineInstr &MI, char Flag,
 char SIWholeQuadMode::scanInstructions(MachineFunction &MF,
                                        std::vector<WorkItem> &Worklist) {
   char GlobalFlags = 0;
-  bool WQMOutputs = MF.getFunction()->hasFnAttribute("amdgpu-ps-wqm-outputs");
+  bool WQMOutputs = MF.getFunction().hasFnAttribute("amdgpu-ps-wqm-outputs");
   SmallVector<MachineInstr *, 4> SetInactiveInstrs;
 
   // We need to visit the basic blocks in reverse post-order so that we visit
@@ -320,9 +325,7 @@ char SIWholeQuadMode::scanInstructions(MachineFunction &MF,
       unsigned Opcode = MI.getOpcode();
       char Flags = 0;
 
-      if (TII->isDS(Opcode) && CallingConv == CallingConv::AMDGPU_PS) {
-        Flags = StateWQM;
-      } else if (TII->isWQM(Opcode)) {
+      if (TII->isWQM(Opcode)) {
         // Sampling instructions don't need to produce results for all pixels
         // in a quad, they just require all inputs of a quad to have been
         // computed for derivatives.
@@ -449,6 +452,11 @@ void SIWholeQuadMode::propagateInstruction(MachineInstr &MI,
 
   if (II.Needs != 0)
     markInstructionUses(MI, II.Needs, Worklist);
+
+  // Ensure we process a block containing WWM, even if it does not require any
+  // WQM transitions.
+  if (II.Needs & StateWWM)
+    BI.Needs |= StateWWM;
 }
 
 void SIWholeQuadMode::propagateBlock(MachineBasicBlock &MBB,
@@ -676,7 +684,8 @@ void SIWholeQuadMode::processBlock(MachineBasicBlock &MBB, unsigned LiveMaskReg,
   if (!isEntry && BI.Needs == StateWQM && BI.OutNeeds != StateExact)
     return;
 
-  DEBUG(dbgs() << "\nProcessing block BB#" << MBB.getNumber() << ":\n");
+  LLVM_DEBUG(dbgs() << "\nProcessing block " << printMBBReference(MBB)
+                    << ":\n");
 
   unsigned SavedWQMReg = 0;
   unsigned SavedNonWWMReg = 0;
@@ -837,9 +846,9 @@ bool SIWholeQuadMode::runOnMachineFunction(MachineFunction &MF) {
   Blocks.clear();
   LiveMaskQueries.clear();
   LowerToCopyInstrs.clear();
-  CallingConv = MF.getFunction()->getCallingConv();
+  CallingConv = MF.getFunction().getCallingConv();
 
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
 
   TII = ST.getInstrInfo();
   TRI = &TII->getRegisterInfo();
@@ -879,7 +888,7 @@ bool SIWholeQuadMode::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
-  DEBUG(printInfo());
+  LLVM_DEBUG(printInfo());
 
   lowerCopyInstrs();
 

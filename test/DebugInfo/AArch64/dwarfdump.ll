@@ -14,9 +14,9 @@
 
 ; A couple of ABS64s similarly:
 
-; CHECK: DW_AT_low_pc [DW_FORM_addr] (0x0000000000000000)
+; CHECK: DW_AT_low_pc [DW_FORM_addr] (0x0000000000000000 ".text")
 ; CHECK-4: DW_AT_high_pc [DW_FORM_data4] (0x00000008)
-; CHECK-3: DW_AT_high_pc [DW_FORM_addr] (0x0000000000000008)
+; CHECK-3: DW_AT_high_pc [DW_FORM_addr] (0x0000000000000008 ".text")
 
 define i32 @main() nounwind !dbg !3 {
   ret i32 0, !dbg !8
@@ -29,7 +29,7 @@ attributes #0 = { nounwind }
 
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 3.3 ", isOptimized: false, emissionKind: FullDebug, file: !9, enums: !1, retainedTypes: !1, globals: !1, imports:  !1)
 !1 = !{}
-!3 = distinct !DISubprogram(name: "main", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, unit: !0, scopeLine: 1, file: !9, scope: !4, type: !5, variables: !1)
+!3 = distinct !DISubprogram(name: "main", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, unit: !0, scopeLine: 1, file: !9, scope: !4, type: !5, retainedNodes: !1)
 !4 = !DIFile(filename: "tmp.c", directory: "/home/tim/llvm/build")
 !5 = !DISubroutineType(types: !6)
 !6 = !{!7}

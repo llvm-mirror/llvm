@@ -1,19 +1,18 @@
 //===- AArch64ExternalSymbolizer.cpp - Symbolizer for AArch64 ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "AArch64ExternalSymbolizer.h"
-#include "AArch64Subtarget.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "Utils/AArch64BaseInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -60,6 +59,8 @@ getVariant(uint64_t LLVMDisassembler_VariantKind) {
 bool AArch64ExternalSymbolizer::tryAddingSymbolicOperand(
     MCInst &MI, raw_ostream &CommentStream, int64_t Value, uint64_t Address,
     bool IsBranch, uint64_t Offset, uint64_t InstSize) {
+  if (!SymbolLookUp)
+    return false;
   // FIXME: This method shares a lot of code with
   //        MCExternalSymbolizer::tryAddingSymbolicOperand. It may be possible
   //        refactor the MCExternalSymbolizer interface to allow more of this
@@ -99,8 +100,8 @@ bool AArch64ExternalSymbolizer::tryAddingSymbolicOperand(
         EncodedInst |= MCRI.getEncodingValue(MI.getOperand(0).getReg()); // reg
         SymbolLookUp(DisInfo, EncodedInst, &ReferenceType, Address,
                      &ReferenceName);
-        CommentStream << format("0x%llx",
-                                0xfffffffffffff000LL & (Address + Value));
+        CommentStream << format("0x%llx", (0xfffffffffffff000LL & Address) +
+                                              Value * 0x1000);
     } else if (MI.getOpcode() == AArch64::ADDXri ||
                MI.getOpcode() == AArch64::LDRXui ||
                MI.getOpcode() == AArch64::LDRXl ||

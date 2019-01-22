@@ -1,9 +1,8 @@
 //===- TpiStream.cpp - PDB Type Info (TPI) Stream 2 Access ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,16 +50,27 @@ public:
   uint32_t getNumHashBuckets() const;
   FixedStreamArray<support::ulittle32_t> getHashValues() const;
   FixedStreamArray<codeview::TypeIndexOffset> getTypeIndexOffsets() const;
-  HashTable &getHashAdjusters();
+  HashTable<support::ulittle32_t> &getHashAdjusters();
 
   codeview::CVTypeRange types(bool *HadError) const;
   const codeview::CVTypeArray &typeArray() const { return TypeRecords; }
 
   codeview::LazyRandomTypeCollection &typeCollection() { return *Types; }
 
+  Expected<codeview::TypeIndex>
+  findFullDeclForForwardRef(codeview::TypeIndex ForwardRefTI) const;
+
+  std::vector<codeview::TypeIndex> findRecordsByName(StringRef Name) const;
+
+  codeview::CVType getType(codeview::TypeIndex Index);
+
   BinarySubstreamRef getTypeRecordsSubstream() const;
 
   Error commit();
+
+  void buildHashMap();
+
+  bool supportsTypeLookup() const;
 
 private:
   PDBFile &Pdb;
@@ -75,7 +85,9 @@ private:
   std::unique_ptr<BinaryStream> HashStream;
   FixedStreamArray<support::ulittle32_t> HashValues;
   FixedStreamArray<codeview::TypeIndexOffset> TypeIndexOffsets;
-  HashTable HashAdjusters;
+  HashTable<support::ulittle32_t> HashAdjusters;
+
+  std::vector<std::vector<codeview::TypeIndex>> HashMap;
 
   const TpiStreamHeader *Header;
 };

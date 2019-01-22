@@ -1,8 +1,8 @@
-; RUN: opt < %s -loop-vectorize -S 2>&1 | FileCheck %s
+; RUN: opt < %s -loop-vectorize -transform-warning -S 2>&1 | FileCheck %s
 
 ; Verify warning is generated when vectorization/ interleaving is explicitly specified and fails to occur.
-; CHECK: warning: no_array_bounds.cpp:5:5: loop not vectorized: failed explicitly specified loop vectorization
-; CHECK: warning: no_array_bounds.cpp:10:5: loop not interleaved: failed explicitly specified loop interleaving
+; CHECK: warning: no_array_bounds.cpp:5:5: loop not vectorized: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+; CHECK: warning: no_array_bounds.cpp:10:5: loop not interleaved: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
 
 ;  #pragma clang loop vectorize(enable)
 ;  for (int i = 0; i < number; i++) {
@@ -75,7 +75,7 @@ attributes #0 = { nounwind }
 !0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5.0", isOptimized: true, emissionKind: LineTablesOnly, file: !1, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
 !1 = !DIFile(filename: "no_array_bounds.cpp", directory: ".")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "test", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !0, scopeLine: 2, file: !1, scope: !5, type: !6, variables: !2)
+!4 = distinct !DISubprogram(name: "test", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, unit: !0, scopeLine: 2, file: !1, scope: !5, type: !6, retainedNodes: !2)
 !5 = !DIFile(filename: "no_array_bounds.cpp", directory: ".")
 !6 = !DISubroutineType(types: !2)
 !7 = !{i32 2, !"Dwarf Version", i32 2}

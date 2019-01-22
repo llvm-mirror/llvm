@@ -1,9 +1,8 @@
 //===- IVUsers.cpp - Induction Variable Users -------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,6 +19,7 @@
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -234,13 +234,13 @@ bool IVUsers::AddUsersImpl(Instruction *I,
     if (LI->getLoopFor(User->getParent()) != L) {
       if (isa<PHINode>(User) || Processed.count(User) ||
           !AddUsersImpl(User, SimpleLoopNests)) {
-        DEBUG(dbgs() << "FOUND USER in other loop: " << *User << '\n'
-                     << "   OF SCEV: " << *ISE << '\n');
+        LLVM_DEBUG(dbgs() << "FOUND USER in other loop: " << *User << '\n'
+                          << "   OF SCEV: " << *ISE << '\n');
         AddUserToIVUsers = true;
       }
     } else if (Processed.count(User) || !AddUsersImpl(User, SimpleLoopNests)) {
-      DEBUG(dbgs() << "FOUND USER: " << *User << '\n'
-                   << "   OF SCEV: " << *ISE << '\n');
+      LLVM_DEBUG(dbgs() << "FOUND USER: " << *User << '\n'
+                        << "   OF SCEV: " << *ISE << '\n');
       AddUserToIVUsers = true;
     }
 
@@ -273,14 +273,15 @@ bool IVUsers::AddUsersImpl(Instruction *I,
         // If we normalized the expression, but denormalization doesn't give the
         // original one, discard this user.
         if (OriginalISE != DenormalizedISE) {
-          DEBUG(dbgs() << "   DISCARDING (NORMALIZATION ISN'T INVERTIBLE): "
-                       << *ISE << '\n');
+          LLVM_DEBUG(dbgs()
+                     << "   DISCARDING (NORMALIZATION ISN'T INVERTIBLE): "
+                     << *ISE << '\n');
           IVUses.pop_back();
           return false;
         }
       }
-      DEBUG(if (SE->getSCEV(I) != ISE)
-              dbgs() << "   NORMALIZED TO: " << *ISE << '\n');
+      LLVM_DEBUG(if (SE->getSCEV(I) != ISE) dbgs()
+                 << "   NORMALIZED TO: " << *ISE << '\n');
     }
   }
   return true;

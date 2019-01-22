@@ -1,23 +1,24 @@
 //===- MachineInstrTest.cpp -----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -91,8 +92,9 @@ std::unique_ptr<MachineFunction> createMachineFunction() {
   auto TM = createTargetMachine();
   unsigned FunctionNum = 42;
   MachineModuleInfo MMI(TM.get());
+  const TargetSubtargetInfo &STI = *TM->getSubtargetImpl(*F);
 
-  return llvm::make_unique<MachineFunction>(F, *TM, FunctionNum, MMI);
+  return llvm::make_unique<MachineFunction>(*F, *TM, STI, FunctionNum, MMI);
 }
 
 // This test makes sure that MachineInstr::isIdenticalTo handles Defs correctly
@@ -243,4 +245,33 @@ TEST(MachineInstrExpressionTraitTest, IsEqualAgreesWithGetHashValue) {
 
   checkHashAndIsEqualMatch(VD2PU, VD2PD);
 }
+
+TEST(MachineInstrPrintingTest, DebugLocPrinting) {
+  auto MF = createMachineFunction();
+
+  MCOperandInfo OpInfo{0, 0, MCOI::OPERAND_REGISTER, 0};
+  MCInstrDesc MCID = {0, 1,       1,       0,       0, 0,
+                      0, nullptr, nullptr, &OpInfo, 0, nullptr};
+
+  LLVMContext Ctx;
+  DIFile *DIF = DIFile::getDistinct(Ctx, "filename", "");
+  DISubprogram *DIS = DISubprogram::getDistinct(
+      Ctx, nullptr, "", "", DIF, 0, nullptr, 0, nullptr, 0, 0, DINode::FlagZero,
+      DISubprogram::SPFlagZero, nullptr);
+  DILocation *DIL = DILocation::get(Ctx, 1, 5, DIS);
+  DebugLoc DL(DIL);
+  MachineInstr *MI = MF->CreateMachineInstr(MCID, DL);
+  MI->addOperand(*MF, MachineOperand::CreateReg(0, /*isDef*/ true));
+
+  std::string str;
+  raw_string_ostream OS(str);
+  MI->print(OS);
+  ASSERT_TRUE(
+      StringRef(OS.str()).startswith("$noreg = UNKNOWN debug-location "));
+  ASSERT_TRUE(
+      StringRef(OS.str()).endswith("filename:1:5"));
+}
+
+static_assert(is_trivially_copyable<MCOperand>::value, "trivially copyable");
+
 } // end namespace

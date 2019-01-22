@@ -1,9 +1,8 @@
 //===----- X86CallFrameOptimization.cpp - Optimize x86 call sequences -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -34,14 +33,14 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -55,10 +54,6 @@ static cl::opt<bool>
     NoX86CFOpt("no-x86-call-frame-opt",
                cl::desc("Avoid optimizing x86 call frames for size"),
                cl::init(false), cl::Hidden);
-
-namespace llvm {
-void initializeX86CallFrameOptimizationPass(PassRegistry &);
-}
 
 namespace {
 
@@ -148,7 +143,7 @@ bool X86CallFrameOptimization::isLegal(MachineFunction &MF) {
   // is a danger of that being generated.
   if (STI->isTargetDarwin() &&
       (!MF.getLandingPads().empty() ||
-       (MF.getFunction()->needsUnwindTableEntry() && !TFL->hasFP(MF))))
+       (MF.getFunction().needsUnwindTableEntry() && !TFL->hasFP(MF))))
     return false;
 
   // It is not valid to change the stack pointer outside the prolog/epilog
@@ -243,7 +238,7 @@ bool X86CallFrameOptimization::runOnMachineFunction(MachineFunction &MF) {
   assert(isPowerOf2_32(SlotSize) && "Expect power of 2 stack slot size");
   Log2SlotSize = Log2_32(SlotSize);
 
-  if (skipFunction(*MF.getFunction()) || !isLegal(MF))
+  if (skipFunction(MF.getFunction()) || !isLegal(MF))
     return false;
 
   unsigned FrameSetupOpcode = TII->getCallFrameSetupOpcode();
@@ -375,7 +370,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
   // Skip over DEBUG_VALUE.
   // For globals in PIC mode, we can have some LEAs here. Skip them as well.
   // TODO: Extend this to something that covers more cases.
-  while (I->getOpcode() == X86::LEA32r || I->isDebugValue())
+  while (I->getOpcode() == X86::LEA32r || I->isDebugInstr())
     ++I;
 
   unsigned StackPtr = RegInfo.getStackRegister();

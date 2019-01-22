@@ -1,9 +1,8 @@
 //===- MCExpr.h - Assembly Level Expressions --------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,7 +30,7 @@ class StringRef;
 
 using SectionAddrMap = DenseMap<const MCSection *, uint64_t>;
 
-/// \brief Base class for the full range of assembler expressions which are
+/// Base class for the full range of assembler expressions which are
 /// needed for parsing.
 class MCExpr {
 public:
@@ -85,7 +84,7 @@ public:
   /// \name Expression Evaluation
   /// @{
 
-  /// \brief Try to evaluate the expression to an absolute value.
+  /// Try to evaluate the expression to an absolute value.
   ///
   /// \param Res - The absolute value, if evaluation succeeds.
   /// \param Layout - The assembler layout object to use for evaluating symbol
@@ -96,11 +95,12 @@ public:
                           const SectionAddrMap &Addrs) const;
   bool evaluateAsAbsolute(int64_t &Res) const;
   bool evaluateAsAbsolute(int64_t &Res, const MCAssembler &Asm) const;
+  bool evaluateAsAbsolute(int64_t &Res, const MCAssembler *Asm) const;
   bool evaluateAsAbsolute(int64_t &Res, const MCAsmLayout &Layout) const;
 
   bool evaluateKnownAbsolute(int64_t &Res, const MCAsmLayout &Layout) const;
 
-  /// \brief Try to evaluate the expression to a relocatable value, i.e. an
+  /// Try to evaluate the expression to a relocatable value, i.e. an
   /// expression of the fixed form (a - b + constant).
   ///
   /// \param Res - The relocatable value, if evaluation succeeds.
@@ -110,14 +110,14 @@ public:
   bool evaluateAsRelocatable(MCValue &Res, const MCAsmLayout *Layout,
                              const MCFixup *Fixup) const;
 
-  /// \brief Try to evaluate the expression to the form (a - b + constant) where
+  /// Try to evaluate the expression to the form (a - b + constant) where
   /// neither a nor b are variables.
   ///
   /// This is a more aggressive variant of evaluateAsRelocatable. The intended
   /// use is for when relocations are not available, like the .size directive.
   bool evaluateAsValue(MCValue &Res, const MCAsmLayout &Layout) const;
 
-  /// \brief Find the "associated section" for this expression, which is
+  /// Find the "associated section" for this expression, which is
   /// currently defined as the absolute section for constants, or
   /// otherwise the section associated with the first defined symbol in the
   /// expression.
@@ -131,7 +131,7 @@ inline raw_ostream &operator<<(raw_ostream &OS, const MCExpr &E) {
   return OS;
 }
 
-//// \brief  Represent a constant integer expression.
+////  Represent a constant integer expression.
 class MCConstantExpr : public MCExpr {
   int64_t Value;
 
@@ -157,7 +157,7 @@ public:
   }
 };
 
-/// \brief  Represent a reference to a symbol from inside an expression.
+///  Represent a reference to a symbol from inside an expression.
 ///
 /// A symbol reference in an expression may be a use of a label, a use of an
 /// assembler variable (defined constant), or constitute an implicit definition
@@ -206,9 +206,19 @@ public:
     VK_ARM_TLSLDO,         // symbol(tlsldo)
     VK_ARM_TLSDESCSEQ,
 
+    VK_AVR_NONE,
+    VK_AVR_LO8,
+    VK_AVR_HI8,
+    VK_AVR_HLO8,
+    VK_AVR_DIFF8,
+    VK_AVR_DIFF16,
+    VK_AVR_DIFF32,
+
     VK_PPC_LO,             // symbol@l
     VK_PPC_HI,             // symbol@h
     VK_PPC_HA,             // symbol@ha
+    VK_PPC_HIGH,           // symbol@high
+    VK_PPC_HIGHA,          // symbol@higha
     VK_PPC_HIGHER,         // symbol@higher
     VK_PPC_HIGHERA,        // symbol@highera
     VK_PPC_HIGHEST,        // symbol@highest
@@ -225,6 +235,8 @@ public:
     VK_PPC_TPREL_LO,       // symbol@tprel@l
     VK_PPC_TPREL_HI,       // symbol@tprel@h
     VK_PPC_TPREL_HA,       // symbol@tprel@ha
+    VK_PPC_TPREL_HIGH,     // symbol@tprel@high
+    VK_PPC_TPREL_HIGHA,    // symbol@tprel@higha
     VK_PPC_TPREL_HIGHER,   // symbol@tprel@higher
     VK_PPC_TPREL_HIGHERA,  // symbol@tprel@highera
     VK_PPC_TPREL_HIGHEST,  // symbol@tprel@highest
@@ -232,6 +244,8 @@ public:
     VK_PPC_DTPREL_LO,      // symbol@dtprel@l
     VK_PPC_DTPREL_HI,      // symbol@dtprel@h
     VK_PPC_DTPREL_HA,      // symbol@dtprel@ha
+    VK_PPC_DTPREL_HIGH,    // symbol@dtprel@high
+    VK_PPC_DTPREL_HIGHA,   // symbol@dtprel@higha
     VK_PPC_DTPREL_HIGHER,  // symbol@dtprel@higher
     VK_PPC_DTPREL_HIGHERA, // symbol@dtprel@highera
     VK_PPC_DTPREL_HIGHEST, // symbol@dtprel@highest
@@ -271,12 +285,15 @@ public:
     VK_Hexagon_IE_GOT,
 
     VK_WebAssembly_FUNCTION, // Function table index, rather than virtual addr
+    VK_WebAssembly_GLOBAL,   // Global object index
     VK_WebAssembly_TYPEINDEX,// Type table index
+    VK_WebAssembly_EVENT,    // Event index
 
     VK_AMDGPU_GOTPCREL32_LO, // symbol@gotpcrel32@lo
     VK_AMDGPU_GOTPCREL32_HI, // symbol@gotpcrel32@hi
     VK_AMDGPU_REL32_LO,      // symbol@rel32@lo
     VK_AMDGPU_REL32_HI,      // symbol@rel32@hi
+    VK_AMDGPU_REL64,         // symbol@rel64
 
     VK_TPREL,
     VK_DTPREL
@@ -338,7 +355,7 @@ public:
   }
 };
 
-/// \brief Unary assembler expressions.
+/// Unary assembler expressions.
 class MCUnaryExpr : public MCExpr {
 public:
   enum Opcode {
@@ -382,10 +399,10 @@ public:
   /// \name Accessors
   /// @{
 
-  /// \brief Get the kind of this unary expression.
+  /// Get the kind of this unary expression.
   Opcode getOpcode() const { return Op; }
 
-  /// \brief Get the child of this unary expression.
+  /// Get the child of this unary expression.
   const MCExpr *getSubExpr() const { return Expr; }
 
   /// @}
@@ -395,7 +412,7 @@ public:
   }
 };
 
-/// \brief Binary assembler expressions.
+/// Binary assembler expressions.
 class MCBinaryExpr : public MCExpr {
 public:
   enum Opcode {
@@ -539,13 +556,13 @@ public:
   /// \name Accessors
   /// @{
 
-  /// \brief Get the kind of this binary expression.
+  /// Get the kind of this binary expression.
   Opcode getOpcode() const { return Op; }
 
-  /// \brief Get the left-hand side expression of the binary operator.
+  /// Get the left-hand side expression of the binary operator.
   const MCExpr *getLHS() const { return LHS; }
 
-  /// \brief Get the right-hand side expression of the binary operator.
+  /// Get the right-hand side expression of the binary operator.
   const MCExpr *getRHS() const { return RHS; }
 
   /// @}
@@ -555,7 +572,7 @@ public:
   }
 };
 
-/// \brief This is an extension point for target-specific MCExpr subclasses to
+/// This is an extension point for target-specific MCExpr subclasses to
 /// implement.
 ///
 /// NOTE: All subclasses are required to have trivial destructors because
@@ -572,6 +589,11 @@ public:
   virtual bool evaluateAsRelocatableImpl(MCValue &Res,
                                          const MCAsmLayout *Layout,
                                          const MCFixup *Fixup) const = 0;
+  // allow Target Expressions to be checked for equality
+  virtual bool isEqualTo(const MCExpr *x) const { return false; }
+  // This should be set when assigned expressions are not valid ".set"
+  // expressions, e.g. registers, and must be inlined.
+  virtual bool inlineAssignedExpr() const { return false; }
   virtual void visitUsedExpr(MCStreamer& Streamer) const = 0;
   virtual MCFragment *findAssociatedFragment() const = 0;
 

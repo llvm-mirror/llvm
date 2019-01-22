@@ -4,17 +4,18 @@
 
 define i32 @t1(i32 %t, i32 %val) nounwind {
 ; X32-LABEL: t1:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    shll %cl, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t1:
-; X64:       # BB#0:
-; X64-NEXT:    movl %edi, %ecx
-; X64-NEXT:    shll %cl, %esi
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %esi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    # kill: def $cl killed $cl killed $ecx
+; X64-NEXT:    shll %cl, %eax
 ; X64-NEXT:    retq
        %shamt = and i32 %t, 31
        %res = shl i32 %val, %shamt
@@ -23,17 +24,18 @@ define i32 @t1(i32 %t, i32 %val) nounwind {
 
 define i32 @t2(i32 %t, i32 %val) nounwind {
 ; X32-LABEL: t2:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    shll %cl, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t2:
-; X64:       # BB#0:
-; X64-NEXT:    movl %edi, %ecx
-; X64-NEXT:    shll %cl, %esi
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %esi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    # kill: def $cl killed $cl killed $ecx
+; X64-NEXT:    shll %cl, %eax
 ; X64-NEXT:    retq
        %shamt = and i32 %t, 63
        %res = shl i32 %val, %shamt
@@ -44,14 +46,15 @@ define i32 @t2(i32 %t, i32 %val) nounwind {
 
 define void @t3(i16 %t) nounwind {
 ; X32-LABEL: t3:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; X32-NEXT:    sarw %cl, X
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t3:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    # kill: def $cl killed $cl killed $ecx
 ; X64-NEXT:    sarw %cl, {{.*}}(%rip)
 ; X64-NEXT:    retq
        %shamt = and i16 %t, 31
@@ -63,7 +66,7 @@ define void @t3(i16 %t) nounwind {
 
 define i64 @t4(i64 %t, i64 %val) nounwind {
 ; X32-LABEL: t4:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    pushl %esi
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -73,7 +76,7 @@ define i64 @t4(i64 %t, i64 %val) nounwind {
 ; X32-NEXT:    shrdl %cl, %esi, %eax
 ; X32-NEXT:    testb $32, %cl
 ; X32-NEXT:    je .LBB3_2
-; X32-NEXT:  # BB#1:
+; X32-NEXT:  # %bb.1:
 ; X32-NEXT:    movl %edx, %eax
 ; X32-NEXT:    xorl %edx, %edx
 ; X32-NEXT:  .LBB3_2:
@@ -81,10 +84,11 @@ define i64 @t4(i64 %t, i64 %val) nounwind {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t4:
-; X64:       # BB#0:
-; X64-NEXT:    movl %edi, %ecx
-; X64-NEXT:    shrq %cl, %rsi
+; X64:       # %bb.0:
 ; X64-NEXT:    movq %rsi, %rax
+; X64-NEXT:    movq %rdi, %rcx
+; X64-NEXT:    # kill: def $cl killed $cl killed $rcx
+; X64-NEXT:    shrq %cl, %rax
 ; X64-NEXT:    retq
        %shamt = and i64 %t, 63
        %res = lshr i64 %val, %shamt
@@ -93,7 +97,7 @@ define i64 @t4(i64 %t, i64 %val) nounwind {
 
 define i64 @t5(i64 %t, i64 %val) nounwind {
 ; X32-LABEL: t5:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    pushl %esi
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -103,7 +107,7 @@ define i64 @t5(i64 %t, i64 %val) nounwind {
 ; X32-NEXT:    shrdl %cl, %esi, %eax
 ; X32-NEXT:    testb $32, %cl
 ; X32-NEXT:    je .LBB4_2
-; X32-NEXT:  # BB#1:
+; X32-NEXT:  # %bb.1:
 ; X32-NEXT:    movl %edx, %eax
 ; X32-NEXT:    xorl %edx, %edx
 ; X32-NEXT:  .LBB4_2:
@@ -111,10 +115,11 @@ define i64 @t5(i64 %t, i64 %val) nounwind {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t5:
-; X64:       # BB#0:
-; X64-NEXT:    movl %edi, %ecx
-; X64-NEXT:    shrq %cl, %rsi
+; X64:       # %bb.0:
 ; X64-NEXT:    movq %rsi, %rax
+; X64-NEXT:    movq %rdi, %rcx
+; X64-NEXT:    # kill: def $cl killed $cl killed $rcx
+; X64-NEXT:    shrq %cl, %rax
 ; X64-NEXT:    retq
        %shamt = and i64 %t, 191
        %res = lshr i64 %val, %shamt
@@ -123,7 +128,7 @@ define i64 @t5(i64 %t, i64 %val) nounwind {
 
 define void @t5ptr(i64 %t, i64* %ptr) nounwind {
 ; X32-LABEL: t5ptr:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    pushl %edi
 ; X32-NEXT:    pushl %esi
 ; X32-NEXT:    movb {{[0-9]+}}(%esp), %cl
@@ -135,7 +140,7 @@ define void @t5ptr(i64 %t, i64* %ptr) nounwind {
 ; X32-NEXT:    shrdl %cl, %edi, %edx
 ; X32-NEXT:    testb $32, %cl
 ; X32-NEXT:    je .LBB5_2
-; X32-NEXT:  # BB#1:
+; X32-NEXT:  # %bb.1:
 ; X32-NEXT:    movl %esi, %edx
 ; X32-NEXT:    xorl %esi, %esi
 ; X32-NEXT:  .LBB5_2:
@@ -146,8 +151,9 @@ define void @t5ptr(i64 %t, i64* %ptr) nounwind {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t5ptr:
-; X64:       # BB#0:
-; X64-NEXT:    movl %edi, %ecx
+; X64:       # %bb.0:
+; X64-NEXT:    movq %rdi, %rcx
+; X64-NEXT:    # kill: def $cl killed $cl killed $rcx
 ; X64-NEXT:    shrq %cl, (%rsi)
 ; X64-NEXT:    retq
        %shamt = and i64 %t, 191
@@ -161,7 +167,7 @@ define void @t5ptr(i64 %t, i64* %ptr) nounwind {
 ; rdar://11866926
 define i64 @t6(i64 %key, i64* nocapture %val) nounwind {
 ; X32-LABEL: t6:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    pushl %edi
 ; X32-NEXT:    pushl %esi
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
@@ -181,7 +187,7 @@ define i64 @t6(i64 %key, i64* nocapture %val) nounwind {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: t6:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    shrq $3, %rdi
 ; X64-NEXT:    movq (%rsi), %rax
 ; X64-NEXT:    decq %rax
@@ -196,7 +202,7 @@ define i64 @t6(i64 %key, i64* nocapture %val) nounwind {
 
 define i64 @big_mask_constant(i64 %x) nounwind {
 ; X32-LABEL: big_mask_constant:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    andl $4, %eax
 ; X32-NEXT:    shll $25, %eax
@@ -204,10 +210,10 @@ define i64 @big_mask_constant(i64 %x) nounwind {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: big_mask_constant:
-; X64:       # BB#0:
-; X64-NEXT:    shrq $7, %rdi
-; X64-NEXT:    andl $134217728, %edi # imm = 0x8000000
+; X64:       # %bb.0:
 ; X64-NEXT:    movq %rdi, %rax
+; X64-NEXT:    shrq $7, %rax
+; X64-NEXT:    andl $134217728, %eax # imm = 0x8000000
 ; X64-NEXT:    retq
   %and = and i64 %x, 17179869184 ; 0x400000000
   %sh = lshr i64 %and, 7

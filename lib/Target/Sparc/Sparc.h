@@ -1,9 +1,8 @@
 //===-- Sparc.h - Top-level interface for Sparc representation --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -73,7 +72,7 @@ namespace llvm {
       FCC_LE  = 13+16,  // Less or Equal
       FCC_ULE = 14+16,  // Unordered or Less or Equal
       FCC_O   = 15+16,  // Ordered
-        
+
       CPCC_A   =  8+32,  // Always
       CPCC_N   =  0+32,  // Never
       CPCC_3   =  7+32,

@@ -1,9 +1,8 @@
 /*===--- ConvertUTF.h - Universal Character Names conversions ---------------===
  *
- *                     The LLVM Compiler Infrastructure
- *
- * This file is distributed under the University of Illinois Open Source
- * License. See LICENSE.TXT for details.
+ * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ * See https://llvm.org/LICENSE.txt for license information.
+ * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  *
  *==------------------------------------------------------------------------==*/
 /*
@@ -92,6 +91,7 @@
 
 #include <cstddef>
 #include <string>
+#include <system_error>
 
 // Wrap everything in namespace llvm so that programs can link with llvm and
 // their own version of the unicode libraries.
@@ -285,6 +285,21 @@ bool convertUTF16ToUTF8String(ArrayRef<UTF16> Src, std::string &Out);
  */
 bool convertUTF8ToUTF16String(StringRef SrcUTF8,
                               SmallVectorImpl<UTF16> &DstUTF16);
+
+#if defined(_WIN32)
+namespace sys {
+namespace windows {
+std::error_code UTF8ToUTF16(StringRef utf8, SmallVectorImpl<wchar_t> &utf16);
+/// Convert to UTF16 from the current code page used in the system
+std::error_code CurCPToUTF16(StringRef utf8, SmallVectorImpl<wchar_t> &utf16);
+std::error_code UTF16ToUTF8(const wchar_t *utf16, size_t utf16_len,
+                            SmallVectorImpl<char> &utf8);
+/// Convert from UTF16 to the current code page used in the system
+std::error_code UTF16ToCurCP(const wchar_t *utf16, size_t utf16_len,
+                             SmallVectorImpl<char> &utf8);
+} // namespace windows
+} // namespace sys
+#endif
 
 } /* end namespace llvm */
 

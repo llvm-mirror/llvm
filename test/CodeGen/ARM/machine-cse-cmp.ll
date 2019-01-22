@@ -37,14 +37,14 @@ entry:
 for.body.lr.ph:                                   ; preds = %entry
   %1 = icmp sgt i32 %0, 1
   %smax = select i1 %1, i32 %0, i32 1
-  call void @llvm.memset.p0i8.i32(i8* getelementptr inbounds ([250 x i8], [250 x i8]* @bar, i32 0, i32 0), i8 0, i32 %smax, i32 1, i1 false)
+  call void @llvm.memset.p0i8.i32(i8* getelementptr inbounds ([250 x i8], [250 x i8]* @bar, i32 0, i32 0), i8 0, i32 %smax, i1 false)
   unreachable
 
 for.cond1.preheader:                              ; preds = %entry
   ret void
 }
 
-declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i32, i1) nounwind
+declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i1) nounwind
 
 ; rdar://12462006
 define i8* @f3(i8* %base, i32* nocapture %offset, i32 %size) nounwind {
@@ -65,8 +65,8 @@ if.end:
 %s2 = sub nsw i32 %s, %size
 %s3 = sub nsw i32 %sub, %s2
 ; CHECK: sub [[R1:r[0-9]+]], [[R2:r[0-9]+]], r2
-; CHECK: sub [[R3:r[0-9]+]], [[R1]], r2
-; CHECK: sub [[R4:r[0-9]+]], [[R1]], [[R3]]
+; CHECK: sub [[R3:r[0-9]+]], r2, [[R1]]
+; CHECK: add [[R4:r[0-9]+]], [[R1]], [[R3]]
 ; CHECK-NOT: sub
 ; CHECK: str
 store i32 %s3, i32* %offset, align 4

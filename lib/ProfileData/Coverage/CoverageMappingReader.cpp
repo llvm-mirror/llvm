@@ -1,9 +1,8 @@
 //===- CoverageMappingReader.cpp - Code coverage mapping reader -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,7 +19,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Object/Binary.h"
-#include "llvm/Object/COFF.h"
 #include "llvm/Object/Error.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
@@ -33,13 +31,6 @@
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <limits>
-#include <memory>
-#include <utility>
 #include <vector>
 
 using namespace llvm;
@@ -155,7 +146,7 @@ Error RawCoverageMappingReader::readCounter(Counter &C) {
 static const unsigned EncodingExpansionRegionBit = 1
                                                    << Counter::EncodingTagBits;
 
-/// \brief Read the sub-array of regions for the given inferred file id.
+/// Read the sub-array of regions for the given inferred file id.
 /// \param NumFileIDs the number of file ids that are defined for this
 /// function.
 Error RawCoverageMappingReader::readMappingRegionsSubArray(
@@ -236,7 +227,7 @@ Error RawCoverageMappingReader::readMappingRegionsSubArray(
       ColumnEnd = std::numeric_limits<unsigned>::max();
     }
 
-    DEBUG({
+    LLVM_DEBUG({
       dbgs() << "Counter in file " << InferredFileID << " " << LineStart << ":"
              << ColumnStart << " -> " << (LineStart + NumLines) << ":"
              << ColumnEnd << ", ";

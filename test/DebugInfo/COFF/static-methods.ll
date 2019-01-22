@@ -28,7 +28,7 @@
 ; CHECK-NEXT:    TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK-NEXT:    ReturnType: void (0x3)
 ; CHECK-NEXT:    ClassType: A ({{.*}})
-; CHECK-NEXT:    ThisType: A* ({{.*}})
+; CHECK-NEXT:    ThisType: A* const ({{.*}})
 ; CHECK-NEXT:    CallingConvention: ThisCall (0xB)
 ; CHECK-NEXT:    FunctionOptions [ (0x0)
 ; CHECK-NEXT:    ]
@@ -131,9 +131,9 @@ attributes #2 = { builtin }
 !22 = !{i32 2, !"Debug Info Version", i32 3}
 !23 = !{i32 1, !"wchar_size", i32 2}
 !24 = !{!"clang version 6.0.0 "}
-!25 = distinct !DISubprogram(name: "??__Ep@@YAXXZ", scope: !3, file: !3, line: 7, type: !10, isLocal: true, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!25 = distinct !DISubprogram(name: "??__Ep@@YAXXZ", scope: !3, file: !3, line: 7, type: !10, isLocal: true, isDefinition: true, scopeLine: 7, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !26 = !DILocation(line: 7, column: 8, scope: !25)
 !27 = !DILocation(line: 7, column: 12, scope: !25)
-!28 = distinct !DISubprogram(linkageName: "_GLOBAL__sub_I_t.cpp", scope: !3, file: !3, type: !29, isLocal: true, isDefinition: true, flags: DIFlagArtificial, isOptimized: false, unit: !2, variables: !4)
+!28 = distinct !DISubprogram(linkageName: "_GLOBAL__sub_I_t.cpp", scope: !3, file: !3, type: !29, isLocal: true, isDefinition: true, flags: DIFlagArtificial, isOptimized: false, unit: !2, retainedNodes: !4)
 !29 = !DISubroutineType(types: !4)
 !30 = !DILocation(line: 0, scope: !28)

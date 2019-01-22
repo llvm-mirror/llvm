@@ -1,9 +1,8 @@
 //===- GraphBuilder.cpp -----------------------------------------*- C++ -*-===//
 //
-//                      The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -28,30 +27,28 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <functional>
 
 using Instr = llvm::cfi_verify::FileAnalysis::Instr;
 
 namespace llvm {
 namespace cfi_verify {
 
-uint64_t SearchLengthForUndef;
-uint64_t SearchLengthForConditionalBranch;
+unsigned long long SearchLengthForUndef;
+unsigned long long SearchLengthForConditionalBranch;
 
-static cl::opt<uint64_t, true> SearchLengthForUndefArg(
+static cl::opt<unsigned long long, true> SearchLengthForUndefArg(
     "search-length-undef",
     cl::desc("Specify the maximum amount of instructions "
              "to inspect when searching for an undefined "
              "instruction from a conditional branch."),
     cl::location(SearchLengthForUndef), cl::init(2));
 
-static cl::opt<uint64_t, true> SearchLengthForConditionalBranchArg(
+static cl::opt<unsigned long long, true> SearchLengthForConditionalBranchArg(
     "search-length-cb",
     cl::desc("Specify the maximum amount of instructions "
              "to inspect when searching for a conditional "
@@ -69,6 +66,30 @@ std::vector<uint64_t> GraphResult::flattenAddress(uint64_t Address) const {
     It = IntermediateNodes.find(It->second);
   }
   return Addresses;
+}
+
+void printPairToDOT(const FileAnalysis &Analysis, raw_ostream &OS,
+                          uint64_t From, uint64_t To) {
+  OS << "  \"" << format_hex(From, 2) << ": ";
+  Analysis.printInstruction(Analysis.getInstructionOrDie(From), OS);
+  OS << "\" -> \"" << format_hex(To, 2) << ": ";
+  Analysis.printInstruction(Analysis.getInstructionOrDie(To), OS);
+  OS << "\"\n";
+}
+
+void GraphResult::printToDOT(const FileAnalysis &Analysis,
+                             raw_ostream &OS) const {
+  std::map<uint64_t, uint64_t> SortedIntermediateNodes(
+      IntermediateNodes.begin(), IntermediateNodes.end());
+  OS << "digraph graph_" << format_hex(BaseAddress, 2) << " {\n";
+  for (const auto &KV : SortedIntermediateNodes)
+    printPairToDOT(Analysis, OS, KV.first, KV.second);
+
+  for (auto &BranchNode : ConditionalBranchNodes) {
+    for (auto &V : {BranchNode.Target, BranchNode.Fallthrough})
+      printPairToDOT(Analysis, OS, BranchNode.Address, V);
+  }
+  OS << "}\n";
 }
 
 GraphResult GraphBuilder::buildFlowGraph(const FileAnalysis &Analysis,
@@ -221,6 +242,13 @@ void GraphBuilder::buildFlowGraphImpl(const FileAnalysis &Analysis,
       continue;
     }
 
+    // Call instructions are not valid in the upwards traversal.
+    if (ParentDesc.isCall()) {
+      Result.IntermediateNodes[ParentMeta.VMAddress] = Address;
+      Result.OrphanedNodes.push_back(ParentMeta.VMAddress);
+      continue;
+    }
+
     // Evaluate the branch target to ascertain whether this XRef is the result
     // of a fallthrough or the target of a branch.
     uint64_t BranchTarget;
@@ -270,6 +298,7 @@ void GraphBuilder::buildFlowGraphImpl(const FileAnalysis &Analysis,
     BranchNode.Target = 0;
     BranchNode.Fallthrough = 0;
     BranchNode.CFIProtection = false;
+    BranchNode.IndirectCFIsOnTargetPath = (BranchTarget == Address);
 
     if (BranchTarget == Address)
       BranchNode.Target = Address;
@@ -279,6 +308,24 @@ void GraphBuilder::buildFlowGraphImpl(const FileAnalysis &Analysis,
     HasValidCrossRef = true;
     buildFlowsToUndefined(Analysis, Result, BranchNode, ParentMeta);
     Result.ConditionalBranchNodes.push_back(BranchNode);
+  }
+
+  // When using cross-DSO, some indirect calls are not guarded by a branch to a
+  // trap but instead follow a call to __cfi_slowpath.  For example:
+  // if (!InlinedFastCheck(f))
+  //    call *f
+  //  else {
+  //    __cfi_slowpath(CallSiteTypeId, f);
+  //    call *f
+  //  }
+  // To mark the second call as protected, we recognize indirect calls that
+  // directly follow calls to functions that will trap on CFI violations.
+  if (CFCrossRefs.empty()) {
+    const Instr *PrevInstr = Analysis.getPrevInstructionSequential(ChildMeta);
+    if (PrevInstr && Analysis.willTrapOnCFIViolation(*PrevInstr)) {
+      Result.IntermediateNodes[PrevInstr->VMAddress] = Address;
+      HasValidCrossRef = true;
+    }
   }
 
   if (!HasValidCrossRef)

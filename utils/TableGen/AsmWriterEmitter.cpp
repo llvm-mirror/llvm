@@ -1,9 +1,8 @@
 //===- AsmWriterEmitter.cpp - Generate an assembly writer -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -351,8 +350,8 @@ void AsmWriterEmitter::EmitPrintInstruction(raw_ostream &O) {
 
     // If we don't have enough bits for this operand, don't include it.
     if (NumBits > BitsLeft) {
-      DEBUG(errs() << "Not enough bits to densely encode " << NumBits
-                   << " more bits\n");
+      LLVM_DEBUG(errs() << "Not enough bits to densely encode " << NumBits
+                        << " more bits\n");
       break;
     }
 
@@ -727,10 +726,6 @@ public:
 } // end anonymous namespace
 
 static unsigned CountNumOperands(StringRef AsmString, unsigned Variant) {
-  std::string FlatAsmString =
-      CodeGenInstruction::FlattenAsmStringVariants(AsmString, Variant);
-  AsmString = FlatAsmString;
-
   return AsmString.count(' ') + AsmString.count('\t');
 }
 
@@ -782,7 +777,7 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
     const DagInit *DI = R->getValueAsDag("ResultInst");
     const DefInit *Op = cast<DefInit>(DI->getOperator());
     AliasMap[getQualifiedName(Op->getDef())].insert(
-        std::make_pair(CodeGenInstAlias(R, Variant, Target), Priority));
+        std::make_pair(CodeGenInstAlias(R, Target), Priority));
   }
 
   // A map of which conditions need to be met for each instruction operand
@@ -799,14 +794,20 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
     for (auto &Alias : Aliases.second) {
       const CodeGenInstAlias &CGA = Alias.first;
       unsigned LastOpNo = CGA.ResultInstOperandIndex.size();
-      unsigned NumResultOps =
-          CountNumOperands(CGA.ResultInst->AsmString, Variant);
+      std::string FlatInstAsmString =
+         CodeGenInstruction::FlattenAsmStringVariants(CGA.ResultInst->AsmString,
+                                                      Variant);
+      unsigned NumResultOps = CountNumOperands(FlatInstAsmString, Variant);
+
+      std::string FlatAliasAsmString =
+        CodeGenInstruction::FlattenAsmStringVariants(CGA.AsmString,
+                                                      Variant);
 
       // Don't emit the alias if it has more operands than what it's aliasing.
-      if (NumResultOps < CountNumOperands(CGA.AsmString, Variant))
+      if (NumResultOps < CountNumOperands(FlatAliasAsmString, Variant))
         continue;
 
-      IAPrinter IAP(CGA.Result->getAsString(), CGA.AsmString);
+      IAPrinter IAP(CGA.Result->getAsString(), FlatAliasAsmString);
 
       StringRef Namespace = Target.getName();
       std::vector<Record *> ReqFeatures;
@@ -820,8 +821,8 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
       }
 
       unsigned NumMIOps = 0;
-      for (auto &Operand : CGA.ResultOperands)
-        NumMIOps += Operand.getMINumOperands();
+      for (auto &ResultInstOpnd : CGA.ResultInst->Operands)
+        NumMIOps += ResultInstOpnd.MINumOperands;
 
       std::string Cond;
       Cond = std::string("MI->getNumOperands() == ") + utostr(NumMIOps);
@@ -831,6 +832,24 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
 
       unsigned MIOpNum = 0;
       for (unsigned i = 0, e = LastOpNo; i != e; ++i) {
+        // Skip over tied operands as they're not part of an alias declaration.
+        auto &Operands = CGA.ResultInst->Operands;
+        while (true) {
+          unsigned OpNum = Operands.getSubOperandNumber(MIOpNum).first;
+          if (Operands[OpNum].MINumOperands == 1 &&
+              Operands[OpNum].getTiedRegister() != -1) {
+            // Tied operands of different RegisterClass should be explicit within
+            // an instruction's syntax and so cannot be skipped.
+            int TiedOpNum = Operands[OpNum].getTiedRegister();
+            if (Operands[OpNum].Rec->getName() ==
+                Operands[TiedOpNum].Rec->getName()) {
+              ++MIOpNum;
+              continue;
+            }
+          }
+          break;
+        }
+
         std::string Op = "MI->getOperand(" + utostr(MIOpNum) + ")";
 
         const CodeGenInstAlias::ResultOperand &RO = CGA.ResultOperands[i];
@@ -1024,8 +1043,10 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
   O << "  OS << '\\t' << StringRef(AsmString, I);\n";
 
   O << "  if (AsmString[I] != '\\0') {\n";
-  O << "    if (AsmString[I] == ' ' || AsmString[I] == '\\t')";
+  O << "    if (AsmString[I] == ' ' || AsmString[I] == '\\t') {\n";
   O << "      OS << '\\t';\n";
+  O << "      ++I;\n";
+  O << "    }\n";
   O << "    do {\n";
   O << "      if (AsmString[I] == '$') {\n";
   O << "        ++I;\n";

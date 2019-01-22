@@ -1,9 +1,8 @@
 //===-- RuntimeDyldELFMips.cpp ---- ELF/Mips specific code. -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -55,12 +54,12 @@ RuntimeDyldELFMips::evaluateMIPS32Relocation(const SectionEntry &Section,
                                              uint64_t Offset, uint64_t Value,
                                              uint32_t Type) {
 
-  DEBUG(dbgs() << "evaluateMIPS32Relocation, LocalAddress: 0x"
-               << format("%llx", Section.getAddressWithOffset(Offset))
-               << " FinalAddress: 0x"
-               << format("%llx", Section.getLoadAddressWithOffset(Offset))
-               << " Value: 0x" << format("%llx", Value) << " Type: 0x"
-               << format("%x", Type) << "\n");
+  LLVM_DEBUG(dbgs() << "evaluateMIPS32Relocation, LocalAddress: 0x"
+                    << format("%llx", Section.getAddressWithOffset(Offset))
+                    << " FinalAddress: 0x"
+                    << format("%llx", Section.getLoadAddressWithOffset(Offset))
+                    << " Value: 0x" << format("%llx", Value) << " Type: 0x"
+                    << format("%x", Type) << "\n");
 
   switch (Type) {
   default:
@@ -110,15 +109,16 @@ int64_t RuntimeDyldELFMips::evaluateMIPS64Relocation(
     const SectionEntry &Section, uint64_t Offset, uint64_t Value, uint32_t Type,
     int64_t Addend, uint64_t SymOffset, SID SectionID) {
 
-  DEBUG(dbgs() << "evaluateMIPS64Relocation, LocalAddress: 0x"
-               << format("%llx", Section.getAddressWithOffset(Offset))
-               << " FinalAddress: 0x"
-               << format("%llx", Section.getLoadAddressWithOffset(Offset))
-               << " Value: 0x" << format("%llx", Value) << " Type: 0x"
-               << format("%x", Type) << " Addend: 0x" << format("%llx", Addend)
-               << " Offset: " << format("%llx" PRIx64, Offset)
-               << " SID: " << format("%d", SectionID)
-               << " SymOffset: " << format("%x", SymOffset) << "\n");
+  LLVM_DEBUG(dbgs() << "evaluateMIPS64Relocation, LocalAddress: 0x"
+                    << format("%llx", Section.getAddressWithOffset(Offset))
+                    << " FinalAddress: 0x"
+                    << format("%llx", Section.getLoadAddressWithOffset(Offset))
+                    << " Value: 0x" << format("%llx", Value) << " Type: 0x"
+                    << format("%x", Type) << " Addend: 0x"
+                    << format("%llx", Addend)
+                    << " Offset: " << format("%llx" PRIx64, Offset)
+                    << " SID: " << format("%d", SectionID)
+                    << " SymOffset: " << format("%x", SymOffset) << "\n");
 
   switch (Type) {
   default:
@@ -307,13 +307,12 @@ void RuntimeDyldELFMips::resolveMIPSO32Relocation(const SectionEntry &Section,
   uint8_t *TargetPtr = Section.getAddressWithOffset(Offset);
   Value += Addend;
 
-  DEBUG(dbgs() << "resolveMIPSO32Relocation, LocalAddress: "
-               << Section.getAddressWithOffset(Offset) << " FinalAddress: "
-               << format("%p", Section.getLoadAddressWithOffset(Offset))
-               << " Value: " << format("%x", Value)
-               << " Type: " << format("%x", Type)
-               << " Addend: " << format("%x", Addend)
-               << " SymOffset: " << format("%x", Offset) << "\n");
+  LLVM_DEBUG(dbgs() << "resolveMIPSO32Relocation, LocalAddress: "
+                    << Section.getAddressWithOffset(Offset) << " FinalAddress: "
+                    << format("%p", Section.getLoadAddressWithOffset(Offset))
+                    << " Value: " << format("%x", Value) << " Type: "
+                    << format("%x", Type) << " Addend: " << format("%x", Addend)
+                    << " SymOffset: " << format("%x", Offset) << "\n");
 
   Value = evaluateMIPS32Relocation(Section, Offset, Value, Type);
 

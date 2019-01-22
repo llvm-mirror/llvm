@@ -1,9 +1,8 @@
 //===-- BPFInstPrinter.cpp - Convert BPF MCInst to asm syntax -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "BPFInstPrinter.h"
-#include "BPF.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -56,7 +54,7 @@ void BPFInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   if (Op.isReg()) {
     O << getRegisterName(Op.getReg());
   } else if (Op.isImm()) {
-    O << (int32_t)Op.getImm();
+    O << formatImm((int32_t)Op.getImm());
   } else {
     assert(Op.isExpr() && "Expected an expression");
     printExpr(Op.getExpr(), O);
@@ -76,9 +74,9 @@ void BPFInstPrinter::printMemOperand(const MCInst *MI, int OpNo, raw_ostream &O,
   if (OffsetOp.isImm()) {
     auto Imm = OffsetOp.getImm();
     if (Imm >= 0)
-      O << " + " << formatDec(Imm);
+      O << " + " << formatImm(Imm);
     else
-      O << " - " << formatDec(-Imm);
+      O << " - " << formatImm(-Imm);
   } else {
     assert(0 && "Expected an immediate");
   }
@@ -88,9 +86,22 @@ void BPFInstPrinter::printImm64Operand(const MCInst *MI, unsigned OpNo,
                                        raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm())
-    O << (uint64_t)Op.getImm();
+    O << formatImm(Op.getImm());
   else if (Op.isExpr())
     printExpr(Op.getExpr(), O);
   else
     O << Op;
+}
+
+void BPFInstPrinter::printBrTargetOperand(const MCInst *MI, unsigned OpNo,
+                                       raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (Op.isImm()) {
+    int16_t Imm = Op.getImm();
+    O << ((Imm >= 0) ? "+" : "") << formatImm(Imm);
+  } else if (Op.isExpr()) {
+    printExpr(Op.getExpr(), O);
+  } else {
+    O << Op;
+  }
 }

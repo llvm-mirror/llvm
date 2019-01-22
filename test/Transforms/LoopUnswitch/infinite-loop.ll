@@ -1,5 +1,6 @@
 ; REQUIRES: asserts
 ; RUN: opt -loop-unswitch -disable-output -stats -info-output-file - < %s | FileCheck --check-prefix=STATS %s
+; RUN: opt -loop-unswitch -enable-mssa-loop-dependency=true -verify-memoryssa -disable-output -stats -info-output-file - < %s | FileCheck --check-prefix=STATS %s
 ; RUN: opt -loop-unswitch -simplifycfg -S < %s | FileCheck %s
 ; PR5373
 
@@ -16,7 +17,7 @@
 ; CHECK-NEXT: br i1 %a, label %entry.split, label %abort0.split
 
 ; CHECK: entry.split:
-; CHECK-NEXT: br i1 %b, label %entry.split.split, label %abort1.split
+; CHECK-NEXT: br i1 %b, label %for.body, label %abort1.split
 
 ; CHECK: for.body:
 ; CHECK-NEXT: br label %for.body

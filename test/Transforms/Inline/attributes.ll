@@ -10,6 +10,10 @@ define i32 @sanitize_address_callee(i32 %i) sanitize_address {
   ret i32 %i
 }
 
+define i32 @sanitize_hwaddress_callee(i32 %i) sanitize_hwaddress {
+  ret i32 %i
+}
+
 define i32 @sanitize_thread_callee(i32 %i) sanitize_thread {
   ret i32 %i
 }
@@ -22,11 +26,19 @@ define i32 @safestack_callee(i32 %i) safestack {
   ret i32 %i
 }
 
+define i32 @slh_callee(i32 %i) speculative_load_hardening {
+  ret i32 %i
+}
+
 define i32 @alwaysinline_callee(i32 %i) alwaysinline {
   ret i32 %i
 }
 
 define i32 @alwaysinline_sanitize_address_callee(i32 %i) alwaysinline sanitize_address {
+  ret i32 %i
+}
+
+define i32 @alwaysinline_sanitize_hwaddress_callee(i32 %i) alwaysinline sanitize_hwaddress {
   ret i32 %i
 }
 
@@ -56,6 +68,17 @@ define i32 @test_no_sanitize_address(i32 %arg) {
   ret i32 %x4
 ; CHECK-LABEL: @test_no_sanitize_address(
 ; CHECK-NEXT: @sanitize_address_callee
+; CHECK-NEXT: ret i32
+}
+
+define i32 @test_no_sanitize_hwaddress(i32 %arg) {
+  %x1 = call i32 @noattr_callee(i32 %arg)
+  %x2 = call i32 @sanitize_hwaddress_callee(i32 %x1)
+  %x3 = call i32 @alwaysinline_callee(i32 %x2)
+  %x4 = call i32 @alwaysinline_sanitize_hwaddress_callee(i32 %x3)
+  ret i32 %x4
+; CHECK-LABEL: @test_no_sanitize_hwaddress(
+; CHECK-NEXT: @sanitize_hwaddress_callee
 ; CHECK-NEXT: ret i32
 }
 
@@ -98,6 +121,17 @@ define i32 @test_sanitize_address(i32 %arg) sanitize_address {
 ; CHECK-NEXT: ret i32
 }
 
+define i32 @test_sanitize_hwaddress(i32 %arg) sanitize_hwaddress {
+  %x1 = call i32 @noattr_callee(i32 %arg)
+  %x2 = call i32 @sanitize_hwaddress_callee(i32 %x1)
+  %x3 = call i32 @alwaysinline_callee(i32 %x2)
+  %x4 = call i32 @alwaysinline_sanitize_hwaddress_callee(i32 %x3)
+  ret i32 %x4
+; CHECK-LABEL: @test_sanitize_hwaddress(
+; CHECK-NEXT: @noattr_callee
+; CHECK-NEXT: ret i32
+}
+
 define i32 @test_sanitize_memory(i32 %arg) sanitize_memory {
   %x1 = call i32 @noattr_callee(i32 %arg)
   %x2 = call i32 @sanitize_memory_callee(i32 %x1)
@@ -129,6 +163,28 @@ define i32 @test_safestack(i32 %arg) safestack {
 ; CHECK-LABEL: @test_safestack(
 ; CHECK-NEXT: @noattr_callee
 ; CHECK-NEXT: ret i32
+}
+
+; Can inline a normal function into an SLH'ed function.
+define i32 @test_caller_slh(i32 %i) speculative_load_hardening {
+; CHECK-LABEL: @test_caller_slh(
+; CHECK-SAME: ) [[SLH:.*]] {
+; CHECK-NOT: call
+; CHECK: ret i32
+entry:
+  %callee = call i32 @noattr_callee(i32 %i)
+  ret i32 %callee
+}
+
+; Can inline a SLH'ed function into a normal one, propagating SLH.
+define i32 @test_callee_slh(i32 %i) {
+; CHECK-LABEL: @test_callee_slh(
+; CHECK-SAME: ) [[SLH:.*]] {
+; CHECK-NOT: call
+; CHECK: ret i32
+entry:
+  %callee = call i32 @slh_callee(i32 %i)
+  ret i32 %callee
 }
 
 ; Check that a function doesn't get inlined if target-cpu strings don't match
@@ -303,7 +359,60 @@ define i32 @test_no-use-jump-tables3(i32 %i) "no-jump-tables"="true" {
 ; CHECK-NEXT: ret i32
 }
 
+; Callee with "null-pointer-is-valid"="true" attribute should not be inlined
+; into a caller without this attribute.
+; Exception: alwaysinline callee can still be inlined but
+; "null-pointer-is-valid"="true" should get copied to caller.
+
+define i32 @null-pointer-is-valid_callee0(i32 %i) "null-pointer-is-valid"="true" {
+  ret i32 %i
+; CHECK: @null-pointer-is-valid_callee0(i32 %i)
+; CHECK-NEXT: ret i32
+}
+
+define i32 @null-pointer-is-valid_callee1(i32 %i) alwaysinline "null-pointer-is-valid"="true" {
+  ret i32 %i
+; CHECK: @null-pointer-is-valid_callee1(i32 %i)
+; CHECK-NEXT: ret i32
+}
+
+define i32 @null-pointer-is-valid_callee2(i32 %i)  {
+  ret i32 %i
+; CHECK: @null-pointer-is-valid_callee2(i32 %i)
+; CHECK-NEXT: ret i32
+}
+
+; No inlining since caller does not have "null-pointer-is-valid"="true" attribute.
+define i32 @test_null-pointer-is-valid0(i32 %i) {
+  %1 = call i32 @null-pointer-is-valid_callee0(i32 %i)
+  ret i32 %1
+; CHECK: @test_null-pointer-is-valid0(
+; CHECK: call i32 @null-pointer-is-valid_callee0
+; CHECK-NEXT: ret i32
+}
+
+; alwaysinline should force inlining even when caller does not have
+; "null-pointer-is-valid"="true" attribute. However, the attribute should be
+; copied to caller.
+define i32 @test_null-pointer-is-valid1(i32 %i) "null-pointer-is-valid"="false" {
+  %1 = call i32 @null-pointer-is-valid_callee1(i32 %i)
+  ret i32 %1
+; CHECK: @test_null-pointer-is-valid1(i32 %i) [[NULLPOINTERISVALID:#[0-9]+]] {
+; CHECK-NEXT: ret i32
+}
+
+; Can inline since both caller and callee have "null-pointer-is-valid"="true"
+; attribute.
+define i32 @test_null-pointer-is-valid2(i32 %i) "null-pointer-is-valid"="true" {
+  %1 = call i32 @null-pointer-is-valid_callee2(i32 %i)
+  ret i32 %1
+; CHECK: @test_null-pointer-is-valid2(i32 %i) [[NULLPOINTERISVALID]] {
+; CHECK-NEXT: ret i32
+}
+
+; CHECK: attributes [[SLH]] = { speculative_load_hardening }
 ; CHECK: attributes [[FPMAD_FALSE]] = { "less-precise-fpmad"="false" }
 ; CHECK: attributes [[FPMAD_TRUE]] = { "less-precise-fpmad"="true" }
 ; CHECK: attributes [[NOIMPLICITFLOAT]] = { noimplicitfloat }
 ; CHECK: attributes [[NOUSEJUMPTABLES]] = { "no-jump-tables"="true" }
+; CHECK: attributes [[NULLPOINTERISVALID]] = { "null-pointer-is-valid"="true" }

@@ -1,9 +1,8 @@
 //===- HexagonInstrInfo.h - Hexagon Instruction Information -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,9 +17,9 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Support/MachineValueType.h"
 #include <cstdint>
 #include <vector>
 
@@ -38,6 +37,11 @@ class TargetRegisterInfo;
 
 class HexagonInstrInfo : public HexagonGenInstrInfo {
   const HexagonSubtarget &Subtarget;
+
+  enum BundleAttribute {
+    memShufDisabledMask = 0x4
+  };
+
   virtual void anchor();
 
 public:
@@ -60,6 +64,20 @@ public:
   /// any side effects other than storing to the stack slot.
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
+
+  /// Check if the instruction or the bundle of instructions has
+  /// load from stack slots. Return the frameindex and machine memory operand
+  /// if true.
+  bool hasLoadFromStackSlot(
+      const MachineInstr &MI,
+      SmallVectorImpl<const MachineMemOperand *> &Accesses) const override;
+
+  /// Check if the instruction or the bundle of instructions has
+  /// store to stack slots. Return the frameindex and machine memory operand
+  /// if true.
+  bool hasStoreToStackSlot(
+      const MachineInstr &MI,
+      SmallVectorImpl<const MachineMemOperand *> &Accesses) const override;
 
   /// Analyze the branching code at the end of MBB, returning
   /// true if it cannot be understood (e.g. it's a switch dispatch or isn't
@@ -117,8 +135,8 @@ public:
   bool analyzeLoop(MachineLoop &L, MachineInstr *&IndVarInst,
                    MachineInstr *&CmpInst) const override;
 
-  /// Generate code to reduce the loop iteration by one and check if the loop is
-  /// finished.  Return the value/register of the the new loop count.  We need
+  /// Generate code to reduce the loop iteration by one and check if the loop
+  /// is finished.  Return the value/register of the new loop count.  We need
   /// this function when peeling off one or more iterations of a loop. This
   /// function assumes the nth iteration is peeled first.
   unsigned reduceLoopCount(MachineBasicBlock &MBB,
@@ -196,10 +214,10 @@ public:
   /// anything was changed.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
-  /// \brief Get the base register and byte offset of a load/store instr.
-  bool getMemOpBaseRegImmOfs(MachineInstr &LdSt, unsigned &BaseReg,
-                             int64_t &Offset,
-                             const TargetRegisterInfo *TRI) const override;
+  /// Get the base register and byte offset of a load/store instr.
+  bool getMemOperandWithOffset(MachineInstr &LdSt, MachineOperand *&BaseOp,
+                               int64_t &Offset,
+                               const TargetRegisterInfo *TRI) const override;
 
   /// Reverses the branch condition of the specified condition list,
   /// returning false on success and true if it cannot be reversed.
@@ -326,10 +344,15 @@ public:
 
   /// HexagonInstrInfo specifics.
 
-  unsigned createVR(MachineFunction* MF, MVT VT) const;
+  unsigned createVR(MachineFunction *MF, MVT VT) const;
+  MachineInstr *findLoopInstr(MachineBasicBlock *BB, unsigned EndLoopOp,
+                              MachineBasicBlock *TargetBB,
+                              SmallPtrSet<MachineBasicBlock *, 8> &Visited) const;
 
+  bool isBaseImmOffset(const MachineInstr &MI) const;
   bool isAbsoluteSet(const MachineInstr &MI) const;
   bool isAccumulator(const MachineInstr &MI) const;
+  bool isAddrModeWithOffset(const MachineInstr &MI) const;
   bool isComplex(const MachineInstr &MI) const;
   bool isCompoundBranchInstr(const MachineInstr &MI) const;
   bool isConstExtended(const MachineInstr &MI) const;
@@ -412,8 +435,8 @@ public:
   bool predOpcodeHasNot(ArrayRef<MachineOperand> Cond) const;
 
   unsigned getAddrMode(const MachineInstr &MI) const;
-  unsigned getBaseAndOffset(const MachineInstr &MI, int &Offset,
-                            unsigned &AccessSize) const;
+  MachineOperand *getBaseAndOffset(const MachineInstr &MI, int64_t &Offset,
+                                   unsigned &AccessSize) const;
   SmallVector<MachineInstr*,2> getBranchingInstrs(MachineBasicBlock& MBB) const;
   unsigned getCExtOpNum(const MachineInstr &MI) const;
   HexagonII::CompoundGroup
@@ -432,7 +455,6 @@ public:
   HexagonII::SubInstructionGroup getDuplexCandidateGroup(const MachineInstr &MI)
                                                          const;
   short getEquivalentHWInstr(const MachineInstr &MI) const;
-  MachineInstr *getFirstNonDbgInst(MachineBasicBlock *BB) const;
   unsigned getInstrTimingClassLatency(const InstrItineraryData *ItinData,
                                       const MachineInstr &MI) const;
   bool getInvertedPredSense(SmallVectorImpl<MachineOperand> &Cond) const;
@@ -449,6 +471,8 @@ public:
   uint64_t getType(const MachineInstr &MI) const;
   unsigned getUnits(const MachineInstr &MI) const;
 
+  MachineBasicBlock::instr_iterator expandVGatherPseudo(MachineInstr &MI) const;
+
   /// getInstrTimingClassLatency - Compute the instruction latency of a given
   /// instruction using Timing Class information, if available.
   unsigned nonDbgBBSize(const MachineBasicBlock *BB) const;
@@ -456,16 +480,20 @@ public:
 
   void immediateExtend(MachineInstr &MI) const;
   bool invertAndChangeJumpTarget(MachineInstr &MI,
-                                 MachineBasicBlock* NewTarget) const;
+                                 MachineBasicBlock *NewTarget) const;
   void genAllInsnTimingClasses(MachineFunction &MF) const;
   bool reversePredSense(MachineInstr &MI) const;
   unsigned reversePrediction(unsigned Opcode) const;
   bool validateBranchCond(const ArrayRef<MachineOperand> &Cond) const;
 
+  void setBundleNoShuf(MachineBasicBlock::instr_iterator MIB) const;
+  bool getBundleNoShuf(const MachineInstr &MIB) const;
   // Addressing mode relations.
   short changeAddrMode_abs_io(short Opc) const;
   short changeAddrMode_io_abs(short Opc) const;
+  short changeAddrMode_io_pi(short Opc) const;
   short changeAddrMode_io_rr(short Opc) const;
+  short changeAddrMode_pi_io(short Opc) const;
   short changeAddrMode_rr_io(short Opc) const;
   short changeAddrMode_rr_ur(short Opc) const;
   short changeAddrMode_ur_rr(short Opc) const;

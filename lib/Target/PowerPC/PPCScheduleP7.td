@@ -1,9 +1,8 @@
 //===-- PPCScheduleP7.td - PPC P7 Scheduling Definitions ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -114,6 +113,10 @@ def P7Itineraries : ProcessorItineraries<
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                   [4, 1, 1]>,
+  InstrItinData<IIC_IntMulHD    , [InstrStage<1, [P7_DU1, P7_DU2,
+                                                  P7_DU3, P7_DU4], 0>,
+                                   InstrStage<1, [P7_FX1, P7_FX2]>],
+                                  [4, 1, 1]>,
   InstrItinData<IIC_IntMulLI    , [InstrStage<1, [P7_DU1, P7_DU2,
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
@@ -123,6 +126,10 @@ def P7Itineraries : ProcessorItineraries<
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                    [1, 1, 1]>,
   InstrItinData<IIC_IntRotateD  , [InstrStage<1, [P7_DU1, P7_DU2,
+                                                  P7_DU3, P7_DU4], 0>,
+                                   InstrStage<1, [P7_FX1, P7_FX2]>],
+                                   [1, 1, 1]>,
+  InstrItinData<IIC_IntRotateDI , [InstrStage<1, [P7_DU1, P7_DU2,
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                    [1, 1, 1]>,
@@ -253,13 +260,13 @@ def P7Itineraries : ProcessorItineraries<
                                    InstrStage<1, [P7_LS1, P7_LS2], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                   [1, 1, 1]>,
-  InstrItinData<IIC_LdStSTDU    , [InstrStage<1, [P7_DU1], 0>,
+  InstrItinData<IIC_LdStSTU     , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_DU2], 0>,
                                    InstrStage<1, [P7_LS1, P7_LS2], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                   [2, 1, 1, 1]>,
-  InstrItinData<IIC_LdStSTDUX   , [InstrStage<1, [P7_DU1], 0>,
+  InstrItinData<IIC_LdStSTUX    , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_DU2], 0>,
                                    InstrStage<1, [P7_DU3], 0>,
                                    InstrStage<1, [P7_DU4], 0>,

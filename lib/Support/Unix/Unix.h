@@ -1,9 +1,8 @@
 //===- llvm/Support/Unix/Unix.h - Common Unix Include File -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,7 +55,7 @@
 /// This function builds an error message into \p ErrMsg using the \p prefix
 /// string and the Unix error number given by \p errnum. If errnum is -1, the
 /// default then the value of errno is used.
-/// @brief Make an error message
+/// Make an error message
 ///
 /// If the error number can be converted to a string, it will be
 /// separated from prefix by ": ".

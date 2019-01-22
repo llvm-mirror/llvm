@@ -1,9 +1,8 @@
 //===- llvm/ADT/ScopeExit.h - Execute code at scope exit --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,14 +24,26 @@ namespace detail {
 
 template <typename Callable> class scope_exit {
   Callable ExitFunction;
+  bool Engaged = true; // False once moved-from or release()d.
 
 public:
   template <typename Fp>
   explicit scope_exit(Fp &&F) : ExitFunction(std::forward<Fp>(F)) {}
 
-  scope_exit(scope_exit &&Rhs) : ExitFunction(std::move(Rhs.ExitFunction)) {}
+  scope_exit(scope_exit &&Rhs)
+      : ExitFunction(std::move(Rhs.ExitFunction)), Engaged(Rhs.Engaged) {
+    Rhs.release();
+  }
+  scope_exit(const scope_exit &) = delete;
+  scope_exit &operator=(scope_exit &&) = delete;
+  scope_exit &operator=(const scope_exit &) = delete;
 
-  ~scope_exit() { ExitFunction(); }
+  void release() { Engaged = false; }
+
+  ~scope_exit() {
+    if (Engaged)
+      ExitFunction();
+  }
 };
 
 } // end namespace detail

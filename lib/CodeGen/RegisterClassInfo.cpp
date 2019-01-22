@@ -1,9 +1,8 @@
 //===- RegisterClassInfo.cpp - Dynamic Register Class Info ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,13 +19,13 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -49,9 +48,6 @@ void RegisterClassInfo::runOnMachineFunction(const MachineFunction &mf) {
   if (MF->getSubtarget().getRegisterInfo() != TRI) {
     TRI = MF->getSubtarget().getRegisterInfo();
     RegClass.reset(new RCInfo[TRI->getNumRegClasses()]);
-    unsigned NumPSets = TRI->getNumRegPressureSets();
-    PSetLimits.reset(new unsigned[NumPSets]);
-    std::fill(&PSetLimits[0], &PSetLimits[NumPSets], 0);
     Update = true;
   }
 
@@ -80,8 +76,12 @@ void RegisterClassInfo::runOnMachineFunction(const MachineFunction &mf) {
   }
 
   // Invalidate cached information from previous function.
-  if (Update)
+  if (Update) {
+    unsigned NumPSets = TRI->getNumRegPressureSets();
+    PSetLimits.reset(new unsigned[NumPSets]);
+    std::fill(&PSetLimits[0], &PSetLimits[NumPSets], 0);
     ++Tag;
+  }
 }
 
 /// compute - Compute the preferred allocation order for RC with reserved
@@ -150,10 +150,10 @@ void RegisterClassInfo::compute(const TargetRegisterClass *RC) const {
   RCI.MinCost = uint8_t(MinCost);
   RCI.LastCostChange = LastCostChange;
 
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "AllocationOrder(" << TRI->getRegClassName(RC) << ") = [";
     for (unsigned I = 0; I != RCI.NumRegs; ++I)
-      dbgs() << ' ' << PrintReg(RCI.Order[I], TRI);
+      dbgs() << ' ' << printReg(RCI.Order[I], TRI);
     dbgs() << (RCI.ProperSubClass ? " ] (sub-class)\n" : " ]\n");
   });
 

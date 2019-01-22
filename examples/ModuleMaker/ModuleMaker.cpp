@@ -1,9 +1,8 @@
 //===- examples/ModuleMaker/ModuleMaker.cpp - Example project ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -62,7 +61,7 @@ int main() {
   BB->getInstList().push_back(ReturnInst::Create(Context, Add));
 
   // Output the bitcode file to stdout
-  WriteBitcodeToFile(M, outs());
+  WriteBitcodeToFile(*M, outs());
 
   // Delete the module and all of its contents.
   delete M;

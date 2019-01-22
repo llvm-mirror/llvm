@@ -1,9 +1,8 @@
 //===- NamedStreamMap.h - PDB Named Stream Map ------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,32 +24,45 @@ class BinaryStreamWriter;
 
 namespace pdb {
 
+class NamedStreamMap;
+
+struct NamedStreamMapTraits {
+  NamedStreamMap *NS;
+
+  explicit NamedStreamMapTraits(NamedStreamMap &NS);
+  uint16_t hashLookupKey(StringRef S) const;
+  StringRef storageKeyToLookupKey(uint32_t Offset) const;
+  uint32_t lookupKeyToStorageKey(StringRef S);
+};
+
 class NamedStreamMap {
   friend class NamedStreamMapBuilder;
-
-  struct FinalizationInfo {
-    uint32_t StringDataBytes = 0;
-    uint32_t SerializedLength = 0;
-  };
 
 public:
   NamedStreamMap();
 
   Error load(BinaryStreamReader &Stream);
   Error commit(BinaryStreamWriter &Writer) const;
-  uint32_t finalize();
+  uint32_t calculateSerializedLength() const;
 
   uint32_t size() const;
   bool get(StringRef Stream, uint32_t &StreamNo) const;
   void set(StringRef Stream, uint32_t StreamNo);
-  void remove(StringRef Stream);
-  const StringMap<uint32_t> &getStringMap() const { return Mapping; }
-  iterator_range<StringMapConstIterator<uint32_t>> entries() const;
+
+  uint32_t appendStringData(StringRef S);
+  StringRef getString(uint32_t Offset) const;
+  uint32_t hashString(uint32_t Offset) const;
+
+  StringMap<uint32_t> entries() const;
 
 private:
-  Optional<FinalizationInfo> FinalizedInfo;
-  HashTable FinalizedHashTable;
-  StringMap<uint32_t> Mapping;
+  NamedStreamMapTraits HashTraits;
+  /// Closed hash table from Offset -> StreamNumber, where Offset is the offset
+  /// of the stream name in NamesBuffer.
+  HashTable<support::ulittle32_t, NamedStreamMapTraits> OffsetIndexMap;
+
+  /// Buffer of string data.
+  std::vector<char> NamesBuffer;
 };
 
 } // end namespace pdb

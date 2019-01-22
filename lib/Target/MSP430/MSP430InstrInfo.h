@@ -1,9 +1,8 @@
 //===-- MSP430InstrInfo.h - MSP430 Instruction Information ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,7 +14,7 @@
 #define LLVM_LIB_TARGET_MSP430_MSP430INSTRINFO_H
 
 #include "MSP430RegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "MSP430GenInstrInfo.inc"
@@ -23,22 +22,6 @@
 namespace llvm {
 
 class MSP430Subtarget;
-
-/// MSP430II - This namespace holds all of the target specific flags that
-/// instruction info tracks.
-///
-namespace MSP430II {
-  enum {
-    SizeShift   = 2,
-    SizeMask    = 7 << SizeShift,
-
-    SizeUnknown = 0 << SizeShift,
-    SizeSpecial = 1 << SizeShift,
-    Size2Bytes  = 2 << SizeShift,
-    Size4Bytes  = 3 << SizeShift,
-    Size6Bytes  = 4 << SizeShift
-  };
-}
 
 class MSP430InstrInfo : public MSP430GenInstrInfo {
   const MSP430RegisterInfo RI;

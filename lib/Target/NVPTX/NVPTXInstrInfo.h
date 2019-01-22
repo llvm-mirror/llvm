@@ -1,9 +1,8 @@
 //===- NVPTXInstrInfo.h - NVPTX Instruction Information----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the niversity of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,7 +15,7 @@
 
 #include "NVPTX.h"
 #include "NVPTXRegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "NVPTXGenInstrInfo.inc"
@@ -52,10 +51,6 @@ public:
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                    const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
-  virtual bool isMoveInstr(const MachineInstr &MI, unsigned &SrcReg,
-                           unsigned &DestReg) const;
-  bool isLoadInstr(const MachineInstr &MI, unsigned &AddrSpace) const;
-  bool isStoreInstr(const MachineInstr &MI, unsigned &AddrSpace) const;
 
   // Branch analysis.
   bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
@@ -68,10 +63,6 @@ public:
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
                         const DebugLoc &DL,
                         int *BytesAdded = nullptr) const override;
-  unsigned getLdStCodeAddrSpace(const MachineInstr &MI) const {
-    return MI.getOperand(2).getImm();
-  }
-
 };
 
 } // namespace llvm

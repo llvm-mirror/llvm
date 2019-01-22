@@ -1,31 +1,13 @@
 ; RUN: llc < %s -mtriple=arm64-eabi -aarch64-neon-syntax=apple | FileCheck %s
 
-; Check that building up a vector w/ only one non-zero lane initializes
-; intelligently.
-define void @one_lane(i32* nocapture %out_int, i32 %skip0) nounwind {
-; CHECK-LABEL: one_lane:
-; CHECK: dup.16b v[[REG:[0-9]+]], wzr
-; CHECK-NEXT: ins.b v[[REG]][0], w1
-; v and q are aliases, and str is preferred against st.16b when possible
-; rdar://11246289
-; CHECK: str q[[REG]], [x0]
-; CHECK: ret
-  %conv = trunc i32 %skip0 to i8
-  %vset_lane = insertelement <16 x i8> <i8 undef, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0>, i8 %conv, i32 0
-  %tmp = bitcast i32* %out_int to <4 x i32>*
-  %tmp1 = bitcast <16 x i8> %vset_lane to <4 x i32>
-  store <4 x i32> %tmp1, <4 x i32>* %tmp, align 16
-  ret void
-}
-
 ; Check that building a vector from floats doesn't insert an unnecessary
 ; copy for lane zero.
 define <4 x float>  @foo(float %a, float %b, float %c, float %d) nounwind {
 ; CHECK-LABEL: foo:
-; CHECK-NOT: ins.s v0[0], v0[0]
-; CHECK: ins.s v0[1], v1[0]
-; CHECK: ins.s v0[2], v2[0]
-; CHECK: ins.s v0[3], v3[0]
+; CHECK-NOT: mov.s v0[0], v0[0]
+; CHECK: mov.s v0[1], v1[0]
+; CHECK: mov.s v0[2], v2[0]
+; CHECK: mov.s v0[3], v3[0]
 ; CHECK: ret
   %1 = insertelement <4 x float> undef, float %a, i32 0
   %2 = insertelement <4 x float> %1, float %b, i32 1
@@ -56,4 +38,40 @@ define <8 x i16> @concat_2_build_vector(<4 x i16> %in0) {
   %vshl_n2 = shl <4 x i16> %vshl_n, <i16 9, i16 9, i16 9, i16 9>
   %shuffle.i = shufflevector <4 x i16> %vshl_n2, <4 x i16> zeroinitializer, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   ret <8 x i16> %shuffle.i
+}
+
+; The lowering of a widened f16 BUILD_VECTOR tries to optimize it by building
+; an equivalent integer vector and BITCAST-ing that. This case checks that
+; normalizing the vector generates a valid result. The choice of the
+; constant prevents earlier passes from replacing the BUILD_VECTOR.
+define void @widen_f16_build_vector(half* %addr) {
+; CHECK-LABEL: widen_f16_build_vector:
+; CHECK: mov    w[[GREG:[0-9]+]], #13294
+; CHECK: dup.4h v0, w[[GREG]]
+; CHECK: str    s0, [x0]
+  %1 = bitcast half* %addr to <2 x half>*
+  store <2 x half> <half 0xH33EE, half 0xH33EE>, <2 x half>* %1, align 2
+  ret void
+}
+
+; Check that a single element vector is constructed with a mov
+define <1 x i64> @single_element_vector_i64(<1 x i64> %arg) {
+; CHECK-LABEL: single_element_vector_i64
+; CHECK: orr w[[GREG:[0-9]+]], wzr, #0x1
+; CHECK: fmov d[[DREG:[0-9]+]], x[[GREG]]
+; CHECK: add d0, d0, d[[DREG]]
+; CHECK: ret
+entry:
+  %add = add <1 x i64> %arg, <i64 1>
+  ret <1 x i64> %add
+}
+
+define <1 x double> @single_element_vector_double(<1 x double> %arg) {
+; CHECK-LABEL: single_element_vector_double
+; CHECK: fmov d[[DREG:[0-9]+]], #1.00000000
+; CHECK: fadd d0, d0, d[[DREG]]
+; CHECK: ret
+entry:
+  %add = fadd <1 x double> %arg, <double 1.0>
+  ret <1 x double> %add
 }

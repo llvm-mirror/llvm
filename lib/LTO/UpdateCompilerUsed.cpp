@@ -1,9 +1,8 @@
 //==-LTOInternalize.cpp - LLVM Link Time Optimizer Internalization Utility -==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,11 +12,10 @@
 
 #include "llvm/LTO/legacy/UpdateCompilerUsed.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
-#include "llvm/Target/TargetLowering.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
-#include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
 using namespace llvm;
@@ -96,12 +94,18 @@ private:
     if (GV.hasPrivateLinkage())
       return;
 
-    // Conservatively append user-supplied runtime library functions to
-    // llvm.compiler.used.  These could be internalized and deleted by
-    // optimizations like -globalopt, causing problems when later optimizations
-    // add new library calls (e.g., llvm.memset => memset and printf => puts).
+    // Conservatively append user-supplied runtime library functions (supplied
+    // either directly, or via a function alias) to llvm.compiler.used.  These
+    // could be internalized and deleted by optimizations like -globalopt,
+    // causing problems when later optimizations add new library calls (e.g.,
+    // llvm.memset => memset and printf => puts).
     // Leave it to the linker to remove any dead code (e.g. with -dead_strip).
-    if (isa<Function>(GV) && Libcalls.count(GV.getName())) {
+    GlobalValue *FuncAliasee = nullptr;
+    if (isa<GlobalAlias>(GV)) {
+      auto *A = cast<GlobalAlias>(&GV);
+      FuncAliasee = dyn_cast<Function>(A->getAliasee());
+    }
+    if ((isa<Function>(GV) || FuncAliasee) && Libcalls.count(GV.getName())) {
       LLVMUsed.push_back(&GV);
       return;
     }

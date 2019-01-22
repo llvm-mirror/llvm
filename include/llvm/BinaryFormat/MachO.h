@@ -1,9 +1,8 @@
 //===-- llvm/BinaryFormat/MachO.h - The MachO file format -------*- C++/-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -481,12 +480,15 @@ enum RelocationInfoType {
 enum { VM_PROT_READ = 0x1, VM_PROT_WRITE = 0x2, VM_PROT_EXECUTE = 0x4 };
 
 // Values for platform field in build_version_command.
-enum {
+enum PlatformType {
   PLATFORM_MACOS = 1,
   PLATFORM_IOS = 2,
   PLATFORM_TVOS = 3,
   PLATFORM_WATCHOS = 4,
-  PLATFORM_BRIDGEOS = 5
+  PLATFORM_BRIDGEOS = 5,
+  PLATFORM_IOSSIMULATOR = 7,
+  PLATFORM_TVOSSIMULATOR = 8,
+  PLATFORM_WATCHOSSIMULATOR = 9
 };
 
 // Values for tools enum in build_tool_version.
@@ -1973,9 +1975,11 @@ const uint32_t PPC_THREAD_STATE_COUNT =
 // Define a union of all load command structs
 #define LOAD_COMMAND_STRUCT(LCStruct) LCStruct LCStruct##_data;
 
-union macho_load_command {
+LLVM_PACKED_START
+union alignas(4) macho_load_command {
 #include "llvm/BinaryFormat/MachO.def"
 };
+LLVM_PACKED_END
 
 } // end namespace MachO
 } // end namespace llvm

@@ -1,9 +1,8 @@
 //===- ObjectFile.h - File format independent object file -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@
 #define LLVM_OBJECT_OBJECTFILE_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/MC/SubtargetFeature.h"
@@ -64,7 +64,7 @@ public:
   symbol_iterator getSymbol() const;
   uint64_t getType() const;
 
-  /// @brief Get a string that represents the type of this relocation.
+  /// Get a string that represents the type of this relocation.
   ///
   /// This is for display purposes only.
   void getTypeName(SmallVectorImpl<char> &Result) const;
@@ -99,16 +99,28 @@ public:
   uint64_t getSize() const;
   std::error_code getContents(StringRef &Result) const;
 
-  /// @brief Get the alignment of this section as the actual value (not log 2).
+  /// Get the alignment of this section as the actual value (not log 2).
   uint64_t getAlignment() const;
 
   bool isCompressed() const;
+  /// Whether this section contains instructions.
   bool isText() const;
+  /// Whether this section contains data, not instructions.
   bool isData() const;
+  /// Whether this section contains BSS uninitialized data.
   bool isBSS() const;
   bool isVirtual() const;
   bool isBitcode() const;
   bool isStripped() const;
+
+  /// Whether this section will be placed in the text segment, according to the
+  /// Berkeley size format. This is true if the section is allocatable, and
+  /// contains either code or readonly data.
+  bool isBerkeleyText() const;
+  /// Whether this section will be placed in the data segment, according to the
+  /// Berkeley size format. This is true if the section is allocatable and
+  /// contains data (e.g. PROGBITS), but is not text.
+  bool isBerkeleyData() const;
 
   bool containsSymbol(SymbolRef S) const;
 
@@ -153,12 +165,12 @@ public:
   /// offset or a virtual address.
   uint64_t getValue() const;
 
-  /// @brief Get the alignment of this symbol as the actual value (not log 2).
+  /// Get the alignment of this symbol as the actual value (not log 2).
   uint32_t getAlignment() const;
   uint64_t getCommonSize() const;
   Expected<SymbolRef::Type> getType() const;
 
-  /// @brief Get section this symbol is defined in reference to. Result is
+  /// Get section this symbol is defined in reference to. Result is
   /// end_sections() if it is undefined or is an absolute symbol.
   Expected<section_iterator> getSection() const;
 
@@ -237,6 +249,8 @@ protected:
   virtual bool isSectionVirtual(DataRefImpl Sec) const = 0;
   virtual bool isSectionBitcode(DataRefImpl Sec) const;
   virtual bool isSectionStripped(DataRefImpl Sec) const;
+  virtual bool isBerkeleyText(DataRefImpl Sec) const;
+  virtual bool isBerkeleyData(DataRefImpl Sec) const;
   virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const = 0;
   virtual relocation_iterator section_rel_end(DataRefImpl Sec) const = 0;
   virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
@@ -261,6 +275,10 @@ public:
     return getCommonSymbolSizeImpl(Symb);
   }
 
+  virtual std::vector<SectionRef> dynamic_relocation_sections() const {
+    return std::vector<SectionRef>();
+  }
+
   using symbol_iterator_range = iterator_range<symbol_iterator>;
   symbol_iterator_range symbols() const {
     return symbol_iterator_range(symbol_begin(), symbol_end());
@@ -274,23 +292,20 @@ public:
     return section_iterator_range(section_begin(), section_end());
   }
 
-  /// @brief The number of bytes used to represent an address in this object
+  /// The number of bytes used to represent an address in this object
   ///        file format.
   virtual uint8_t getBytesInAddress() const = 0;
 
   virtual StringRef getFileFormatName() const = 0;
-  virtual /* Triple::ArchType */ unsigned getArch() const = 0;
+  virtual Triple::ArchType getArch() const = 0;
   virtual SubtargetFeatures getFeatures() const = 0;
   virtual void setARMSubArch(Triple &TheTriple) const { }
+  virtual Expected<uint64_t> getStartAddress() const {
+    return errorCodeToError(object_error::parse_failed);
+  };
 
-  /// @brief Create a triple from the data in this object file.
+  /// Create a triple from the data in this object file.
   Triple makeTriple() const;
-
-  /// Returns platform-specific object flags, if any.
-  virtual std::error_code getPlatformFlags(unsigned &Result) const {
-    Result = 0;
-    return object_error::invalid_file_type;
-  }
 
   virtual std::error_code
     getBuildAttributes(ARMAttributeParser &Attributes) const {
@@ -306,7 +321,7 @@ public:
   /// @returns Pointer to ObjectFile subclass to handle this type of object.
   /// @param ObjectPath The path to the object file. ObjectPath.isObject must
   ///        return true.
-  /// @brief Create ObjectFile from path.
+  /// Create ObjectFile from path.
   static Expected<OwningBinary<ObjectFile>>
   createObjectFile(StringRef ObjectPath);
 
@@ -445,6 +460,14 @@ inline bool SectionRef::isBitcode() const {
 
 inline bool SectionRef::isStripped() const {
   return OwningObject->isSectionStripped(SectionPimpl);
+}
+
+inline bool SectionRef::isBerkeleyText() const {
+  return OwningObject->isBerkeleyText(SectionPimpl);
+}
+
+inline bool SectionRef::isBerkeleyData() const {
+  return OwningObject->isBerkeleyData(SectionPimpl);
 }
 
 inline relocation_iterator SectionRef::relocation_begin() const {

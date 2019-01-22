@@ -1,9 +1,8 @@
 //===--- HexagonBranchRelaxation.cpp - Identify and relax long jumps ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -90,7 +89,7 @@ FunctionPass *llvm::createHexagonBranchRelaxation() {
 }
 
 bool HexagonBranchRelaxation::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG(dbgs() << "****** Hexagon Branch Relaxation ******\n");
+  LLVM_DEBUG(dbgs() << "****** Hexagon Branch Relaxation ******\n");
 
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
   HII = HST.getInstrInfo();
@@ -114,8 +113,12 @@ void HexagonBranchRelaxation::computeOffset(MachineFunction &MF,
       InstOffset = (InstOffset + ByteAlign) & ~(ByteAlign);
     }
     OffsetMap[&B] = InstOffset;
-    for (auto &MI : B.instrs())
+    for (auto &MI : B.instrs()) {
       InstOffset += HII->getSize(MI);
+      // Assume that all extendable branches will be extended.
+      if (MI.isBranch() && HII->isExtendable(MI))
+        InstOffset += HEXAGON_INSTR_SIZE;
+    }
   }
 }
 
@@ -143,6 +146,9 @@ bool HexagonBranchRelaxation::isJumpOutOfRange(MachineInstr &MI,
   MachineBasicBlock &B = *MI.getParent();
   auto FirstTerm = B.getFirstInstrTerminator();
   if (FirstTerm == B.instr_end())
+    return false;
+
+  if (HII->isExtended(MI))
     return false;
 
   unsigned InstOffset = BlockToInstOffset[&B];
@@ -193,14 +199,14 @@ bool HexagonBranchRelaxation::reGenerateBranch(MachineFunction &MF,
     for (auto &MI : B) {
       if (!MI.isBranch() || !isJumpOutOfRange(MI, BlockToInstOffset))
         continue;
-      DEBUG(dbgs() << "Long distance jump. isExtendable("
-                   << HII->isExtendable(MI) << ") isConstExtended("
-                   << HII->isConstExtended(MI) << ") " << MI);
+      LLVM_DEBUG(dbgs() << "Long distance jump. isExtendable("
+                        << HII->isExtendable(MI) << ") isConstExtended("
+                        << HII->isConstExtended(MI) << ") " << MI);
 
       // Since we have not merged HW loops relaxation into
       // this code (yet), soften our approach for the moment.
       if (!HII->isExtendable(MI) && !HII->isExtended(MI)) {
-        DEBUG(dbgs() << "\tUnderimplemented relax branch instruction.\n");
+        LLVM_DEBUG(dbgs() << "\tUnderimplemented relax branch instruction.\n");
       } else {
         // Find which operand is expandable.
         int ExtOpNum = HII->getCExtOpNum(MI);

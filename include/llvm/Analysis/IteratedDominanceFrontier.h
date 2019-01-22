@@ -1,13 +1,12 @@
 //===- IteratedDominanceFrontier.h - Calculate IDF --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-/// \brief Compute iterated dominance frontiers using a linear time algorithm.
+/// \file
+/// Compute iterated dominance frontiers using a linear time algorithm.
 ///
 /// The algorithm used here is based on:
 ///
@@ -28,11 +27,12 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFGDiff.h"
 #include "llvm/IR/Dominators.h"
 
 namespace llvm {
 
-/// \brief Determine the iterated dominance frontier, given a set of defining
+/// Determine the iterated dominance frontier, given a set of defining
 /// blocks, and optionally, a set of live-in blocks.
 ///
 /// In turn, the results can be used to place phi nodes.
@@ -45,19 +45,23 @@ namespace llvm {
 template <class NodeTy, bool IsPostDom>
 class IDFCalculator {
  public:
-  IDFCalculator(DominatorTreeBase<BasicBlock, IsPostDom> &DT)
-      : DT(DT), useLiveIn(false) {}
+   IDFCalculator(DominatorTreeBase<BasicBlock, IsPostDom> &DT)
+       : DT(DT), GD(nullptr), useLiveIn(false) {}
 
-  /// \brief Give the IDF calculator the set of blocks in which the value is
-  /// defined.  This is equivalent to the set of starting blocks it should be
-  /// calculating the IDF for (though later gets pruned based on liveness).
-  ///
-  /// Note: This set *must* live for the entire lifetime of the IDF calculator.
-  void setDefiningBlocks(const SmallPtrSetImpl<BasicBlock *> &Blocks) {
-    DefBlocks = &Blocks;
-  }
+   IDFCalculator(DominatorTreeBase<BasicBlock, IsPostDom> &DT,
+                 const GraphDiff<BasicBlock *, IsPostDom> *GD)
+       : DT(DT), GD(GD), useLiveIn(false) {}
 
-  /// \brief Give the IDF calculator the set of blocks in which the value is
+   /// Give the IDF calculator the set of blocks in which the value is
+   /// defined.  This is equivalent to the set of starting blocks it should be
+   /// calculating the IDF for (though later gets pruned based on liveness).
+   ///
+   /// Note: This set *must* live for the entire lifetime of the IDF calculator.
+   void setDefiningBlocks(const SmallPtrSetImpl<BasicBlock *> &Blocks) {
+     DefBlocks = &Blocks;
+   }
+
+  /// Give the IDF calculator the set of blocks in which the value is
   /// live on entry to the block.   This is used to prune the IDF calculation to
   /// not include blocks where any phi insertion would be dead.
   ///
@@ -68,14 +72,14 @@ class IDFCalculator {
     useLiveIn = true;
   }
 
-  /// \brief Reset the live-in block set to be empty, and tell the IDF
+  /// Reset the live-in block set to be empty, and tell the IDF
   /// calculator to not use liveness anymore.
   void resetLiveInBlocks() {
     LiveInBlocks = nullptr;
     useLiveIn = false;
   }
 
-  /// \brief Calculate iterated dominance frontiers
+  /// Calculate iterated dominance frontiers
   ///
   /// This uses the linear-time phi algorithm based on DJ-graphs mentioned in
   /// the file-level comment.  It performs DF->IDF pruning using the live-in
@@ -85,6 +89,7 @@ class IDFCalculator {
 
 private:
  DominatorTreeBase<BasicBlock, IsPostDom> &DT;
+ const GraphDiff<BasicBlock *, IsPostDom> *GD;
  bool useLiveIn;
  const SmallPtrSetImpl<BasicBlock *> *LiveInBlocks;
  const SmallPtrSetImpl<BasicBlock *> *DefBlocks;

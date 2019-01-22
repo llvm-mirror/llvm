@@ -1,9 +1,8 @@
 //===- BitTracker.h ---------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,6 +12,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include <cassert>
 #include <cstdint>
@@ -23,11 +23,11 @@
 
 namespace llvm {
 
+class BitVector;
 class ConstantInt;
 class MachineRegisterInfo;
 class MachineBasicBlock;
 class MachineFunction;
-class MachineInstr;
 class raw_ostream;
 class TargetRegisterClass;
 class TargetRegisterInfo;
@@ -63,23 +63,63 @@ private:
   void visitNonBranch(const MachineInstr &MI);
   void visitBranchesFrom(const MachineInstr &BI);
   void visitUsesOf(unsigned Reg);
-  void reset();
 
   using CFGEdge = std::pair<int, int>;
   using EdgeSetType = std::set<CFGEdge>;
   using InstrSetType = std::set<const MachineInstr *>;
   using EdgeQueueType = std::queue<CFGEdge>;
 
-  EdgeSetType EdgeExec;         // Executable flow graph edges.
-  InstrSetType InstrExec;       // Executable instructions.
-  EdgeQueueType FlowQ;          // Work queue of CFG edges.
-  DenseSet<unsigned> ReachedBB; // Cache of reached blocks.
-  bool Trace;                   // Enable tracing for debugging.
+  // Priority queue of instructions using modified registers, ordered by
+  // their relative position in a basic block.
+  struct UseQueueType {
+    UseQueueType() : Uses(Dist) {}
+
+    unsigned size() const {
+      return Uses.size();
+    }
+    bool empty() const {
+      return size() == 0;
+    }
+    MachineInstr *front() const {
+      return Uses.top();
+    }
+    void push(MachineInstr *MI) {
+      if (Set.insert(MI).second)
+        Uses.push(MI);
+    }
+    void pop() {
+      Set.erase(front());
+      Uses.pop();
+    }
+    void reset() {
+      Dist.clear();
+    }
+  private:
+    struct Cmp {
+      Cmp(DenseMap<const MachineInstr*,unsigned> &Map) : Dist(Map) {}
+      bool operator()(const MachineInstr *MI, const MachineInstr *MJ) const;
+      DenseMap<const MachineInstr*,unsigned> &Dist;
+    };
+    std::priority_queue<MachineInstr*, std::vector<MachineInstr*>, Cmp> Uses;
+    DenseSet<const MachineInstr*> Set; // Set to avoid adding duplicate entries.
+    DenseMap<const MachineInstr*,unsigned> Dist;
+  };
+
+  void reset();
+  void runEdgeQueue(BitVector &BlockScanned);
+  void runUseQueue();
 
   const MachineEvaluator &ME;
   MachineFunction &MF;
   MachineRegisterInfo &MRI;
   CellMapType &Map;
+
+  EdgeSetType EdgeExec;         // Executable flow graph edges.
+  InstrSetType InstrExec;       // Executable instructions.
+  UseQueueType UseQ;            // Work queue of register uses.
+  EdgeQueueType FlowQ;          // Work queue of CFG edges.
+  DenseSet<unsigned> ReachedBB; // Cache of reached blocks.
+  bool Trace;                   // Enable tracing for debugging.
 };
 
 // Abstraction of a reference to bit at position Pos from a register Reg.

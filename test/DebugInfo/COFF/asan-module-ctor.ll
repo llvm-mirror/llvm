@@ -10,7 +10,7 @@
 ; The module ctor has no debug info.  All we have to do is don't crash.
 ; X86: _asan.module_ctor:
 ; X86-NEXT: L{{.*}}:
-; X86:      # BB
+; X86:      # %bb.
 ; X86-NEXT: calll   ___asan_init_v3
 ; X86-NEXT: retl
 
@@ -85,7 +85,7 @@ attributes #0 = { nounwind sanitize_address "less-precise-fpmad"="false" "no-fra
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: LineTablesOnly, file: !1, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
 !1 = !DIFile(filename: "asan.c", directory: "D:\5C")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "foo", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 1, file: !1, scope: !5, type: !6, variables: !2)
+!4 = distinct !DISubprogram(name: "foo", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, unit: !0, scopeLine: 1, file: !1, scope: !5, type: !6, retainedNodes: !2)
 !5 = !DIFile(filename: "asan.c", directory: "D:C")
 !6 = !DISubroutineType(types: !2)
 !7 = !{i32 2, !"CodeView", i32 1}

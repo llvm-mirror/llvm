@@ -1,15 +1,15 @@
 //===- llvm/unittest/DebugInfo/CodeView/TypeIndexDiscoveryTest.cpp --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/CodeView/TypeIndexDiscovery.h"
 
-#include "llvm/DebugInfo/CodeView/TypeTableBuilder.h"
+#include "llvm/DebugInfo/CodeView/AppendingTypeTableBuilder.h"
+#include "llvm/DebugInfo/CodeView/ContinuationRecordBuilder.h"
 #include "llvm/DebugInfo/CodeView/SymbolSerializer.h"
 #include "llvm/Support/Allocator.h"
 
@@ -25,13 +25,13 @@ public:
 
   void SetUp() override {
     Refs.clear();
-    TTB = make_unique<TypeTableBuilder>(Storage);
-    FLRB = make_unique<FieldListRecordBuilder>(*TTB);
+    TTB = make_unique<AppendingTypeTableBuilder>(Storage);
+    CRB = make_unique<ContinuationRecordBuilder>();
     Symbols.clear();
   }
 
   void TearDown() override {
-    FLRB.reset();
+    CRB.reset();
     TTB.reset();
   }
 
@@ -55,10 +55,11 @@ protected:
   }
 
   template <typename... T> void writeFieldList(T &&... MemberRecords) {
-    FLRB->begin();
+    CRB->begin(ContinuationRecordKind::FieldList);
     writeFieldListImpl(std::forward<T>(MemberRecords)...);
-    FLRB->end(true);
-    ASSERT_EQ(1u, TTB->records().size());
+    auto Records = CRB->end(TTB->nextTypeIndex());
+    ASSERT_EQ(1u, Records.size());
+    TTB->insertRecordBytes(Records.front().RecordData);
     discoverAllTypeIndices();
   }
 
@@ -74,8 +75,7 @@ protected:
     discoverTypeIndicesInSymbols();
   }
 
-
-  std::unique_ptr<TypeTableBuilder> TTB;
+  std::unique_ptr<AppendingTypeTableBuilder> TTB;
 
 private:
   uint32_t countRefs(uint32_t RecordIndex) const {
@@ -140,7 +140,7 @@ private:
 
   template <typename RecType, typename... Rest>
   void writeFieldListImpl(RecType &&Record, Rest &&... Records) {
-    FLRB->writeMemberType(Record);
+    CRB->writeMemberType(Record);
     writeFieldListImpl(std::forward<Rest>(Records)...);
   }
 
@@ -149,7 +149,7 @@ private:
 
   template <typename RecType, typename... Rest>
   void writeTypeRecordsImpl(RecType &&Record, Rest &&... Records) {
-    TTB->writeKnownType(Record);
+    TTB->writeLeafType(Record);
     writeTypeRecordsImpl(std::forward<Rest>(Records)...);
   }
 
@@ -164,7 +164,7 @@ private:
   }
 
   std::vector<SmallVector<TiReference, 4>> Refs;
-  std::unique_ptr<FieldListRecordBuilder> FLRB;
+  std::unique_ptr<ContinuationRecordBuilder> CRB;
   std::vector<CVSymbol> Symbols;
   BumpPtrAllocator Storage;
 };
@@ -536,9 +536,9 @@ TEST_F(TypeIndexIteratorTest, ManyMembers) {
 
 TEST_F(TypeIndexIteratorTest, ProcSym) {
   ProcSym GS(SymbolRecordKind::GlobalProcSym);
-  GS.FunctionType = TypeIndex(0x40);
+  GS.FunctionType = TypeIndex::Float32();
   ProcSym LS(SymbolRecordKind::ProcSym);
-  LS.FunctionType = TypeIndex(0x41);
+  LS.FunctionType = TypeIndex::Float64();
   writeSymbolRecords(GS, LS);
   checkTypeReferences(0, GS.FunctionType);
   checkTypeReferences(1, LS.FunctionType);
@@ -546,9 +546,18 @@ TEST_F(TypeIndexIteratorTest, ProcSym) {
 
 TEST_F(TypeIndexIteratorTest, DataSym) {
   DataSym DS(SymbolRecordKind::GlobalData);
-  DS.Type = TypeIndex(0x40);
+  DS.Type = TypeIndex::Float32();
   writeSymbolRecords(DS);
   checkTypeReferences(0, DS.Type);
+}
+
+TEST_F(TypeIndexIteratorTest, RegisterSym) {
+  RegisterSym Reg(SymbolRecordKind::RegisterSym);
+  Reg.Index = TypeIndex::UInt32();
+  Reg.Register = RegisterId::EAX;
+  Reg.Name = "Target";
+  writeSymbolRecords(Reg);
+  checkTypeReferences(0, Reg.Index);
 }
 
 TEST_F(TypeIndexIteratorTest, CallerSym) {
@@ -568,4 +577,33 @@ TEST_F(TypeIndexIteratorTest, CallerSym) {
   checkTypeReferences(0, TypeIndex(1), TypeIndex(2), TypeIndex(3));
   checkTypeReferences(1, TypeIndex(4), TypeIndex(5), TypeIndex(6));
   checkTypeReferences(2, TypeIndex(7), TypeIndex(8), TypeIndex(9));
+}
+
+TEST_F(TypeIndexIteratorTest, Precomp) {
+  PrecompRecord P(TypeRecordKind::Precomp);
+  P.StartTypeIndex = TypeIndex::FirstNonSimpleIndex;
+  P.TypesCount = 100;
+  P.Signature = 0x12345678;
+  P.PrecompFilePath = "C:/precomp.obj";
+
+  EndPrecompRecord EP(TypeRecordKind::EndPrecomp);
+  EP.Signature = P.Signature;
+
+  writeTypeRecords(P, EP);
+  checkTypeReferences(0);
+}
+
+// This is a test for getEncodedIntegerLength()
+TEST_F(TypeIndexIteratorTest, VariableSizeIntegers) {
+  BaseClassRecord BaseClass1(MemberAccess::Public, TypeIndex(47), (uint64_t)-1);
+  BaseClassRecord BaseClass2(MemberAccess::Public, TypeIndex(48), 1);
+  writeFieldList(BaseClass1, BaseClass2);
+  checkTypeReferences(0, TypeIndex(47), TypeIndex(48));
+}
+
+TEST_F(TypeIndexIteratorTest, UsingNamespace) {
+  UsingNamespaceSym UN(SymbolRecordKind::UsingNamespaceSym);
+  UN.Name = "std";
+  writeSymbolRecords(UN);
+  checkTypeReferences(0);
 }

@@ -1,9 +1,8 @@
 //===- llvm/ADT/SmallPtrSet.cpp - 'Normally small' pointer set ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,9 +31,7 @@ void SmallPtrSetImplBase::shrink_and_clear() {
   NumNonEmpty = NumTombstones = 0;
 
   // Install the new array.  Clear all the buckets to empty.
-  CurArray = (const void**)malloc(sizeof(void*) * CurArraySize);
-  if (CurArray == nullptr)
-    report_bad_alloc_error("Allocation of SmallPtrSet bucket array failed.");
+  CurArray = (const void**)safe_malloc(sizeof(void*) * CurArraySize);
 
   memset(CurArray, -1, CurArraySize*sizeof(void*));
 }
@@ -100,9 +97,7 @@ void SmallPtrSetImplBase::Grow(unsigned NewSize) {
   bool WasSmall = isSmall();
 
   // Install the new array.  Clear all the buckets to empty.
-  const void **NewBuckets = (const void**) malloc(sizeof(void*) * NewSize);
-  if (NewBuckets == nullptr)
-    report_bad_alloc_error("Allocation of SmallPtrSet bucket array failed.");
+  const void **NewBuckets = (const void**) safe_malloc(sizeof(void*) * NewSize);
 
   // Reset member only if memory was allocated successfully
   CurArray = NewBuckets;
@@ -132,9 +127,7 @@ SmallPtrSetImplBase::SmallPtrSetImplBase(const void **SmallStorage,
     CurArray = SmallArray;
   // Otherwise, allocate new heap space (unless we were the same size)
   } else {
-    CurArray = (const void**)malloc(sizeof(void*) * that.CurArraySize);
-    if (CurArray == nullptr)
-      report_bad_alloc_error("Allocation of SmallPtrSet bucket array failed.");
+    CurArray = (const void**)safe_malloc(sizeof(void*) * that.CurArraySize);
   }
 
   // Copy over the that array.
@@ -163,16 +156,12 @@ void SmallPtrSetImplBase::CopyFrom(const SmallPtrSetImplBase &RHS) {
   // Otherwise, allocate new heap space (unless we were the same size)
   } else if (CurArraySize != RHS.CurArraySize) {
     if (isSmall())
-      CurArray = (const void**)malloc(sizeof(void*) * RHS.CurArraySize);
+      CurArray = (const void**)safe_malloc(sizeof(void*) * RHS.CurArraySize);
     else {
-      const void **T = (const void**)realloc(CurArray,
+      const void **T = (const void**)safe_realloc(CurArray,
                                              sizeof(void*) * RHS.CurArraySize);
-      if (!T)
-        free(CurArray);
       CurArray = T;
     }
-    if (CurArray == nullptr)
-      report_bad_alloc_error("Allocation of SmallPtrSet bucket array failed.");
   }
 
   CopyHelper(RHS);

@@ -1,9 +1,8 @@
 //===- MCSection.h - Machine Code Sections ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -40,7 +39,7 @@ class MCSection {
 public:
   enum SectionVariant { SV_COFF = 0, SV_ELF, SV_MachO, SV_Wasm };
 
-  /// \brief Express the state of bundle locked groups while emitting code.
+  /// Express the state of bundle locked groups while emitting code.
   enum BundleLockStateType {
     NotBundleLocked,
     BundleLocked,
@@ -65,18 +64,22 @@ private:
   /// The index of this section in the layout order.
   unsigned LayoutOrder;
 
-  /// \brief Keeping track of bundle-locked state.
+  /// Keeping track of bundle-locked state.
   BundleLockStateType BundleLockState = NotBundleLocked;
 
-  /// \brief Current nesting depth of bundle_lock directives.
+  /// Current nesting depth of bundle_lock directives.
   unsigned BundleLockNestingDepth = 0;
 
-  /// \brief We've seen a bundle_lock directive but not its first instruction
+  /// We've seen a bundle_lock directive but not its first instruction
   /// yet.
   bool BundleGroupBeforeFirstInst : 1;
 
   /// Whether this section has had instructions emitted into it.
   bool HasInstructions : 1;
+
+  /// Whether this section has had data emitted into it.
+  /// Right now this is only used by the ARM backend.
+  bool HasData : 1;
 
   bool IsRegistered : 1;
 
@@ -136,6 +139,9 @@ public:
 
   bool hasInstructions() const { return HasInstructions; }
   void setHasInstructions(bool Value) { HasInstructions = Value; }
+
+  bool hasData() const { return HasData; }
+  void setHasData(bool Value) { HasData = Value; }
 
   bool isRegistered() const { return IsRegistered; }
   void setIsRegistered(bool Value) { IsRegistered = Value; }

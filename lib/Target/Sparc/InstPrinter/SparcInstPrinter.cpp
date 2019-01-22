@@ -1,9 +1,8 @@
 //===-- SparcInstPrinter.cpp - Convert Sparc MCInst to assembly syntax -----==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -118,9 +117,9 @@ void SparcInstPrinter::printOperand(const MCInst *MI, int opNum,
   if (MO.isImm()) {
     switch (MI->getOpcode()) {
       default:
-        O << (int)MO.getImm(); 
+        O << (int)MO.getImm();
         return;
-        
+
       case SP::TICCri: // Fall through
       case SP::TICCrr: // Fall through
       case SP::TRAPri: // Fall through
@@ -128,7 +127,7 @@ void SparcInstPrinter::printOperand(const MCInst *MI, int opNum,
       case SP::TXCCri: // Fall through
       case SP::TXCCrr: // Fall through
         // Only seven-bit values up to 127.
-        O << ((int) MO.getImm() & 0x7f);  
+        O << ((int) MO.getImm() & 0x7f);
         return;
     }
   }
@@ -194,4 +193,27 @@ bool SparcInstPrinter::printGetPCX(const MCInst *MI, unsigned opNum,
                                    raw_ostream &O) {
   llvm_unreachable("FIXME: Implement SparcInstPrinter::printGetPCX.");
   return true;
+}
+
+void SparcInstPrinter::printMembarTag(const MCInst *MI, int opNum,
+                                      const MCSubtargetInfo &STI,
+                                      raw_ostream &O) {
+  static const char *const TagNames[] = {
+      "#LoadLoad",  "#StoreLoad", "#LoadStore", "#StoreStore",
+      "#Lookaside", "#MemIssue",  "#Sync"};
+
+  unsigned Imm = MI->getOperand(opNum).getImm();
+
+  if (Imm > 127) {
+    O << Imm;
+    return;
+  }
+
+  bool First = true;
+  for (unsigned i = 0; i < sizeof(TagNames) / sizeof(char *); i++) {
+    if (Imm & (1 << i)) {
+      O << (First ? "" : " | ") << TagNames[i];
+      First = false;
+    }
+  }
 }

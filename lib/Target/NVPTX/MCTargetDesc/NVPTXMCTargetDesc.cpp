@@ -1,9 +1,8 @@
 //===-- NVPTXMCTargetDesc.cpp - NVPTX Target Descriptions -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,9 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "NVPTXMCTargetDesc.h"
 #include "InstPrinter/NVPTXInstPrinter.h"
 #include "NVPTXMCAsmInfo.h"
+#include "NVPTXMCTargetDesc.h"
+#include "NVPTXTargetStreamer.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -58,6 +58,12 @@ static MCInstPrinter *createNVPTXMCInstPrinter(const Triple &T,
   return nullptr;
 }
 
+static MCTargetStreamer *createTargetAsmStreamer(MCStreamer &S,
+                                                 formatted_raw_ostream &,
+                                                 MCInstPrinter *, bool) {
+  return new NVPTXTargetStreamer(S);
+}
+
 // Force static initialization.
 extern "C" void LLVMInitializeNVPTXTargetMC() {
   for (Target *T : {&getTheNVPTXTarget32(), &getTheNVPTXTarget64()}) {
@@ -75,5 +81,8 @@ extern "C" void LLVMInitializeNVPTXTargetMC() {
 
     // Register the MCInstPrinter.
     TargetRegistry::RegisterMCInstPrinter(*T, createNVPTXMCInstPrinter);
+
+    // Register the MCTargetStreamer.
+    TargetRegistry::RegisterAsmTargetStreamer(*T, createTargetAsmStreamer);
   }
 }

@@ -1,9 +1,8 @@
 //===- NaryReassociate.cpp - Reassociate n-ary expressions ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -83,6 +82,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -105,7 +105,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 
@@ -240,10 +239,17 @@ bool NaryReassociatePass::doOneIteration(Function &F) {
           Changed = true;
           SE->forgetValue(&*I);
           I->replaceAllUsesWith(NewI);
-          // If SeenExprs constains I's WeakTrackingVH, that entry will be
-          // replaced with
-          // nullptr.
+          WeakVH NewIExist = NewI;
+          // If SeenExprs/NewIExist contains I's WeakTrackingVH/WeakVH, that
+          // entry will be replaced with nullptr if deleted.
           RecursivelyDeleteTriviallyDeadInstructions(&*I, TLI);
+          if (!NewIExist) {
+            // Rare occation where the new instruction (NewI) have been removed,
+            // probably due to parts of the input code was dead from the
+            // beginning, reset the iterator and start over from the beginning
+            I = BB->begin();
+            continue;
+          }
           I = NewI->getIterator();
         }
         // Add the rewritten instruction to SeenExprs; the original instruction
@@ -429,6 +435,9 @@ NaryReassociatePass::tryReassociateGEPAtIndex(GetElementPtrInst *GEP,
 
 Instruction *NaryReassociatePass::tryReassociateBinaryOp(BinaryOperator *I) {
   Value *LHS = I->getOperand(0), *RHS = I->getOperand(1);
+  // There is no need to reassociate 0.
+  if (SE->getSCEV(I)->isZero())
+    return nullptr;
   if (auto *NewI = tryReassociateBinaryOp(LHS, RHS, I))
     return NewI;
   if (auto *NewI = tryReassociateBinaryOp(RHS, LHS, I))

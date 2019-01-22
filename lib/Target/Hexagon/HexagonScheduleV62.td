@@ -1,9 +1,8 @@
 //=-HexagonScheduleV62.td - HexagonV62 Scheduling Definitions *- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -21,7 +20,7 @@ def HexagonItinerariesV62 :
       ProcessorItineraries<[SLOT0, SLOT1, SLOT2, SLOT3, SLOT_ENDLOOP,
                             CVI_ST, CVI_XLANE, CVI_SHIFT, CVI_MPY0, CVI_MPY1,
                             CVI_LD, CVI_XLSHF, CVI_MPY01, CVI_ALL,
-                            CVI_ALL_NOMEM],
+                            CVI_ALL_NOMEM, CVI_ZW],
                            [Hex_FWD, HVX_FWD], HexagonV62ItinList.ItinList>;
 
 def HexagonModelV62 : SchedMachineModel {

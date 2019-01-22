@@ -1,9 +1,8 @@
 //===- X86InterleavedAccess.cpp -------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,7 +18,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/VectorUtils.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -30,6 +28,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/MachineValueType.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -39,7 +38,7 @@ using namespace llvm;
 
 namespace {
 
-/// \brief This class holds necessary information to represent an interleaved
+/// This class holds necessary information to represent an interleaved
 /// access group and supports utilities to lower the group into
 /// X86-specific instructions/intrinsics.
 ///  E.g. A group of interleaving access loads (Factor = 2; accessing every
@@ -48,32 +47,32 @@ namespace {
 ///        %v0 = shuffle <8 x i32> %wide.vec, <8 x i32> undef, <0, 2, 4, 6>
 ///        %v1 = shuffle <8 x i32> %wide.vec, <8 x i32> undef, <1, 3, 5, 7>
 class X86InterleavedAccessGroup {
-  /// \brief Reference to the wide-load instruction of an interleaved access
+  /// Reference to the wide-load instruction of an interleaved access
   /// group.
   Instruction *const Inst;
 
-  /// \brief Reference to the shuffle(s), consumer(s) of the (load) 'Inst'.
+  /// Reference to the shuffle(s), consumer(s) of the (load) 'Inst'.
   ArrayRef<ShuffleVectorInst *> Shuffles;
 
-  /// \brief Reference to the starting index of each user-shuffle.
+  /// Reference to the starting index of each user-shuffle.
   ArrayRef<unsigned> Indices;
 
-  /// \brief Reference to the interleaving stride in terms of elements.
+  /// Reference to the interleaving stride in terms of elements.
   const unsigned Factor;
 
-  /// \brief Reference to the underlying target.
+  /// Reference to the underlying target.
   const X86Subtarget &Subtarget;
 
   const DataLayout &DL;
 
   IRBuilder<> &Builder;
 
-  /// \brief Breaks down a vector \p 'Inst' of N elements into \p NumSubVectors
+  /// Breaks down a vector \p 'Inst' of N elements into \p NumSubVectors
   /// sub vectors of type \p T. Returns the sub-vectors in \p DecomposedVectors.
   void decompose(Instruction *Inst, unsigned NumSubVectors, VectorType *T,
                  SmallVectorImpl<Instruction *> &DecomposedVectors);
 
-  /// \brief Performs matrix transposition on a 4x4 matrix \p InputVectors and
+  /// Performs matrix transposition on a 4x4 matrix \p InputVectors and
   /// returns the transposed-vectors in \p TransposedVectors.
   /// E.g.
   /// InputVectors:
@@ -115,11 +114,11 @@ public:
       : Inst(I), Shuffles(Shuffs), Indices(Ind), Factor(F), Subtarget(STarget),
         DL(Inst->getModule()->getDataLayout()), Builder(B) {}
 
-  /// \brief Returns true if this interleaved access group can be lowered into
+  /// Returns true if this interleaved access group can be lowered into
   /// x86-specific instructions/intrinsics, false otherwise.
   bool isSupported() const;
 
-  /// \brief Lowers this interleaved access group into X86-specific
+  /// Lowers this interleaved access group into X86-specific
   /// instructions/intrinsics.
   bool lowerIntoOptimizedSequence();
 };
@@ -137,7 +136,7 @@ bool X86InterleavedAccessGroup::isSupported() const {
   //    1. Store and load of 4-element vectors of 64 bits on AVX.
   //    2. Store of 16/32-element vectors of 8 bits on AVX.
   // Stride 3:
-  //    1. Load of 16/32-element vecotrs of 8 bits on AVX.
+  //    1. Load of 16/32-element vectors of 8 bits on AVX.
   if (!Subtarget.hasAVX() || (Factor != 4 && Factor != 3))
     return false;
 
@@ -260,7 +259,7 @@ static void genShuffleBland(MVT VT, ArrayRef<uint32_t> Mask,
     Out.push_back(Mask[i] + HighOffset + NumOfElm);
 }
 
-// reorderSubVecotr returns the data to is the original state. And de-facto is
+// reorderSubVector returns the data to is the original state. And de-facto is
 // the opposite of  the function concatSubVector.
 
 // For VecElems = 16
@@ -463,7 +462,7 @@ static void setGroupSize(MVT VT, SmallVectorImpl<uint32_t> &SizeInfo) {
 //  {DiffToJump,...,VF/2-1,VF,...,DiffToJump+VF-1}.
 //  Imm variable sets the offset amount. The result of the
 //  function is stored inside ShuffleMask vector and it built as described in
-//  the begin of the description. AlignDirection is a boolean that indecat the
+//  the begin of the description. AlignDirection is a boolean that indicates the
 //  direction of the alignment. (false - align to the "right" side while true -
 //  align to the "left" side)
 static void DecodePALIGNRMask(MVT VT, unsigned Imm,

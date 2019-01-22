@@ -1,9 +1,8 @@
 //===---- RuntimeDyldMachOI386.h ---- MachO/I386 specific code. ---*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -97,7 +96,7 @@ public:
   }
 
   void resolveRelocation(const RelocationEntry &RE, uint64_t Value) override {
-    DEBUG(dumpRelocationToResolve(RE, Value));
+    LLVM_DEBUG(dumpRelocationToResolve(RE, Value));
 
     const SectionEntry &Section = Sections[RE.SectionID];
     uint8_t *LocalAddress = Section.getAddressWithOffset(RE.Offset);
@@ -192,11 +191,11 @@ private:
     // Compute the addend 'C' from the original expression 'A - B + C'.
     Addend -= AddrA - AddrB;
 
-    DEBUG(dbgs() << "Found SECTDIFF: AddrA: " << AddrA << ", AddrB: " << AddrB
-                 << ", Addend: " << Addend << ", SectionA ID: " << SectionAID
-                 << ", SectionAOffset: " << SectionAOffset
-                 << ", SectionB ID: " << SectionBID
-                 << ", SectionBOffset: " << SectionBOffset << "\n");
+    LLVM_DEBUG(dbgs() << "Found SECTDIFF: AddrA: " << AddrA
+                      << ", AddrB: " << AddrB << ", Addend: " << Addend
+                      << ", SectionA ID: " << SectionAID << ", SectionAOffset: "
+                      << SectionAOffset << ", SectionB ID: " << SectionBID
+                      << ", SectionBOffset: " << SectionBOffset << "\n");
     RelocationEntry R(SectionID, Offset, RelocType, Addend, SectionAID,
                       SectionAOffset, SectionBID, SectionBOffset,
                       IsPCRel, Size);

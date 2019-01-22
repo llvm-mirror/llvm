@@ -1,9 +1,8 @@
 //===- llvm/User.h - User class definition ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -36,7 +35,7 @@ namespace llvm {
 template <typename T> class ArrayRef;
 template <typename T> class MutableArrayRef;
 
-/// \brief Compile-time customization of User operands.
+/// Compile-time customization of User operands.
 ///
 /// Customizes operand-related allocators and accessors.
 template <class>
@@ -81,13 +80,13 @@ protected:
            "Error in initializing hung off uses for User");
   }
 
-  /// \brief Allocate the array of Uses, followed by a pointer
+  /// Allocate the array of Uses, followed by a pointer
   /// (with bottom bit set) to the User.
   /// \param IsPhi identifies callers which are phi nodes and which need
   /// N BasicBlock* allocated along with N
   void allocHungoffUses(unsigned N, bool IsPhi = false);
 
-  /// \brief Grow the number of hung off uses.  Note that allocHungoffUses
+  /// Grow the number of hung off uses.  Note that allocHungoffUses
   /// should be called if there are no uses.
   void growHungoffUses(unsigned N, bool IsPhi = false);
 
@@ -97,15 +96,31 @@ protected:
 public:
   User(const User &) = delete;
 
-  /// \brief Free memory allocated for User and Use objects.
+  /// Free memory allocated for User and Use objects.
   void operator delete(void *Usr);
-  /// \brief Placement delete - required by std, but never called.
-  void operator delete(void*, unsigned) {
+  /// Placement delete - required by std, called if the ctor throws.
+  void operator delete(void *Usr, unsigned) {
+    // Note: If a subclass manipulates the information which is required to calculate the
+    // Usr memory pointer, e.g. NumUserOperands, the operator delete of that subclass has
+    // to restore the changed information to the original value, since the dtor of that class
+    // is not called if the ctor fails.
+    User::operator delete(Usr);
+
+#ifndef LLVM_ENABLE_EXCEPTIONS
     llvm_unreachable("Constructor throws?");
+#endif
   }
-  /// \brief Placement delete - required by std, but never called.
-  void operator delete(void*, unsigned, bool) {
+  /// Placement delete - required by std, called if the ctor throws.
+  void operator delete(void *Usr, unsigned, bool) {
+    // Note: If a subclass manipulates the information which is required to calculate the
+    // Usr memory pointer, e.g. NumUserOperands, the operator delete of that subclass has
+    // to restore the changed information to the original value, since the dtor of that class
+    // is not called if the ctor fails.
+    User::operator delete(Usr);
+
+#ifndef LLVM_ENABLE_EXCEPTIONS
     llvm_unreachable("Constructor throws?");
+#endif
   }
 
 protected:
@@ -194,7 +209,7 @@ public:
     NumUserOperands = NumOps;
   }
 
-  /// \brief Subclasses with hung off uses need to manage the operand count
+  /// Subclasses with hung off uses need to manage the operand count
   /// themselves.  In these instances, the operand count isn't used to find the
   /// OperandList, so there's no issue in having the operand count change.
   void setNumHungOffUseOperands(unsigned NumOps) {
@@ -226,7 +241,7 @@ public:
     return const_op_range(op_begin(), op_end());
   }
 
-  /// \brief Iterator for directly iterating over the operand Values.
+  /// Iterator for directly iterating over the operand Values.
   struct value_op_iterator
       : iterator_adaptor_base<value_op_iterator, op_iterator,
                               std::random_access_iterator_tag, Value *,
@@ -268,7 +283,7 @@ public:
     return make_range(value_op_begin(), value_op_end());
   }
 
-  /// \brief Drop all references to operands.
+  /// Drop all references to operands.
   ///
   /// This function is in charge of "letting go" of all objects that this User
   /// refers to.  This allows one to 'delete' a whole class at a time, even
@@ -281,7 +296,7 @@ public:
       U.set(nullptr);
   }
 
-  /// \brief Replace uses of one Value with another.
+  /// Replace uses of one Value with another.
   ///
   /// Replaces all references to the "From" definition with references to the
   /// "To" definition.

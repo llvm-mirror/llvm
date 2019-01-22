@@ -1,9 +1,8 @@
 //===-- WinException.h - Windows Exception Handling ----------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,6 +37,9 @@ class LLVM_LIBRARY_VISIBILITY WinException : public EHStreamer {
   /// True if this is a 64-bit target and we should use image relative offsets.
   bool useImageRel32 = false;
 
+  /// True if we are generating exception handling on Windows for ARM64.
+  bool isAArch64 = false;
+
   /// Pointer to the current funclet entry BB.
   const MachineBasicBlock *CurrentFuncletEntry = nullptr;
 
@@ -65,14 +67,14 @@ class LLVM_LIBRARY_VISIBILITY WinException : public EHStreamer {
       const MachineFunction *MF, const WinEHFuncInfo &FuncInfo,
       SmallVectorImpl<std::pair<const MCExpr *, int>> &IPToStateTable);
 
-  /// Emits the label used with llvm.x86.seh.recoverfp, which is used by
+  /// Emits the label used with llvm.eh.recoverfp, which is used by
   /// outlined funclets.
   void emitEHRegistrationOffsetLabel(const WinEHFuncInfo &FuncInfo,
                                      StringRef FLinkageName);
 
   const MCExpr *create32bitRef(const MCSymbol *Value);
   const MCExpr *create32bitRef(const GlobalValue *GV);
-  const MCExpr *getLabelPlusOne(const MCSymbol *Label);
+  const MCExpr *getLabel(const MCSymbol *Label);
   const MCExpr *getOffset(const MCSymbol *OffsetOf, const MCSymbol *OffsetFrom);
   const MCExpr *getOffsetPlusOne(const MCSymbol *OffsetOf,
                                  const MCSymbol *OffsetFrom);
@@ -100,7 +102,7 @@ public:
   /// Gather and emit post-function exception information.
   void endFunction(const MachineFunction *) override;
 
-  /// \brief Emit target-specific EH funclet machinery.
+  /// Emit target-specific EH funclet machinery.
   void beginFunclet(const MachineBasicBlock &MBB, MCSymbol *Sym) override;
   void endFunclet() override;
 };

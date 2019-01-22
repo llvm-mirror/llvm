@@ -1,9 +1,8 @@
 //===--- HexagonHazardRecognizer.h - Hexagon Post RA Hazard Recognizer ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // This file defines the hazard recognizer for scheduling on Hexagon.
@@ -23,13 +22,21 @@ namespace llvm {
 class HexagonHazardRecognizer : public ScheduleHazardRecognizer {
   DFAPacketizer *Resources;
   const HexagonInstrInfo *TII;
-  unsigned PacketNum;
+  unsigned PacketNum = 0;
   // If the packet contains a potential dot cur instruction. This is
   // used for the scheduling priority function.
-  SUnit *UsesDotCur;
+  SUnit *UsesDotCur = nullptr;
   // The packet number when a dor cur is emitted. If its use is not generated
   // in the same packet, then try to wait another cycle before emitting.
-  int DotCurPNum;
+  int DotCurPNum = -1;
+  // Does the packet contain a load. Used to restrict another load, if possible.
+  bool UsesLoad = false;
+  // Check if we should prefer a vector store that will become a .new version.
+  // The .new store uses different resources than a normal store, and the
+  // packetizer will not generate the .new if the regular store does not have
+  // resources available (even if the .new version does). To help, the schedule
+  // attempts to schedule the .new as soon as possible in the packet.
+  SUnit *PrefVectorStoreNew = nullptr;
   // The set of registers defined by instructions in the current packet.
   SmallSet<unsigned, 8> RegDefs;
 
@@ -37,8 +44,7 @@ public:
   HexagonHazardRecognizer(const InstrItineraryData *II,
                           const HexagonInstrInfo *HII,
                           const HexagonSubtarget &ST)
-    : Resources(ST.createDFAPacketizer(II)), TII(HII), PacketNum(0),
-    UsesDotCur(nullptr), DotCurPNum(-1) { }
+    : Resources(ST.createDFAPacketizer(II)), TII(HII) { }
 
   ~HexagonHazardRecognizer() override {
     if (Resources)

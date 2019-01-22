@@ -1,9 +1,8 @@
 //===- PtrState.h - ARC State for a Ptr -------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -36,7 +35,7 @@ class ProvenanceAnalysis;
 
 /// \enum Sequence
 ///
-/// \brief A sequence of states that a pointer may go through in which an
+/// A sequence of states that a pointer may go through in which an
 /// objc_retain and objc_release are actually needed.
 enum Sequence {
   S_None,
@@ -51,7 +50,7 @@ enum Sequence {
 raw_ostream &operator<<(raw_ostream &OS,
                         const Sequence S) LLVM_ATTRIBUTE_UNUSED;
 
-/// \brief Unidirectional information about either a
+/// Unidirectional information about either a
 /// retain-decrement-use-release sequence or release-use-decrement-retain
 /// reverse sequence.
 struct RRInfo {
@@ -97,7 +96,7 @@ struct RRInfo {
   bool Merge(const RRInfo &Other);
 };
 
-/// \brief This class summarizes several per-pointer runtime properties which
+/// This class summarizes several per-pointer runtime properties which
 /// are propagated through the flow graph.
 class PtrState {
 protected:

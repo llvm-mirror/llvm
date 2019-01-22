@@ -1,9 +1,8 @@
 //===- MipsDSPInstrFormats.td - Mips Instruction Formats ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -29,11 +28,11 @@ def HasDSPR3 : Predicate<"Subtarget->hasDSPR3()">,
                AssemblerPredicate<"FeatureDSPR3">;
 
 class ISA_DSPR2 {
-  list<Predicate> InsnPredicates = [HasDSPR2];
+  list<Predicate> ASEPredicate = [HasDSPR2];
 }
 
 class ISA_DSPR3 {
-  list<Predicate> InsnPredicates = [HasDSPR3];
+  list<Predicate> ASEPredicate = [HasDSPR3];
 }
 
 // Fields.
@@ -45,21 +44,21 @@ def SPECIAL3_OPCODE : Field6<0b011111>;
 def REGIMM_OPCODE : Field6<0b000001>;
 
 class DSPInst<string opstr = "">
-    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther>, PredicateControl {
-  let InsnPredicates = [HasDSP];
+    : MipsInst<(outs), (ins), "", [], NoItinerary, FrmOther> {
+  let ASEPredicate = [HasDSP];
   string BaseOpcode = opstr;
   string Arch = "dsp";
 }
 
 class PseudoDSP<dag outs, dag ins, list<dag> pattern,
                 InstrItinClass itin = IIPseudo>
-    : MipsPseudo<outs, ins, pattern, itin>, PredicateControl {
-  let InsnPredicates = [HasDSP];
+    : MipsPseudo<outs, ins, pattern, itin> {
+  let ASEPredicate = [HasDSP];
 }
 
 class DSPInstAlias<string Asm, dag Result, bit Emit = 0b1>
     : InstAlias<Asm, Result, Emit>, PredicateControl {
-  let InsnPredicates = [HasDSP];
+  let ASEPredicate = [HasDSP];
 }
 
 // ADDU.QB sub-class format.

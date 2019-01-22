@@ -1,5 +1,5 @@
-; RUN: llc -march=amdgcn -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -allow-deprecated-dag-overlap -check-prefix=GCN -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -mattr=-flat-for-global -verify-machineinstrs < %s | FileCheck -allow-deprecated-dag-overlap -check-prefix=GCN -check-prefix=VI %s
 
 declare i32 @llvm.amdgcn.workitem.id.x() nounwind readnone
 declare i32 @llvm.amdgcn.workitem.id.y() nounwind readnone
@@ -36,10 +36,11 @@ define amdgpu_kernel void @load_v2i8_to_v2f32(<2 x float> addrspace(1)* noalias 
 ; GCN-LABEL: {{^}}load_v3i8_to_v3f32:
 ; GCN: {{buffer|flat}}_load_dword [[VAL:v[0-9]+]]
 ; GCN-NOT: v_cvt_f32_ubyte3_e32
-; GCN-DAG: v_cvt_f32_ubyte2_e32 v{{[0-9]+}}, [[VAL]]
-; GCN-DAG: v_cvt_f32_ubyte1_e32 v[[HIRESULT:[0-9]+]], [[VAL]]
+; GCN-DAG: v_cvt_f32_ubyte2_e32 v[[HIRESULT:[0-9]+]], [[VAL]]
+; GCN-DAG: v_cvt_f32_ubyte1_e32 v[[MDRESULT:[0-9]+]], [[VAL]]
 ; GCN-DAG: v_cvt_f32_ubyte0_e32 v[[LORESULT:[0-9]+]], [[VAL]]
-; GCN: buffer_store_dwordx2 v{{\[}}[[LORESULT]]:[[HIRESULT]]{{\]}},
+; SI: buffer_store_dwordx2 v{{\[}}[[LORESULT]]:[[MDRESULT]]{{\]}},
+; VI: buffer_store_dwordx3 v{{\[}}[[LORESULT]]:[[HIRESULT]]{{\]}},
 define amdgpu_kernel void @load_v3i8_to_v3f32(<3 x float> addrspace(1)* noalias %out, <3 x i8> addrspace(1)* noalias %in) nounwind {
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %gep = getelementptr <3 x i8>, <3 x i8> addrspace(1)* %in, i32 %tid
@@ -169,7 +170,7 @@ define amdgpu_kernel void @load_v8i8_to_v8f32(<8 x float> addrspace(1)* noalias 
 
 ; GCN-LABEL: {{^}}i8_zext_inreg_i32_to_f32:
 ; GCN: {{buffer|flat}}_load_dword [[LOADREG:v[0-9]+]],
-; GCN: v_add_i32_e32 [[ADD:v[0-9]+]], vcc, 2, [[LOADREG]]
+; GCN: v_add_{{[iu]}}32_e32 [[ADD:v[0-9]+]], vcc, 2, [[LOADREG]]
 ; GCN-NEXT: v_cvt_f32_ubyte0_e32 [[CONV:v[0-9]+]], [[ADD]]
 ; GCN: buffer_store_dword [[CONV]],
 define amdgpu_kernel void @i8_zext_inreg_i32_to_f32(float addrspace(1)* noalias %out, i32 addrspace(1)* noalias %in) nounwind {
@@ -279,5 +280,25 @@ define amdgpu_kernel void @extract_byte3_to_f32(float addrspace(1)* noalias %out
   %and = and i32 %srl, 255
   %cvt = uitofp i32 %and to float
   store float %cvt, float addrspace(1)* %out
+  ret void
+}
+
+; GCN-LABEL: {{^}}cvt_ubyte0_or_multiuse:
+; GCN:     {{buffer|flat}}_load_dword [[LOADREG:v[0-9]+]],
+; GCN-DAG: v_or_b32_e32 [[OR:v[0-9]+]], 0x80000001, [[LOADREG]]
+; GCN-DAG: v_cvt_f32_ubyte0_e32 [[CONV:v[0-9]+]], [[OR]]
+; GCN:     v_add_f32_e32 [[RES:v[0-9]+]], [[OR]], [[CONV]]
+; GCN:     buffer_store_dword [[RES]],
+define amdgpu_kernel void @cvt_ubyte0_or_multiuse(i32 addrspace(1)* %in, float addrspace(1)* %out) {
+bb:
+  %lid = tail call i32 @llvm.amdgcn.workitem.id.x()
+  %gep = getelementptr inbounds i32, i32 addrspace(1)* %in, i32 %lid
+  %load = load i32, i32 addrspace(1)* %gep
+  %or = or i32 %load, -2147483647
+  %and = and i32 %or, 255
+  %uitofp = uitofp i32 %and to float
+  %cast = bitcast i32 %or to float
+  %add = fadd float %cast, %uitofp
+  store float %add, float addrspace(1)* %out
   ret void
 }

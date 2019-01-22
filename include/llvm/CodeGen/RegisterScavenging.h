@@ -1,9 +1,8 @@
 //===- RegisterScavenging.h - Machine register scavenging -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -127,7 +126,7 @@ public:
 
   /// Find an unused register of the specified register class.
   /// Return 0 if none is found.
-  unsigned FindUnusedReg(const TargetRegisterClass *RegClass) const;
+  unsigned FindUnusedReg(const TargetRegisterClass *RC) const;
 
   /// Add a scavenging frame index.
   void addScavengingFrameIndex(int FI) {
@@ -158,7 +157,7 @@ public:
   /// Returns the scavenged register.
   /// This is deprecated as it depends on the quality of the kill flags being
   /// present; Use scavengeRegisterBackwards() instead!
-  unsigned scavengeRegister(const TargetRegisterClass *RegClass,
+  unsigned scavengeRegister(const TargetRegisterClass *RC,
                             MachineBasicBlock::iterator I, int SPAdj);
   unsigned scavengeRegister(const TargetRegisterClass *RegClass, int SPAdj) {
     return scavengeRegister(RegClass, MBBI, SPAdj);
@@ -218,7 +217,7 @@ private:
   /// Spill a register after position \p After and reload it before position
   /// \p UseMI.
   ScavengedInfo &spill(unsigned Reg, const TargetRegisterClass &RC, int SPAdj,
-                       MachineBasicBlock::iterator After,
+                       MachineBasicBlock::iterator Before,
                        MachineBasicBlock::iterator &UseMI);
 };
 

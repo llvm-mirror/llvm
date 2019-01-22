@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/DwarfFile.cpp - Dwarf Debug Framework -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -36,13 +35,20 @@ void DwarfFile::emitUnits(bool UseOffsets) {
 }
 
 void DwarfFile::emitUnit(DwarfUnit *TheU, bool UseOffsets) {
-  DIE &Die = TheU->getUnitDie();
-  MCSection *USection = TheU->getSection();
-  Asm->OutStreamer->SwitchSection(USection);
+  if (TheU->getCUNode()->isDebugDirectivesOnly())
+    return;
 
+  MCSection *S = TheU->getSection();
+
+  if (!S)
+    return;
+
+  Asm->OutStreamer->SwitchSection(S);
   TheU->emitHeader(UseOffsets);
+  Asm->emitDwarfDIE(TheU->getUnitDie());
 
-  Asm->emitDwarfDIE(Die);
+  if (MCSymbol *EndLabel = TheU->getEndLabel())
+    Asm->OutStreamer->EmitLabel(EndLabel);
 }
 
 // Compute the size and offset for each DIE.
@@ -53,6 +59,9 @@ void DwarfFile::computeSizeAndOffsets() {
   // Iterate over each compile unit and set the size and offsets for each
   // DIE within each compile unit. All offsets are CU relative.
   for (const auto &TheU : CUs) {
+    if (TheU->getCUNode()->isDebugDirectivesOnly())
+      continue;
+
     TheU->setDebugSectionOffset(SecOffset);
     SecOffset += computeSizeAndOffsetsForUnit(TheU.get());
   }
@@ -77,42 +86,36 @@ unsigned DwarfFile::computeSizeAndOffset(DIE &Die, unsigned Offset) {
 void DwarfFile::emitAbbrevs(MCSection *Section) { Abbrevs.Emit(Asm, Section); }
 
 // Emit strings into a string section.
-void DwarfFile::emitStrings(MCSection *StrSection, MCSection *OffsetSection) {
-  StrPool.emit(*Asm, StrSection, OffsetSection);
+void DwarfFile::emitStrings(MCSection *StrSection, MCSection *OffsetSection,
+                            bool UseRelativeOffsets) {
+  StrPool.emit(*Asm, StrSection, OffsetSection, UseRelativeOffsets);
 }
 
 bool DwarfFile::addScopeVariable(LexicalScope *LS, DbgVariable *Var) {
-  SmallVectorImpl<DbgVariable *> &Vars = ScopeVariables[LS];
+  auto &ScopeVars = ScopeVariables[LS];
   const DILocalVariable *DV = Var->getVariable();
-  // Variables with positive arg numbers are parameters.
   if (unsigned ArgNum = DV->getArg()) {
-    // Keep all parameters in order at the start of the variable list to ensure
-    // function types are correct (no out-of-order parameters)
-    //
-    // This could be improved by only doing it for optimized builds (unoptimized
-    // builds have the right order to begin with), searching from the back (this
-    // would catch the unoptimized case quickly), or doing a binary search
-    // rather than linear search.
-    auto I = Vars.begin();
-    while (I != Vars.end()) {
-      unsigned CurNum = (*I)->getVariable()->getArg();
-      // A local (non-parameter) variable has been found, insert immediately
-      // before it.
-      if (CurNum == 0)
-        break;
-      // A later indexed parameter has been found, insert immediately before it.
-      if (CurNum > ArgNum)
-        break;
-      if (CurNum == ArgNum) {
-        (*I)->addMMIEntry(*Var);
-        return false;
-      }
-      ++I;
+    auto Cached = ScopeVars.Args.find(ArgNum);
+    if (Cached == ScopeVars.Args.end())
+      ScopeVars.Args[ArgNum] = Var;
+    else {
+      Cached->second->addMMIEntry(*Var);
+      return false;
     }
-    Vars.insert(I, Var);
-    return true;
+  } else {
+    ScopeVars.Locals.push_back(Var);
   }
-
-  Vars.push_back(Var);
   return true;
+}
+
+void DwarfFile::addScopeLabel(LexicalScope *LS, DbgLabel *Label) {
+  SmallVectorImpl<DbgLabel *> &Labels = ScopeLabels[LS];
+  Labels.push_back(Label);
+}
+
+std::pair<uint32_t, RangeSpanList *>
+DwarfFile::addRange(const DwarfCompileUnit &CU, SmallVector<RangeSpan, 2> R) {
+  CURangeLists.push_back(
+      RangeSpanList(Asm->createTempSymbol("debug_ranges"), CU, std::move(R)));
+  return std::make_pair(CURangeLists.size() - 1, &CURangeLists.back());
 }

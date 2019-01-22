@@ -1,9 +1,8 @@
 //===- CachePruningTest.cpp -----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,10 +26,10 @@ TEST(CachePruningPolicyParser, Interval) {
   EXPECT_EQ(std::chrono::seconds(1), P->Interval);
   P = parseCachePruningPolicy("prune_interval=2m");
   ASSERT_TRUE(bool(P));
-  EXPECT_EQ(std::chrono::minutes(2), P->Interval);
+  EXPECT_EQ(std::chrono::minutes(2), *P->Interval);
   P = parseCachePruningPolicy("prune_interval=3h");
   ASSERT_TRUE(bool(P));
-  EXPECT_EQ(std::chrono::hours(3), P->Interval);
+  EXPECT_EQ(std::chrono::hours(3), *P->Interval);
 }
 
 TEST(CachePruningPolicyParser, Expiration) {

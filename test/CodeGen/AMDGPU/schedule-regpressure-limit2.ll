@@ -1,13 +1,16 @@
-; RUN: llc -march=amdgcn -mcpu=tahiti -misched=gcn-minreg -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tahiti -misched=gcn-max-occupancy-experimental -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=fiji -misched=gcn-minreg -verify-machineinstrs < %s | FileCheck -check-prefix=VI %s
-; RUN: llc -march=amdgcn -mcpu=fiji -misched=gcn-max-occupancy-experimental -verify-machineinstrs < %s | FileCheck -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=tahiti -misched=gcn-minreg -verify-machineinstrs < %s | FileCheck -check-prefixes=SI,SI-MINREG %s
+; RUN: llc -march=amdgcn -mcpu=tahiti -misched=gcn-max-occupancy-experimental -verify-machineinstrs < %s | FileCheck -check-prefixes=SI,SI-MAXOCC %s
+; RUN: llc -march=amdgcn -mcpu=fiji -misched=gcn-minreg -verify-machineinstrs < %s | FileCheck -check-prefixes=VI,VI-MINREG %s
+; RUN: llc -march=amdgcn -mcpu=fiji -misched=gcn-max-occupancy-experimental -verify-machineinstrs < %s | FileCheck -check-prefixes=VI,VI-MAXOCC %s
 
-; SI: NumSgprs: {{[1-9]$}}
-; SI: NumVgprs: {{[1-9]$}}
+; SI-MINREG: NumSgprs: {{[1-9]$}}
+; SI-MINREG: NumVgprs: {{[1-9]$}}
+
+; SI-MAXOCC: NumSgprs: {{[0-4][0-9]$}}
+; SI-MAXOCC: NumVgprs: {{[0-4][0-9]$}}
 
 ; stores may alias loads
-; VI: NumSgprs: {{[1-5][0-9]$}}
+; VI: NumSgprs: {{[0-9]$}}
 ; VI: NumVgprs: {{[1-3][0-9]$}}
 
 define amdgpu_kernel void @load_fma_store(float addrspace(3)* nocapture readonly %in_arg, float addrspace(1)* nocapture %out_arg) {

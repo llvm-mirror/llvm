@@ -1,9 +1,8 @@
 //===-- PredicateInfo.cpp - PredicateInfo Builder--------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------===//
 //
@@ -17,6 +16,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
@@ -24,6 +24,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
@@ -32,8 +33,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DebugCounter.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/OrderedInstructions.h"
+#include "llvm/Transforms/Utils.h"
 #include <algorithm>
 #define DEBUG_TYPE "predicateinfo"
 using namespace llvm;
@@ -118,7 +118,7 @@ static bool valueComesBefore(OrderedInstructions &OI, const Value *A,
     return false;
   if (ArgA && ArgB)
     return ArgA->getArgNo() < ArgB->getArgNo();
-  return OI.dominates(cast<Instruction>(A), cast<Instruction>(B));
+  return OI.dfsBefore(cast<Instruction>(A), cast<Instruction>(B));
 }
 
 // This compares ValueDFS structures, creating OrderedBasicBlocks where
@@ -479,6 +479,19 @@ void PredicateInfo::buildPredicateInfo() {
   renameUses(OpsToRename);
 }
 
+// Create a ssa_copy declaration with custom mangling, because
+// Intrinsic::getDeclaration does not handle overloaded unnamed types properly:
+// all unnamed types get mangled to the same string. We use the pointer
+// to the type as name here, as it guarantees unique names for different
+// types and we remove the declarations when destroying PredicateInfo.
+// It is a workaround for PR38117, because solving it in a fully general way is
+// tricky (FIXME).
+static Function *getCopyDeclaration(Module *M, Type *Ty) {
+  std::string Name = "llvm.ssa.copy." + utostr((uintptr_t) Ty);
+  return cast<Function>(M->getOrInsertFunction(
+      Name, getType(M->getContext(), Intrinsic::ssa_copy, Ty)));
+}
+
 // Given the renaming stack, make all the operands currently on the stack real
 // by inserting them into the IR.  Return the last operation's value.
 Value *PredicateInfo::materializeStack(unsigned int &Counter,
@@ -507,8 +520,9 @@ Value *PredicateInfo::materializeStack(unsigned int &Counter,
     // order in the case of multiple predicateinfo in the same block.
     if (isa<PredicateWithEdge>(ValInfo)) {
       IRBuilder<> B(getBranchTerminator(ValInfo));
-      Function *IF = Intrinsic::getDeclaration(
-          F.getParent(), Intrinsic::ssa_copy, Op->getType());
+      Function *IF = getCopyDeclaration(F.getParent(), Op->getType());
+      if (empty(IF->users()))
+        CreatedDeclarations.insert(IF);
       CallInst *PIC =
           B.CreateCall(IF, Op, Op->getName() + "." + Twine(Counter++));
       PredicateMap.insert({PIC, ValInfo});
@@ -518,8 +532,9 @@ Value *PredicateInfo::materializeStack(unsigned int &Counter,
       assert(PAssume &&
              "Should not have gotten here without it being an assume");
       IRBuilder<> B(PAssume->AssumeInst);
-      Function *IF = Intrinsic::getDeclaration(
-          F.getParent(), Intrinsic::ssa_copy, Op->getType());
+      Function *IF = getCopyDeclaration(F.getParent(), Op->getType());
+      if (empty(IF->users()))
+        CreatedDeclarations.insert(IF);
       CallInst *PIC = B.CreateCall(IF, Op);
       PredicateMap.insert({PIC, ValInfo});
       Result.Def = PIC;
@@ -553,10 +568,11 @@ void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
   auto Comparator = [&](const Value *A, const Value *B) {
     return valueComesBefore(OI, A, B);
   };
-  std::sort(OpsToRename.begin(), OpsToRename.end(), Comparator);
+  llvm::sort(OpsToRename, Comparator);
   ValueDFS_Compare Compare(OI);
   // Compute liveness, and rename in O(uses) per Op.
   for (auto *Op : OpsToRename) {
+    LLVM_DEBUG(dbgs() << "Visiting " << *Op << "\n");
     unsigned Counter = 0;
     SmallVector<ValueDFS, 16> OrderedUses;
     const auto &ValueInfo = getValueInfo(Op);
@@ -611,7 +627,12 @@ void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
     }
 
     convertUsesToDFSOrdered(Op, OrderedUses);
-    std::sort(OrderedUses.begin(), OrderedUses.end(), Compare);
+    // Here we require a stable sort because we do not bother to try to
+    // assign an order to the operands the uses represent. Thus, two
+    // uses in the same instruction do not have a strict sort order
+    // currently and will be considered equal. We could get rid of the
+    // stable sort by creating one if we wanted.
+    std::stable_sort(OrderedUses.begin(), OrderedUses.end(), Compare);
     SmallVector<ValueDFS, 8> RenameStack;
     // For each use, sorted into dfs order, push values and replaces uses with
     // top of stack, which will represent the reaching def.
@@ -620,15 +641,15 @@ void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
       // we want to.
       bool PossibleCopy = VD.PInfo != nullptr;
       if (RenameStack.empty()) {
-        DEBUG(dbgs() << "Rename Stack is empty\n");
+        LLVM_DEBUG(dbgs() << "Rename Stack is empty\n");
       } else {
-        DEBUG(dbgs() << "Rename Stack Top DFS numbers are ("
-                     << RenameStack.back().DFSIn << ","
-                     << RenameStack.back().DFSOut << ")\n");
+        LLVM_DEBUG(dbgs() << "Rename Stack Top DFS numbers are ("
+                          << RenameStack.back().DFSIn << ","
+                          << RenameStack.back().DFSOut << ")\n");
       }
 
-      DEBUG(dbgs() << "Current DFS numbers are (" << VD.DFSIn << ","
-                   << VD.DFSOut << ")\n");
+      LLVM_DEBUG(dbgs() << "Current DFS numbers are (" << VD.DFSIn << ","
+                        << VD.DFSOut << ")\n");
 
       bool ShouldPush = (VD.Def || PossibleCopy);
       bool OutOfScope = !stackIsInScope(RenameStack, VD);
@@ -647,7 +668,7 @@ void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
       if (VD.Def || PossibleCopy)
         continue;
       if (!DebugCounter::shouldExecute(RenameCounter)) {
-        DEBUG(dbgs() << "Skipping execution due to debug counter\n");
+        LLVM_DEBUG(dbgs() << "Skipping execution due to debug counter\n");
         continue;
       }
       ValueDFS &Result = RenameStack.back();
@@ -658,8 +679,9 @@ void PredicateInfo::renameUses(SmallPtrSetImpl<Value *> &OpSet) {
       if (!Result.Def)
         Result.Def = materializeStack(Counter, RenameStack, Op);
 
-      DEBUG(dbgs() << "Found replacement " << *Result.Def << " for "
-                   << *VD.U->get() << " in " << *(VD.U->getUser()) << "\n");
+      LLVM_DEBUG(dbgs() << "Found replacement " << *Result.Def << " for "
+                        << *VD.U->get() << " in " << *(VD.U->getUser())
+                        << "\n");
       assert(DT.dominates(cast<Instruction>(Result.Def), *VD.U) &&
              "Predicateinfo def should have dominated this use");
       VD.U->set(Result.Def);
@@ -697,7 +719,22 @@ PredicateInfo::PredicateInfo(Function &F, DominatorTree &DT,
   buildPredicateInfo();
 }
 
-PredicateInfo::~PredicateInfo() {}
+// Remove all declarations we created . The PredicateInfo consumers are
+// responsible for remove the ssa_copy calls created.
+PredicateInfo::~PredicateInfo() {
+  // Collect function pointers in set first, as SmallSet uses a SmallVector
+  // internally and we have to remove the asserting value handles first.
+  SmallPtrSet<Function *, 20> FunctionPtrs;
+  for (auto &F : CreatedDeclarations)
+    FunctionPtrs.insert(&*F);
+  CreatedDeclarations.clear();
+
+  for (Function *F : FunctionPtrs) {
+    assert(F->user_begin() == F->user_end() &&
+           "PredicateInfo consumer did not remove all SSA copies.");
+    F->eraseFromParent();
+  }
+}
 
 void PredicateInfo::verifyPredicateInfo() const {}
 
@@ -715,6 +752,20 @@ void PredicateInfoPrinterLegacyPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<AssumptionCacheTracker>();
 }
 
+// Replace ssa_copy calls created by PredicateInfo with their operand.
+static void replaceCreatedSSACopys(PredicateInfo &PredInfo, Function &F) {
+  for (auto I = inst_begin(F), E = inst_end(F); I != E;) {
+    Instruction *Inst = &*I++;
+    const auto *PI = PredInfo.getPredicateInfoFor(Inst);
+    auto *II = dyn_cast<IntrinsicInst>(Inst);
+    if (!PI || !II || II->getIntrinsicID() != Intrinsic::ssa_copy)
+      continue;
+
+    Inst->replaceAllUsesWith(II->getOperand(0));
+    Inst->eraseFromParent();
+  }
+}
+
 bool PredicateInfoPrinterLegacyPass::runOnFunction(Function &F) {
   auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
@@ -722,6 +773,8 @@ bool PredicateInfoPrinterLegacyPass::runOnFunction(Function &F) {
   PredInfo->print(dbgs());
   if (VerifyPredicateInfo)
     PredInfo->verifyPredicateInfo();
+
+  replaceCreatedSSACopys(*PredInfo, F);
   return false;
 }
 
@@ -730,12 +783,14 @@ PreservedAnalyses PredicateInfoPrinterPass::run(Function &F,
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
   auto &AC = AM.getResult<AssumptionAnalysis>(F);
   OS << "PredicateInfo for function: " << F.getName() << "\n";
-  make_unique<PredicateInfo>(F, DT, AC)->print(OS);
+  auto PredInfo = make_unique<PredicateInfo>(F, DT, AC);
+  PredInfo->print(OS);
 
+  replaceCreatedSSACopys(*PredInfo, F);
   return PreservedAnalyses::all();
 }
 
-/// \brief An assembly annotator class to print PredicateInfo information in
+/// An assembly annotator class to print PredicateInfo information in
 /// comments.
 class PredicateInfoAnnotatedWriter : public AssemblyAnnotationWriter {
   friend class PredicateInfo;

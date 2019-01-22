@@ -1,9 +1,8 @@
 //===- LoopVersioning.cpp - Utility to version a loop ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -140,9 +139,12 @@ void LoopVersioning::addPHINodes(
     if (!PN) {
       PN = PHINode::Create(Inst->getType(), 2, Inst->getName() + ".lver",
                            &PHIBlock->front());
-      for (auto *User : Inst->users())
-        if (!VersionedLoop->contains(cast<Instruction>(User)->getParent()))
-          User->replaceUsesOfWith(Inst, PN);
+      SmallVector<User*, 8> UsersToUpdate;
+      for (User *U : Inst->users())
+        if (!VersionedLoop->contains(cast<Instruction>(U)->getParent()))
+          UsersToUpdate.push_back(U);
+      for (User *U : UsersToUpdate)
+        U->replaceUsesOfWith(Inst, PN);
       PN->addIncoming(Inst, VersionedLoop->getExitingBlock());
     }
   }
@@ -248,7 +250,7 @@ void LoopVersioning::annotateInstWithNoAlias(Instruction *VersionedInst,
 }
 
 namespace {
-/// \brief Also expose this is a pass.  Currently this is only used for
+/// Also expose this is a pass.  Currently this is only used for
 /// unit-testing.  It adds all memchecks necessary to remove all may-aliasing
 /// array accesses from the loop.
 class LoopVersioningPass : public FunctionPass {

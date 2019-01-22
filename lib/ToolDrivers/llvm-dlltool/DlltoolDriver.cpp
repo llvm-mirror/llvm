@@ -1,9 +1,8 @@
 //===- DlltoolDriver.cpp - dlltool.exe-compatible driver ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ToolDrivers/llvm-dlltool/DlltoolDriver.h"
-#include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/COFFImportFile.h"
 #include "llvm/Object/COFFModuleDefinition.h"
@@ -21,7 +19,6 @@
 #include "llvm/Option/Option.h"
 #include "llvm/Support/Path.h"
 
-#include <string>
 #include <vector>
 
 using namespace llvm;
@@ -98,7 +95,8 @@ int llvm::dlltoolDriverMain(llvm::ArrayRef<const char *> ArgsArr) {
   // Handle when no input or output is specified
   if (Args.hasArgNoClaim(OPT_INPUT) ||
       (!Args.hasArgNoClaim(OPT_d) && !Args.hasArgNoClaim(OPT_l))) {
-    Table.PrintHelp(outs(), ArgsArr[0], "dlltool", false);
+    Table.PrintHelp(outs(), "llvm-dlltool [options] file...", "llvm-dlltool",
+                    false);
     llvm::outs() << "\nTARGETS: i386, i386:x86-64, arm, arm64\n";
     return 1;
   }
@@ -160,7 +158,7 @@ int llvm::dlltoolDriverMain(llvm::ArrayRef<const char *> ArgsArr) {
 
   if (Machine == IMAGE_FILE_MACHINE_I386 && Args.getLastArg(OPT_k)) {
     for (COFFShortExport& E : Def->Exports) {
-      if (E.isWeak() || (!E.Name.empty() && E.Name[0] == '?'))
+      if (!E.AliasTarget.empty() || (!E.Name.empty() && E.Name[0] == '?'))
         continue;
       E.SymbolName = E.Name;
       // Trim off the trailing decoration. Symbols will always have a

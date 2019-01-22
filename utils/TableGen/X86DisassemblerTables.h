@@ -1,9 +1,8 @@
 //===- X86DisassemblerTables.h - Disassembler tables ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,7 +40,8 @@ private:
   /// [4] XOP8 map opcode
   /// [5] XOP9 map opcode
   /// [6] XOPA map opcode
-  ContextDecision* Tables[7];
+  /// [7] 3dnow map opcode
+  std::unique_ptr<ContextDecision> Tables[8];
 
   // Table of ModRM encodings.
   typedef std::map<std::vector<unsigned>, unsigned> ModRMMapTy;

@@ -1,9 +1,8 @@
 //===--- AlignOf.h - Portable calculation of type alignment -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,7 +19,7 @@
 namespace llvm {
 
 /// \struct AlignedCharArray
-/// \brief Helper for building an aligned character array type.
+/// Helper for building an aligned character array type.
 ///
 /// This template is used to explicitly build up a collection of aligned
 /// character array types. We have to build these up using a macro and explicit
@@ -34,12 +33,12 @@ namespace llvm {
 
 template<std::size_t Alignment, std::size_t Size>
 struct AlignedCharArray {
-  LLVM_ALIGNAS(Alignment) char buffer[Size];
+  alignas(Alignment) char buffer[Size];
 };
 
 #else // _MSC_VER
 
-/// \brief Create a type with an aligned char buffer.
+/// Create a type with an aligned char buffer.
 template<std::size_t Alignment, std::size_t Size>
 struct AlignedCharArray;
 
@@ -124,7 +123,7 @@ union SizerImpl {
 };
 } // end namespace detail
 
-/// \brief This union template exposes a suitably aligned and sized character
+/// This union template exposes a suitably aligned and sized character
 /// array member which can hold elements of any of up to ten types.
 ///
 /// These types may be arrays, structs, or any other types. The goal is to

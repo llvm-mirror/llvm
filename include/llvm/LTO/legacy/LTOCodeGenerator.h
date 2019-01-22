@@ -1,9 +1,8 @@
 //===-LTOCodeGenerator.h - LLVM Link Time Optimizer -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -47,6 +46,9 @@
 #include "llvm/Target/TargetOptions.h"
 #include <string>
 #include <vector>
+
+/// Enable global value internalization in LTO.
+extern llvm::cl::opt<bool> EnableLTOInternalization;
 
 namespace llvm {
 template <typename T> class ArrayRef;
@@ -233,7 +235,7 @@ private:
   unsigned OptLevel = 2;
   lto_diagnostic_handler_t DiagHandler = nullptr;
   void *DiagContext = nullptr;
-  bool ShouldInternalize = true;
+  bool ShouldInternalize = EnableLTOInternalization;
   bool ShouldEmbedUselists = false;
   bool ShouldRestoreGlobalsLinkage = false;
   TargetMachine::CodeGenFileType FileType = TargetMachine::CGFT_ObjectFile;

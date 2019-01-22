@@ -1,9 +1,8 @@
 //===- llvm/unittest/Bitcode/BitReaderTest.cpp - Tests for BitReader ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -12,10 +11,6 @@
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
-#include "llvm/Bitcode/BitstreamReader.h"
-#include "llvm/Bitcode/BitstreamWriter.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
@@ -48,7 +43,7 @@ std::unique_ptr<Module> parseAssembly(LLVMContext &Context,
 static void writeModuleToBuffer(std::unique_ptr<Module> Mod,
                                 SmallVectorImpl<char> &Buffer) {
   raw_svector_ostream OS(Buffer);
-  WriteBitcodeToFile(Mod.get(), OS);
+  WriteBitcodeToFile(*Mod, OS);
 }
 
 static std::unique_ptr<Module> getLazyModuleFromAssembly(LLVMContext &Context,

@@ -1,9 +1,8 @@
 //===- MCJITTestBase.h - Common base class for MCJIT Unit tests  ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,10 +45,10 @@ protected:
     // fail to initialize the AssumptionCacheTracker.
     initializeAssumptionCacheTrackerPass(*PassRegistry::getPassRegistry());
 
-#ifdef LLVM_ON_WIN32
+#ifdef _WIN32
     // On Windows, generate ELF objects by specifying "-elf" in triple
     HostTriple += "-elf";
-#endif // LLVM_ON_WIN32
+#endif // _WIN32
     HostTriple = Triple::normalize(HostTriple);
   }
 

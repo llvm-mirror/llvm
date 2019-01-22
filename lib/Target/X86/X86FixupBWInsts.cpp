@@ -1,9 +1,8 @@
 //===-- X86FixupBWInsts.cpp - Fixup Byte or Word instructions -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -55,9 +54,9 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
 using namespace llvm;
 
 #define FIXUPBW_DESC "X86 Byte/Word Instruction Fixup"
@@ -146,101 +145,27 @@ INITIALIZE_PASS(FixupBWInstPass, FIXUPBW_NAME, FIXUPBW_DESC, false, false)
 FunctionPass *llvm::createX86FixupBWInsts() { return new FixupBWInstPass(); }
 
 bool FixupBWInstPass::runOnMachineFunction(MachineFunction &MF) {
-  if (!FixupBWInsts || skipFunction(*MF.getFunction()))
+  if (!FixupBWInsts || skipFunction(MF.getFunction()))
     return false;
 
   this->MF = &MF;
   TII = MF.getSubtarget<X86Subtarget>().getInstrInfo();
-  OptForSize = MF.getFunction()->optForSize();
+  OptForSize = MF.getFunction().optForSize();
   MLI = &getAnalysis<MachineLoopInfo>();
   LiveRegs.init(TII->getRegisterInfo());
 
-  DEBUG(dbgs() << "Start X86FixupBWInsts\n";);
+  LLVM_DEBUG(dbgs() << "Start X86FixupBWInsts\n";);
 
   // Process all basic blocks.
   for (auto &MBB : MF)
     processBasicBlock(MF, MBB);
 
-  DEBUG(dbgs() << "End X86FixupBWInsts\n";);
+  LLVM_DEBUG(dbgs() << "End X86FixupBWInsts\n";);
 
   return true;
 }
 
-/// Check if register \p Reg is live after the \p MI.
-///
-/// \p LiveRegs should be in a state describing liveness information in
-/// that exact place as this function tries to precise analysis made
-/// by \p LiveRegs by exploiting the information about particular
-/// instruction \p MI. \p MI is expected to be one of the MOVs handled
-/// by the x86FixupBWInsts pass.
-/// Note: similar to LivePhysRegs::contains this would state that
-/// super-register is not used if only some part of it is used.
-///
-/// X86 backend does not have subregister liveness tracking enabled,
-/// so liveness information might be overly conservative. However, for
-/// some specific instructions (this pass only cares about MOVs) we can
-/// produce more precise results by analysing that MOV's operands.
-///
-/// Indeed, if super-register is not live before the mov it means that it
-/// was originally <read-undef> and so we are free to modify these
-/// undef upper bits. That may happen in case where the use is in another MBB
-/// and the vreg/physreg corresponding to the move has higher width than
-/// necessary (e.g. due to register coalescing with a "truncate" copy).
-/// So, it handles pattern like this:
-///
-///   BB#2: derived from LLVM BB %if.then
-///   Live Ins: %RDI
-///   Predecessors according to CFG: BB#0
-///   %AX<def> = MOV16rm %RDI<kill>, 1, %noreg, 0, %noreg, %EAX<imp-def>; mem:LD2[%p]
-///                                             No %EAX<imp-use>
-///   Successors according to CFG: BB#3(?%)
-///
-///   BB#3: derived from LLVM BB %if.end
-///   Live Ins: %EAX                            Only %AX is actually live
-///   Predecessors according to CFG: BB#2 BB#1
-///   %AX<def> = KILL %AX, %EAX<imp-use,kill>
-///   RET 0, %AX
-static bool isLive(const MachineInstr &MI,
-                   const LivePhysRegs &LiveRegs,
-                   const TargetRegisterInfo *TRI,
-                   unsigned Reg) {
-  if (!LiveRegs.contains(Reg))
-    return false;
-
-  unsigned Opc = MI.getOpcode(); (void)Opc;
-  // These are the opcodes currently handled by the pass, if something
-  // else will be added we need to ensure that new opcode has the same
-  // properties.
-  assert((Opc == X86::MOV8rm || Opc == X86::MOV16rm || Opc == X86::MOV8rr ||
-          Opc == X86::MOV16rr) &&
-         "Unexpected opcode.");
-
-  bool IsDefined = false;
-  for (auto &MO: MI.implicit_operands()) {
-    if (!MO.isReg())
-      continue;
-
-    assert((MO.isDef() || MO.isUse()) && "Expected Def or Use only!");
-
-    for (MCSuperRegIterator Supers(Reg, TRI, true); Supers.isValid(); ++Supers) {
-      if (*Supers == MO.getReg()) {
-        if (MO.isDef())
-          IsDefined = true;
-        else
-          return true; // SuperReg Imp-used' -> live before the MI
-      }
-    }
-  }
-  // Reg is not Imp-def'ed -> it's live both before/after the instruction.
-  if (!IsDefined)
-    return true;
-
-  // Otherwise, the Reg is not live before the MI and the MOV can't
-  // make it really live, so it's in fact dead even after the MI.
-  return false;
-}
-
-/// \brief Check if after \p OrigMI the only portion of super register
+/// Check if after \p OrigMI the only portion of super register
 /// of the destination register of \p OrigMI that is alive is that
 /// destination register.
 ///
@@ -261,20 +186,85 @@ bool FixupBWInstPass::getSuperRegDestIfDead(MachineInstr *OrigMI,
   if (SubRegIdx == X86::sub_8bit_hi)
     return false;
 
-  if (isLive(*OrigMI, LiveRegs, TRI, SuperDestReg))
-    return false;
-
-  if (SubRegIdx == X86::sub_8bit) {
-    // In the case of byte registers, we also have to check that the upper
-    // byte register is also dead. That is considered to be independent of
-    // whether the super-register is dead.
-    unsigned UpperByteReg =
-        getX86SubSuperRegister(SuperDestReg, 8, /*High=*/true);
-
-    if (isLive(*OrigMI, LiveRegs, TRI, UpperByteReg))
-      return false;
+  // If neither the destination-super register nor any applicable subregisters
+  // are live after this instruction, then the super register is safe to use.
+  if (!LiveRegs.contains(SuperDestReg)) {
+    // If the original destination register was not the low 8-bit subregister
+    // then the super register check is sufficient.
+    if (SubRegIdx != X86::sub_8bit)
+      return true;
+    // If the original destination register was the low 8-bit subregister and
+    // we also need to check the 16-bit subregister and the high 8-bit
+    // subregister.
+    if (!LiveRegs.contains(getX86SubSuperRegister(OrigDestReg, 16)) &&
+        !LiveRegs.contains(getX86SubSuperRegister(SuperDestReg, 8,
+                                                  /*High=*/true)))
+      return true;
+    // Otherwise, we have a little more checking to do.
   }
 
+  // If we get here, the super-register destination (or some part of it) is
+  // marked as live after the original instruction.
+  //
+  // The X86 backend does not have subregister liveness tracking enabled,
+  // so liveness information might be overly conservative. Specifically, the
+  // super register might be marked as live because it is implicitly defined
+  // by the instruction we are examining.
+  //
+  // However, for some specific instructions (this pass only cares about MOVs)
+  // we can produce more precise results by analysing that MOV's operands.
+  //
+  // Indeed, if super-register is not live before the mov it means that it
+  // was originally <read-undef> and so we are free to modify these
+  // undef upper bits. That may happen in case where the use is in another MBB
+  // and the vreg/physreg corresponding to the move has higher width than
+  // necessary (e.g. due to register coalescing with a "truncate" copy).
+  // So, we would like to handle patterns like this:
+  //
+  //   %bb.2: derived from LLVM BB %if.then
+  //   Live Ins: %rdi
+  //   Predecessors according to CFG: %bb.0
+  //   %ax<def> = MOV16rm killed %rdi, 1, %noreg, 0, %noreg, implicit-def %eax
+  //                                 ; No implicit %eax
+  //   Successors according to CFG: %bb.3(?%)
+  //
+  //   %bb.3: derived from LLVM BB %if.end
+  //   Live Ins: %eax                            Only %ax is actually live
+  //   Predecessors according to CFG: %bb.2 %bb.1
+  //   %ax = KILL %ax, implicit killed %eax
+  //   RET 0, %ax
+  unsigned Opc = OrigMI->getOpcode(); (void)Opc;
+  // These are the opcodes currently handled by the pass, if something
+  // else will be added we need to ensure that new opcode has the same
+  // properties.
+  assert((Opc == X86::MOV8rm || Opc == X86::MOV16rm || Opc == X86::MOV8rr ||
+          Opc == X86::MOV16rr) &&
+         "Unexpected opcode.");
+
+  bool IsDefined = false;
+  for (auto &MO: OrigMI->implicit_operands()) {
+    if (!MO.isReg())
+      continue;
+
+    assert((MO.isDef() || MO.isUse()) && "Expected Def or Use only!");
+
+    if (MO.isDef() && TRI->isSuperRegisterEq(OrigDestReg, MO.getReg()))
+        IsDefined = true;
+
+    // If MO is a use of any part of the destination register but is not equal
+    // to OrigDestReg or one of its subregisters, we cannot use SuperDestReg.
+    // For example, if OrigDestReg is %al then an implicit use of %ah, %ax,
+    // %eax, or %rax will prevent us from using the %eax register.
+    if (MO.isUse() && !TRI->isSubRegisterEq(OrigDestReg, MO.getReg()) &&
+        TRI->regsOverlap(SuperDestReg, MO.getReg()))
+      return false;
+  }
+  // Reg is not Imp-def'ed -> it's live both before/after the instruction.
+  if (!IsDefined)
+    return false;
+
+  // Otherwise, the Reg is not live before the MI and the MOV can't
+  // make it really live, so it's in fact dead even after the MI.
   return true;
 }
 
@@ -297,7 +287,7 @@ MachineInstr *FixupBWInstPass::tryReplaceLoad(unsigned New32BitOpcode,
   for (unsigned i = 1; i < NumArgs; ++i)
     MIB.add(MI->getOperand(i));
 
-  MIB->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+  MIB.setMemRefs(MI->memoperands());
 
   return MIB;
 }

@@ -24,6 +24,9 @@ match.  The file to verify is read from standard input unless the
 OPTIONS
 -------
 
+Options are parsed from the environment variable ``FILECHECK_OPTS``
+and from the command line.
+
 .. option:: -help
 
  Print a summary of command line options.
@@ -77,6 +80,17 @@ OPTIONS
   -verify``. With this option FileCheck will verify that input does not contain
   warnings not covered by any ``CHECK:`` patterns.
 
+.. option:: --dump-input <mode>
+
+  Dump input to stderr, adding annotations representing currently enabled
+  diagnostics.  Do this either 'always', on 'fail', or 'never'.  Specify 'help'
+  to explain the dump format and quit.
+
+.. option:: --dump-input-on-failure
+
+  When the check fails, dump all of the original input.  This option is
+  deprecated in favor of `--dump-input=fail`.
+
 .. option:: --enable-var-scope
 
   Enables scope for regex variables.
@@ -86,9 +100,35 @@ OPTIONS
 
   All other variables get undefined after each encountered ``CHECK-LABEL``.
 
+.. option:: -D<VAR=VALUE>
+
+  Sets a filecheck variable ``VAR`` with value ``VALUE`` that can be used in
+  ``CHECK:`` lines.
+
 .. option:: -version
 
  Show the version number of this program.
+
+.. option:: -v
+
+  Print directive pattern matches.
+
+.. option:: -vv
+
+  Print information helpful in diagnosing internal FileCheck issues, such as
+  discarded overlapping ``CHECK-DAG:`` matches, implicit EOF pattern matches,
+  and ``CHECK-NOT:`` patterns that do not have matches.  Implies ``-v``.
+
+.. option:: --allow-deprecated-dag-overlap
+
+  Enable overlapping among matches in a group of consecutive ``CHECK-DAG:``
+  directives.  This option is deprecated and is only provided for convenience
+  as old tests are migrated to the new non-overlapping ``CHECK-DAG:``
+  implementation.
+
+.. option:: --color
+
+  Use colors in output (autodetected by default).
 
 EXIT STATUS
 -----------
@@ -236,6 +276,25 @@ For example, the following works like you'd expect:
 it and the previous directive.  A "``CHECK-SAME:``" cannot be the first
 directive in a file.
 
+The "CHECK-EMPTY:" directive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you need to check that the next line has nothing on it, not even whitespace,
+you can use the "``CHECK-EMPTY:``" directive.
+
+.. code-block:: llvm
+
+   declare void @foo()
+
+   declare void @bar()
+   ; CHECK: foo
+   ; CHECK-EMPTY:
+   ; CHECK-NEXT: bar
+
+Just like "``CHECK-NEXT:``" the directive will fail if there is more than one
+newline before it finds the next blank line, and it cannot be the first
+directive in a file.
+
 The "CHECK-NOT:" directive
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -258,6 +317,29 @@ can be used:
    ; CHECK-NOT: load
    ; CHECK: ret i8
    }
+
+The "CHECK-COUNT:" directive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you need to match multiple lines with the same pattern over and over again
+you can repeat a plain ``CHECK:`` as many times as needed. If that looks too
+boring you can instead use a counted check "``CHECK-COUNT-<num>:``", where
+``<num>`` is a positive decimal number. It will match the pattern exactly
+``<num>`` times, no more and no less. If you specified a custom check prefix,
+just use "``<PREFIX>-COUNT-<num>:``" for the same effect.
+Here is a simple example:
+
+.. code-block:: text
+
+   Loop at depth 1
+   Loop at depth 1
+   Loop at depth 1
+   Loop at depth 1
+     Loop at depth 2
+       Loop at depth 3
+
+   ; CHECK-COUNT-6: Loop at depth {{[0-9]+}}
+   ; CHECK-NOT:     Loop at depth {{[0-9]+}}
 
 The "CHECK-DAG:" directive
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -335,6 +417,25 @@ of a bug in the compiler), it may match further away from the use, and mask
 real bugs away.
 
 In those cases, to enforce the order, use a non-DAG directive between DAG-blocks.
+
+A ``CHECK-DAG:`` directive skips matches that overlap the matches of any
+preceding ``CHECK-DAG:`` directives in the same ``CHECK-DAG:`` block.  Not only
+is this non-overlapping behavior consistent with other directives, but it's
+also necessary to handle sets of non-unique strings or patterns.  For example,
+the following directives look for unordered log entries for two tasks in a
+parallel program, such as the OpenMP runtime:
+
+.. code-block:: text
+
+    // CHECK-DAG: [[THREAD_ID:[0-9]+]]: task_begin
+    // CHECK-DAG: [[THREAD_ID]]: task_end
+    //
+    // CHECK-DAG: [[THREAD_ID:[0-9]+]]: task_begin
+    // CHECK-DAG: [[THREAD_ID]]: task_end
+
+The second pair of directives is guaranteed not to match the same log entries
+as the first pair even though the patterns are identical and even if the text
+of the log entries is identical because the thread ID manages to be reused.
 
 The "CHECK-LABEL:" directive
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

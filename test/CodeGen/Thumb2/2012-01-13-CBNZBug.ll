@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=thumbv7-apple-ios -relocation-model=pic -disable-fp-elim -mcpu=cortex-a8 | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-ios -relocation-model=pic -frame-pointer=all -mcpu=cortex-a8 | FileCheck %s
 ; rdar://10676853
 
 %struct.Dict_node_struct = type { i8*, %struct.Word_file_struct*, %struct.Exp_struct*, %struct.Dict_node_struct*, %struct.Dict_node_struct* }
@@ -9,7 +9,7 @@
 
 @lookup_list = external hidden unnamed_addr global %struct.Dict_node_struct*, align 4
 
-declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i32, i1) nounwind
+declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i1) nounwind
 
 define hidden fastcc void @rdictionary_lookup(%struct.Dict_node_struct* %dn, i8* nocapture %s) nounwind ssp {
 ; CHECK-LABEL: rdictionary_lookup:
@@ -78,7 +78,7 @@ if.then5:                                         ; preds = %if.end3
   %call6 = tail call fastcc i8* @xalloc(i32 20)
   %5 = bitcast i8* %call6 to %struct.Dict_node_struct*
   %6 = bitcast %struct.Dict_node_struct* %dn.tr to i8*
-  tail call void @llvm.memcpy.p0i8.p0i8.i32(i8* %call6, i8* %6, i32 16, i32 4, i1 false)
+  tail call void @llvm.memcpy.p0i8.p0i8.i32(i8* align 4 %call6, i8* align 4 %6, i32 16, i1 false)
   %7 = load %struct.Dict_node_struct*, %struct.Dict_node_struct** @lookup_list, align 4
   %right7 = getelementptr inbounds i8, i8* %call6, i32 16
   %8 = bitcast i8* %right7 to %struct.Dict_node_struct**

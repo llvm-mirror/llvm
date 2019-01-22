@@ -1,9 +1,8 @@
 //===-- PPCBranchSelector.cpp - Emit long conditional branches ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,9 +22,9 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "ppc-branch-select"
@@ -130,7 +129,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
     BlockSizes[MBB->getNumber()].first = BlockSize;
     FuncSize += BlockSize;
   }
-  
+
   // If the entire function is smaller than the displacement of a branch field,
   // we know we don't need to shrink any branches in this function.  This is a
   // common case.
@@ -138,7 +137,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
     BlockSizes.clear();
     return false;
   }
-  
+
   // For each conditional branch, if the offset to its destination is larger
   // than the offset field allows, transform it into a long branch sequence
   // like this:
@@ -153,7 +152,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
   while (MadeChange) {
     // Iteratively expand branches until we reach a fixed point.
     MadeChange = false;
-  
+
     for (MachineFunction::iterator MFI = Fn.begin(), E = Fn.end(); MFI != E;
          ++MFI) {
       MachineBasicBlock &MBB = *MFI;
@@ -175,7 +174,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
           MBBStartOffset += TII->getInstSizeInBytes(*I);
           continue;
         }
-        
+
         // Determine the offset from the current branch to the destination
         // block.
         int BranchSize;
@@ -184,7 +183,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
           // start of this block to this branch, plus the sizes of all blocks
           // from this block to the dest.
           BranchSize = MBBStartOffset;
-          
+
           for (unsigned i = Dest->getNumber(), e = MBB.getNumber(); i != e; ++i)
             BranchSize += BlockSizes[i].first;
         } else {
@@ -213,7 +212,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
           // 2. Target MBB
           PPC::Predicate Pred = (PPC::Predicate)I->getOperand(0).getImm();
           unsigned CRReg = I->getOperand(1).getReg();
-       
+
           // Jump over the uncond branch inst (i.e. $PC+8) on opposite condition.
           BuildMI(MBB, I, dl, TII->get(PPC::BCC))
             .addImm(PPC::InvertPredicate(Pred)).addReg(CRReg).addImm(2);
@@ -234,7 +233,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
         } else {
            llvm_unreachable("Unhandled branch type!");
         }
-        
+
         // Uncond branch to the real destination.
         I = BuildMI(MBB, I, dl, TII->get(PPC::B)).addMBB(Dest);
 
@@ -277,7 +276,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
 
     EverMadeChange |= MadeChange;
   }
-  
+
   BlockSizes.clear();
   return true;
 }

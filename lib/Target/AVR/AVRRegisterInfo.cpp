@@ -1,9 +1,8 @@
 //===-- AVRRegisterInfo.cpp - AVR Register Information --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,7 +17,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
 
 #include "AVR.h"
 #include "AVRInstrInfo.h"
@@ -34,7 +33,7 @@ AVRRegisterInfo::AVRRegisterInfo() : AVRGenRegisterInfo(0) {}
 
 const uint16_t *
 AVRRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  CallingConv::ID CC = MF->getFunction()->getCallingConv();
+  CallingConv::ID CC = MF->getFunction().getCallingConv();
 
   return ((CC == CallingConv::AVR_INTR || CC == CallingConv::AVR_SIGNAL)
               ? CSR_Interrupts_SaveList
@@ -152,6 +151,7 @@ void AVRRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   if (MI.getOpcode() == AVR::FRMIDX) {
     MI.setDesc(TII.get(AVR::MOVWRdRr));
     MI.getOperand(FIOperandNum).ChangeToRegister(AVR::R29R28, false);
+    MI.RemoveOperand(2);
 
     assert(Offset > 0 && "Invalid offset");
 

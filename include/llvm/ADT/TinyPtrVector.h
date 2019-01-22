@@ -1,9 +1,8 @@
 //===- llvm/ADT/TinyPtrVector.h - 'Normally tiny' vectors -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -97,6 +96,7 @@ public:
       if (RHS.Val.template is<EltTy>()) {
         V->clear();
         V->push_back(RHS.front());
+        RHS.Val = (EltTy)nullptr;
         return *this;
       }
       delete V;
@@ -106,6 +106,12 @@ public:
     RHS.Val = (EltTy)nullptr;
     return *this;
   }
+
+  TinyPtrVector(std::initializer_list<EltTy> IL)
+      : Val(IL.size() == 0
+                ? PtrUnion()
+                : IL.size() == 1 ? PtrUnion(*IL.begin())
+                                 : PtrUnion(new VecTy(IL.begin(), IL.end()))) {}
 
   /// Constructor from an ArrayRef.
   ///

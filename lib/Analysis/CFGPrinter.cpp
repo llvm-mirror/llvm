@@ -1,15 +1,15 @@
 //===- CFGPrinter.cpp - DOT printer for the control flow graph ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines a '-dot-cfg' analysis pass, which emits the
-// cfg.<fnname>.dot file for each function in the program, with a graph of the
-// CFG for that function.
+// This file defines a `-dot-cfg` analysis pass, which emits the
+// `<prefix>.<fnname>.dot` file for each function in the program, with a graph
+// of the CFG for that function. The default value for `<prefix>` is `cfg` but
+// can be customized as needed.
 //
 // The other main feature of this file is that it implements the
 // Function::viewCFG method, which is useful for debugging passes which operate
@@ -21,6 +21,15 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 using namespace llvm;
+
+static cl::opt<std::string> CFGFuncName(
+    "cfg-func-name", cl::Hidden,
+    cl::desc("The name of a function (or its substring)"
+             " whose CFG is viewed/printed."));
+
+static cl::opt<std::string> CFGDotFilenamePrefix(
+    "cfg-dot-filename-prefix", cl::Hidden,
+    cl::desc("The prefix used for the CFG dot file names."));
 
 namespace {
   struct CFGViewerLegacyPass : public FunctionPass {
@@ -82,15 +91,18 @@ PreservedAnalyses CFGOnlyViewerPass::run(Function &F,
   return PreservedAnalyses::all();
 }
 
-static void writeCFGToDotFile(Function &F) {
-  std::string Filename = ("cfg." + F.getName() + ".dot").str();
+static void writeCFGToDotFile(Function &F, bool CFGOnly = false) {
+  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
+     return;
+  std::string Filename =
+      (CFGDotFilenamePrefix + "." + F.getName() + ".dot").str();
   errs() << "Writing '" << Filename << "'...";
 
   std::error_code EC;
   raw_fd_ostream File(Filename, EC, sys::fs::F_Text);
 
   if (!EC)
-    WriteGraph(File, (const Function*)&F);
+    WriteGraph(File, (const Function*)&F, CFGOnly);
   else
     errs() << "  error opening file for writing!";
   errs() << "\n";
@@ -117,7 +129,7 @@ namespace {
 }
 
 char CFGPrinterLegacyPass::ID = 0;
-INITIALIZE_PASS(CFGPrinterLegacyPass, "dot-cfg", "Print CFG of function to 'dot' file", 
+INITIALIZE_PASS(CFGPrinterLegacyPass, "dot-cfg", "Print CFG of function to 'dot' file",
                 false, true)
 
 PreservedAnalyses CFGPrinterPass::run(Function &F,
@@ -134,7 +146,7 @@ namespace {
     }
 
     bool runOnFunction(Function &F) override {
-      writeCFGToDotFile(F);
+      writeCFGToDotFile(F, /*CFGOnly=*/true);
       return false;
     }
     void print(raw_ostream &OS, const Module* = nullptr) const override {}
@@ -152,7 +164,7 @@ INITIALIZE_PASS(CFGOnlyPrinterLegacyPass, "dot-cfg-only",
 
 PreservedAnalyses CFGOnlyPrinterPass::run(Function &F,
                                           FunctionAnalysisManager &AM) {
-  writeCFGToDotFile(F);
+  writeCFGToDotFile(F, /*CFGOnly=*/true);
   return PreservedAnalyses::all();
 }
 
@@ -162,6 +174,8 @@ PreservedAnalyses CFGOnlyPrinterPass::run(Function &F,
 /// being a 'dot' and 'gv' program in your path.
 ///
 void Function::viewCFG() const {
+  if (!CFGFuncName.empty() && !getName().contains(CFGFuncName))
+     return;
   ViewGraph(this, "cfg" + getName());
 }
 
@@ -171,6 +185,8 @@ void Function::viewCFG() const {
 /// this can make the graph smaller.
 ///
 void Function::viewCFGOnly() const {
+  if (!CFGFuncName.empty() && !getName().contains(CFGFuncName))
+     return;
   ViewGraph(this, "cfg" + getName(), true);
 }
 

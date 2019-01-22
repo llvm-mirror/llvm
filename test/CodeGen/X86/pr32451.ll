@@ -8,7 +8,7 @@ target triple = "x86_64-unknown-linux-gnu"
 
 define i8** @japi1_convert_690(i8**, i8***, i32) {
 ; CHECK-LABEL: japi1_convert_690:
-; CHECK:       # BB#0: # %top
+; CHECK:       # %bb.0: # %top
 ; CHECK-NEXT:    pushl %ebx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    subl $16, %esp
@@ -30,7 +30,9 @@ define i8** @japi1_convert_690(i8**, i8***, i32) {
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ecx # 4-byte Reload
 ; CHECK-NEXT:    movl %eax, (%ecx)
 ; CHECK-NEXT:    addl $16, %esp
+; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    popl %ebx
+; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    retl
 top:
   %3 = alloca i8***

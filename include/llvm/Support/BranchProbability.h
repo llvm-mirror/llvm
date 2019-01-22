@@ -1,9 +1,8 @@
 //===- BranchProbability.h - Branch Probability Wrapper ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -73,7 +72,7 @@ public:
 
   void dump() const;
 
-  /// \brief Scale a large integer.
+  /// Scale a large integer.
   ///
   /// Scales \c Num.  Guarantees full precision.  Returns the floor of the
   /// result.
@@ -81,7 +80,7 @@ public:
   /// \return \c Num times \c this.
   uint64_t scale(uint64_t Num) const;
 
-  /// \brief Scale a large integer by the inverse.
+  /// Scale a large integer by the inverse.
   ///
   /// Scales \c Num by the inverse of \c this.  Guarantees full precision.
   /// Returns the floor of the result.

@@ -27,10 +27,10 @@ for.cond:                                         ; preds = %for.inc14, %entry
   %c.0 = phi i32 [ %inc15, %for.inc14 ], [ 1, %entry ]
   %k.0 = phi i32 [ %k.1.lcssa, %for.inc14 ], [ undef, %entry ]
   %tmp3 = icmp sgt i32 undef, 0
-  %smax52 = select i1 %tmp3, i32 undef, i32 0
+  %smax52 = select i1 %tmp3, i32 %c.0, i32 0
   %tmp4 = zext i32 %smax52 to i64
   %tmp5 = icmp sgt i64 undef, %tmp4
-  %smax53 = select i1 %tmp5, i64 undef, i64 %tmp4
+  %smax53 = select i1 %tmp5, i64 %tmp2, i64 %tmp4
   %tmp6 = add nsw i64 %smax53, 1
   %tmp7 = sub nsw i64 %tmp6, %tmp4
   %tmp8 = add nsw i64 %tmp7, -8
@@ -47,9 +47,6 @@ for.cond:                                         ; preds = %for.inc14, %entry
   %sub. = select i1 %cmp, i32 %sub, i32 0
   %cmp326 = icmp sgt i32 %k.0, %p1
   br i1 %cmp326, label %for.cond4.preheader, label %for.body.preheader
-
-for.body.preheader:                               ; preds = %for.cond
-  br label %for.body
 
 for.cond4.preheader:                              ; preds = %for.body, %for.cond
   %k.1.lcssa = phi i32 [ %k.0, %for.cond ], [ %add, %for.body ]
@@ -94,6 +91,9 @@ vector.body:                                      ; preds = %vector.body, %vecto
 
 middle.block:                                     ; preds = %vector.body, %vector.body.preheader.split
   br i1 undef, label %for.inc14, label %for.body6
+
+for.body.preheader:                               ; preds = %for.cond
+  br label %for.body
 
 for.body:                                         ; preds = %for.body, %for.body.preheader
   %k.127 = phi i32 [ %k.0, %for.body.preheader ], [ %add, %for.body ]

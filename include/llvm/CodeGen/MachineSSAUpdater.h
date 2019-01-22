@@ -1,9 +1,8 @@
 //===- MachineSSAUpdater.h - Unstructured SSA Update Tool -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,7 +55,7 @@ public:
   /// MachineSSAUpdater constructor.  If InsertedPHIs is specified, it will be
   /// filled in with all PHI Nodes created by rewriting.
   explicit MachineSSAUpdater(MachineFunction &MF,
-                        SmallVectorImpl<MachineInstr*> *InsertedPHIs = nullptr);
+                        SmallVectorImpl<MachineInstr*> *NewPHI = nullptr);
   MachineSSAUpdater(const MachineSSAUpdater &) = delete;
   MachineSSAUpdater &operator=(const MachineSSAUpdater &) = delete;
   ~MachineSSAUpdater();

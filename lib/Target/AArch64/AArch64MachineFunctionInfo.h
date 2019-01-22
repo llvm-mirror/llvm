@@ -1,9 +1,8 @@
 //=- AArch64MachineFunctionInfo.h - AArch64 machine function info -*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,8 +14,10 @@
 #define LLVM_LIB_TARGET_AARCH64_AARCH64MACHINEFUNCTIONINFO_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include <cassert>
@@ -48,33 +49,33 @@ class AArch64FunctionInfo final : public MachineFunctionInfo {
   /// determineCalleeSaves().
   bool HasStackFrame = false;
 
-  /// \brief Amount of stack frame size, not including callee-saved registers.
+  /// Amount of stack frame size, not including callee-saved registers.
   unsigned LocalStackSize;
 
-  /// \brief Amount of stack frame size used for saving callee-saved registers.
+  /// Amount of stack frame size used for saving callee-saved registers.
   unsigned CalleeSavedStackSize;
 
-  /// \brief Number of TLS accesses using the special (combinable)
+  /// Number of TLS accesses using the special (combinable)
   /// _TLS_MODULE_BASE_ symbol.
   unsigned NumLocalDynamicTLSAccesses = 0;
 
-  /// \brief FrameIndex for start of varargs area for arguments passed on the
+  /// FrameIndex for start of varargs area for arguments passed on the
   /// stack.
   int VarArgsStackIndex = 0;
 
-  /// \brief FrameIndex for start of varargs area for arguments passed in
+  /// FrameIndex for start of varargs area for arguments passed in
   /// general purpose registers.
   int VarArgsGPRIndex = 0;
 
-  /// \brief Size of the varargs area for arguments passed in general purpose
+  /// Size of the varargs area for arguments passed in general purpose
   /// registers.
   unsigned VarArgsGPRSize = 0;
 
-  /// \brief FrameIndex for start of varargs area for arguments passed in
+  /// FrameIndex for start of varargs area for arguments passed in
   /// floating-point registers.
   int VarArgsFPRIndex = 0;
 
-  /// \brief Size of the varargs area for arguments passed in floating-point
+  /// Size of the varargs area for arguments passed in floating-point
   /// registers.
   unsigned VarArgsFPRSize = 0;
 
@@ -90,11 +91,25 @@ class AArch64FunctionInfo final : public MachineFunctionInfo {
   /// other stack allocations.
   bool CalleeSaveStackHasFreeSpace = false;
 
+  /// Has a value when it is known whether or not the function uses a
+  /// redzone, and no value otherwise.
+  /// Initialized during frame lowering, unless the function has the noredzone
+  /// attribute, in which case it is set to false at construction.
+  Optional<bool> HasRedZone;
+
+  /// ForwardedMustTailRegParms - A list of virtual and physical registers
+  /// that must be forwarded to every musttail call.
+  SmallVector<ForwardedRegister, 1> ForwardedMustTailRegParms;
 public:
   AArch64FunctionInfo() = default;
 
   explicit AArch64FunctionInfo(MachineFunction &MF) {
     (void)MF;
+
+    // If we already know that the function doesn't have a redzone, set
+    // HasRedZone here.
+    if (MF.getFunction().hasFnAttribute(Attribute::NoRedZone))
+      HasRedZone = false;
   }
 
   unsigned getBytesInStackArgArea() const { return BytesInStackArgArea; }
@@ -132,6 +147,9 @@ public:
     return NumLocalDynamicTLSAccesses;
   }
 
+  Optional<bool> hasRedZone() const { return HasRedZone; }
+  void setHasRedZone(bool s) { HasRedZone = s; }
+
   int getVarArgsStackIndex() const { return VarArgsStackIndex; }
   void setVarArgsStackIndex(int Index) { VarArgsStackIndex = Index; }
 
@@ -146,6 +164,19 @@ public:
 
   unsigned getVarArgsFPRSize() const { return VarArgsFPRSize; }
   void setVarArgsFPRSize(unsigned Size) { VarArgsFPRSize = Size; }
+
+  unsigned getJumpTableEntrySize(int Idx) const {
+    auto It = JumpTableEntryInfo.find(Idx);
+    if (It != JumpTableEntryInfo.end())
+      return It->second.first;
+    return 4;
+  }
+  MCSymbol *getJumpTableEntryPCRelSymbol(int Idx) const {
+    return JumpTableEntryInfo.find(Idx)->second.second;
+  }
+  void setJumpTableEntryInfo(int Idx, unsigned Size, MCSymbol *PCRelSym) {
+    JumpTableEntryInfo[Idx] = std::make_pair(Size, PCRelSym);
+  }
 
   using SetOfInstructions = SmallPtrSet<const MachineInstr *, 16>;
 
@@ -181,10 +212,16 @@ public:
     LOHRelated.insert(Args.begin(), Args.end());
   }
 
+  SmallVectorImpl<ForwardedRegister> &getForwardedMustTailRegParms() {
+    return ForwardedMustTailRegParms;
+  }
+
 private:
   // Hold the lists of LOHs.
   MILOHContainer LOHContainerSet;
   SetOfInstructions LOHRelated;
+
+  DenseMap<int, std::pair<unsigned, MCSymbol *>> JumpTableEntryInfo;
 };
 
 } // end namespace llvm

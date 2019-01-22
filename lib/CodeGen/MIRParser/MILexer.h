@@ -1,9 +1,8 @@
 //===- MILexer.h - Lexer for machine instructions ---------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -60,14 +59,36 @@ struct MIToken {
     kw_internal,
     kw_early_clobber,
     kw_debug_use,
+    kw_renamable,
     kw_tied_def,
     kw_frame_setup,
+    kw_frame_destroy,
+    kw_nnan,
+    kw_ninf,
+    kw_nsz,
+    kw_arcp,
+    kw_contract,
+    kw_afn,
+    kw_reassoc,
+    kw_nuw,
+    kw_nsw,
+    kw_exact,
     kw_debug_location,
     kw_cfi_same_value,
     kw_cfi_offset,
+    kw_cfi_rel_offset,
     kw_cfi_def_cfa_register,
     kw_cfi_def_cfa_offset,
+    kw_cfi_adjust_cfa_offset,
+    kw_cfi_escape,
     kw_cfi_def_cfa,
+    kw_cfi_register,
+    kw_cfi_remember_state,
+    kw_cfi_restore,
+    kw_cfi_restore_state,
+    kw_cfi_undefined,
+    kw_cfi_window_save,
+    kw_cfi_aarch64_negate_ra_sign_state,
     kw_blockaddress,
     kw_intrinsic,
     kw_target_index,
@@ -82,6 +103,7 @@ struct MIToken {
     kw_non_temporal,
     kw_invariant,
     kw_align,
+    kw_addrspace,
     kw_stack,
     kw_got,
     kw_jump_table,
@@ -94,6 +116,9 @@ struct MIToken {
     kw_successors,
     kw_floatpred,
     kw_intpred,
+    kw_pre_instr_symbol,
+    kw_post_instr_symbol,
+    kw_unknown_size,
 
     // Named metadata keywords
     md_tbaa,
@@ -101,20 +126,20 @@ struct MIToken {
     md_noalias,
     md_range,
     md_diexpr,
+    md_dilocation,
 
     // Identifier tokens
     Identifier,
-    IntegerType,
     NamedRegister,
+    NamedVirtualRegister,
     MachineBasicBlockLabel,
     MachineBasicBlock,
-    PointerType,
-    ScalarType,
     StackObject,
     FixedStackObject,
     NamedGlobalValue,
     GlobalValue,
     ExternalSymbol,
+    MCSymbol,
 
     // Other tokens
     IntegerLiteral,
@@ -158,14 +183,15 @@ public:
 
   bool isRegister() const {
     return Kind == NamedRegister || Kind == underscore ||
-           Kind == VirtualRegister;
+           Kind == NamedVirtualRegister || Kind == VirtualRegister;
   }
 
   bool isRegisterFlag() const {
     return Kind == kw_implicit || Kind == kw_implicit_define ||
            Kind == kw_def || Kind == kw_dead || Kind == kw_killed ||
            Kind == kw_undef || Kind == kw_internal ||
-           Kind == kw_early_clobber || Kind == kw_debug_use;
+           Kind == kw_early_clobber || Kind == kw_debug_use ||
+           Kind == kw_renamable;
   }
 
   bool isMemoryOperandFlag() const {

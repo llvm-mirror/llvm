@@ -1,7 +1,7 @@
 ; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=static < %s | FileCheck %s -check-prefix=STATIC
-; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=static -disable-fp-elim < %s | FileCheck %s -check-prefix=STATIC-FP
+; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=static -frame-pointer=all < %s | FileCheck %s -check-prefix=STATIC-FP
 ; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=pic < %s | FileCheck %s -check-prefix=PIC
-; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=pic -disable-fp-elim < %s | FileCheck %s -check-prefix=PIC-FP
+; RUN: llc -O0 -mtriple mips-unknown-linux-gnu -relocation-model=pic -frame-pointer=all < %s | FileCheck %s -check-prefix=PIC-FP
 
 ; Generated using clang -O0 -emit-llvm -S -target mipsel-unknown-linux -g test.c -o test.ll
 ; test.c:
@@ -59,7 +59,7 @@ attributes #0 = { nounwind }
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 3.8.0", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
 !1 = !DIFile(filename: "test.c", directory: "/tmp")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "hello_world", scope: !1, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!4 = distinct !DISubprogram(name: "hello_world", scope: !1, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !5 = !DISubroutineType(types: !6)
 !6 = !{null}
 !7 = !{i32 2, !"Dwarf Version", i32 4}

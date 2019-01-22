@@ -1,9 +1,8 @@
 //===- ScheduleDAGVLIW.cpp - SelectionDAG list scheduler for VLIW -*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,13 +24,13 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 #include <climits>
 using namespace llvm;
 
@@ -93,9 +92,8 @@ private:
 
 /// Schedule - Schedule the DAG using list scheduling.
 void ScheduleDAGVLIW::Schedule() {
-  DEBUG(dbgs()
-        << "********** List Scheduling BB#" << BB->getNumber()
-        << " '" << BB->getName() << "' **********\n");
+  LLVM_DEBUG(dbgs() << "********** List Scheduling " << printMBBReference(*BB)
+                    << " '" << BB->getName() << "' **********\n");
 
   // Build the scheduling graph.
   BuildSchedGraph(AA);
@@ -119,7 +117,7 @@ void ScheduleDAGVLIW::releaseSucc(SUnit *SU, const SDep &D) {
 #ifndef NDEBUG
   if (SuccSU->NumPredsLeft == 0) {
     dbgs() << "*** Scheduling failed! ***\n";
-    SuccSU->dump(this);
+    dumpNode(*SuccSU);
     dbgs() << " has been released too many times!\n";
     llvm_unreachable(nullptr);
   }
@@ -152,8 +150,8 @@ void ScheduleDAGVLIW::releaseSuccessors(SUnit *SU) {
 /// count of its successors. If a successor pending count is zero, add it to
 /// the Available queue.
 void ScheduleDAGVLIW::scheduleNodeTopDown(SUnit *SU, unsigned CurCycle) {
-  DEBUG(dbgs() << "*** Scheduling [" << CurCycle << "]: ");
-  DEBUG(SU->dump(this));
+  LLVM_DEBUG(dbgs() << "*** Scheduling [" << CurCycle << "]: ");
+  LLVM_DEBUG(dumpNode(*SU));
 
   Sequence.push_back(SU);
   assert(CurCycle >= SU->getDepth() && "Node scheduled above its depth!");
@@ -247,7 +245,7 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
     } else if (!HasNoopHazards) {
       // Otherwise, we have a pipeline stall, but no other problem, just advance
       // the current cycle and try again.
-      DEBUG(dbgs() << "*** Advancing cycle, no work to do\n");
+      LLVM_DEBUG(dbgs() << "*** Advancing cycle, no work to do\n");
       HazardRec->AdvanceCycle();
       ++NumStalls;
       ++CurCycle;
@@ -255,7 +253,7 @@ void ScheduleDAGVLIW::listScheduleTopDown() {
       // Otherwise, we have no instructions to issue and we have instructions
       // that will fault if we don't do this right.  This is the case for
       // processors without pipeline interlocks and other cases.
-      DEBUG(dbgs() << "*** Emitting noop\n");
+      LLVM_DEBUG(dbgs() << "*** Emitting noop\n");
       HazardRec->EmitNoop();
       Sequence.push_back(nullptr);   // NULL here means noop
       ++NumNoops;

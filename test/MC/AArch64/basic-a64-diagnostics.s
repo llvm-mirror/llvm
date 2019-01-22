@@ -76,12 +76,12 @@
 //------------------------------------------------------------------------------
 
 // Out of range immediates: more than 12 bits
-        add w4, w5, #-4096
+        add w4, w5, #-4097
         add w5, w6, #0x1000
         add w4, w5, #-4096, lsl #12
         add w5, w6, #0x1000, lsl #12
 // CHECK-ERROR: error: expected compatible register, symbol or integer in range [0, 4095]
-// CHECK-ERROR-NEXT:         add w4, w5, #-4096
+// CHECK-ERROR-NEXT:         add w4, w5, #-4097
 // CHECK-ERROR-NEXT:                     ^
 // CHECK-ERROR-AARCH64-NEXT: error: expected compatible register, symbol or integer in range [0, 4095]
 // CHECK-ERROR-AARCH64-NEXT:         add w5, w6, #0x1000
@@ -180,6 +180,11 @@
 // CHECK-ERROR-NEXT:         add x3, x9, #variable-16
 // CHECK-ERROR-NEXT:                 ^
 
+        // Relocation on a sub
+        sub x1, x0, :lo12:loc
+// CHECK-ERROR: error: invalid immediate expression
+// CHECK-ERROR:         sub x1, x0, :lo12:loc
+// CHECK-ERROR:                     ^
 
 
 //------------------------------------------------------------------------------
@@ -1851,12 +1856,16 @@
 
         ldr sp, some_label
         ldrsw w3, somewhere
+        ldr v0, some_label
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr sp, some_label
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldrsw w3, somewhere
 // CHECK-ERROR-NEXT:               ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, some_label
+// CHECK-ERROR-NEXT:             ^
 
         ldrsw x2, #1048576
         ldr q0, #-1048580
@@ -1913,6 +1922,14 @@
 //------------------------------------------------------------------------------
 // Load/store (unscaled immediate)
 //------------------------------------------------------------------------------
+        ldur v0, [x0, #0]
+        stur v0, [x0, #0]
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldur v0, [x0, #0]
+// CHECK-ERROR-NEXT:              ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         stur v0, [x0, #0]
+// CHECK-ERROR-NEXT:              ^
 
         ldurb w2, [sp, #256]
         sturh w17, [x1, #256]
@@ -1960,10 +1977,19 @@
 //------------------------------------------------------------------------------
 // Load-store register (immediate post-indexed)
 //------------------------------------------------------------------------------
+        ldr v0, [x0], #0
+        str v0, [x0], #0
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0], #0
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0], #0
+// CHECK-ERROR-NEXT:             ^
+
         ldr x3, [x4, #25], #0
         ldr x4, [x9, #0], #4
-// CHECK-ERROR-AARCH64: error: {{expected symbolic reference or integer|index must be a multiple of 8}} in range [0, 32760]
-// CHECK-ERROR-ARM64: error: expected label or encodable integer pc offset
+// CHECK-ERROR-AARCH64: error: invalid operand for instruction
+// CHECK-ERROR-ARM64: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr x3, [x4, #25], #0
 // CHECK-ERROR-NEXT:                 ^
 // CHECK-ERROR-AARCH64-NEXT: error: expected label or encodable integer pc offset
@@ -2147,6 +2173,14 @@
 //------------------------------------------------------------------------------
 // Load-store register (immediate pre-indexed)
 //------------------------------------------------------------------------------
+        ldr v0, [x0, #0]!
+        str v0, [x0, #0]!
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0, #0]!
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0, #0]!
+// CHECK-ERROR-NEXT:             ^
 
         ldr x3, [x4]!
 // CHECK-ERROR: error:
@@ -2196,7 +2230,7 @@
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
 // CHECK-ERROR-NEXT:         ldrh w9, [sp, #-257]!
 // CHECK-ERROR-NEXT:                  ^
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr w1, [x19, #256]!
 // CHECK-ERROR-NEXT:                            ^
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
@@ -2221,7 +2255,7 @@
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
 // CHECK-ERROR-NEXT:         ldrsh x22, [x13, #-257]!
 // CHECK-ERROR-NEXT:                    ^
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldrsw x2, [x3, #256]!
 // CHECK-ERROR-NEXT:                             ^
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
@@ -2298,13 +2332,13 @@
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
 // CHECK-ERROR-NEXT:         ldr h3, [x13, #-257]!
 // CHECK-ERROR-NEXT:                 ^
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr s3, [x3, #256]!
 // CHECK-ERROR-NEXT:                           ^
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
 // CHECK-ERROR-NEXT:         ldr s3, [x13, #-257]!
 // CHECK-ERROR-NEXT:                 ^
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr d3, [x3, #256]!
 // CHECK-ERROR-NEXT:                           ^
 // CHECK-ERROR-NEXT: error: {{expected|index must be an}} integer in range [-256, 255]
@@ -2357,6 +2391,14 @@
 //------------------------------------------------------------------------------
 // Load/store (unsigned immediate)
 //------------------------------------------------------------------------------
+        ldr v0, [x0, #0]
+        str v0, [x0, #0]
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0, #0]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0, #0]
+// CHECK-ERROR-NEXT:             ^
 
 //// Out of range immediates
         ldr q0, [x11, #65536]
@@ -2397,7 +2439,7 @@
 //// 32-bit addresses
         ldr w0, [w20]
         ldrsh x3, [wsp]
-// CHECK-ERROR: error: expected label or encodable integer pc offset
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         ldr w0, [w20]
 // CHECK-ERROR-NEXT:                  ^
 // CHECK-ERROR-NEXT: error: invalid operand for instruction
@@ -2435,17 +2477,41 @@
 // CHECK-ERROR-ARM64-NEXT: error: prefetch operand out of range, [0,31] expected
 // CHECK-ERROR-NEXT:        prfm #32, [sp, #8]
 // CHECK-ERROR-NEXT:             ^
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:        prfm pldl1strm, [w3, #8]
 // CHECK-ERROR-NEXT:                         ^
 // CHECK-ERROR-AARCH64-NEXT: error: operand specifier not recognised
-// CHECK-ERROR-ARM64-NEXT: error: pre-fetch hint expected
+// CHECK-ERROR-ARM64-NEXT: error: prefetch hint expected
 // CHECK-ERROR-NEXT:        prfm wibble, [sp]
 // CHECK-ERROR-NEXT:             ^
 
 //------------------------------------------------------------------------------
 // Load/store register (register offset)
 //------------------------------------------------------------------------------
+        ldr v0, [x0, xzr]
+        ldr v0, [x0, x1, lsl #0]
+        ldr v0, [x0, x1, lsl #0]
+        str v0, [x0, xzr]
+        str v0, [x0, x1, lsl #0]
+        str v0, [x0, x1, lsl #0]
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0, xzr]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0, x1, lsl #0]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldr v0, [x0, x1, lsl #0]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0, xzr]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0, x1, lsl #0]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         str v0, [x0, x1, lsl #0]
+// CHECK-ERROR-NEXT:             ^
 
         ldr w3, [xzr, x3]
         ldr w4, [x0, x4, lsl]
@@ -2453,7 +2519,7 @@
         ldr w10, [x6, x9, sxtw #2]
         ldr w11, [x7, w2, lsl #2]
         ldr w12, [x8, w1, sxtx]
-// CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:        ldr w3, [xzr, x3]
 // CHECK-ERROR-NEXT:                 ^
 // CHECK-ERROR-NEXT: error: expected #imm after shift specifier
@@ -2534,6 +2600,15 @@
 //------------------------------------------------------------------------------
 // Load/store register pair (offset)
 //------------------------------------------------------------------------------
+        ldp v0, v1, [x0, #0]
+        stp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         stp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT:             ^
+
         ldp w3, w2, [x4, #1]
         stp w1, w2, [x3, #253]
         stp w9, w10, [x5, #256]
@@ -2636,6 +2711,14 @@
 //------------------------------------------------------------------------------
 // Load/store register pair (post-indexed)
 //------------------------------------------------------------------------------
+        ldp v0, v1, [x0], #0
+        stp v0, v1, [x0], #0
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldp v0, v1, [x0], #0
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         stp v0, v1, [x0], #0
+// CHECK-ERROR-NEXT:             ^
 
         ldp w3, w2, [x4], #1
         stp w1, w2, [x3], #253
@@ -2739,6 +2822,14 @@
 //------------------------------------------------------------------------------
 // Load/store register pair (pre-indexed)
 //------------------------------------------------------------------------------
+        ldp v0, v1, [x0, #0]!
+        stp v0, v1, [x0, #0]!
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldp v0, v1, [x0, #0]!
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         stp v0, v1, [x0, #0]!
+// CHECK-ERROR-NEXT:             ^
 
         ldp w3, w2, [x4, #1]!
         stp w1, w2, [x3, #253]!
@@ -2842,6 +2933,15 @@
 //------------------------------------------------------------------------------
 // Load/store register pair (offset)
 //------------------------------------------------------------------------------
+        ldnp v0, v1, [x0, #0]
+        stnp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         ldnp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT:              ^
+// CHECK-ERROR-NEXT: error: invalid operand for instruction
+// CHECK-ERROR-NEXT:         stnp v0, v1, [x0, #0]
+// CHECK-ERROR-NEXT:              ^
+
         ldnp w3, w2, [x4, #1]
         stnp w1, w2, [x3, #253]
         stnp w9, w10, [x5, #256]
@@ -3106,10 +3206,10 @@
         movk w3, #:abs_g0:sym
         movz x3, #:abs_g0_nc:sym
         movn x4, #:abs_g0_nc:sym
-// CHECK-ERROR: error: {{expected relocated symbol or|immediate must be an}} integer in range [0, 65535]
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         movz x12, #:abs_g0:sym, lsl #16
 // CHECK-ERROR-NEXT:                                 ^
-// CHECK-ERROR-NEXT: error: {{expected relocated symbol or|immediate must be an}} integer in range [0, 65535]
+// CHECK-ERROR:  error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         movz x12, #:abs_g0:sym, lsl #0
 // CHECK-ERROR-NEXT:                                 ^
 // CHECK-ERROR-AARCH64-NEXT: error: {{expected relocated symbol or|immediate must be an}} integer in range [0, 65535]
@@ -3220,10 +3320,19 @@
 //------------------------------------------------------------------------------
 
         adr sp, loc             // expects xzr
+        adr x0, :got:loc        // bad relocation type
+        adr x1, :lo12:loc
         adrp x3, #20            // Immediate unaligned
         adrp w2, loc            // 64-bit register needed
+        adrp x5, :got_lo12:loc  // bad relocation type
 // CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         adr sp, loc
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: unexpected adr label
+// CHECK-ERROR-NEXT:         adr x0, :got:loc
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: unexpected adr label
+// CHECK-ERROR-NEXT:         adr x1, :lo12:loc
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: expected label or encodable integer pc offset
 // CHECK-ERROR-NEXT:         adrp x3, #20
@@ -3231,6 +3340,9 @@
 // CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         adrp w2, loc
 // CHECK-ERROR-NEXT:              ^
+// CHECK-ERROR-NEXT: error: page or gotpage label reference expected
+// CHECK-ERROR-NEXT:         adrp x5, :got_lo12:loc
+// CHECK-ERROR-NEXT:             ^
 
         adr x9, #1048576
         adr x2, #-1048577
@@ -3504,6 +3616,7 @@
         msr MIDR_EL1, x12
         msr CCSIDR_EL1, x12
         msr CLIDR_EL1, x12
+        msr CCSIDR2_EL1, x12
         msr CTR_EL0, x12
         msr MPIDR_EL1, x12
         msr REVIDR_EL1, x12
@@ -3570,6 +3683,9 @@
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: expected writable system register or pstate
 // CHECK-ERROR-NEXT:         msr CLIDR_EL1, x12
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: expected writable system register or pstate
+// CHECK-ERROR-NEXT:         msr CCSIDR2_EL1, x12
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: expected writable system register or pstate
 // CHECK-ERROR-NEXT:         msr CTR_EL0, x12

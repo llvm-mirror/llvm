@@ -1,28 +1,27 @@
 //===--- WebAssemblyOptimizeLiveIntervals.cpp - LiveInterval processing ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief Optimize LiveIntervals for use in a post-RA context.
+/// Optimize LiveIntervals for use in a post-RA context.
 //
 /// LiveIntervals normally runs before register allocation when the code is
 /// only recently lowered out of SSA form, so it's uncommon for registers to
-/// have multiple defs, and then they do, the defs are usually closely related.
+/// have multiple defs, and when they do, the defs are usually closely related.
 /// Later, after coalescing, tail duplication, and other optimizations, it's
 /// more common to see registers with multiple unrelated defs. This pass
-/// updates LiveIntervalAnalysis to distribute the value numbers across separate
+/// updates LiveIntervals to distribute the value numbers across separate
 /// LiveIntervals.
 ///
 //===----------------------------------------------------------------------===//
 
 #include "WebAssembly.h"
 #include "WebAssemblySubtarget.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
@@ -58,14 +57,18 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyOptimizeLiveIntervals::ID = 0;
+INITIALIZE_PASS(WebAssemblyOptimizeLiveIntervals, DEBUG_TYPE,
+                "Optimize LiveIntervals for WebAssembly", false, false)
+
 FunctionPass *llvm::createWebAssemblyOptimizeLiveIntervals() {
   return new WebAssemblyOptimizeLiveIntervals();
 }
 
-bool WebAssemblyOptimizeLiveIntervals::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG(dbgs() << "********** Optimize LiveIntervals **********\n"
-                  "********** Function: "
-               << MF.getName() << '\n');
+bool WebAssemblyOptimizeLiveIntervals::runOnMachineFunction(
+    MachineFunction &MF) {
+  LLVM_DEBUG(dbgs() << "********** Optimize LiveIntervals **********\n"
+                       "********** Function: "
+                    << MF.getName() << '\n');
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
   LiveIntervals &LIS = getAnalysis<LiveIntervals>();
@@ -73,11 +76,10 @@ bool WebAssemblyOptimizeLiveIntervals::runOnMachineFunction(MachineFunction &MF)
   // We don't preserve SSA form.
   MRI.leaveSSA();
 
-  assert(MRI.tracksLiveness() &&
-         "OptimizeLiveIntervals expects liveness");
+  assert(MRI.tracksLiveness() && "OptimizeLiveIntervals expects liveness");
 
   // Split multiple-VN LiveIntervals into multiple LiveIntervals.
-  SmallVector<LiveInterval*, 4> SplitLIs;
+  SmallVector<LiveInterval *, 4> SplitLIs;
   for (unsigned i = 0, e = MRI.getNumVirtRegs(); i < e; ++i) {
     unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
     if (MRI.reg_nodbg_empty(Reg))
@@ -91,7 +93,7 @@ bool WebAssemblyOptimizeLiveIntervals::runOnMachineFunction(MachineFunction &MF)
   // instructions to satisfy LiveIntervals' requirement that all uses be
   // dominated by defs. Now that LiveIntervals has computed which of these
   // defs are actually needed and which are dead, remove the dead ones.
-  for (auto MII = MF.begin()->begin(), MIE = MF.begin()->end(); MII != MIE; ) {
+  for (auto MII = MF.begin()->begin(), MIE = MF.begin()->end(); MII != MIE;) {
     MachineInstr *MI = &*MII++;
     if (MI->isImplicitDef() && MI->getOperand(0).isDead()) {
       LiveInterval &LI = LIS.getInterval(MI->getOperand(0).getReg());

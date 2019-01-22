@@ -1,9 +1,8 @@
 //===-- PPCScheduleP8.td - PPC P8 Scheduling Definitions ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -90,6 +89,10 @@ def P8Itineraries : ProcessorItineraries<
                                                   P8_DU4, P8_DU5, P8_DU6], 0>,
                                    InstrStage<1, [P8_FXU1, P8_FXU2]>],
                                   [4, 1, 1]>,
+  InstrItinData<IIC_IntMulHD    , [InstrStage<1, [P8_DU1, P8_DU2, P8_DU3,
+                                                  P8_DU4, P8_DU5, P8_DU6], 0>,
+                                   InstrStage<1, [P8_FXU1, P8_FXU2]>],
+                                  [4, 1, 1]>,
   InstrItinData<IIC_IntMulLI    , [InstrStage<1, [P8_DU1, P8_DU2, P8_DU3,
                                                   P8_DU4, P8_DU5, P8_DU6], 0>,
                                    InstrStage<1, [P8_FXU1, P8_FXU2]>],
@@ -99,6 +102,10 @@ def P8Itineraries : ProcessorItineraries<
                                    InstrStage<1, [P8_FXU1, P8_FXU2]>],
                                    [1, 1, 1]>,
   InstrItinData<IIC_IntRotateD  , [InstrStage<1, [P8_DU1, P8_DU2, P8_DU3,
+                                                  P8_DU4, P8_DU5, P8_DU6], 0>,
+                                   InstrStage<1, [P8_FXU1, P8_FXU2]>],
+                                   [1, 1, 1]>,
+  InstrItinData<IIC_IntRotateDI , [InstrStage<1, [P8_DU1, P8_DU2, P8_DU3,
                                                   P8_DU4, P8_DU5, P8_DU6], 0>,
                                    InstrStage<1, [P8_FXU1, P8_FXU2]>],
                                    [1, 1, 1]>,
@@ -259,14 +266,14 @@ def P8Itineraries : ProcessorItineraries<
                                    InstrStage<1, [P8_LU1, P8_LU2,
                                                   P8_LSU1, P8_LSU2]>]
                                   [1, 1, 1]>,
-  InstrItinData<IIC_LdStSTDU    , [InstrStage<1, [P8_DU1], 0>,
+  InstrItinData<IIC_LdStSTU     , [InstrStage<1, [P8_DU1], 0>,
                                    InstrStage<1, [P8_DU2], 0>,
                                    InstrStage<1, [P8_LU1, P8_LU2,
                                                   P8_LSU1, P8_LSU2], 0>,
                                    InstrStage<1, [P8_FXU1, P8_FXU2]>],
                                   [2, 1, 1, 1]>,
   // First+last
-  InstrItinData<IIC_LdStSTDUX   , [InstrStage<1, [P8_DU1], 0>,
+  InstrItinData<IIC_LdStSTUX    , [InstrStage<1, [P8_DU1], 0>,
                                    InstrStage<1, [P8_DU2], 0>,
                                    InstrStage<1, [P8_DU3], 0>,
                                    InstrStage<1, [P8_DU4], 0>,

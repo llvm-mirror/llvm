@@ -1,9 +1,8 @@
 //=-- ProfilesummaryBuilder.cpp - Profile summary computation ---------------=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Type.h"
@@ -28,8 +26,8 @@ using namespace llvm;
 static const uint32_t DefaultCutoffsData[] = {
     10000,  /*  1% */
     100000, /* 10% */
-    200000, 300000, 400000, 500000, 600000, 500000, 600000, 700000,
-    800000, 900000, 950000, 990000, 999000, 999900, 999990, 999999};
+    200000, 300000, 400000, 500000, 600000, 700000, 800000,
+    900000, 950000, 990000, 999000, 999900, 999990, 999999};
 const ArrayRef<uint32_t> ProfileSummaryBuilder::DefaultCutoffs =
     DefaultCutoffsData;
 
@@ -59,7 +57,7 @@ void SampleProfileSummaryBuilder::addRecord(
 void ProfileSummaryBuilder::computeDetailedSummary() {
   if (DetailedSummaryCutoffs.empty())
     return;
-  std::sort(DetailedSummaryCutoffs.begin(), DetailedSummaryCutoffs.end());
+  llvm::sort(DetailedSummaryCutoffs);
   auto Iter = CountFrequencies.begin();
   const auto End = CountFrequencies.end();
 

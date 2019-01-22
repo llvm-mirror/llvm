@@ -1,9 +1,8 @@
 //===-- llvm/Constant.h - Constant class definition -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,7 +37,7 @@ class APInt;
 /// structurally equivalent constants will always have the same address.
 /// Constants are created on demand as needed and never deleted: thus clients
 /// don't have to worry about the lifetime of the objects.
-/// @brief LLVM Constant Representation
+/// LLVM Constant Representation
 class Constant : public User {
 protected:
   Constant(Type *ty, ValueTy vty, Use *Ops, unsigned NumOps)
@@ -71,6 +70,26 @@ public:
   /// Return true if the value is the smallest signed value.
   bool isMinSignedValue() const;
 
+  /// Return true if this is a finite and non-zero floating-point scalar
+  /// constant or a vector constant with all finite and non-zero elements.
+  bool isFiniteNonZeroFP() const;
+
+  /// Return true if this is a normal (as opposed to denormal) floating-point
+  /// scalar constant or a vector constant with all normal elements.
+  bool isNormalFP() const;
+
+  /// Return true if this scalar has an exact multiplicative inverse or this
+  /// vector has an exact multiplicative inverse for each element in the vector.
+  bool hasExactInverseFP() const;
+
+  /// Return true if this is a floating-point NaN constant or a vector
+  /// floating-point constant with all NaN elements.
+  bool isNaN() const;
+
+  /// Return true if this is a vector constant that includes any undefined
+  /// elements.
+  bool containsUndefElement() const;
+
   /// Return true if evaluation of this constant could trap. This is true for
   /// things like constant expressions that could divide by zero.
   bool canTrap() const;
@@ -94,7 +113,8 @@ public:
 
   /// For aggregates (struct/array/vector) return the constant that corresponds
   /// to the specified element if possible, or null if not. This can return null
-  /// if the element index is a ConstantExpr, or if 'this' is a constant expr.
+  /// if the element index is a ConstantExpr, if 'this' is a constant expr or
+  /// if the constant does not fit into an uint64_t.
   Constant *getAggregateElement(unsigned Elt) const;
   Constant *getAggregateElement(Constant *Elt) const;
 
@@ -117,8 +137,8 @@ public:
 
   //// Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Value *V) {
-    return V->getValueID() >= ConstantFirstVal &&
-           V->getValueID() <= ConstantLastVal;
+    static_assert(ConstantFirstVal == 0, "V->getValueID() >= ConstantFirstVal always succeeds");
+    return V->getValueID() <= ConstantLastVal;
   }
 
   /// This method is a special form of User::replaceUsesOfWith
@@ -137,7 +157,7 @@ public:
 
   /// @returns the value for an integer or vector of integer constant of the
   /// given type that has all its bits set to true.
-  /// @brief Get the all ones value
+  /// Get the all ones value
   static Constant *getAllOnesValue(Type* Ty);
 
   /// Return the value for an integer or pointer constant, or a vector thereof,

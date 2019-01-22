@@ -1,9 +1,8 @@
 //===- BinaryStreamRef.h - A copyable reference to a stream -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,6 +10,7 @@
 #define LLVM_SUPPORT_BINARYSTREAMREF_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/Support/BinaryStream.h"
 #include "llvm/Support/BinaryStreamError.h"
 #include "llvm/Support/Error.h"
@@ -24,12 +24,18 @@ namespace llvm {
 template <class RefType, class StreamType> class BinaryStreamRefBase {
 protected:
   BinaryStreamRefBase() = default;
+  explicit BinaryStreamRefBase(StreamType &BorrowedImpl)
+      : BorrowedImpl(&BorrowedImpl), ViewOffset(0) {
+    if (!(BorrowedImpl.getFlags() & BSF_Append))
+      Length = BorrowedImpl.getLength();
+  }
+
   BinaryStreamRefBase(std::shared_ptr<StreamType> SharedImpl, uint32_t Offset,
-                      uint32_t Length)
+                      Optional<uint32_t> Length)
       : SharedImpl(SharedImpl), BorrowedImpl(SharedImpl.get()),
         ViewOffset(Offset), Length(Length) {}
   BinaryStreamRefBase(StreamType &BorrowedImpl, uint32_t Offset,
-                      uint32_t Length)
+                      Optional<uint32_t> Length)
       : BorrowedImpl(&BorrowedImpl), ViewOffset(Offset), Length(Length) {}
   BinaryStreamRefBase(const BinaryStreamRefBase &Other) = default;
   BinaryStreamRefBase &operator=(const BinaryStreamRefBase &Other) = default;
@@ -42,28 +48,50 @@ public:
     return BorrowedImpl->getEndian();
   }
 
-  uint32_t getLength() const { return Length; }
+  uint32_t getLength() const {
+    if (Length.hasValue())
+      return *Length;
 
-  /// Return a new BinaryStreamRef with the first \p N elements removed.
+    return BorrowedImpl ? (BorrowedImpl->getLength() - ViewOffset) : 0;
+  }
+
+  /// Return a new BinaryStreamRef with the first \p N elements removed.  If
+  /// this BinaryStreamRef is length-tracking, then the resulting one will be
+  /// too.
   RefType drop_front(uint32_t N) const {
     if (!BorrowedImpl)
       return RefType();
 
-    N = std::min(N, Length);
+    N = std::min(N, getLength());
     RefType Result(static_cast<const RefType &>(*this));
+    if (N == 0)
+      return Result;
+
     Result.ViewOffset += N;
-    Result.Length -= N;
+    if (Result.Length.hasValue())
+      *Result.Length -= N;
     return Result;
   }
 
-  /// Return a new BinaryStreamRef with the first \p N elements removed.
+  /// Return a new BinaryStreamRef with the last \p N elements removed.  If
+  /// this BinaryStreamRef is length-tracking and \p N is greater than 0, then
+  /// this BinaryStreamRef will no longer length-track.
   RefType drop_back(uint32_t N) const {
     if (!BorrowedImpl)
       return RefType();
 
-    N = std::min(N, Length);
     RefType Result(static_cast<const RefType &>(*this));
-    Result.Length -= N;
+    N = std::min(N, getLength());
+
+    if (N == 0)
+      return Result;
+
+    // Since we're dropping non-zero bytes from the end, stop length-tracking
+    // by setting the length of the resulting StreamRef to an explicit value.
+    if (!Result.Length.hasValue())
+      Result.Length = getLength();
+
+    *Result.Length -= N;
     return Result;
   }
 
@@ -104,7 +132,7 @@ public:
   }
 
 protected:
-  Error checkOffset(uint32_t Offset, uint32_t DataSize) const {
+  Error checkOffsetForRead(uint32_t Offset, uint32_t DataSize) const {
     if (Offset > getLength())
       return make_error<BinaryStreamError>(stream_error_code::invalid_offset);
     if (getLength() < DataSize + Offset)
@@ -115,10 +143,10 @@ protected:
   std::shared_ptr<StreamType> SharedImpl;
   StreamType *BorrowedImpl = nullptr;
   uint32_t ViewOffset = 0;
-  uint32_t Length = 0;
+  Optional<uint32_t> Length;
 };
 
-/// \brief BinaryStreamRef is to BinaryStream what ArrayRef is to an Array.  It
+/// BinaryStreamRef is to BinaryStream what ArrayRef is to an Array.  It
 /// provides copy-semantics and read only access to a "window" of the underlying
 /// BinaryStream. Note that BinaryStreamRef is *not* a BinaryStream.  That is to
 /// say, it does not inherit and override the methods of BinaryStream.  In
@@ -130,13 +158,14 @@ class BinaryStreamRef
   friend BinaryStreamRefBase<BinaryStreamRef, BinaryStream>;
   friend class WritableBinaryStreamRef;
   BinaryStreamRef(std::shared_ptr<BinaryStream> Impl, uint32_t ViewOffset,
-                  uint32_t Length)
+                  Optional<uint32_t> Length)
       : BinaryStreamRefBase(Impl, ViewOffset, Length) {}
 
 public:
   BinaryStreamRef() = default;
   BinaryStreamRef(BinaryStream &Stream);
-  BinaryStreamRef(BinaryStream &Stream, uint32_t Offset, uint32_t Length);
+  BinaryStreamRef(BinaryStream &Stream, uint32_t Offset,
+                  Optional<uint32_t> Length);
   explicit BinaryStreamRef(ArrayRef<uint8_t> Data,
                            llvm::support::endianness Endian);
   explicit BinaryStreamRef(StringRef Data, llvm::support::endianness Endian);
@@ -195,14 +224,23 @@ class WritableBinaryStreamRef
                                  WritableBinaryStream> {
   friend BinaryStreamRefBase<WritableBinaryStreamRef, WritableBinaryStream>;
   WritableBinaryStreamRef(std::shared_ptr<WritableBinaryStream> Impl,
-                          uint32_t ViewOffset, uint32_t Length)
+                          uint32_t ViewOffset, Optional<uint32_t> Length)
       : BinaryStreamRefBase(Impl, ViewOffset, Length) {}
+
+  Error checkOffsetForWrite(uint32_t Offset, uint32_t DataSize) const {
+    if (!(BorrowedImpl->getFlags() & BSF_Append))
+      return checkOffsetForRead(Offset, DataSize);
+
+    if (Offset > getLength())
+      return make_error<BinaryStreamError>(stream_error_code::invalid_offset);
+    return Error::success();
+  }
 
 public:
   WritableBinaryStreamRef() = default;
   WritableBinaryStreamRef(WritableBinaryStream &Stream);
   WritableBinaryStreamRef(WritableBinaryStream &Stream, uint32_t Offset,
-                          uint32_t Length);
+                          Optional<uint32_t> Length);
   explicit WritableBinaryStreamRef(MutableArrayRef<uint8_t> Data,
                                    llvm::support::endianness Endian);
   WritableBinaryStreamRef(const WritableBinaryStreamRef &Other) = default;
@@ -227,7 +265,7 @@ public:
   /// Conver this WritableBinaryStreamRef to a read-only BinaryStreamRef.
   operator BinaryStreamRef() const;
 
-  /// \brief For buffered streams, commits changes to the backing store.
+  /// For buffered streams, commits changes to the backing store.
   Error commit();
 };
 

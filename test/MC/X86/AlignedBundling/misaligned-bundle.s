@@ -1,7 +1,7 @@
-# RUN: llvm-mc -filetype=obj -triple i686-pc-linux-gnu %s -o - \
+# RUN: llvm-mc -filetype=obj -triple i686-pc-linux-gnu -mcpu=pentiumpro %s -o - \
 # RUN:   | llvm-objdump -disassemble -no-show-raw-insn - \
 # RUN:   | FileCheck -check-prefix=CHECK -check-prefix=CHECK-OPT %s
-# RUN: llvm-mc -filetype=obj -triple i686-pc-linux-gnu -mc-relax-all %s -o - \
+# RUN: llvm-mc -filetype=obj -triple i686-pc-linux-gnu -mcpu=pentiumpro -mc-relax-all %s -o - \
 # RUN:   | llvm-objdump -disassemble -no-show-raw-insn - \
 # RUN:   | FileCheck -check-prefix=CHECK -check-prefix=CHECK-RELAX %s
 
@@ -12,7 +12,7 @@ foo:
         .align  16
 # CHECK:            1:  nopw %cs:(%eax,%eax)
 # CHECK-RELAX:      10: nopw %cs:(%eax,%eax)
-# CHECK-RELAX:      1f: nop
+# CHECK-RELAX:      1a: nop
 # CHECK-OPT:        10: movl $1, (%esp)
 # CHECK-RELAX:      20: movl $1, (%esp)
         movl $0x1, (%esp)     # 7 bytes

@@ -4,11 +4,11 @@
 ; RUN: opt -module-summary %p/Inputs/thinlto_archive2.ll -o %t3.o
 
 ; Generate the static library
-; RUN: llvm-ar r %t.a %t2.o %t3.o
+; RUN: llvm-ar -format=gnu r %t.a %t2.o %t3.o
 
 ; Test importing from archive library via gold, using jobs=1 to ensure
 ; output messages are not interleaved.
-; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
+; RUN: %gold -plugin %llvmshlibdir/LLVMgold%shlibext \
 ; RUN:    -m elf_x86_64 \
 ; RUN:    --plugin-opt=thinlto \
 ; RUN:    --plugin-opt=-print-imports \

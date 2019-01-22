@@ -1,9 +1,8 @@
 //===- unittest/ProfileData/SampleProfTest.cpp ------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,7 +12,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
-#include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/ProfileData/SampleProfReader.h"
 #include "llvm/ProfileData/SampleProfWriter.h"
 #include "llvm/Support/Casting.h"
@@ -21,12 +19,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
-#include <algorithm>
-#include <cstdint>
-#include <limits>
-#include <memory>
 #include <string>
-#include <system_error>
 #include <vector>
 
 using namespace llvm;
@@ -42,29 +35,33 @@ static ::testing::AssertionResult NoError(std::error_code EC) {
 namespace {
 
 struct SampleProfTest : ::testing::Test {
-  std::string Data;
   LLVMContext Context;
-  std::unique_ptr<raw_ostream> OS;
   std::unique_ptr<SampleProfileWriter> Writer;
   std::unique_ptr<SampleProfileReader> Reader;
 
-  SampleProfTest()
-      : Data(), OS(new raw_string_ostream(Data)), Writer(), Reader() {}
+  SampleProfTest() : Writer(), Reader() {}
 
-  void createWriter(SampleProfileFormat Format) {
+  void createWriter(SampleProfileFormat Format, StringRef Profile) {
+    std::error_code EC;
+    std::unique_ptr<raw_ostream> OS(
+        new raw_fd_ostream(Profile, EC, sys::fs::F_None));
     auto WriterOrErr = SampleProfileWriter::create(OS, Format);
     ASSERT_TRUE(NoError(WriterOrErr.getError()));
     Writer = std::move(WriterOrErr.get());
   }
 
-  void readProfile(std::unique_ptr<MemoryBuffer> &Profile) {
+  void readProfile(const Module &M, StringRef Profile) {
     auto ReaderOrErr = SampleProfileReader::create(Profile, Context);
     ASSERT_TRUE(NoError(ReaderOrErr.getError()));
     Reader = std::move(ReaderOrErr.get());
+    Reader->collectFuncsToUse(M);
   }
 
-  void testRoundTrip(SampleProfileFormat Format) {
-    createWriter(Format);
+  void testRoundTrip(SampleProfileFormat Format, bool Remap) {
+    SmallVector<char, 128> ProfilePath;
+    ASSERT_TRUE(NoError(llvm::sys::fs::createTemporaryFile("profile", "", ProfilePath)));
+    StringRef Profile(ProfilePath.data(), ProfilePath.size());
+    createWriter(Format, Profile);
 
     StringRef FooName("_Z3fooi");
     FunctionSamples FooSamples;
@@ -83,6 +80,17 @@ struct SampleProfTest : ::testing::Test {
     BarSamples.addTotalSamples(20301);
     BarSamples.addHeadSamples(1437);
     BarSamples.addBodySamples(1, 0, 1437);
+    // Test how reader/writer handles unmangled names.
+    StringRef MconstructName("_M_construct<char *>");
+    StringRef StringviewName("string_view<std::allocator<char> >");
+    BarSamples.addCalledTargetSamples(1, 0, MconstructName, 1000);
+    BarSamples.addCalledTargetSamples(1, 0, StringviewName, 437);
+
+    Module M("my_module", Context);
+    FunctionType *fn_type =
+        FunctionType::get(Type::getVoidTy(Context), {}, false);
+    M.getOrInsertFunction(FooName, fn_type);
+    M.getOrInsertFunction(BarName, fn_type);
 
     StringMap<FunctionSamples> Profiles;
     Profiles[FooName] = std::move(FooSamples);
@@ -94,22 +102,56 @@ struct SampleProfTest : ::testing::Test {
 
     Writer->getOutputStream().flush();
 
-    auto Profile = MemoryBuffer::getMemBufferCopy(Data);
-    readProfile(Profile);
+    readProfile(M, Profile);
 
     EC = Reader->read();
     ASSERT_TRUE(NoError(EC));
 
-    StringMap<FunctionSamples> &ReadProfiles = Reader->getProfiles();
-    ASSERT_EQ(2u, ReadProfiles.size());
+    if (Remap) {
+      auto MemBuffer = llvm::MemoryBuffer::getMemBuffer(R"(
+        # Types 'int' and 'long' are equivalent
+        type i l
+        # Function names 'foo' and 'faux' are equivalent
+        name 3foo 4faux
+      )");
+      Reader.reset(new SampleProfileReaderItaniumRemapper(
+          std::move(MemBuffer), Context, std::move(Reader)));
+      FooName = "_Z4fauxi";
+      BarName = "_Z3barl";
 
-    FunctionSamples &ReadFooSamples = ReadProfiles[FooName];
-    ASSERT_EQ(7711u, ReadFooSamples.getTotalSamples());
-    ASSERT_EQ(610u, ReadFooSamples.getHeadSamples());
+      EC = Reader->read();
+      ASSERT_TRUE(NoError(EC));
+    }
 
-    FunctionSamples &ReadBarSamples = ReadProfiles[BarName];
-    ASSERT_EQ(20301u, ReadBarSamples.getTotalSamples());
-    ASSERT_EQ(1437u, ReadBarSamples.getHeadSamples());
+    ASSERT_EQ(2u, Reader->getProfiles().size());
+
+    FunctionSamples *ReadFooSamples = Reader->getSamplesFor(FooName);
+    ASSERT_TRUE(ReadFooSamples != nullptr);
+    if (Format != SampleProfileFormat::SPF_Compact_Binary) {
+      ASSERT_EQ("_Z3fooi", ReadFooSamples->getName());
+    }
+    ASSERT_EQ(7711u, ReadFooSamples->getTotalSamples());
+    ASSERT_EQ(610u, ReadFooSamples->getHeadSamples());
+
+    FunctionSamples *ReadBarSamples = Reader->getSamplesFor(BarName);
+    ASSERT_TRUE(ReadBarSamples != nullptr);
+    if (Format != SampleProfileFormat::SPF_Compact_Binary) {
+      ASSERT_EQ("_Z3bari", ReadBarSamples->getName());
+    }
+    ASSERT_EQ(20301u, ReadBarSamples->getTotalSamples());
+    ASSERT_EQ(1437u, ReadBarSamples->getHeadSamples());
+    ErrorOr<SampleRecord::CallTargetMap> CTMap =
+        ReadBarSamples->findCallTargetMapAt(1, 0);
+    ASSERT_FALSE(CTMap.getError());
+
+    std::string MconstructGUID;
+    StringRef MconstructRep =
+        getRepInFormat(MconstructName, Format, MconstructGUID);
+    std::string StringviewGUID;
+    StringRef StringviewRep =
+        getRepInFormat(StringviewName, Format, StringviewGUID);
+    ASSERT_EQ(1000u, CTMap.get()[MconstructRep]);
+    ASSERT_EQ(437u, CTMap.get()[StringviewRep]);
 
     auto VerifySummary = [](ProfileSummary &Summary) mutable {
       ASSERT_EQ(ProfileSummary::PSK_Sample, Summary.getKind());
@@ -149,7 +191,6 @@ struct SampleProfTest : ::testing::Test {
     delete PS;
 
     // Test that summary can be attached to and read back from module.
-    Module M("my_module", Context);
     M.setProfileSummary(MD);
     MD = M.getProfileSummary();
     ASSERT_TRUE(MD);
@@ -161,11 +202,23 @@ struct SampleProfTest : ::testing::Test {
 };
 
 TEST_F(SampleProfTest, roundtrip_text_profile) {
-  testRoundTrip(SampleProfileFormat::SPF_Text);
+  testRoundTrip(SampleProfileFormat::SPF_Text, false);
 }
 
-TEST_F(SampleProfTest, roundtrip_binary_profile) {
-  testRoundTrip(SampleProfileFormat::SPF_Binary);
+TEST_F(SampleProfTest, roundtrip_raw_binary_profile) {
+  testRoundTrip(SampleProfileFormat::SPF_Binary, false);
+}
+
+TEST_F(SampleProfTest, roundtrip_compact_binary_profile) {
+  testRoundTrip(SampleProfileFormat::SPF_Compact_Binary, false);
+}
+
+TEST_F(SampleProfTest, remap_text_profile) {
+  testRoundTrip(SampleProfileFormat::SPF_Text, true);
+}
+
+TEST_F(SampleProfTest, remap_raw_binary_profile) {
+  testRoundTrip(SampleProfileFormat::SPF_Binary, true);
 }
 
 TEST_F(SampleProfTest, sample_overflow_saturation) {

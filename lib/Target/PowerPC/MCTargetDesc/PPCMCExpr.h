@@ -1,9 +1,8 @@
 //===-- PPCMCExpr.h - PPC specific MC expression classes --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -23,6 +22,8 @@ public:
     VK_PPC_LO,
     VK_PPC_HI,
     VK_PPC_HA,
+    VK_PPC_HIGH,
+    VK_PPC_HIGHA,
     VK_PPC_HIGHER,
     VK_PPC_HIGHERA,
     VK_PPC_HIGHEST,

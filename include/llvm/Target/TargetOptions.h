@@ -1,9 +1,8 @@
 //===-- llvm/Target/TargetOptions.h - Target Options ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -96,6 +95,14 @@ namespace llvm {
     SCE       // Tune debug info for SCE targets (e.g. PS4).
   };
 
+  /// Enable abort calls when global instruction selection fails to lower/select
+  /// an instruction.
+  enum class GlobalISelAbortMode {
+    Disable,        // Disable the abort.
+    Enable,         // Enable the abort.
+    DisableWithDiag // Disable the abort but emit a diagnostic on failure.
+  };
+
   class TargetOptions {
   public:
     TargetOptions()
@@ -104,11 +111,14 @@ namespace llvm {
           NoSignedZerosFPMath(false),
           HonorSignDependentRoundingFPMathOption(false), NoZerosInBSS(false),
           GuaranteedTailCallOpt(false), StackSymbolOrdering(true),
-          EnableFastISel(false), UseInitArray(false),
+          EnableFastISel(false), EnableGlobalISel(false), UseInitArray(false),
           DisableIntegratedAS(false), RelaxELFRelocations(false),
           FunctionSections(false), DataSections(false),
-          UniqueSectionNames(true), TrapUnreachable(false), EmulatedTLS(false),
-          EnableIPRA(false) {}
+          UniqueSectionNames(true), TrapUnreachable(false),
+          NoTrapAfterNoreturn(false), EmulatedTLS(false),
+          ExplicitEmulatedTLS(false), EnableIPRA(false),
+          EmitStackSizeSection(false), EnableMachineOutliner(false),
+          SupportsDefaultOutlining(false), EmitAddrsig(false) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
     /// option is specified on the command line, and should enable debugging
@@ -186,6 +196,13 @@ namespace llvm {
     /// compile time.
     unsigned EnableFastISel : 1;
 
+    /// EnableGlobalISel - This flag enables global instruction selection.
+    unsigned EnableGlobalISel : 1;
+
+    /// EnableGlobalISelAbort - Control abort behaviour when global instruction
+    /// selection fails to lower/select an instruction.
+    GlobalISelAbortMode GlobalISelAbort = GlobalISelAbortMode::Enable;
+
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.
     unsigned UseInitArray : 1;
@@ -209,12 +226,31 @@ namespace llvm {
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.
     unsigned TrapUnreachable : 1;
 
+    /// Do not emit a trap instruction for 'unreachable' IR instructions behind
+    /// noreturn calls, even if TrapUnreachable is true.
+    unsigned NoTrapAfterNoreturn : 1;
+
     /// EmulatedTLS - This flag enables emulated TLS model, using emutls
     /// function in the runtime library..
     unsigned EmulatedTLS : 1;
 
+    /// Whether -emulated-tls or -no-emulated-tls is set.
+    unsigned ExplicitEmulatedTLS : 1;
+
     /// This flag enables InterProcedural Register Allocation (IPRA).
     unsigned EnableIPRA : 1;
+
+    /// Emit section containing metadata on function stack sizes.
+    unsigned EmitStackSizeSection : 1;
+
+    /// Enables the MachineOutliner pass.
+    unsigned EnableMachineOutliner : 1;
+
+    /// Set if the target supports default outlining behaviour.
+    unsigned SupportsDefaultOutlining : 1;
+
+    /// Emit address-significance table.
+    unsigned EmitAddrsig : 1;
 
     /// FloatABIType - This setting is set by -float-abi=xxx option is specfied
     /// on the command line. This setting may either be Default, Soft, or Hard.

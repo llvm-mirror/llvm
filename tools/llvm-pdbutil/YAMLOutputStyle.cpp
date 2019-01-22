@@ -1,9 +1,8 @@
 //===- YAMLOutputStyle.cpp ------------------------------------ *- C++ --*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,19 +12,18 @@
 #include "llvm-pdbutil.h"
 
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
-#include "llvm/DebugInfo/CodeView/DebugInlineeLinesSubsection.h"
-#include "llvm/DebugInfo/CodeView/DebugLinesSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugUnknownSubsection.h"
-#include "llvm/DebugInfo/CodeView/Line.h"
 #include "llvm/DebugInfo/CodeView/StringsAndChecksums.h"
 #include "llvm/DebugInfo/MSF/MappedBlockStream.h"
 #include "llvm/DebugInfo/PDB/Native/DbiStream.h"
+#include "llvm/DebugInfo/PDB/Native/GlobalsStream.h"
 #include "llvm/DebugInfo/PDB/Native/InfoStream.h"
 #include "llvm/DebugInfo/PDB/Native/ModuleDebugStream.h"
 #include "llvm/DebugInfo/PDB/Native/PDBFile.h"
+#include "llvm/DebugInfo/PDB/Native/PublicsStream.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
-#include "llvm/DebugInfo/PDB/Native/RawError.h"
+#include "llvm/DebugInfo/PDB/Native/SymbolStream.h"
 #include "llvm/DebugInfo/PDB/Native/TpiStream.h"
 
 using namespace llvm;
@@ -70,6 +68,9 @@ Error YAMLOutputStyle::dump() {
     return EC;
 
   if (auto EC = dumpIpiStream())
+    return EC;
+
+  if (auto EC = dumpPublics())
     return EC;
 
   flush();
@@ -193,6 +194,9 @@ static opts::ModuleSubsection convertSubsectionKind(DebugSubsectionKind K) {
 
 Error YAMLOutputStyle::dumpDbiStream() {
   if (!opts::pdb2yaml::DbiStream)
+    return Error::success();
+
+  if (!File.hasPDBDbiStream())
     return Error::success();
 
   auto DbiS = File.getPDBDbiStream();
@@ -322,6 +326,42 @@ Error YAMLOutputStyle::dumpIpiStream() {
       return ExpectedRecord.takeError();
 
     Obj.IpiStream->Records.push_back(*ExpectedRecord);
+  }
+
+  return Error::success();
+}
+
+Error YAMLOutputStyle::dumpPublics() {
+  if (!opts::pdb2yaml::PublicsStream)
+    return Error::success();
+
+  Obj.PublicsStream.emplace();
+  auto ExpectedPublics = File.getPDBPublicsStream();
+  if (!ExpectedPublics) {
+    llvm::consumeError(ExpectedPublics.takeError());
+    return Error::success();
+  }
+
+  PublicsStream &Publics = *ExpectedPublics;
+  const GSIHashTable &PublicsTable = Publics.getPublicsTable();
+
+  auto ExpectedSyms = File.getPDBSymbolStream();
+  if (!ExpectedSyms) {
+    llvm::consumeError(ExpectedSyms.takeError());
+    return Error::success();
+  }
+
+  BinaryStreamRef SymStream =
+      ExpectedSyms->getSymbolArray().getUnderlyingStream();
+  for (uint32_t PubSymOff : PublicsTable) {
+    Expected<CVSymbol> Sym = readSymbolFromStream(SymStream, PubSymOff);
+    if (!Sym)
+      return Sym.takeError();
+    auto ES = CodeViewYAML::SymbolRecord::fromCodeViewSymbol(*Sym);
+    if (!ES)
+      return ES.takeError();
+
+    Obj.PublicsStream->PubSyms.push_back(*ES);
   }
 
   return Error::success();

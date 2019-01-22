@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   AllTargetsDescs
   AllTargetsDisassemblers
   AllTargetsInfos
+  BinaryFormat
   CodeGen
   DebugInfoDWARF
   DebugInfoPDB
@@ -23,5 +24,9 @@ add_llvm_tool(llvm-objdump
   )
 
 if(HAVE_LIBXAR)
-  target_link_libraries(llvm-objdump ${XAR_LIB})
+  target_link_libraries(llvm-objdump PRIVATE ${XAR_LIB})
+endif()
+
+if(LLVM_INSTALL_BINUTILS_SYMLINKS)
+  add_llvm_tool_symlink(objdump llvm-objdump)
 endif()

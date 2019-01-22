@@ -1,9 +1,8 @@
 //===- HexagonAsmPrinter.h - Print machine code to an Hexagon .s file -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,7 +17,8 @@
 #include "HexagonSubtarget.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include <memory>
+#include "llvm/MC/MCStreamer.h"
+#include <utility>
 
 namespace llvm {
 
@@ -32,7 +32,8 @@ class TargetMachine;
 
   public:
     explicit HexagonAsmPrinter(TargetMachine &TM,
-                               std::unique_ptr<MCStreamer> Streamer);
+                               std::unique_ptr<MCStreamer> Streamer)
+      : AsmPrinter(TM, std::move(Streamer)) {}
 
     bool runOnMachineFunction(MachineFunction &Fn) override {
       Subtarget = &Fn.getSubtarget<HexagonSubtarget>();
@@ -43,13 +44,11 @@ class TargetMachine;
       return "Hexagon Assembly Printer";
     }
 
-    bool isBlockOnlyReachableByFallthrough(
-                                   const MachineBasicBlock *MBB) const override;
+    bool isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB)
+          const override;
 
     void EmitInstruction(const MachineInstr *MI) override;
-
-    void HexagonProcessInstruction(MCInst &Inst,
-                                   const MachineInstr &MBB);
+    void HexagonProcessInstruction(MCInst &Inst, const MachineInstr &MBB);
 
     void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &O);
     bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -58,8 +57,6 @@ class TargetMachine;
     bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                unsigned AsmVariant, const char *ExtraCode,
                                raw_ostream &OS) override;
-
-    static const char *getRegisterName(unsigned RegNo);
   };
 
 } // end namespace llvm

@@ -1,9 +1,9 @@
-; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -disable-wasm-explicit-locals | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-disable-explicit-locals -wasm-keep-registers | FileCheck %s
 
 ; Test that globals assemble as expected.
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; CHECK-NOT: llvm.used
 ; CHECK-NOT: llvm.metadata
@@ -19,13 +19,12 @@ define i32 @foo() {
 }
 
 ; CHECK-LABEL: call_memcpy:
-; CHECK-NEXT: .param          i32, i32, i32{{$}}
-; CHECK-NEXT: .result         i32{{$}}
+; CHECK-NEXT: .functype call_memcpy (i32, i32, i32) -> (i32){{$}}
 ; CHECK-NEXT: i32.call        $push0=, memcpy@FUNCTION, $0, $1, $2{{$}}
 ; CHECK-NEXT: return          $pop0{{$}}
-declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture readonly, i32, i32, i1)
+declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture readonly, i32, i1)
 define i8* @call_memcpy(i8* %p, i8* nocapture readonly %q, i32 %n) {
-  tail call void @llvm.memcpy.p0i8.p0i8.i32(i8* %p, i8* %q, i32 %n, i32 1, i1 false)
+  tail call void @llvm.memcpy.p0i8.p0i8.i32(i8* %p, i8* %q, i32 %n, i1 false)
   ret i8* %p
 }
 
@@ -205,7 +204,7 @@ define i8* @call_memcpy(i8* %p, i8* nocapture readonly %q, i32 %n) {
 ; CHECK-NEXT: .skip       8
 ; CHECK-NEXT: .size       array, 8
 ; CHECK: .type       pointer_to_array,@object
-; CHECK-NEXT: .section    .data.rel.ro.pointer_to_array,
+; CHECK-NEXT: .section    .rodata.pointer_to_array,
 ; CHECK-NEXT: .globl      pointer_to_array
 ; CHECK-NEXT: .p2align      2
 ; CHECK-NEXT: pointer_to_array:
@@ -213,3 +212,10 @@ define i8* @call_memcpy(i8* %p, i8* nocapture readonly %q, i32 %n) {
 ; CHECK-NEXT: .size       pointer_to_array, 4
 @array = internal constant [8 x i8] zeroinitializer, align 1
 @pointer_to_array = constant i8* getelementptr inbounds ([8 x i8], [8 x i8]* @array, i32 0, i32 4), align 4
+
+; Handle external objects with opaque type.
+%struct.ASTRUCT = type opaque
+@g_struct = external global %struct.ASTRUCT, align 1
+define i32 @address_of_opaque()  {
+  ret i32 ptrtoint (%struct.ASTRUCT* @g_struct to i32)
+}

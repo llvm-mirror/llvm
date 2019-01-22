@@ -1,9 +1,8 @@
 //===- JITEventListener.h - Exposes events from JIT compilation -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,9 +14,11 @@
 #ifndef LLVM_EXECUTIONENGINE_JITEVENTLISTENER_H
 #define LLVM_EXECUTIONENGINE_JITEVENTLISTENER_H
 
+#include "llvm-c/ExecutionEngine.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/Support/CBindingWrapping.h"
 #include <cstdint>
 #include <vector>
 
@@ -33,25 +34,6 @@ class ObjectFile;
 
 } // end namespace object
 
-/// JITEvent_EmittedFunctionDetails - Helper struct for containing information
-/// about a generated machine code function.
-struct JITEvent_EmittedFunctionDetails {
-  struct LineStart {
-    /// The address at which the current line changes.
-    uintptr_t Address;
-
-    /// The new location information.  These can be translated to DebugLocTuples
-    /// using MF->getDebugLocTuple().
-    DebugLoc Loc;
-  };
-
-  /// The machine function the struct contains information for.
-  const MachineFunction *MF;
-
-  /// The list of line boundary information, sorted by address.
-  std::vector<LineStart> LineStarts;
-};
-
 /// JITEventListener - Abstract interface for use by the JIT to notify clients
 /// about significant events during compilation. For example, to notify
 /// profilers and debuggers that need to know where functions have been emitted.
@@ -59,26 +41,26 @@ struct JITEvent_EmittedFunctionDetails {
 /// The default implementation of each method does nothing.
 class JITEventListener {
 public:
-  using EmittedFunctionDetails = JITEvent_EmittedFunctionDetails;
+  using ObjectKey = uint64_t;
 
-public:
   JITEventListener() = default;
   virtual ~JITEventListener() = default;
 
-  /// NotifyObjectEmitted - Called after an object has been successfully
-  /// emitted to memory.  NotifyFunctionEmitted will not be called for
+  /// notifyObjectLoaded - Called after an object has had its sections allocated
+  /// and addresses assigned to all symbols. Note: Section memory will not have
+  /// been relocated yet. notifyFunctionLoaded will not be called for
   /// individual functions in the object.
   ///
   /// ELF-specific information
   /// The ObjectImage contains the generated object image
   /// with section headers updated to reflect the address at which sections
   /// were loaded and with relocations performed in-place on debug sections.
-  virtual void NotifyObjectEmitted(const object::ObjectFile &Obj,
-                                   const RuntimeDyld::LoadedObjectInfo &L) {}
+  virtual void notifyObjectLoaded(ObjectKey K, const object::ObjectFile &Obj,
+                                  const RuntimeDyld::LoadedObjectInfo &L) {}
 
-  /// NotifyFreeingObject - Called just before the memory associated with
+  /// notifyFreeingObject - Called just before the memory associated with
   /// a previously emitted object is released.
-  virtual void NotifyFreeingObject(const object::ObjectFile &Obj) {}
+  virtual void notifyFreeingObject(ObjectKey K) {}
 
   // Get a pointe to the GDB debugger registration listener.
   static JITEventListener *createGDBRegistrationListener();
@@ -115,9 +97,20 @@ public:
   }
 #endif // USE_OPROFILE
 
+#if LLVM_USE_PERF
+  static JITEventListener *createPerfJITEventListener();
+#else
+  static JITEventListener *createPerfJITEventListener()
+  {
+    return nullptr;
+  }
+#endif // USE_PERF
+
 private:
   virtual void anchor();
 };
+
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(JITEventListener, LLVMJITEventListenerRef)
 
 } // end namespace llvm
 

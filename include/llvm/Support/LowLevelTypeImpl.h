@@ -1,9 +1,8 @@
 //== llvm/Support/LowLevelTypeImpl.h --------------------------- -*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -28,7 +27,7 @@
 #define LLVM_SUPPORT_LOWLEVELTYPEIMPL_H
 
 #include "llvm/ADT/DenseMapInfo.h"
-#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/Support/MachineValueType.h"
 #include <cassert>
 
 namespace llvm {
@@ -137,51 +136,6 @@ public:
       return scalar(getScalarSizeInBits());
   }
 
-  /// Get a low-level type with half the size of the original, by halving the
-  /// size of the scalar type involved. For example `s32` will become `s16`,
-  /// `<2 x s32>` will become `<2 x s16>`.
-  LLT halfScalarSize() const {
-    assert(!IsPointer && getScalarSizeInBits() > 1 &&
-           getScalarSizeInBits() % 2 == 0 && "cannot half size of this type");
-    return LLT{/*isPointer=*/false, IsVector ? true : false,
-               IsVector ? getNumElements() : (uint16_t)0,
-               getScalarSizeInBits() / 2, /*AddressSpace=*/0};
-  }
-
-  /// Get a low-level type with twice the size of the original, by doubling the
-  /// size of the scalar type involved. For example `s32` will become `s64`,
-  /// `<2 x s32>` will become `<2 x s64>`.
-  LLT doubleScalarSize() const {
-    assert(!IsPointer && "cannot change size of this type");
-    return LLT{/*isPointer=*/false, IsVector ? true : false,
-               IsVector ? getNumElements() : (uint16_t)0,
-               getScalarSizeInBits() * 2, /*AddressSpace=*/0};
-  }
-
-  /// Get a low-level type with half the size of the original, by halving the
-  /// number of vector elements of the scalar type involved. The source must be
-  /// a vector type with an even number of elements. For example `<4 x s32>`
-  /// will become `<2 x s32>`, `<2 x s32>` will become `s32`.
-  LLT halfElements() const {
-    assert(isVector() && getNumElements() % 2 == 0 && "cannot half odd vector");
-    if (getNumElements() == 2)
-      return scalar(getScalarSizeInBits());
-
-    return LLT{/*isPointer=*/false, /*isVector=*/true,
-               (uint16_t)(getNumElements() / 2), getScalarSizeInBits(),
-               /*AddressSpace=*/0};
-  }
-
-  /// Get a low-level type with twice the size of the original, by doubling the
-  /// number of vector elements of the scalar type involved. The source must be
-  /// a vector type. For example `<2 x s32>` will become `<4 x s32>`. Doubling
-  /// the number of elements in sN produces <2 x sN>.
-  LLT doubleElements() const {
-    return LLT{IsPointer ? true : false, /*isVector=*/true,
-               (uint16_t)(getNumElements() * 2), getScalarSizeInBits(),
-               IsPointer ? getAddressSpace() : 0};
-  }
-
   void print(raw_ostream &OS) const;
 
   bool operator==(const LLT &RHS) const {
@@ -192,6 +146,7 @@ public:
   bool operator!=(const LLT &RHS) const { return !(*this == RHS); }
 
   friend struct DenseMapInfo<LLT>;
+  friend class GISelInstProfileBuilder;
 
 private:
   /// LLT is packed into 64 bits as follows:
@@ -276,6 +231,11 @@ private:
             maskAndShift(AddressSpace, PointerVectorAddressSpaceFieldInfo);
     }
   }
+
+  uint64_t getUniqueRAWLLTData() const {
+    return ((uint64_t)RawData) << 2 | ((uint64_t)IsPointer) << 1 |
+           ((uint64_t)IsVector);
+  }
 };
 
 inline raw_ostream& operator<<(raw_ostream &OS, const LLT &Ty) {
@@ -295,8 +255,7 @@ template<> struct DenseMapInfo<LLT> {
     return Invalid;
   }
   static inline unsigned getHashValue(const LLT &Ty) {
-    uint64_t Val = ((uint64_t)Ty.RawData) << 2 | ((uint64_t)Ty.IsPointer) << 1 |
-                   ((uint64_t)Ty.IsVector);
+    uint64_t Val = Ty.getUniqueRAWLLTData();
     return DenseMapInfo<uint64_t>::getHashValue(Val);
   }
   static bool isEqual(const LLT &LHS, const LLT &RHS) {

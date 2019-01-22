@@ -1,9 +1,8 @@
 //===-- CodeGen/MachineJumpTableInfo.h - Abstract Jump Tables  --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,6 +19,7 @@
 #ifndef LLVM_CODEGEN_MACHINEJUMPTABLEINFO_H
 #define LLVM_CODEGEN_MACHINEJUMPTABLEINFO_H
 
+#include "llvm/Support/Printable.h"
 #include <cassert>
 #include <vector>
 
@@ -124,6 +124,15 @@ public:
   ///
   void dump() const;
 };
+
+
+/// Prints a jump table entry reference.
+///
+/// The format is:
+///   %jump-table.5       - a jump table entry with index == 5.
+///
+/// Usage: OS << printJumpTableEntryReference(Idx) << '\n';
+Printable printJumpTableEntryReference(unsigned Idx);
 
 } // End llvm namespace
 

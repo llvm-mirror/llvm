@@ -1,13 +1,14 @@
 //===- IteratorTest.cpp - Unit tests for iterator utilities ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/ilist.h"
 #include "llvm/ADT/iterator.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "gtest/gtest.h"
@@ -33,6 +34,34 @@ static_assert(std::is_same<typename AdaptedIter::pointer, Shadow<2>>::value,
               "");
 static_assert(std::is_same<typename AdaptedIter::reference, Shadow<3>>::value,
               "");
+
+// Ensure that pointe{e,r}_iterator adaptors correctly forward the category of
+// the underlying iterator.
+
+using RandomAccessIter = SmallVectorImpl<int*>::iterator;
+using BidiIter = ilist<int*>::iterator;
+
+template<class T>
+using pointee_iterator_defaulted = pointee_iterator<T>;
+template<class T>
+using pointer_iterator_defaulted = pointer_iterator<T>;
+
+// Ensures that an iterator and its adaptation have the same iterator_category.
+template<template<typename> class A, typename It>
+using IsAdaptedIterCategorySame =
+  std::is_same<typename std::iterator_traits<It>::iterator_category,
+               typename std::iterator_traits<A<It>>::iterator_category>;
+
+// pointeE_iterator
+static_assert(IsAdaptedIterCategorySame<pointee_iterator_defaulted,
+                                        RandomAccessIter>::value, "");
+static_assert(IsAdaptedIterCategorySame<pointee_iterator_defaulted,
+                                        BidiIter>::value, "");
+// pointeR_iterator
+static_assert(IsAdaptedIterCategorySame<pointer_iterator_defaulted,
+                                        RandomAccessIter>::value, "");
+static_assert(IsAdaptedIterCategorySame<pointer_iterator_defaulted,
+                                        BidiIter>::value, "");
 
 TEST(PointeeIteratorTest, Basic) {
   int arr[4] = {1, 2, 3, 4};
@@ -127,6 +156,20 @@ TEST(PointeeIteratorTest, Range) {
     EXPECT_EQ(A[I++], II);
 }
 
+TEST(PointeeIteratorTest, PointeeType) {
+  struct S {
+    int X;
+    bool operator==(const S &RHS) const { return X == RHS.X; };
+  };
+  S A[] = {S{0}, S{1}};
+  SmallVector<S *, 2> V{&A[0], &A[1]};
+
+  pointee_iterator<SmallVectorImpl<S *>::const_iterator, const S> I = V.begin();
+  for (int j = 0; j < 2; ++j, ++I) {
+    EXPECT_EQ(*V[j], *I);
+  }
+}
+
 TEST(FilterIteratorTest, Lambda) {
   auto IsOdd = [](int N) { return N % 2 == 1; };
   int A[] = {0, 1, 2, 3, 4, 5, 6};
@@ -196,6 +239,33 @@ TEST(FilterIteratorTest, InputIterator) {
   EXPECT_EQ((SmallVector<int, 3>{1, 3, 5}), Actual);
 }
 
+TEST(FilterIteratorTest, ReverseFilterRange) {
+  auto IsOdd = [](int N) { return N % 2 == 1; };
+  int A[] = {0, 1, 2, 3, 4, 5, 6};
+
+  // Check basic reversal.
+  auto Range = reverse(make_filter_range(A, IsOdd));
+  SmallVector<int, 3> Actual(Range.begin(), Range.end());
+  EXPECT_EQ((SmallVector<int, 3>{5, 3, 1}), Actual);
+
+  // Check that the reverse of the reverse is the original.
+  auto Range2 = reverse(reverse(make_filter_range(A, IsOdd)));
+  SmallVector<int, 3> Actual2(Range2.begin(), Range2.end());
+  EXPECT_EQ((SmallVector<int, 3>{1, 3, 5}), Actual2);
+
+  // Check empty ranges.
+  auto Range3 = reverse(make_filter_range(ArrayRef<int>(), IsOdd));
+  SmallVector<int, 0> Actual3(Range3.begin(), Range3.end());
+  EXPECT_EQ((SmallVector<int, 0>{}), Actual3);
+
+  // Check that we don't skip the first element, provided it isn't filtered
+  // away.
+  auto IsEven = [](int N) { return N % 2 == 0; };
+  auto Range4 = reverse(make_filter_range(A, IsEven));
+  SmallVector<int, 4> Actual4(Range4.begin(), Range4.end());
+  EXPECT_EQ((SmallVector<int, 4>{6, 4, 2, 0}), Actual4);
+}
+
 TEST(PointerIterator, Basic) {
   int A[] = {1, 2, 3, 4};
   pointer_iterator<int *> Begin(std::begin(A)), End(std::end(A));
@@ -255,6 +325,40 @@ TEST(ZipIteratorTest, ZipFirstBasic) {
   }
 
   EXPECT_EQ(iters, 4u);
+}
+
+TEST(ZipIteratorTest, ZipLongestBasic) {
+  using namespace std;
+  const vector<unsigned> pi{3, 1, 4, 1, 5, 9};
+  const vector<StringRef> e{"2", "7", "1", "8"};
+
+  {
+    // Check left range longer than right.
+    const vector<tuple<Optional<unsigned>, Optional<StringRef>>> expected{
+        make_tuple(3, StringRef("2")), make_tuple(1, StringRef("7")),
+        make_tuple(4, StringRef("1")), make_tuple(1, StringRef("8")),
+        make_tuple(5, None),           make_tuple(9, None)};
+    size_t iters = 0;
+    for (auto tup : zip_longest(pi, e)) {
+      EXPECT_EQ(tup, expected[iters]);
+      iters += 1;
+    }
+    EXPECT_EQ(iters, expected.size());
+  }
+
+  {
+    // Check right range longer than left.
+    const vector<tuple<Optional<StringRef>, Optional<unsigned>>> expected{
+        make_tuple(StringRef("2"), 3), make_tuple(StringRef("7"), 1),
+        make_tuple(StringRef("1"), 4), make_tuple(StringRef("8"), 1),
+        make_tuple(None, 5),           make_tuple(None, 9)};
+    size_t iters = 0;
+    for (auto tup : zip_longest(e, pi)) {
+      EXPECT_EQ(tup, expected[iters]);
+      iters += 1;
+    }
+    EXPECT_EQ(iters, expected.size());
+  }
 }
 
 TEST(ZipIteratorTest, Mutability) {
@@ -335,6 +439,27 @@ TEST(ZipIteratorTest, Reverse) {
 
   // Ensure that in-place mutation works.
   EXPECT_TRUE(all_of(ascending, [](unsigned n) { return (n & 0x01) == 0; }));
+}
+
+TEST(RangeTest, Distance) {
+  std::vector<int> v1;
+  std::vector<int> v2{1, 2, 3};
+
+  EXPECT_EQ(std::distance(v1.begin(), v1.end()), size(v1));
+  EXPECT_EQ(std::distance(v2.begin(), v2.end()), size(v2));
+}
+
+TEST(IteratorRangeTest, DropBegin) {
+  SmallVector<int, 5> vec{0, 1, 2, 3, 4};
+
+  for (int n = 0; n < 5; ++n) {
+    int i = n;
+    for (auto &v : drop_begin(vec, n)) {
+      EXPECT_EQ(v, i);
+      i += 1;
+    }
+    EXPECT_EQ(i, 5);
+  }
 }
 
 } // anonymous namespace

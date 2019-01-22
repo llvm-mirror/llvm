@@ -1,9 +1,8 @@
 //===-- XCoreAsmPrinter.cpp - XCore LLVM assembly writer ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -146,7 +145,7 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
   }
 
   EmitAlignment(Align > 2 ? Align : 2, GV);
-  
+
   if (GV->isThreadLocal()) {
     report_fatal_error("TLS is not supported by this target!");
   }
@@ -162,7 +161,7 @@ void XCoreAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
   // are padded to 32 bits.
   if (Size < 4)
     OutStreamer->EmitZeros(4 - Size);
-  
+
   // Mark the end of the global
   getTargetStreamer().emitCCBottomData(GVSym->getName());
 }
@@ -295,6 +294,6 @@ void XCoreAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 }
 
 // Force static initialization.
-extern "C" void LLVMInitializeXCoreAsmPrinter() { 
+extern "C" void LLVMInitializeXCoreAsmPrinter() {
   RegisterAsmPrinter<XCoreAsmPrinter> X(getTheXCoreTarget());
 }

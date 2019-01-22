@@ -1,9 +1,8 @@
 //===- RegisterBankEmitter.cpp - Generate a Register Bank Desc. -*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -291,12 +290,27 @@ void RegisterBankEmitter::run(raw_ostream &OS) {
       visitRegisterBankClasses(
           RegisterClassHierarchy, RC, "explicit",
           [&Bank](const CodeGenRegisterClass *RC, StringRef Kind) {
-            DEBUG(dbgs() << "Added " << RC->getName() << "(" << Kind << ")\n");
+            LLVM_DEBUG(dbgs()
+                       << "Added " << RC->getName() << "(" << Kind << ")\n");
             Bank.addRegisterClass(RC);
-          }, VisitedRCs);
+          },
+          VisitedRCs);
     }
 
     Banks.push_back(Bank);
+  }
+
+  // Warn about ambiguous MIR caused by register bank/class name clashes.
+  for (const auto &Class : Records.getAllDerivedDefinitions("RegisterClass")) {
+    for (const auto &Bank : Banks) {
+      if (Bank.getName().lower() == Class->getName().lower()) {
+        PrintWarning(Bank.getDef().getLoc(), "Register bank names should be "
+                                             "distinct from register classes "
+                                             "to avoid ambiguous MIR");
+        PrintNote(Bank.getDef().getLoc(), "RegisterBank was declared here");
+        PrintNote(Class->getLoc(), "RegisterClass was declared here");
+      }
+    }
   }
 
   emitSourceFileHeader("Register Bank Source Fragments", OS);

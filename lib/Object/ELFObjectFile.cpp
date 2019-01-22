@@ -1,9 +1,8 @@
 //===- ELFObjectFile.cpp - ELF object file implementation -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,6 +13,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Object/ELFTypes.h"
@@ -23,6 +23,7 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/TargetRegistry.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -76,8 +77,7 @@ ObjectFile::createELFObjectFile(MemoryBufferRef Obj) {
 
 SubtargetFeatures ELFObjectFileBase::getMIPSFeatures() const {
   SubtargetFeatures Features;
-  unsigned PlatformFlags;
-  getPlatformFlags(PlatformFlags);
+  unsigned PlatformFlags = getPlatformFlags();
 
   switch (PlatformFlags & ELF::EF_MIPS_ARCH) {
   case ELF::EF_MIPS_ARCH_1:
@@ -239,12 +239,25 @@ SubtargetFeatures ELFObjectFileBase::getARMFeatures() const {
   return Features;
 }
 
+SubtargetFeatures ELFObjectFileBase::getRISCVFeatures() const {
+  SubtargetFeatures Features;
+  unsigned PlatformFlags = getPlatformFlags();
+
+  if (PlatformFlags & ELF::EF_RISCV_RVC) {
+    Features.AddFeature("c");
+  }
+
+  return Features;
+}
+
 SubtargetFeatures ELFObjectFileBase::getFeatures() const {
   switch (getEMachine()) {
   case ELF::EM_MIPS:
     return getMIPSFeatures();
   case ELF::EM_ARM:
     return getARMFeatures();
+  case ELF::EM_RISCV:
+    return getRISCVFeatures();
   default:
     return SubtargetFeatures();
   }
@@ -314,4 +327,69 @@ void ELFObjectFileBase::setARMSubArch(Triple &TheTriple) const {
     Triple += "eb";
 
   TheTriple.setArchName(Triple);
+}
+
+std::vector<std::pair<DataRefImpl, uint64_t>>
+ELFObjectFileBase::getPltAddresses() const {
+  std::string Err;
+  const auto Triple = makeTriple();
+  const auto *T = TargetRegistry::lookupTarget(Triple.str(), Err);
+  if (!T)
+    return {};
+  uint64_t JumpSlotReloc = 0;
+  switch (Triple.getArch()) {
+    case Triple::x86:
+      JumpSlotReloc = ELF::R_386_JUMP_SLOT;
+      break;
+    case Triple::x86_64:
+      JumpSlotReloc = ELF::R_X86_64_JUMP_SLOT;
+      break;
+    case Triple::aarch64:
+      JumpSlotReloc = ELF::R_AARCH64_JUMP_SLOT;
+      break;
+    default:
+      return {};
+  }
+  std::unique_ptr<const MCInstrInfo> MII(T->createMCInstrInfo());
+  std::unique_ptr<const MCInstrAnalysis> MIA(
+      T->createMCInstrAnalysis(MII.get()));
+  if (!MIA)
+    return {};
+  Optional<SectionRef> Plt = None, RelaPlt = None, GotPlt = None;
+  for (const SectionRef &Section : sections()) {
+    StringRef Name;
+    if (Section.getName(Name))
+      continue;
+    if (Name == ".plt")
+      Plt = Section;
+    else if (Name == ".rela.plt" || Name == ".rel.plt")
+      RelaPlt = Section;
+    else if (Name == ".got.plt")
+      GotPlt = Section;
+  }
+  if (!Plt || !RelaPlt || !GotPlt)
+    return {};
+  StringRef PltContents;
+  if (Plt->getContents(PltContents))
+    return {};
+  ArrayRef<uint8_t> PltBytes((const uint8_t *)PltContents.data(),
+                             Plt->getSize());
+  auto PltEntries = MIA->findPltEntries(Plt->getAddress(), PltBytes,
+                                        GotPlt->getAddress(), Triple);
+  // Build a map from GOT entry virtual address to PLT entry virtual address.
+  DenseMap<uint64_t, uint64_t> GotToPlt;
+  for (const auto &Entry : PltEntries)
+    GotToPlt.insert(std::make_pair(Entry.second, Entry.first));
+  // Find the relocations in the dynamic relocation table that point to
+  // locations in the GOT for which we know the corresponding PLT entry.
+  std::vector<std::pair<DataRefImpl, uint64_t>> Result;
+  for (const auto &Relocation : RelaPlt->relocations()) {
+    if (Relocation.getType() != JumpSlotReloc)
+      continue;
+    auto PltEntryIter = GotToPlt.find(Relocation.getOffset());
+    if (PltEntryIter != GotToPlt.end())
+      Result.push_back(std::make_pair(
+          Relocation.getSymbol()->getRawDataRefImpl(), PltEntryIter->second));
+  }
+  return Result;
 }

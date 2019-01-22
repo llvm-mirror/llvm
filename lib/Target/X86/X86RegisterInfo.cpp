@@ -1,9 +1,8 @@
 //===-- X86RegisterInfo.cpp - X86 Register Information --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,26 +14,21 @@
 
 #include "X86RegisterInfo.h"
 #include "X86FrameLowering.h"
-#include "X86InstrBuilder.h"
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
-#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetFrameLowering.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 
@@ -80,7 +74,7 @@ X86RegisterInfo::X86RegisterInfo(const Triple &TT)
 
 bool
 X86RegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  // ExecutionDepsFixer and PostRAScheduler require liveness.
+  // ExecutionDomainFix, BreakFalseDeps and PostRAScheduler require liveness.
   return true;
 }
 
@@ -223,13 +217,13 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF,
 
 const TargetRegisterClass *
 X86RegisterInfo::getGPRsForTailCall(const MachineFunction &MF) const {
-  const Function *F = MF.getFunction();
-  if (IsWin64 || (F && F->getCallingConv() == CallingConv::Win64))
+  const Function &F = MF.getFunction();
+  if (IsWin64 || (F.getCallingConv() == CallingConv::Win64))
     return &X86::GR64_TCW64RegClass;
   else if (Is64Bit)
     return &X86::GR64_TCRegClass;
 
-  bool hasHipeCC = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+  bool hasHipeCC = (F.getCallingConv() == CallingConv::HiPE);
   if (hasHipeCC)
     return &X86::GR32RegClass;
   return &X86::GR32_TCRegClass;
@@ -271,17 +265,17 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   assert(MF && "MachineFunction required");
 
   const X86Subtarget &Subtarget = MF->getSubtarget<X86Subtarget>();
-  const Function *F = MF->getFunction();
+  const Function &F = MF->getFunction();
   bool HasSSE = Subtarget.hasSSE1();
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
   bool CallsEHReturn = MF->callsEHReturn();
 
-  CallingConv::ID CC = F->getCallingConv();
+  CallingConv::ID CC = F.getCallingConv();
 
   // If attribute NoCallerSavedRegisters exists then we set X86_INTR calling
   // convention because it has the CSR list.
-  if (MF->getFunction()->hasFnAttribute("no_caller_saved_registers"))
+  if (MF->getFunction().hasFnAttribute("no_caller_saved_registers"))
     CC = CallingConv::X86_INTR;
 
   switch (CC) {
@@ -367,7 +361,7 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
   if (Is64Bit) {
     bool IsSwiftCC = Subtarget.getTargetLowering()->supportSwiftError() &&
-                     F->getAttributes().hasAttrSomewhere(Attribute::SwiftError);
+                     F.getAttributes().hasAttrSomewhere(Attribute::SwiftError);
     if (IsSwiftCC)
       return IsWin64 ? CSR_Win64_SwiftError_SaveList
                      : CSR_64_SwiftError_SaveList;
@@ -385,7 +379,7 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 const MCPhysReg *X86RegisterInfo::getCalleeSavedRegsViaCopy(
     const MachineFunction *MF) const {
   assert(MF && "Invalid MachineFunction pointer.");
-  if (MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
+  if (MF->getFunction().getCallingConv() == CallingConv::CXX_FAST_TLS &&
       MF->getInfo<X86MachineFunctionInfo>()->isSplitCSR())
     return CSR_64_CXX_TLS_Darwin_ViaCopy_SaveList;
   return nullptr;
@@ -478,9 +472,9 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   // Unlike getCalleeSavedRegs(), we don't have MMI so we can't check
   // callsEHReturn().
   if (Is64Bit) {
-    const Function *F = MF.getFunction();
+    const Function &F = MF.getFunction();
     bool IsSwiftCC = Subtarget.getTargetLowering()->supportSwiftError() &&
-                     F->getAttributes().hasAttrSomewhere(Attribute::SwiftError);
+                     F.getAttributes().hasAttrSomewhere(Attribute::SwiftError);
     if (IsSwiftCC)
       return IsWin64 ? CSR_Win64_SwiftError_RegMask : CSR_64_SwiftError_RegMask;
     return IsWin64 ? CSR_Win64_RegMask : CSR_64_RegMask;
@@ -507,6 +501,9 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
        ++I)
     Reserved.set(*I);
 
+  // Set the Shadow Stack Pointer as reserved.
+  Reserved.set(X86::SSP);
+
   // Set the instruction pointer register and its aliases as reserved.
   for (MCSubRegIterator I(X86::RIP, this, /*IncludeSelf=*/true); I.isValid();
        ++I)
@@ -521,7 +518,7 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // Set the base-pointer register and its aliases as reserved if needed.
   if (hasBasePointer(MF)) {
-    CallingConv::ID CC = MF.getFunction()->getCallingConv();
+    CallingConv::ID CC = MF.getFunction().getCallingConv();
     const uint32_t *RegMask = getCallPreservedMask(MF, CC);
     if (MachineOperand::clobbersPhysReg(RegMask, getBaseRegister()))
       report_fatal_error(
@@ -554,6 +551,10 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     Reserved.set(X86::DIL);
     Reserved.set(X86::BPL);
     Reserved.set(X86::SPL);
+    Reserved.set(X86::SIH);
+    Reserved.set(X86::DIH);
+    Reserved.set(X86::BPH);
+    Reserved.set(X86::SPH);
 
     for (unsigned n = 0; n != 8; ++n) {
       // R8, R9, ...
@@ -573,7 +574,8 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   }
 
   assert(checkAllSuperRegsMarked(Reserved,
-                                 {X86::SIL, X86::DIL, X86::BPL, X86::SPL}));
+                                 {X86::SIL, X86::DIL, X86::BPL, X86::SPL,
+                                  X86::SIH, X86::DIH, X86::BPH, X86::SPH}));
   return Reserved;
 }
 

@@ -1,14 +1,13 @@
 //===- MachOYAML.h - Mach-O YAMLIO implementation ---------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file declares classes for handling the YAML representation
+/// This file declares classes for handling the YAML representation
 /// of Mach-O.
 ///
 //===----------------------------------------------------------------------===//
@@ -261,7 +260,7 @@ using char_16 = char[16];
 template <> struct ScalarTraits<char_16> {
   static void output(const char_16 &Val, void *, raw_ostream &Out);
   static StringRef input(StringRef Scalar, void *, char_16 &Val);
-  static bool mustQuote(StringRef S);
+  static QuotingType mustQuote(StringRef S);
 };
 
 // This trait is used for UUIDs. It reads and writes them matching otool's
@@ -271,7 +270,7 @@ using uuid_t = raw_ostream::uuid_t;
 template <> struct ScalarTraits<uuid_t> {
   static void output(const uuid_t &Val, void *, raw_ostream &Out);
   static StringRef input(StringRef Scalar, void *, uuid_t &Val);
-  static bool mustQuote(StringRef S);
+  static QuotingType mustQuote(StringRef S);
 };
 
 // Load Command struct mapping traits

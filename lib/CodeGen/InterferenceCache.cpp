@@ -1,9 +1,8 @@
 //===- InterferenceCache.cpp - Caching per-block interference -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,15 +13,15 @@
 #include "InterferenceCache.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/CodeGen/LiveInterval.h"
-#include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/LiveIntervalUnion.h"
+#include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/SlotIndexes.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -48,8 +47,8 @@ void InterferenceCache::reinitPhysRegEntries() {
   if (PhysRegEntriesCount == TRI->getNumRegs()) return;
   free(PhysRegEntries);
   PhysRegEntriesCount = TRI->getNumRegs();
-  PhysRegEntries = (unsigned char*)
-    calloc(PhysRegEntriesCount, sizeof(unsigned char));
+  PhysRegEntries = static_cast<unsigned char*>(
+      safe_calloc(PhysRegEntriesCount, sizeof(unsigned char)));
 }
 
 void InterferenceCache::init(MachineFunction *mf,

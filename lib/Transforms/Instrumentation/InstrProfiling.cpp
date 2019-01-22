@@ -1,9 +1,8 @@
 //===-- InstrProfiling.cpp - Frontend instrumentation based profiling -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/InstrProfiling.h"
+#include "llvm/Transforms/Instrumentation/InstrProfiling.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -43,7 +42,6 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include <algorithm>
@@ -96,6 +94,11 @@ cl::opt<double> NumCountersPerValueSite(
     // For those sites with non-zero profile, the average number of targets
     // is usually smaller than 2.
     cl::init(1.0));
+
+cl::opt<bool> AtomicCounterUpdateAll(
+    "instrprof-atomic-counter-update-all", cl::ZeroOrMore,
+    cl::desc("Make all profile counter updates atomic (for testing only)"),
+    cl::init(false));
 
 cl::opt<bool> AtomicCounterUpdatePromoted(
     "atomic-counter-update-promoted", cl::ZeroOrMore,
@@ -245,6 +248,9 @@ public:
   }
 
   bool run(int64_t *NumPromoted) {
+    // Skip 'infinite' loops:
+    if (ExitBlocks.size() == 0)
+      return false;
     unsigned MaxProm = getMaxNumOfPromotionsInLoop(&L);
     if (MaxProm == 0)
       return false;
@@ -269,8 +275,8 @@ public:
         break;
     }
 
-    DEBUG(dbgs() << Promoted << " counters promoted for loop (depth="
-                 << L.getLoopDepth() << ")\n");
+    LLVM_DEBUG(dbgs() << Promoted << " counters promoted for loop (depth="
+                      << L.getLoopDepth() << ")\n");
     return Promoted != 0;
   }
 
@@ -428,9 +434,24 @@ void InstrProfiling::promoteCounterLoadStores(Function *F) {
   }
 }
 
-bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
-  bool MadeChange = false;
+/// Check if the module contains uses of any profiling intrinsics.
+static bool containsProfilingIntrinsics(Module &M) {
+  if (auto *F = M.getFunction(
+          Intrinsic::getName(llvm::Intrinsic::instrprof_increment)))
+    if (!F->use_empty())
+      return true;
+  if (auto *F = M.getFunction(
+          Intrinsic::getName(llvm::Intrinsic::instrprof_increment_step)))
+    if (!F->use_empty())
+      return true;
+  if (auto *F = M.getFunction(
+          Intrinsic::getName(llvm::Intrinsic::instrprof_value_profile)))
+    if (!F->use_empty())
+      return true;
+  return false;
+}
 
+bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
   this->M = &M;
   this->TLI = &TLI;
   NamesVar = nullptr;
@@ -440,6 +461,15 @@ bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
   getMemOPSizeRangeFromOption(MemOPSizeRange, MemOPSizeRangeStart,
                               MemOPSizeRangeLast);
   TT = Triple(M.getTargetTriple());
+
+  // Emit the runtime hook even if no counters are present.
+  bool MadeChange = emitRuntimeHook();
+
+  // Improve compile time by avoiding linear scans when there is no work.
+  GlobalVariable *CoverageNamesVar =
+      M.getNamedGlobal(getCoverageUnusedNamesVarName());
+  if (!containsProfilingIntrinsics(M) && !CoverageNamesVar)
+    return MadeChange;
 
   // We did not know how many value sites there would be inside
   // the instrumented function. This is counting the number of instrumented
@@ -462,8 +492,7 @@ bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
   for (Function &F : M)
     MadeChange |= lowerIntrinsics(&F);
 
-  if (GlobalVariable *CoverageNamesVar =
-          M.getNamedGlobal(getCoverageUnusedNamesVarName())) {
+  if (CoverageNamesVar) {
     lowerCoverageData(CoverageNamesVar);
     MadeChange = true;
   }
@@ -474,7 +503,6 @@ bool InstrProfiling::run(Module &M, const TargetLibraryInfo &TLI) {
   emitVNodes();
   emitNameData();
   emitRegistration();
-  emitRuntimeHook();
   emitUses();
   emitInitialization();
   return true;
@@ -573,12 +601,17 @@ void InstrProfiling::lowerIncrement(InstrProfIncrementInst *Inc) {
   IRBuilder<> Builder(Inc);
   uint64_t Index = Inc->getIndex()->getZExtValue();
   Value *Addr = Builder.CreateConstInBoundsGEP2_64(Counters, 0, Index);
-  Value *Load = Builder.CreateLoad(Addr, "pgocount");
-  auto *Count = Builder.CreateAdd(Load, Inc->getStep());
-  auto *Store = Builder.CreateStore(Count, Addr);
-  Inc->replaceAllUsesWith(Store);
-  if (isCounterPromotionEnabled())
-    PromotionCandidates.emplace_back(cast<Instruction>(Load), Store);
+
+  if (Options.Atomic || AtomicCounterUpdateAll) {
+    Builder.CreateAtomicRMW(AtomicRMWInst::Add, Addr, Inc->getStep(),
+                            AtomicOrdering::Monotonic);
+  } else {
+    Value *Load = Builder.CreateLoad(Addr, "pgocount");
+    auto *Count = Builder.CreateAdd(Load, Inc->getStep());
+    auto *Store = Builder.CreateStore(Count, Addr);
+    if (isCounterPromotionEnabled())
+      PromotionCandidates.emplace_back(cast<Instruction>(Load), Store);
+  }
   Inc->eraseFromParent();
 }
 
@@ -667,6 +700,8 @@ static bool needsRuntimeRegistrationOfSectionRange(const Module &M) {
   // Use linker script magic to get data/cnts/name start/end.
   if (Triple(M.getTargetTriple()).isOSLinux() ||
       Triple(M.getTargetTriple()).isOSFreeBSD() ||
+      Triple(M.getTargetTriple()).isOSNetBSD() ||
+      Triple(M.getTargetTriple()).isOSFuchsia() ||
       Triple(M.getTargetTriple()).isPS4CPU())
     return false;
 
@@ -873,7 +908,7 @@ void InstrProfiling::emitRegistration() {
 
   IRBuilder<> IRB(BasicBlock::Create(M->getContext(), "", RegisterF));
   for (Value *Data : UsedVars)
-    if (Data != NamesVar)
+    if (Data != NamesVar && !isa<Function>(Data))
       IRB.CreateCall(RuntimeRegisterF, IRB.CreateBitCast(Data, VoidPtrTy));
 
   if (NamesVar) {
@@ -890,15 +925,15 @@ void InstrProfiling::emitRegistration() {
   IRB.CreateRetVoid();
 }
 
-void InstrProfiling::emitRuntimeHook() {
+bool InstrProfiling::emitRuntimeHook() {
   // We expect the linker to be invoked with -u<hook_var> flag for linux,
   // for which case there is no need to emit the user function.
   if (Triple(M->getTargetTriple()).isOSLinux())
-    return;
+    return false;
 
   // If the module's provided its own runtime, we don't need to do anything.
   if (M->getGlobalVariable(getInstrProfRuntimeHookVarName()))
-    return;
+    return false;
 
   // Declare an external variable that will pull in the runtime initialization.
   auto *Int32Ty = Type::getInt32Ty(M->getContext());
@@ -923,6 +958,7 @@ void InstrProfiling::emitRuntimeHook() {
 
   // Mark the user variable as used so that it isn't stripped out.
   UsedVars.push_back(User);
+  return true;
 }
 
 void InstrProfiling::emitUses() {

@@ -13,7 +13,7 @@
 
 ; Check that the location of the ASAN instrumented __block variable is
 ; correct.
-; CHECK: !DIExpression(DW_OP_plus_uconst, 8, DW_OP_deref, DW_OP_plus_uconst, 24)
+; CHECK: !DIExpression(DW_OP_deref, DW_OP_plus_uconst, 32, DW_OP_plus_uconst, 8, DW_OP_deref, DW_OP_plus_uconst, 24)
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 
@@ -61,7 +61,7 @@ attributes #3 = { nounwind }
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, producer: "clang version 3.6.0 (trunk 223120) (llvm/trunk 223119)", isOptimized: false, emissionKind: FullDebug, file: !1, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
 !1 = !DIFile(filename: "block.c", directory: "/tmp")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "foo", line: 3, isLocal: false, isDefinition: true, isOptimized: false, unit: !0, scopeLine: 3, file: !1, scope: !5, type: !6, variables: !2)
+!4 = distinct !DISubprogram(name: "foo", line: 3, isLocal: false, isDefinition: true, isOptimized: false, unit: !0, scopeLine: 3, file: !1, scope: !5, type: !6, retainedNodes: !2)
 !5 = !DIFile(filename: "block.c", directory: "/tmp")
 !6 = !DISubroutineType(types: !7)
 !7 = !{null}

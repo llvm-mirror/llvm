@@ -1,9 +1,8 @@
 //===- llvm/unittest/Support/MemoryBufferTest.cpp - MemoryBuffer tests ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Testing/Support/Error.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -103,25 +103,25 @@ TEST_F(MemoryBufferTest, copy) {
 
 TEST_F(MemoryBufferTest, make_new) {
   // 0-sized buffer
-  OwningBuffer Zero(MemoryBuffer::getNewUninitMemBuffer(0));
+  OwningBuffer Zero(WritableMemoryBuffer::getNewUninitMemBuffer(0));
   EXPECT_TRUE(nullptr != Zero.get());
 
   // uninitialized buffer with no name
-  OwningBuffer One(MemoryBuffer::getNewUninitMemBuffer(321));
+  OwningBuffer One(WritableMemoryBuffer::getNewUninitMemBuffer(321));
   EXPECT_TRUE(nullptr != One.get());
 
   // uninitialized buffer with name
-  OwningBuffer Two(MemoryBuffer::getNewUninitMemBuffer(123, "bla"));
+  OwningBuffer Two(WritableMemoryBuffer::getNewUninitMemBuffer(123, "bla"));
   EXPECT_TRUE(nullptr != Two.get());
 
   // 0-initialized buffer with no name
-  OwningBuffer Three(MemoryBuffer::getNewMemBuffer(321, data));
+  OwningBuffer Three(WritableMemoryBuffer::getNewMemBuffer(321, data));
   EXPECT_TRUE(nullptr != Three.get());
   for (size_t i = 0; i < 321; ++i)
     EXPECT_EQ(0, Three->getBufferStart()[0]);
 
   // 0-initialized buffer with name
-  OwningBuffer Four(MemoryBuffer::getNewMemBuffer(123, "zeros"));
+  OwningBuffer Four(WritableMemoryBuffer::getNewMemBuffer(123, "zeros"));
   EXPECT_TRUE(nullptr != Four.get());
   for (size_t i = 0; i < 123; ++i)
     EXPECT_EQ(0, Four->getBufferStart()[0]);
@@ -225,5 +225,67 @@ TEST_F(MemoryBufferTest, slice) {
   EXPECT_TRUE(BufData2.substr(0x17F8,8).equals("12345678"));
   EXPECT_TRUE(BufData2.substr(0x1800,8).equals("abcdefgh"));
   EXPECT_TRUE(BufData2.substr(0x2FF8,8).equals("abcdefgh"));
+}
+
+TEST_F(MemoryBufferTest, writableSlice) {
+  // Create a file initialized with some data
+  int FD;
+  SmallString<64> TestPath;
+  sys::fs::createTemporaryFile("MemoryBufferTest_WritableSlice", "temp", FD,
+                               TestPath);
+  FileRemover Cleanup(TestPath);
+  raw_fd_ostream OF(FD, true);
+  for (unsigned i = 0; i < 0x1000; ++i)
+    OF << "0123456789abcdef";
+  OF.close();
+
+  {
+    auto MBOrError =
+        WritableMemoryBuffer::getFileSlice(TestPath.str(), 0x6000, 0x2000);
+    ASSERT_FALSE(MBOrError.getError());
+    // Write some data.  It should be mapped private, so that upon completion
+    // the original file contents are not modified.
+    WritableMemoryBuffer &MB = **MBOrError;
+    ASSERT_EQ(0x6000u, MB.getBufferSize());
+    char *Start = MB.getBufferStart();
+    ASSERT_EQ(MB.getBufferEnd(), MB.getBufferStart() + MB.getBufferSize());
+    ::memset(Start, 'x', MB.getBufferSize());
+  }
+
+  auto MBOrError = MemoryBuffer::getFile(TestPath);
+  ASSERT_FALSE(MBOrError.getError());
+  auto &MB = **MBOrError;
+  ASSERT_EQ(0x10000u, MB.getBufferSize());
+  for (size_t i = 0; i < MB.getBufferSize(); i += 0x10)
+    EXPECT_EQ("0123456789abcdef", MB.getBuffer().substr(i, 0x10)) << "i: " << i;
+}
+
+TEST_F(MemoryBufferTest, writeThroughFile) {
+  // Create a file initialized with some data
+  int FD;
+  SmallString<64> TestPath;
+  sys::fs::createTemporaryFile("MemoryBufferTest_WriteThrough", "temp", FD,
+                               TestPath);
+  FileRemover Cleanup(TestPath);
+  raw_fd_ostream OF(FD, true);
+  OF << "0123456789abcdef";
+  OF.close();
+  {
+    auto MBOrError = WriteThroughMemoryBuffer::getFile(TestPath);
+    ASSERT_FALSE(MBOrError.getError());
+    // Write some data.  It should be mapped readwrite, so that upon completion
+    // the original file contents are modified.
+    WriteThroughMemoryBuffer &MB = **MBOrError;
+    ASSERT_EQ(16u, MB.getBufferSize());
+    char *Start = MB.getBufferStart();
+    ASSERT_EQ(MB.getBufferEnd(), MB.getBufferStart() + MB.getBufferSize());
+    ::memset(Start, 'x', MB.getBufferSize());
+  }
+
+  auto MBOrError = MemoryBuffer::getFile(TestPath);
+  ASSERT_FALSE(MBOrError.getError());
+  auto &MB = **MBOrError;
+  ASSERT_EQ(16u, MB.getBufferSize());
+  EXPECT_EQ("xxxxxxxxxxxxxxxx", MB.getBuffer());
 }
 }

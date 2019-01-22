@@ -1,15 +1,13 @@
 //===- PrettyBuiltinDumper.cpp ---------------------------------- *- C++ *-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "PrettyBuiltinDumper.h"
 #include "LinePrinter.h"
-#include "llvm-pdbutil.h"
 
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 
@@ -88,7 +86,12 @@ StringRef BuiltinDumper::getTypeName(const PDBSymbolTypeBuiltin &Symbol) {
     return "HRESULT";
   case PDB_BuiltinType::BCD:
     return "HRESULT";
-  default:
-    return "void";
+  case PDB_BuiltinType::Char16:
+    return "char16_t";
+  case PDB_BuiltinType::Char32:
+    return "char32_t";
+  case PDB_BuiltinType::None:
+    return "...";
   }
+  llvm_unreachable("Unknown PDB_BuiltinType");
 }

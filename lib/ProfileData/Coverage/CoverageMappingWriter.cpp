@@ -1,9 +1,8 @@
 //===- CoverageMappingWriter.cpp - Code coverage mapping writer -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -35,7 +34,7 @@ void CoverageFilenamesSectionWriter::write(raw_ostream &OS) {
 
 namespace {
 
-/// \brief Gather only the expressions that are used by the mapping
+/// Gather only the expressions that are used by the mapping
 /// regions in this function.
 class CounterExpressionsMinimizer {
   ArrayRef<CounterExpression> Expressions;
@@ -74,7 +73,7 @@ public:
 
   ArrayRef<CounterExpression> getExpressions() const { return UsedExpressions; }
 
-  /// \brief Adjust the given counter to correctly transition from the old
+  /// Adjust the given counter to correctly transition from the old
   /// expression ids to the new expression ids.
   Counter adjust(Counter C) const {
     if (C.isExpression())
@@ -85,7 +84,7 @@ public:
 
 } // end anonymous namespace
 
-/// \brief Encode the counter.
+/// Encode the counter.
 ///
 /// The encoding uses the following format:
 /// Low 2 bits - Tag:

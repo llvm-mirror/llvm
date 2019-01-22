@@ -14,7 +14,7 @@ entry:
   ; The target has no native double type.
   ; SROA split the complex value into two i64 values.
   ; CHECK: DW_TAG_formal_parameter
-  ; CHECK-NEXT:  DW_AT_location [DW_FORM_block1]	(DW_OP_constu 0x0, DW_OP_piece 0x8)
+  ; CHECK-NEXT:  DW_AT_location [DW_FORM_block1]	(DW_OP_lit0, DW_OP_piece 0x8)
   ; CHECK-NEXT:  DW_AT_name {{.*}} "c"
   tail call void @llvm.dbg.value(metadata i64 0, metadata !14, metadata !17), !dbg !16
   ; Manually removed to disable location list emission:
@@ -37,7 +37,7 @@ attributes #0 = { nounwind readnone }
 !0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 3.9.0 (trunk 259998) (llvm/trunk 259999)", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !2)
 !1 = !DIFile(filename: "<stdin>", directory: "/")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "f", scope: !5, file: !5, line: 1, type: !6, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, variables: !2)
+!4 = distinct !DISubprogram(name: "f", scope: !5, file: !5, line: 1, type: !6, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
 !5 = !DIFile(filename: "test.c", directory: "/")
 !6 = !DISubroutineType(types: !7)
 !7 = !{null, !8}

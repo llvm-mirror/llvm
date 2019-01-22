@@ -1,9 +1,8 @@
 //===- MachineDominators.cpp - Machine Dominator Calculation --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -26,7 +25,7 @@ static bool VerifyMachineDomInfo = true;
 static bool VerifyMachineDomInfo = false;
 #endif
 static cl::opt<bool, true> VerifyMachineDomInfoX(
-    "verify-machine-dom-info", cl::location(VerifyMachineDomInfo),
+    "verify-machine-dom-info", cl::location(VerifyMachineDomInfo), cl::Hidden,
     cl::desc("Verify machine dominator info (time consuming)"));
 
 namespace llvm {
@@ -65,8 +64,21 @@ void MachineDominatorTree::releaseMemory() {
 }
 
 void MachineDominatorTree::verifyAnalysis() const {
-  if (DT && VerifyMachineDomInfo)
-    verifyDomTree();
+  if (DT && VerifyMachineDomInfo) {
+    MachineFunction &F = *getRoot()->getParent();
+
+    DomTreeBase<MachineBasicBlock> OtherDT;
+    OtherDT.recalculate(F);
+    if (getRootNode()->getBlock() != OtherDT.getRootNode()->getBlock() ||
+        DT->compare(OtherDT)) {
+      errs() << "MachineDominatorTree for function " << F.getName()
+            << " is not up to date!\nComputed:\n";
+      DT->print(errs());
+      errs() << "\nActual:\n";
+      OtherDT.print(errs());
+      abort();
+    }
+  }
 }
 
 void MachineDominatorTree::print(raw_ostream &OS, const Module*) const {
@@ -137,21 +149,4 @@ void MachineDominatorTree::applySplitCriticalEdges() const {
   }
   NewBBs.clear();
   CriticalEdgesToSplit.clear();
-}
-
-void MachineDominatorTree::verifyDomTree() const {
-  if (!DT)
-    return;
-  MachineFunction &F = *getRoot()->getParent();
-
-  DomTreeBase<MachineBasicBlock> OtherDT;
-  OtherDT.recalculate(F);
-  if (getRootNode()->getBlock() != OtherDT.getRootNode()->getBlock() ||
-      DT->compare(OtherDT)) {
-    errs() << "MachineDominatorTree is not up to date!\nComputed:\n";
-    DT->print(errs());
-    errs() << "\nActual:\n";
-    OtherDT.print(errs());
-    abort();
-  }
 }

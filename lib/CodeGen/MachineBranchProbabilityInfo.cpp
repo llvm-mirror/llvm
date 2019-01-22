@@ -1,9 +1,8 @@
 //===- MachineBranchProbabilityInfo.cpp - Machine Branch Probability Info -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -84,7 +83,7 @@ raw_ostream &MachineBranchProbabilityInfo::printEdgeProbability(
     const MachineBasicBlock *Dst) const {
 
   const BranchProbability Prob = getEdgeProbability(Src, Dst);
-  OS << "edge MBB#" << Src->getNumber() << " -> MBB#" << Dst->getNumber()
+  OS << "edge " << printMBBReference(*Src) << " -> " << printMBBReference(*Dst)
      << " probability is " << Prob
      << (isEdgeHot(Src, Dst) ? " [HOT edge]\n" : "\n");
 

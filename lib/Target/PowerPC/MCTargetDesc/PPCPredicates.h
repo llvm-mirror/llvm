@@ -1,9 +1,8 @@
 //===-- PPCPredicates.h - PPC Branch Predicate Information ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -50,12 +49,15 @@ namespace PPC {
     PRED_UN_PLUS  = (3 << 5) | 15,
     PRED_NU_PLUS  = (3 << 5) |  7,
 
+    // SPE scalar compare instructions always set the GT bit.
+    PRED_SPE      = PRED_GT,
+
     // When dealing with individual condition-register bits, we have simple set
     // and unset predicates.
     PRED_BIT_SET =   1024,
     PRED_BIT_UNSET = 1025
   };
-  
+
   // Bit for branch taken (plus) or not-taken (minus) hint
   enum BranchHintBit {
     BR_NO_HINT       = 0x0,

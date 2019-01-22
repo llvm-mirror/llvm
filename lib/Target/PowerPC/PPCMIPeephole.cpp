@@ -1,9 +1,8 @@
 //===-------------- PPCMIPeephole.cpp - MI Peephole Cleanups -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
 //
@@ -29,16 +28,34 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/ADT/Statistic.h"
 #include "MCTargetDesc/PPCPredicates.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "ppc-mi-peepholes"
 
+STATISTIC(RemoveTOCSave, "Number of TOC saves removed");
+STATISTIC(MultiTOCSaves,
+          "Number of functions with multiple TOC saves that must be kept");
 STATISTIC(NumEliminatedSExt, "Number of eliminated sign-extensions");
 STATISTIC(NumEliminatedZExt, "Number of eliminated zero-extensions");
 STATISTIC(NumOptADDLIs, "Number of optimized ADD instruction fed by LI");
+STATISTIC(NumConvertedToImmediateForm,
+          "Number of instructions converted to their immediate form");
+STATISTIC(NumFunctionsEnteredInMIPeephole,
+          "Number of functions entered in PPC MI Peepholes");
+STATISTIC(NumFixedPointIterations,
+          "Number of fixed-point iterations converting reg-reg instructions "
+          "to reg-imm ones");
+
+static cl::opt<bool>
+FixedPointRegToImm("ppc-reg-to-imm-fixed-point", cl::Hidden, cl::init(true),
+                   cl::desc("Iterate to a fixed point when attempting to "
+                            "convert reg-reg instructions to reg-imm"));
+
+static cl::opt<bool>
+ConvertRegReg("ppc-convert-rr-to-ri", cl::Hidden, cl::init(true),
+              cl::desc("Convert eligible reg+reg instructions to reg+imm"));
 
 static cl::opt<bool>
     EnableSExtElimination("ppc-eliminate-signext",
@@ -49,10 +66,6 @@ static cl::opt<bool>
     EnableZExtElimination("ppc-eliminate-zeroext",
                           cl::desc("enable elimination of zero-extensions"),
                           cl::init(false), cl::Hidden);
-
-namespace llvm {
-  void initializePPCMIPeepholePass(PassRegistry&);
-}
 
 namespace {
 
@@ -78,10 +91,9 @@ private:
 
   // Perform peepholes.
   bool eliminateRedundantCompare(void);
-
-  // Find the "true" register represented by SrcReg (following chains
-  // of copies and subreg_to_reg operations).
-  unsigned lookThruCopyLike(unsigned SrcReg);
+  bool eliminateRedundantTOCSaves(std::map<MachineInstr *, bool> &TOCSaves);
+  void UpdateTOCSaves(std::map<MachineInstr *, bool> &TOCSaves,
+                      MachineInstr *MI);
 
 public:
 
@@ -93,7 +105,7 @@ public:
 
   // Main entry point for this pass.
   bool runOnMachineFunction(MachineFunction &MF) override {
-    if (skipFunction(*MF.getFunction()))
+    if (skipFunction(MF.getFunction()))
       return false;
     initialize(MF);
     return simplifyCode();
@@ -106,8 +118,8 @@ void PPCMIPeephole::initialize(MachineFunction &MFParm) {
   MRI = &MF->getRegInfo();
   MDT = &getAnalysis<MachineDominatorTree>();
   TII = MF->getSubtarget<PPCSubtarget>().getInstrInfo();
-  DEBUG(dbgs() << "*** PowerPC MI peephole pass ***\n\n");
-  DEBUG(MF->dump());
+  LLVM_DEBUG(dbgs() << "*** PowerPC MI peephole pass ***\n\n");
+  LLVM_DEBUG(MF->dump());
 }
 
 static MachineInstr *getVRegDefOrNull(MachineOperand *Op,
@@ -176,10 +188,66 @@ getKnownLeadingZeroCount(MachineInstr *MI, const PPCInstrInfo *TII) {
   return 0;
 }
 
+// This function maintains a map for the pairs <TOC Save Instr, Keep>
+// Each time a new TOC save is encountered, it checks if any of the existing
+// ones are dominated by the new one. If so, it marks the existing one as
+// redundant by setting it's entry in the map as false. It then adds the new
+// instruction to the map with either true or false depending on if any
+// existing instructions dominated the new one.
+void PPCMIPeephole::UpdateTOCSaves(
+  std::map<MachineInstr *, bool> &TOCSaves, MachineInstr *MI) {
+  assert(TII->isTOCSaveMI(*MI) && "Expecting a TOC save instruction here");
+  bool Keep = true;
+  for (auto It = TOCSaves.begin(); It != TOCSaves.end(); It++ ) {
+    MachineInstr *CurrInst = It->first;
+    // If new instruction dominates an existing one, mark existing one as
+    // redundant.
+    if (It->second && MDT->dominates(MI, CurrInst))
+      It->second = false;
+    // Check if the new instruction is redundant.
+    if (MDT->dominates(CurrInst, MI)) {
+      Keep = false;
+      break;
+    }
+  }
+  // Add new instruction to map.
+  TOCSaves[MI] = Keep;
+}
+
 // Perform peephole optimizations.
 bool PPCMIPeephole::simplifyCode(void) {
   bool Simplified = false;
   MachineInstr* ToErase = nullptr;
+  std::map<MachineInstr *, bool> TOCSaves;
+  const TargetRegisterInfo *TRI = &TII->getRegisterInfo();
+  NumFunctionsEnteredInMIPeephole++;
+  if (ConvertRegReg) {
+    // Fixed-point conversion of reg/reg instructions fed by load-immediate
+    // into reg/imm instructions. FIXME: This is expensive, control it with
+    // an option.
+    bool SomethingChanged = false;
+    do {
+      NumFixedPointIterations++;
+      SomethingChanged = false;
+      for (MachineBasicBlock &MBB : *MF) {
+        for (MachineInstr &MI : MBB) {
+          if (MI.isDebugInstr())
+            continue;
+
+          if (TII->convertToImmediateForm(MI)) {
+            // We don't erase anything in case the def has other uses. Let DCE
+            // remove it if it can be removed.
+            LLVM_DEBUG(dbgs() << "Converted instruction to imm form: ");
+            LLVM_DEBUG(MI.dump());
+            NumConvertedToImmediateForm++;
+            SomethingChanged = true;
+            Simplified = true;
+            continue;
+          }
+        }
+      }
+    } while (SomethingChanged && FixedPointRegToImm);
+  }
 
   for (MachineBasicBlock &MBB : *MF) {
     for (MachineInstr &MI : MBB) {
@@ -192,7 +260,7 @@ bool PPCMIPeephole::simplifyCode(void) {
       }
 
       // Ignore debug instructions.
-      if (MI.isDebugValue())
+      if (MI.isDebugInstr())
         continue;
 
       // Per-opcode peepholes.
@@ -201,6 +269,18 @@ bool PPCMIPeephole::simplifyCode(void) {
       default:
         break;
 
+      case PPC::STD: {
+        MachineFrameInfo &MFI = MF->getFrameInfo();
+        if (MFI.hasVarSizedObjects() ||
+            !MF->getSubtarget<PPCSubtarget>().isELFv2ABI())
+          break;
+        // When encountering a TOC save instruction, call UpdateTOCSaves
+        // to add it to the TOCSaves map and mark any existing TOC saves
+        // it dominates as redundant.
+        if (TII->isTOCSaveMI(MI))
+          UpdateTOCSaves(TOCSaves, &MI);
+        break;
+      }
       case PPC::XXPERMDI: {
         // Perform simplifications of 2x64 vector swaps and splats.
         // A swap is identified by an immediate value of 2, and a splat
@@ -215,8 +295,10 @@ bool PPCMIPeephole::simplifyCode(void) {
           //   XXPERMDI t, SUBREG_TO_REG(s), SUBREG_TO_REG(s), immed.
           // We have to look through chains of COPY and SUBREG_TO_REG
           // to find the real source values for comparison.
-          unsigned TrueReg1 = lookThruCopyLike(MI.getOperand(1).getReg());
-          unsigned TrueReg2 = lookThruCopyLike(MI.getOperand(2).getReg());
+          unsigned TrueReg1 =
+            TRI->lookThruCopyLike(MI.getOperand(1).getReg(), MRI);
+          unsigned TrueReg2 =
+            TRI->lookThruCopyLike(MI.getOperand(2).getReg(), MRI);
 
           if (TrueReg1 == TrueReg2
               && TargetRegisterInfo::isVirtualRegister(TrueReg1)) {
@@ -230,7 +312,8 @@ bool PPCMIPeephole::simplifyCode(void) {
             auto isConversionOfLoadAndSplat = [=]() -> bool {
               if (DefOpc != PPC::XVCVDPSXDS && DefOpc != PPC::XVCVDPUXDS)
                 return false;
-              unsigned DefReg = lookThruCopyLike(DefMI->getOperand(1).getReg());
+              unsigned DefReg =
+                TRI->lookThruCopyLike(DefMI->getOperand(1).getReg(), MRI);
               if (TargetRegisterInfo::isVirtualRegister(DefReg)) {
                 MachineInstr *LoadMI = MRI->getVRegDef(DefReg);
                 if (LoadMI && LoadMI->getOpcode() == PPC::LXVDSX)
@@ -240,10 +323,9 @@ bool PPCMIPeephole::simplifyCode(void) {
             };
             if (DefMI && (Immed == 0 || Immed == 3)) {
               if (DefOpc == PPC::LXVDSX || isConversionOfLoadAndSplat()) {
-                DEBUG(dbgs()
-                      << "Optimizing load-and-splat/splat "
-                      "to load-and-splat/copy: ");
-                DEBUG(MI.dump());
+                LLVM_DEBUG(dbgs() << "Optimizing load-and-splat/splat "
+                                     "to load-and-splat/copy: ");
+                LLVM_DEBUG(MI.dump());
                 BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                         MI.getOperand(0).getReg())
                     .add(MI.getOperand(1));
@@ -256,16 +338,15 @@ bool PPCMIPeephole::simplifyCode(void) {
             // can replace it with a copy.
             if (DefOpc == PPC::XXPERMDI) {
               unsigned FeedImmed = DefMI->getOperand(3).getImm();
-              unsigned FeedReg1
-                = lookThruCopyLike(DefMI->getOperand(1).getReg());
-              unsigned FeedReg2
-                = lookThruCopyLike(DefMI->getOperand(2).getReg());
+              unsigned FeedReg1 =
+                TRI->lookThruCopyLike(DefMI->getOperand(1).getReg(), MRI);
+              unsigned FeedReg2 =
+                TRI->lookThruCopyLike(DefMI->getOperand(2).getReg(), MRI);
 
               if ((FeedImmed == 0 || FeedImmed == 3) && FeedReg1 == FeedReg2) {
-                DEBUG(dbgs()
-                      << "Optimizing splat/swap or splat/splat "
-                      "to splat/copy: ");
-                DEBUG(MI.dump());
+                LLVM_DEBUG(dbgs() << "Optimizing splat/swap or splat/splat "
+                                     "to splat/copy: ");
+                LLVM_DEBUG(MI.dump());
                 BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                         MI.getOperand(0).getReg())
                     .add(MI.getOperand(1));
@@ -278,8 +359,8 @@ bool PPCMIPeephole::simplifyCode(void) {
               // parameter.
               else if ((Immed == 0 || Immed == 3)
                        && FeedImmed == 2 && FeedReg1 == FeedReg2) {
-                DEBUG(dbgs() << "Optimizing swap/splat => splat: ");
-                DEBUG(MI.dump());
+                LLVM_DEBUG(dbgs() << "Optimizing swap/splat => splat: ");
+                LLVM_DEBUG(MI.dump());
                 MI.getOperand(1).setReg(DefMI->getOperand(1).getReg());
                 MI.getOperand(2).setReg(DefMI->getOperand(2).getReg());
                 MI.getOperand(3).setImm(3 - Immed);
@@ -289,8 +370,8 @@ bool PPCMIPeephole::simplifyCode(void) {
               // If this is a swap fed by a swap, we can replace it
               // with a copy from the first swap's input.
               else if (Immed == 2 && FeedImmed == 2 && FeedReg1 == FeedReg2) {
-                DEBUG(dbgs() << "Optimizing swap/swap => copy: ");
-                DEBUG(MI.dump());
+                LLVM_DEBUG(dbgs() << "Optimizing swap/swap => copy: ");
+                LLVM_DEBUG(MI.dump());
                 BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                         MI.getOperand(0).getReg())
                     .add(DefMI->getOperand(1));
@@ -305,8 +386,8 @@ bool PPCMIPeephole::simplifyCode(void) {
               DefMI->getOperand(0).setReg(MI.getOperand(0).getReg());
               ToErase = &MI;
               Simplified = true;
-              DEBUG(dbgs() << "Removing redundant splat: ");
-              DEBUG(MI.dump());
+              LLVM_DEBUG(dbgs() << "Removing redundant splat: ");
+              LLVM_DEBUG(MI.dump());
             }
           }
         }
@@ -317,7 +398,8 @@ bool PPCMIPeephole::simplifyCode(void) {
       case PPC::XXSPLTW: {
         unsigned MyOpcode = MI.getOpcode();
         unsigned OpNo = MyOpcode == PPC::XXSPLTW ? 1 : 2;
-        unsigned TrueReg = lookThruCopyLike(MI.getOperand(OpNo).getReg());
+        unsigned TrueReg =
+          TRI->lookThruCopyLike(MI.getOperand(OpNo).getReg(), MRI);
         if (!TargetRegisterInfo::isVirtualRegister(TrueReg))
           break;
         MachineInstr *DefMI = MRI->getVRegDef(TrueReg);
@@ -344,8 +426,8 @@ bool PPCMIPeephole::simplifyCode(void) {
         // If the instruction[s] that feed this splat have already splat
         // the value, this splat is redundant.
         if (AlreadySplat) {
-          DEBUG(dbgs() << "Changing redundant splat to a copy: ");
-          DEBUG(MI.dump());
+          LLVM_DEBUG(dbgs() << "Changing redundant splat to a copy: ");
+          LLVM_DEBUG(MI.dump());
           BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                   MI.getOperand(0).getReg())
               .add(MI.getOperand(OpNo));
@@ -363,70 +445,24 @@ bool PPCMIPeephole::simplifyCode(void) {
           if (ShiftOp1 == ShiftOp2) {
             unsigned NewElem = (SplatImm + ShiftImm) & 0x3;
             if (MRI->hasOneNonDBGUse(ShiftRes)) {
-              DEBUG(dbgs() << "Removing redundant shift: ");
-              DEBUG(DefMI->dump());
+              LLVM_DEBUG(dbgs() << "Removing redundant shift: ");
+              LLVM_DEBUG(DefMI->dump());
               ToErase = DefMI;
             }
             Simplified = true;
-            DEBUG(dbgs() << "Changing splat immediate from " << SplatImm <<
-                  " to " << NewElem << " in instruction: ");
-            DEBUG(MI.dump());
+            LLVM_DEBUG(dbgs() << "Changing splat immediate from " << SplatImm
+                              << " to " << NewElem << " in instruction: ");
+            LLVM_DEBUG(MI.dump());
             MI.getOperand(1).setReg(ShiftOp1);
             MI.getOperand(2).setImm(NewElem);
           }
         }
-
-        // Splat is fed by a SWAP which is a permute of this form
-        //  XXPERMDI %VA, %VA, 2
-        // Since the splat instruction can use any of the vector elements to do
-        //  the splat we do not have to rearrange the elements in the vector
-        //  with a swap before we do the splat. We can simply do the splat from
-        //  a different index.
-        // If the swap has only one use (the splat) then we can completely
-        //  remove the swap too.
-        if (DefOpcode == PPC::XXPERMDI && MI.getOperand(1).isImm()) {
-          unsigned SwapRes = DefMI->getOperand(0).getReg();
-          unsigned SwapOp1 = DefMI->getOperand(1).getReg();
-          unsigned SwapOp2 = DefMI->getOperand(2).getReg();
-          unsigned SwapImm = DefMI->getOperand(3).getImm();
-          unsigned SplatImm = MI.getOperand(1).getImm();
-
-          // Break if this permute is not a swap.
-          if (SwapOp1 != SwapOp2 || SwapImm != 2)
-            break;
-
-          unsigned NewElem = 0;
-          // Compute the new index to use for the splat.
-          if (MI.getOpcode() == PPC::VSPLTB)
-            NewElem = (SplatImm + 8) & 0xF;
-          else if (MI.getOpcode() == PPC::VSPLTH)
-            NewElem = (SplatImm + 4) & 0x7;
-          else if (MI.getOpcode() == PPC::XXSPLTW)
-            NewElem = (SplatImm + 2) & 0x3;
-          else {
-            DEBUG(dbgs() << "Unknown splat opcode.");
-            DEBUG(MI.dump());
-            break;
-          }
-
-          if (MRI->hasOneNonDBGUse(SwapRes)) {
-            DEBUG(dbgs() << "Removing redundant swap: ");
-            DEBUG(DefMI->dump());
-            ToErase = DefMI;
-          }
-          Simplified = true;
-          DEBUG(dbgs() << "Changing splat immediate from " << SplatImm <<
-                " to " << NewElem << " in instruction: ");
-          DEBUG(MI.dump());
-          MI.getOperand(1).setImm(NewElem);
-          MI.getOperand(2).setReg(SwapOp1);
-        }
-
         break;
       }
       case PPC::XVCVDPSP: {
         // If this is a DP->SP conversion fed by an FRSP, the FRSP is redundant.
-        unsigned TrueReg = lookThruCopyLike(MI.getOperand(1).getReg());
+        unsigned TrueReg =
+          TRI->lookThruCopyLike(MI.getOperand(1).getReg(), MRI);
         if (!TargetRegisterInfo::isVirtualRegister(TrueReg))
           break;
         MachineInstr *DefMI = MRI->getVRegDef(TrueReg);
@@ -434,8 +470,10 @@ bool PPCMIPeephole::simplifyCode(void) {
         // This can occur when building a vector of single precision or integer
         // values.
         if (DefMI && DefMI->getOpcode() == PPC::XXPERMDI) {
-          unsigned DefsReg1 = lookThruCopyLike(DefMI->getOperand(1).getReg());
-          unsigned DefsReg2 = lookThruCopyLike(DefMI->getOperand(2).getReg());
+          unsigned DefsReg1 =
+            TRI->lookThruCopyLike(DefMI->getOperand(1).getReg(), MRI);
+          unsigned DefsReg2 =
+            TRI->lookThruCopyLike(DefMI->getOperand(2).getReg(), MRI);
           if (!TargetRegisterInfo::isVirtualRegister(DefsReg1) ||
               !TargetRegisterInfo::isVirtualRegister(DefsReg2))
             break;
@@ -458,12 +496,12 @@ bool PPCMIPeephole::simplifyCode(void) {
                 if (Use.getOperand(i).isReg() &&
                     Use.getOperand(i).getReg() == FRSPDefines)
                   Use.getOperand(i).setReg(ConvReg1);
-              DEBUG(dbgs() << "Removing redundant FRSP:\n");
-              DEBUG(RoundInstr->dump());
-              DEBUG(dbgs() << "As it feeds instruction:\n");
-              DEBUG(MI.dump());
-              DEBUG(dbgs() << "Through instruction:\n");
-              DEBUG(DefMI->dump());
+              LLVM_DEBUG(dbgs() << "Removing redundant FRSP:\n");
+              LLVM_DEBUG(RoundInstr->dump());
+              LLVM_DEBUG(dbgs() << "As it feeds instruction:\n");
+              LLVM_DEBUG(MI.dump());
+              LLVM_DEBUG(dbgs() << "Through instruction:\n");
+              LLVM_DEBUG(DefMI->dump());
               RoundInstr->eraseFromParent();
             }
           };
@@ -511,11 +549,11 @@ bool PPCMIPeephole::simplifyCode(void) {
           };
           unsigned Opc = getSextLoadOp(is64Bit(MI.getOpcode()),
                                        isXForm(SrcMI->getOpcode()));
-          DEBUG(dbgs() << "Zero-extending load\n");
-          DEBUG(SrcMI->dump());
-          DEBUG(dbgs() << "and sign-extension\n");
-          DEBUG(MI.dump());
-          DEBUG(dbgs() << "are merged into sign-extending load\n");
+          LLVM_DEBUG(dbgs() << "Zero-extending load\n");
+          LLVM_DEBUG(SrcMI->dump());
+          LLVM_DEBUG(dbgs() << "and sign-extension\n");
+          LLVM_DEBUG(MI.dump());
+          LLVM_DEBUG(dbgs() << "are merged into sign-extending load\n");
           SrcMI->setDesc(TII->get(Opc));
           SrcMI->getOperand(0).setReg(MI.getOperand(0).getReg());
           ToErase = &MI;
@@ -555,11 +593,11 @@ bool PPCMIPeephole::simplifyCode(void) {
           };
           unsigned Opc = getSextLoadOp(is64Bit(MI.getOpcode()),
                                        isXForm(SrcMI->getOpcode()));
-          DEBUG(dbgs() << "Zero-extending load\n");
-          DEBUG(SrcMI->dump());
-          DEBUG(dbgs() << "and sign-extension\n");
-          DEBUG(MI.dump());
-          DEBUG(dbgs() << "are merged into sign-extending load\n");
+          LLVM_DEBUG(dbgs() << "Zero-extending load\n");
+          LLVM_DEBUG(SrcMI->dump());
+          LLVM_DEBUG(dbgs() << "and sign-extension\n");
+          LLVM_DEBUG(MI.dump());
+          LLVM_DEBUG(dbgs() << "are merged into sign-extending load\n");
           SrcMI->setDesc(TII->get(Opc));
           SrcMI->getOperand(0).setReg(MI.getOperand(0).getReg());
           ToErase = &MI;
@@ -569,7 +607,7 @@ bool PPCMIPeephole::simplifyCode(void) {
                    TII->isSignExtended(*SrcMI)) {
           // We can eliminate EXTSW if the input is known to be already
           // sign-extended.
-          DEBUG(dbgs() << "Removing redundant sign-extension\n");
+          LLVM_DEBUG(dbgs() << "Removing redundant sign-extension\n");
           unsigned TmpReg =
             MF->getRegInfo().createVirtualRegister(&PPC::G8RCRegClass);
           BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::IMPLICIT_DEF),
@@ -589,9 +627,9 @@ bool PPCMIPeephole::simplifyCode(void) {
         // We can eliminate RLDICL (e.g. for zero-extension)
         // if all bits to clear are already zero in the input.
         // This code assume following code sequence for zero-extension.
-        //   %vreg6<def> = COPY %vreg5:sub_32; (optional)
-        //   %vreg8<def> = IMPLICIT_DEF;
-        //   %vreg7<def,tied1> = INSERT_SUBREG %vreg8<tied0>, %vreg6, sub_32;
+        //   %6 = COPY %5:sub_32; (optional)
+        //   %8 = IMPLICIT_DEF;
+        //   %7<def,tied1> = INSERT_SUBREG %8<tied0>, %6, sub_32;
         if (!EnableZExtElimination) break;
 
         if (MI.getOperand(2).getImm() != 0)
@@ -620,7 +658,7 @@ bool PPCMIPeephole::simplifyCode(void) {
 
         unsigned KnownZeroCount = getKnownLeadingZeroCount(SrcMI, TII);
         if (MI.getOperand(3).getImm() <= KnownZeroCount) {
-          DEBUG(dbgs() << "Removing redundant zero-extension\n");
+          LLVM_DEBUG(dbgs() << "Removing redundant zero-extension\n");
           BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                   MI.getOperand(0).getReg())
               .addReg(SrcReg);
@@ -686,11 +724,11 @@ bool PPCMIPeephole::simplifyCode(void) {
         MachineInstr *DefPhiMI = getVRegDefOrNull(&Op1, MRI);
         for (unsigned i = 1; i < DefPhiMI->getNumOperands(); i += 2) {
           MachineInstr *LiMI = getVRegDefOrNull(&DefPhiMI->getOperand(i), MRI);
-          DEBUG(dbgs() << "Optimizing LI to ADDI: ");
-          DEBUG(LiMI->dump());
+          LLVM_DEBUG(dbgs() << "Optimizing LI to ADDI: ");
+          LLVM_DEBUG(LiMI->dump());
 
-          // There could be repeated registers in the PHI, e.g: %vreg1<def> =
-          // PHI %vreg6, <BB#2>, %vreg8, <BB#3>, %vreg8, <BB#6>; So if we've
+          // There could be repeated registers in the PHI, e.g: %1 =
+          // PHI %6, <%bb.2>, %8, <%bb.3>, %8, <%bb.6>; So if we've
           // already replaced the def instruction, skip.
           if (LiMI->getOpcode() == PPC::ADDI || LiMI->getOpcode() == PPC::ADDI8)
             continue;
@@ -705,12 +743,12 @@ bool PPCMIPeephole::simplifyCode(void) {
           MachineInstrBuilder(*LiMI->getParent()->getParent(), *LiMI)
               .addReg(DominatorReg)
               .addImm(LiImm); // restore the imm of LI
-          DEBUG(LiMI->dump());
+          LLVM_DEBUG(LiMI->dump());
         }
 
         // Replace ADD with COPY
-        DEBUG(dbgs() << "Optimizing ADD to COPY: ");
-        DEBUG(MI.dump());
+        LLVM_DEBUG(dbgs() << "Optimizing ADD to COPY: ");
+        LLVM_DEBUG(MI.dump());
         BuildMI(MBB, &MI, MI.getDebugLoc(), TII->get(PPC::COPY),
                 MI.getOperand(0).getReg())
             .add(Op1);
@@ -730,6 +768,8 @@ bool PPCMIPeephole::simplifyCode(void) {
     }
   }
 
+  // Eliminate all the TOC save instructions which are redundant.
+  Simplified |= eliminateRedundantTOCSaves(TOCSaves);
   // We try to eliminate redundant compare instruction.
   Simplified |= eliminateRedundantCompare();
 
@@ -806,7 +846,7 @@ static unsigned getPredicateToIncImm(MachineInstr *BI, MachineInstr *CMPI) {
   return 0;
 }
 
-// This takes a Phi node and returns a register value for the spefied BB.
+// This takes a Phi node and returns a register value for the specified BB.
 static unsigned getIncomingRegForBlock(MachineInstr *Phi,
                                        MachineBasicBlock *MBB) {
   for (unsigned I = 2, E = Phi->getNumOperands() + 1; I != E; I += 2) {
@@ -850,7 +890,7 @@ static bool eligibleForCompareElimination(MachineBasicBlock &MBB,
     auto BII = BB.getFirstInstrTerminator();
     // We optimize BBs ending with a conditional branch.
     // We check only for BCC here, not BCCLR, because BCCLR
-    // will be formed only later in the pipeline. 
+    // will be formed only later in the pipeline.
     if (BB.succ_size() == 2 &&
         BII != BB.instr_end() &&
         (*BII).getOpcode() == PPC::BCC &&
@@ -861,8 +901,12 @@ static bool eligibleForCompareElimination(MachineBasicBlock &MBB,
           !MRI->hasOneNonDBGUse(CndReg))
         return false;
 
-      // We skip this BB if a physical register is used in comparison.
       MachineInstr *CMPI = MRI->getVRegDef(CndReg);
+      // We assume compare and branch are in the same BB for ease of analysis.
+      if (CMPI->getParent() != &BB)
+        return false;
+
+      // We skip this BB if a physical register is used in comparison.
       for (MachineOperand &MO : CMPI->operands())
         if (MO.isReg() && !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
           return false;
@@ -931,6 +975,30 @@ static bool eligibleForCompareElimination(MachineBasicBlock &MBB,
   return false;
 }
 
+// This function will iterate over the input map containing a pair of TOC save
+// instruction and a flag. The flag will be set to false if the TOC save is
+// proven redundant. This function will erase from the basic block all the TOC
+// saves marked as redundant.
+bool PPCMIPeephole::eliminateRedundantTOCSaves(
+    std::map<MachineInstr *, bool> &TOCSaves) {
+  bool Simplified = false;
+  int NumKept = 0;
+  for (auto TOCSave : TOCSaves) {
+    if (!TOCSave.second) {
+      TOCSave.first->eraseFromParent();
+      RemoveTOCSave++;
+      Simplified = true;
+    } else {
+      NumKept++;
+    }
+  }
+
+  if (NumKept > 1)
+    MultiTOCSaves++;
+
+  return Simplified;
+}
+
 // If multiple conditional branches are executed based on the (essentially)
 // same comparison, we merge compare instructions into one and make multiple
 // conditional branches on this comparison.
@@ -968,7 +1036,7 @@ bool PPCMIPeephole::eliminateRedundantCompare(void) {
     //
     // As partially redundant case, we additionally handle if MBB2 has one
     // additional predecessor, which has only one successor (MBB2).
-    // In this case, we move the compre instruction originally in MBB2 into
+    // In this case, we move the compare instruction originally in MBB2 into
     // MBBtoMoveCmp. This partially redundant case is typically appear by
     // compiling a while loop; here, MBBtoMoveCmp is the loop preheader.
     //
@@ -1013,10 +1081,21 @@ bool PPCMIPeephole::eliminateRedundantCompare(void) {
       // we replace it with a signed comparison if the comparison
       // to be merged is a signed comparison.
       // In other cases of opcode mismatch, we cannot optimize this.
-      if (isEqOrNe(BI2) &&
+
+      // We cannot change opcode when comparing against an immediate
+      // if the most significant bit of the immediate is one
+      // due to the difference in sign extension.
+      auto CmpAgainstImmWithSignBit = [](MachineInstr *I) {
+        if (!I->getOperand(2).isImm())
+          return false;
+        int16_t Imm = (int16_t)I->getOperand(2).getImm();
+        return Imm < 0;
+      };
+
+      if (isEqOrNe(BI2) && !CmpAgainstImmWithSignBit(CMPI2) &&
           CMPI1->getOpcode() == getSignedCmpOpCode(CMPI2->getOpcode()))
         NewOpCode = CMPI1->getOpcode();
-      else if (isEqOrNe(BI1) &&
+      else if (isEqOrNe(BI1) && !CmpAgainstImmWithSignBit(CMPI1) &&
                getSignedCmpOpCode(CMPI1->getOpcode()) == CMPI2->getOpcode())
         NewOpCode = CMPI2->getOpcode();
       else continue;
@@ -1110,16 +1189,16 @@ bool PPCMIPeephole::eliminateRedundantCompare(void) {
         }
       }
 
-      // We cannnot merge two compares if the immediates are not same.
+      // We cannot merge two compares if the immediates are not same.
       if (NewImm2 != NewImm1)
         continue;
     }
 
-    DEBUG(dbgs() << "Optimize two pairs of compare and branch:\n");
-    DEBUG(CMPI1->dump());
-    DEBUG(BI1->dump());
-    DEBUG(CMPI2->dump());
-    DEBUG(BI2->dump());
+    LLVM_DEBUG(dbgs() << "Optimize two pairs of compare and branch:\n");
+    LLVM_DEBUG(CMPI1->dump());
+    LLVM_DEBUG(BI1->dump());
+    LLVM_DEBUG(CMPI2->dump());
+    LLVM_DEBUG(BI2->dump());
 
     // We adjust opcode, predicates and immediate as we determined above.
     if (NewOpCode != 0 && NewOpCode != CMPI1->getOpcode()) {
@@ -1178,50 +1257,21 @@ bool PPCMIPeephole::eliminateRedundantCompare(void) {
     BI2->getOperand(1).setIsKill(true);
     BI1->getOperand(1).setIsKill(false);
 
-    DEBUG(dbgs() << "into a compare and two branches:\n");
-    DEBUG(CMPI1->dump());
-    DEBUG(BI1->dump());
-    DEBUG(BI2->dump());
+    LLVM_DEBUG(dbgs() << "into a compare and two branches:\n");
+    LLVM_DEBUG(CMPI1->dump());
+    LLVM_DEBUG(BI1->dump());
+    LLVM_DEBUG(BI2->dump());
     if (IsPartiallyRedundant) {
-      DEBUG(dbgs() << "The following compare is moved into BB#" <<
-            MBBtoMoveCmp->getNumber() << " to handle partial redundancy.\n");
-      DEBUG(CMPI2->dump());
+      LLVM_DEBUG(dbgs() << "The following compare is moved into "
+                        << printMBBReference(*MBBtoMoveCmp)
+                        << " to handle partial redundancy.\n");
+      LLVM_DEBUG(CMPI2->dump());
     }
 
     Simplified = true;
   }
 
   return Simplified;
-}
-
-// This is used to find the "true" source register for an
-// XXPERMDI instruction, since MachineCSE does not handle the
-// "copy-like" operations (Copy and SubregToReg).  Returns
-// the original SrcReg unless it is the target of a copy-like
-// operation, in which case we chain backwards through all
-// such operations to the ultimate source register.  If a
-// physical register is encountered, we stop the search.
-unsigned PPCMIPeephole::lookThruCopyLike(unsigned SrcReg) {
-
-  while (true) {
-
-    MachineInstr *MI = MRI->getVRegDef(SrcReg);
-    if (!MI->isCopyLike())
-      return SrcReg;
-
-    unsigned CopySrcReg;
-    if (MI->isCopy())
-      CopySrcReg = MI->getOperand(1).getReg();
-    else {
-      assert(MI->isSubregToReg() && "bad opcode for lookThruCopyLike");
-      CopySrcReg = MI->getOperand(2).getReg();
-    }
-
-    if (!TargetRegisterInfo::isVirtualRegister(CopySrcReg))
-      return CopySrcReg;
-
-    SrcReg = CopySrcReg;
-  }
 }
 
 } // end default namespace

@@ -1,9 +1,8 @@
 //===----- ResourcePriorityQueue.h - A DFA-oriented priority queue -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,9 +19,9 @@
 #include "llvm/CodeGen/DFAPacketizer.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 
 namespace llvm {
   class ResourcePriorityQueue;
@@ -32,7 +31,7 @@ namespace llvm {
     ResourcePriorityQueue *PQ;
     explicit resource_sort(ResourcePriorityQueue *pq) : PQ(pq) {}
 
-    bool operator()(const SUnit* left, const SUnit* right) const;
+    bool operator()(const SUnit* LHS, const SUnit* RHS) const;
   };
 
   class ResourcePriorityQueue : public SchedulingPriorityQueue {
@@ -121,7 +120,7 @@ namespace llvm {
     void remove(SUnit *SU) override;
 
     /// scheduledNode - Main resource tracking point.
-    void scheduledNode(SUnit *Node) override;
+    void scheduledNode(SUnit *SU) override;
     bool isResourceAvailable(SUnit *SU);
     void reserveResources(SUnit *SU);
 

@@ -1,9 +1,8 @@
 //===- RegionInfo.cpp - SESE region detection analysis --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Detects single entry single exit regions in the control flow graph.
@@ -15,6 +14,7 @@
 #include "llvm/Analysis/RegionPrinter.h"
 #endif
 #include "llvm/Analysis/RegionInfoImpl.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
@@ -80,7 +80,7 @@ RegionInfo::~RegionInfo() = default;
 bool RegionInfo::invalidate(Function &F, const PreservedAnalyses &PA,
                             FunctionAnalysisManager::Invalidator &) {
   // Check whether the analysis, all analyses on functions, or the function's
-  // CFG have been preserved.
+  // CFG has been preserved.
   auto PAC = PA.getChecker<RegionInfoAnalysis>();
   return !(PAC.preserved() || PAC.preservedSet<AllAnalysesOn<Function>>() ||
            PAC.preservedSet<CFGAnalyses>());

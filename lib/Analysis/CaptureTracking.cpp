@@ -1,9 +1,8 @@
 //===--- CaptureTracking.cpp - Determine whether a pointer is captured ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,7 +21,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/OrderedBasicBlock.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
@@ -60,7 +59,7 @@ namespace {
   /// as the given instruction and the use.
   struct CapturesBefore : public CaptureTracker {
 
-    CapturesBefore(bool ReturnCaptures, const Instruction *I, DominatorTree *DT,
+    CapturesBefore(bool ReturnCaptures, const Instruction *I, const DominatorTree *DT,
                    bool IncludeI, OrderedBasicBlock *IC)
       : OrderedBB(IC), BeforeHere(I), DT(DT),
         ReturnCaptures(ReturnCaptures), IncludeI(IncludeI), Captured(false) {}
@@ -140,7 +139,7 @@ namespace {
 
     OrderedBasicBlock *OrderedBB;
     const Instruction *BeforeHere;
-    DominatorTree *DT;
+    const DominatorTree *DT;
 
     bool ReturnCaptures;
     bool IncludeI;
@@ -157,7 +156,8 @@ namespace {
 /// storing the value (or part of it) into memory anywhere automatically
 /// counts as capturing it or not.
 bool llvm::PointerMayBeCaptured(const Value *V,
-                                bool ReturnCaptures, bool StoreCaptures) {
+                                bool ReturnCaptures, bool StoreCaptures,
+                                unsigned MaxUsesToExplore) {
   assert(!isa<GlobalValue>(V) &&
          "It doesn't make sense to ask whether a global is captured.");
 
@@ -168,7 +168,7 @@ bool llvm::PointerMayBeCaptured(const Value *V,
   (void)StoreCaptures;
 
   SimpleCaptureTracker SCT(ReturnCaptures);
-  PointerMayBeCaptured(V, &SCT);
+  PointerMayBeCaptured(V, &SCT, MaxUsesToExplore);
   return SCT.Captured;
 }
 
@@ -184,14 +184,16 @@ bool llvm::PointerMayBeCaptured(const Value *V,
 /// queries about relative order among instructions in the same basic block.
 bool llvm::PointerMayBeCapturedBefore(const Value *V, bool ReturnCaptures,
                                       bool StoreCaptures, const Instruction *I,
-                                      DominatorTree *DT, bool IncludeI,
-                                      OrderedBasicBlock *OBB) {
+                                      const DominatorTree *DT, bool IncludeI,
+                                      OrderedBasicBlock *OBB,
+                                      unsigned MaxUsesToExplore) {
   assert(!isa<GlobalValue>(V) &&
          "It doesn't make sense to ask whether a global is captured.");
   bool UseNewOBB = OBB == nullptr;
 
   if (!DT)
-    return PointerMayBeCaptured(V, ReturnCaptures, StoreCaptures);
+    return PointerMayBeCaptured(V, ReturnCaptures, StoreCaptures,
+                                MaxUsesToExplore);
   if (UseNewOBB)
     OBB = new OrderedBasicBlock(I->getParent());
 
@@ -199,34 +201,34 @@ bool llvm::PointerMayBeCapturedBefore(const Value *V, bool ReturnCaptures,
   // with StoreCaptures.
 
   CapturesBefore CB(ReturnCaptures, I, DT, IncludeI, OBB);
-  PointerMayBeCaptured(V, &CB);
+  PointerMayBeCaptured(V, &CB, MaxUsesToExplore);
 
   if (UseNewOBB)
     delete OBB;
   return CB.Captured;
 }
 
-/// TODO: Write a new FunctionPass AliasAnalysis so that it can keep
-/// a cache. Then we can move the code from BasicAliasAnalysis into
-/// that path, and remove this threshold.
-static int const Threshold = 20;
-
-void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker) {
+void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker,
+                                unsigned MaxUsesToExplore) {
   assert(V->getType()->isPointerTy() && "Capture is for pointers only!");
-  SmallVector<const Use *, Threshold> Worklist;
-  SmallSet<const Use *, Threshold> Visited;
-  int Count = 0;
+  SmallVector<const Use *, DefaultMaxUsesToExplore> Worklist;
+  SmallSet<const Use *, DefaultMaxUsesToExplore> Visited;
 
-  for (const Use &U : V->uses()) {
-    // If there are lots of uses, conservatively say that the value
-    // is captured to avoid taking too much compile time.
-    if (Count++ >= Threshold)
-      return Tracker->tooManyUses();
-
-    if (!Tracker->shouldExplore(&U)) continue;
-    Visited.insert(&U);
-    Worklist.push_back(&U);
-  }
+  auto AddUses = [&](const Value *V) {
+    unsigned Count = 0;
+    for (const Use &U : V->uses()) {
+      // If there are lots of uses, conservatively say that the value
+      // is captured to avoid taking too much compile time.
+      if (Count++ >= MaxUsesToExplore)
+        return Tracker->tooManyUses();
+      if (!Visited.insert(&U).second)
+        continue;
+      if (!Tracker->shouldExplore(&U))
+        continue;
+      Worklist.push_back(&U);
+    }
+  };
+  AddUses(V);
 
   while (!Worklist.empty()) {
     const Use *U = Worklist.pop_back_val();
@@ -236,16 +238,27 @@ void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker) {
     switch (I->getOpcode()) {
     case Instruction::Call:
     case Instruction::Invoke: {
-      CallSite CS(I);
+      auto *Call = cast<CallBase>(I);
       // Not captured if the callee is readonly, doesn't return a copy through
       // its return value and doesn't unwind (a readonly function can leak bits
       // by throwing an exception or not depending on the input value).
-      if (CS.onlyReadsMemory() && CS.doesNotThrow() && I->getType()->isVoidTy())
+      if (Call->onlyReadsMemory() && Call->doesNotThrow() &&
+          Call->getType()->isVoidTy())
         break;
+
+      // The pointer is not captured if returned pointer is not captured.
+      // NOTE: CaptureTracking users should not assume that only functions
+      // marked with nocapture do not capture. This means that places like
+      // GetUnderlyingObject in ValueTracking or DecomposeGEPExpression
+      // in BasicAA also need to know about this property.
+      if (isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(Call)) {
+        AddUses(Call);
+        break;
+      }
 
       // Volatile operations effectively capture the memory location that they
       // load and store to.
-      if (auto *MI = dyn_cast<MemIntrinsic>(I))
+      if (auto *MI = dyn_cast<MemIntrinsic>(Call))
         if (MI->isVolatile())
           if (Tracker->captured(U))
             return;
@@ -257,13 +270,14 @@ void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker) {
       // that loading a value from a pointer does not cause the pointer to be
       // captured, even though the loaded value might be the pointer itself
       // (think of self-referential objects).
-      CallSite::data_operand_iterator B =
-        CS.data_operands_begin(), E = CS.data_operands_end();
-      for (CallSite::data_operand_iterator A = B; A != E; ++A)
-        if (A->get() == V && !CS.doesNotCapture(A - B))
+      for (auto IdxOpPair : enumerate(Call->data_ops())) {
+        int Idx = IdxOpPair.index();
+        Value *A = IdxOpPair.value();
+        if (A == V && !Call->doesNotCapture(Idx))
           // The parameter is not marked 'nocapture' - captured.
           if (Tracker->captured(U))
             return;
+      }
       break;
     }
     case Instruction::Load:
@@ -313,17 +327,7 @@ void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker) {
     case Instruction::Select:
     case Instruction::AddrSpaceCast:
       // The original value is not captured via this if the new value isn't.
-      Count = 0;
-      for (Use &UU : I->uses()) {
-        // If there are lots of uses, conservatively say that the value
-        // is captured to avoid taking too much compile time.
-        if (Count++ >= Threshold)
-          return Tracker->tooManyUses();
-
-        if (Visited.insert(&UU).second)
-          if (Tracker->shouldExplore(&UU))
-            Worklist.push_back(&UU);
-      }
+      AddUses(I);
       break;
     case Instruction::ICmp: {
       // Don't count comparisons of a no-alias return value against null as

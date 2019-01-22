@@ -1,13 +1,13 @@
 //===- DWARFDebugPubTable.cpp ---------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
+#include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/DataExtractor.h"
@@ -18,10 +18,11 @@
 using namespace llvm;
 using namespace dwarf;
 
-DWARFDebugPubTable::DWARFDebugPubTable(StringRef Data, bool LittleEndian,
-                                       bool GnuStyle)
+DWARFDebugPubTable::DWARFDebugPubTable(const DWARFObject &Obj,
+                                       const DWARFSection &Sec,
+                                       bool LittleEndian, bool GnuStyle)
     : GnuStyle(GnuStyle) {
-  DataExtractor PubNames(Data, LittleEndian, 0);
+  DWARFDataExtractor PubNames(Obj, Sec, LittleEndian, 0);
   uint32_t Offset = 0;
   while (PubNames.isValidOffset(Offset)) {
     Sets.push_back({});
@@ -29,15 +30,15 @@ DWARFDebugPubTable::DWARFDebugPubTable(StringRef Data, bool LittleEndian,
 
     SetData.Length = PubNames.getU32(&Offset);
     SetData.Version = PubNames.getU16(&Offset);
-    SetData.Offset = PubNames.getU32(&Offset);
+    SetData.Offset = PubNames.getRelocatedValue(4, &Offset);
     SetData.Size = PubNames.getU32(&Offset);
 
-    while (Offset < Data.size()) {
+    while (Offset < Sec.Data.size()) {
       uint32_t DieRef = PubNames.getU32(&Offset);
       if (DieRef == 0)
         break;
       uint8_t IndexEntryValue = GnuStyle ? PubNames.getU8(&Offset) : 0;
-      const char *Name = PubNames.getCStr(&Offset);
+      StringRef Name = PubNames.getCStrRef(&Offset);
       SetData.Entries.push_back(
           {DieRef, PubIndexEntryDescriptor(IndexEntryValue), Name});
     }

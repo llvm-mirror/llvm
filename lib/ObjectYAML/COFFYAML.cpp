@@ -1,9 +1,8 @@
 //===- COFFYAML.cpp - COFF YAMLIO implementation --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -176,6 +175,46 @@ void ScalarEnumerationTraits<COFF::RelocationTypeAMD64>::enumeration(
   ECase(IMAGE_REL_AMD64_SREL32);
   ECase(IMAGE_REL_AMD64_PAIR);
   ECase(IMAGE_REL_AMD64_SSPAN32);
+}
+
+void ScalarEnumerationTraits<COFF::RelocationTypesARM>::enumeration(
+    IO &IO, COFF::RelocationTypesARM &Value) {
+  ECase(IMAGE_REL_ARM_ABSOLUTE);
+  ECase(IMAGE_REL_ARM_ADDR32);
+  ECase(IMAGE_REL_ARM_ADDR32NB);
+  ECase(IMAGE_REL_ARM_BRANCH24);
+  ECase(IMAGE_REL_ARM_BRANCH11);
+  ECase(IMAGE_REL_ARM_TOKEN);
+  ECase(IMAGE_REL_ARM_BLX24);
+  ECase(IMAGE_REL_ARM_BLX11);
+  ECase(IMAGE_REL_ARM_SECTION);
+  ECase(IMAGE_REL_ARM_SECREL);
+  ECase(IMAGE_REL_ARM_MOV32A);
+  ECase(IMAGE_REL_ARM_MOV32T);
+  ECase(IMAGE_REL_ARM_BRANCH20T);
+  ECase(IMAGE_REL_ARM_BRANCH24T);
+  ECase(IMAGE_REL_ARM_BLX23T);
+}
+
+void ScalarEnumerationTraits<COFF::RelocationTypesARM64>::enumeration(
+    IO &IO, COFF::RelocationTypesARM64 &Value) {
+  ECase(IMAGE_REL_ARM64_ABSOLUTE);
+  ECase(IMAGE_REL_ARM64_ADDR32);
+  ECase(IMAGE_REL_ARM64_ADDR32NB);
+  ECase(IMAGE_REL_ARM64_BRANCH26);
+  ECase(IMAGE_REL_ARM64_PAGEBASE_REL21);
+  ECase(IMAGE_REL_ARM64_REL21);
+  ECase(IMAGE_REL_ARM64_PAGEOFFSET_12A);
+  ECase(IMAGE_REL_ARM64_PAGEOFFSET_12L);
+  ECase(IMAGE_REL_ARM64_SECREL);
+  ECase(IMAGE_REL_ARM64_SECREL_LOW12A);
+  ECase(IMAGE_REL_ARM64_SECREL_HIGH12A);
+  ECase(IMAGE_REL_ARM64_SECREL_LOW12L);
+  ECase(IMAGE_REL_ARM64_TOKEN);
+  ECase(IMAGE_REL_ARM64_SECTION);
+  ECase(IMAGE_REL_ARM64_ADDR64);
+  ECase(IMAGE_REL_ARM64_BRANCH19);
+  ECase(IMAGE_REL_ARM64_BRANCH14);
 }
 
 void ScalarEnumerationTraits<COFF::WindowsSubsystem>::enumeration(
@@ -367,7 +406,8 @@ struct NDLLCharacteristics {
 void MappingTraits<COFFYAML::Relocation>::mapping(IO &IO,
                                                   COFFYAML::Relocation &Rel) {
   IO.mapRequired("VirtualAddress", Rel.VirtualAddress);
-  IO.mapRequired("SymbolName", Rel.SymbolName);
+  IO.mapOptional("SymbolName", Rel.SymbolName, StringRef());
+  IO.mapOptional("SymbolTableIndex", Rel.SymbolTableIndex);
 
   COFF::header &H = *static_cast<COFF::header *>(IO.getContext());
   if (H.Machine == COFF::IMAGE_FILE_MACHINE_I386) {
@@ -376,6 +416,14 @@ void MappingTraits<COFFYAML::Relocation>::mapping(IO &IO,
     IO.mapRequired("Type", NT->Type);
   } else if (H.Machine == COFF::IMAGE_FILE_MACHINE_AMD64) {
     MappingNormalization<NType<COFF::RelocationTypeAMD64>, uint16_t> NT(
+        IO, Rel.Type);
+    IO.mapRequired("Type", NT->Type);
+  } else if (H.Machine == COFF::IMAGE_FILE_MACHINE_ARMNT) {
+    MappingNormalization<NType<COFF::RelocationTypesARM>, uint16_t> NT(
+        IO, Rel.Type);
+    IO.mapRequired("Type", NT->Type);
+  } else if (H.Machine == COFF::IMAGE_FILE_MACHINE_ARM64) {
+    MappingNormalization<NType<COFF::RelocationTypesARM64>, uint16_t> NT(
         IO, Rel.Type);
     IO.mapRequired("Type", NT->Type);
   } else {
@@ -514,14 +562,18 @@ void MappingTraits<COFFYAML::Section>::mapping(IO &IO, COFFYAML::Section &Sec) {
   IO.mapOptional("VirtualSize", Sec.Header.VirtualSize, 0U);
   IO.mapOptional("Alignment", Sec.Alignment, 0U);
 
-  // If this is a .debug$S or .debug$T section parse the semantic representation
-  // of the symbols/types.  If it is any other kind of section, just deal in raw
-  // bytes.
+  // If this is a .debug$S .debug$T .debug$P, or .debug$H section parse the
+  // semantic representation of the symbols/types.  If it is any other kind
+  // of section, just deal in raw bytes.
   IO.mapOptional("SectionData", Sec.SectionData);
   if (Sec.Name == ".debug$S")
     IO.mapOptional("Subsections", Sec.DebugS);
   else if (Sec.Name == ".debug$T")
     IO.mapOptional("Types", Sec.DebugT);
+  else if (Sec.Name == ".debug$P")
+    IO.mapOptional("PrecompTypes", Sec.DebugP);
+  else if (Sec.Name == ".debug$H")
+    IO.mapOptional("GlobalHashes", Sec.DebugH);
 
   IO.mapOptional("Relocations", Sec.Relocations);
 }

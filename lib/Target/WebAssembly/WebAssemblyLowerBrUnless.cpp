@@ -1,14 +1,13 @@
 //===-- WebAssemblyLowerBrUnless.cpp - Lower br_unless --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file lowers br_unless into br_if with an inverted condition.
+/// This file lowers br_unless into br_if with an inverted condition.
 ///
 /// br_unless is not currently in the spec, but it's very convenient for LLVM
 /// to use. This pass allows LLVM to use it, for now.
@@ -47,14 +46,17 @@ public:
 } // end anonymous namespace
 
 char WebAssemblyLowerBrUnless::ID = 0;
+INITIALIZE_PASS(WebAssemblyLowerBrUnless, DEBUG_TYPE,
+                "Lowers br_unless into inverted br_if", false, false)
+
 FunctionPass *llvm::createWebAssemblyLowerBrUnless() {
   return new WebAssemblyLowerBrUnless();
 }
 
 bool WebAssemblyLowerBrUnless::runOnMachineFunction(MachineFunction &MF) {
-  DEBUG(dbgs() << "********** Lowering br_unless **********\n"
-                  "********** Function: "
-               << MF.getName() << '\n');
+  LLVM_DEBUG(dbgs() << "********** Lowering br_unless **********\n"
+                       "********** Function: "
+                    << MF.getName() << '\n');
 
   auto &MFI = *MF.getInfo<WebAssemblyFunctionInfo>();
   const auto &TII = *MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
@@ -75,31 +77,111 @@ bool WebAssemblyLowerBrUnless::runOnMachineFunction(MachineFunction &MF) {
         MachineInstr *Def = MRI.getVRegDef(Cond);
         switch (Def->getOpcode()) {
           using namespace WebAssembly;
-        case EQ_I32: Def->setDesc(TII.get(NE_I32)); Inverted = true; break;
-        case NE_I32: Def->setDesc(TII.get(EQ_I32)); Inverted = true; break;
-        case GT_S_I32: Def->setDesc(TII.get(LE_S_I32)); Inverted = true; break;
-        case GE_S_I32: Def->setDesc(TII.get(LT_S_I32)); Inverted = true; break;
-        case LT_S_I32: Def->setDesc(TII.get(GE_S_I32)); Inverted = true; break;
-        case LE_S_I32: Def->setDesc(TII.get(GT_S_I32)); Inverted = true; break;
-        case GT_U_I32: Def->setDesc(TII.get(LE_U_I32)); Inverted = true; break;
-        case GE_U_I32: Def->setDesc(TII.get(LT_U_I32)); Inverted = true; break;
-        case LT_U_I32: Def->setDesc(TII.get(GE_U_I32)); Inverted = true; break;
-        case LE_U_I32: Def->setDesc(TII.get(GT_U_I32)); Inverted = true; break;
-        case EQ_I64: Def->setDesc(TII.get(NE_I64)); Inverted = true; break;
-        case NE_I64: Def->setDesc(TII.get(EQ_I64)); Inverted = true; break;
-        case GT_S_I64: Def->setDesc(TII.get(LE_S_I64)); Inverted = true; break;
-        case GE_S_I64: Def->setDesc(TII.get(LT_S_I64)); Inverted = true; break;
-        case LT_S_I64: Def->setDesc(TII.get(GE_S_I64)); Inverted = true; break;
-        case LE_S_I64: Def->setDesc(TII.get(GT_S_I64)); Inverted = true; break;
-        case GT_U_I64: Def->setDesc(TII.get(LE_U_I64)); Inverted = true; break;
-        case GE_U_I64: Def->setDesc(TII.get(LT_U_I64)); Inverted = true; break;
-        case LT_U_I64: Def->setDesc(TII.get(GE_U_I64)); Inverted = true; break;
-        case LE_U_I64: Def->setDesc(TII.get(GT_U_I64)); Inverted = true; break;
-        case EQ_F32: Def->setDesc(TII.get(NE_F32)); Inverted = true; break;
-        case NE_F32: Def->setDesc(TII.get(EQ_F32)); Inverted = true; break;
-        case EQ_F64: Def->setDesc(TII.get(NE_F64)); Inverted = true; break;
-        case NE_F64: Def->setDesc(TII.get(EQ_F64)); Inverted = true; break;
-        default: break;
+        case EQ_I32:
+          Def->setDesc(TII.get(NE_I32));
+          Inverted = true;
+          break;
+        case NE_I32:
+          Def->setDesc(TII.get(EQ_I32));
+          Inverted = true;
+          break;
+        case GT_S_I32:
+          Def->setDesc(TII.get(LE_S_I32));
+          Inverted = true;
+          break;
+        case GE_S_I32:
+          Def->setDesc(TII.get(LT_S_I32));
+          Inverted = true;
+          break;
+        case LT_S_I32:
+          Def->setDesc(TII.get(GE_S_I32));
+          Inverted = true;
+          break;
+        case LE_S_I32:
+          Def->setDesc(TII.get(GT_S_I32));
+          Inverted = true;
+          break;
+        case GT_U_I32:
+          Def->setDesc(TII.get(LE_U_I32));
+          Inverted = true;
+          break;
+        case GE_U_I32:
+          Def->setDesc(TII.get(LT_U_I32));
+          Inverted = true;
+          break;
+        case LT_U_I32:
+          Def->setDesc(TII.get(GE_U_I32));
+          Inverted = true;
+          break;
+        case LE_U_I32:
+          Def->setDesc(TII.get(GT_U_I32));
+          Inverted = true;
+          break;
+        case EQ_I64:
+          Def->setDesc(TII.get(NE_I64));
+          Inverted = true;
+          break;
+        case NE_I64:
+          Def->setDesc(TII.get(EQ_I64));
+          Inverted = true;
+          break;
+        case GT_S_I64:
+          Def->setDesc(TII.get(LE_S_I64));
+          Inverted = true;
+          break;
+        case GE_S_I64:
+          Def->setDesc(TII.get(LT_S_I64));
+          Inverted = true;
+          break;
+        case LT_S_I64:
+          Def->setDesc(TII.get(GE_S_I64));
+          Inverted = true;
+          break;
+        case LE_S_I64:
+          Def->setDesc(TII.get(GT_S_I64));
+          Inverted = true;
+          break;
+        case GT_U_I64:
+          Def->setDesc(TII.get(LE_U_I64));
+          Inverted = true;
+          break;
+        case GE_U_I64:
+          Def->setDesc(TII.get(LT_U_I64));
+          Inverted = true;
+          break;
+        case LT_U_I64:
+          Def->setDesc(TII.get(GE_U_I64));
+          Inverted = true;
+          break;
+        case LE_U_I64:
+          Def->setDesc(TII.get(GT_U_I64));
+          Inverted = true;
+          break;
+        case EQ_F32:
+          Def->setDesc(TII.get(NE_F32));
+          Inverted = true;
+          break;
+        case NE_F32:
+          Def->setDesc(TII.get(EQ_F32));
+          Inverted = true;
+          break;
+        case EQ_F64:
+          Def->setDesc(TII.get(NE_F64));
+          Inverted = true;
+          break;
+        case NE_F64:
+          Def->setDesc(TII.get(EQ_F64));
+          Inverted = true;
+          break;
+        case EQZ_I32: {
+          // Invert an eqz by replacing it with its operand.
+          Cond = Def->getOperand(1).getReg();
+          Def->eraseFromParent();
+          Inverted = true;
+          break;
+        }
+        default:
+          break;
         }
       }
 

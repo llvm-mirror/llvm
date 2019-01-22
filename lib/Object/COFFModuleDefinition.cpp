@@ -1,9 +1,8 @@
 //===--- COFFModuleDefinition.cpp - Simple DEF parser ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -37,6 +36,7 @@ enum Kind {
   Identifier,
   Comma,
   Equal,
+  EqualEqual,
   KwBase,
   KwConstant,
   KwData,
@@ -104,9 +104,10 @@ public:
     }
     case '=':
       Buf = Buf.drop_front();
-      // GNU dlltool accepts both = and ==.
-      if (Buf.startswith("="))
+      if (Buf.startswith("=")) {
         Buf = Buf.drop_front();
+        return Token(EqualEqual, "==");
+      }
       return Token(Equal, "=");
     case ',':
       Buf = Buf.drop_front();
@@ -117,7 +118,7 @@ public:
       return Token(Identifier, S);
     }
     default: {
-      size_t End = Buf.find_first_of("=,\r\n \t\v");
+      size_t End = Buf.find_first_of("=,;\r\n \t\v");
       StringRef Word = Buf.substr(0, End);
       Kind K = llvm::StringSwitch<Kind>(Word)
                    .Case("BASE", KwBase)
@@ -280,6 +281,13 @@ private:
       }
       if (Tok.K == KwPrivate) {
         E.Private = true;
+        continue;
+      }
+      if (Tok.K == EqualEqual) {
+        read();
+        E.AliasTarget = Tok.Value;
+        if (Machine == IMAGE_FILE_MACHINE_I386 && !isDecorated(E.AliasTarget, MingwDef))
+          E.AliasTarget = std::string("_").append(E.AliasTarget);
         continue;
       }
       unget();

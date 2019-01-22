@@ -1,9 +1,8 @@
 //===-- SparcMCTargetDesc.h - Sparc Target Descriptions ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,7 +22,7 @@ class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
-class MCObjectWriter;
+class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
@@ -40,12 +39,11 @@ Target &getTheSparcelTarget();
 MCCodeEmitter *createSparcMCCodeEmitter(const MCInstrInfo &MCII,
                                         const MCRegisterInfo &MRI,
                                         MCContext &Ctx);
-MCAsmBackend *createSparcAsmBackend(const Target &T, const MCRegisterInfo &MRI,
-                                    const Triple &TT, StringRef CPU,
+MCAsmBackend *createSparcAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                    const MCRegisterInfo &MRI,
                                     const MCTargetOptions &Options);
-std::unique_ptr<MCObjectWriter>
-createSparcELFObjectWriter(raw_pwrite_stream &OS, bool Is64Bit,
-                           bool IsLIttleEndian, uint8_t OSABI);
+std::unique_ptr<MCObjectTargetWriter> createSparcELFObjectWriter(bool Is64Bit,
+                                                                 uint8_t OSABI);
 } // End llvm namespace
 
 // Defines symbolic names for Sparc registers.  This defines a mapping from

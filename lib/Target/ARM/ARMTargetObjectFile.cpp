@@ -1,9 +1,8 @@
 //===-- llvm/Target/ARMTargetObjectFile.cpp - ARM Object Info Impl --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -32,7 +31,8 @@ void ARMElfTargetObjectFile::Initialize(MCContext &Ctx,
                                         const TargetMachine &TM) {
   const ARMBaseTargetMachine &ARM_TM = static_cast<const ARMBaseTargetMachine &>(TM);
   bool isAAPCS_ABI = ARM_TM.TargetABI == ARMBaseTargetMachine::ARMABI::ARM_ABI_AAPCS;
-  //  genExecuteOnly = ARM_TM.getSubtargetImpl()->genExecuteOnly();
+  bool genExecuteOnly =
+      ARM_TM.getMCSubtargetInfo()->hasFeature(ARM::FeatureExecuteOnly);
 
   TargetLoweringObjectFileELF::Initialize(Ctx, TM);
   InitializeELF(isAAPCS_ABI);
@@ -41,8 +41,16 @@ void ARMElfTargetObjectFile::Initialize(MCContext &Ctx,
     LSDASection = nullptr;
   }
 
-  AttributesSection =
-      getContext().getELFSection(".ARM.attributes", ELF::SHT_ARM_ATTRIBUTES, 0);
+  // Make code section unreadable when in execute-only mode
+  if (genExecuteOnly) {
+    unsigned Type = ELF::SHT_PROGBITS;
+    unsigned Flags =
+        ELF::SHF_EXECINSTR | ELF::SHF_ALLOC | ELF::SHF_ARM_PURECODE;
+    // Since we cannot modify flags for an existing section, we create a new
+    // section with the right flags, and use 0 as the unique ID for
+    // execute-only text
+    TextSection = Ctx.getELFSection(".text", Type, Flags, 0, "", 0U);
+  }
 }
 
 const MCExpr *ARMElfTargetObjectFile::getTTypeGlobalReference(

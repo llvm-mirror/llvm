@@ -7,7 +7,7 @@ define <4 x float> @foo(<4 x float> %val, <4 x float> %test) nounwind {
 ; CHECK-NEXT: .long 1065353216              ## 0x3f800000
 ; CHECK-NEXT: .long 1065353216              ## 0x3f800000
 ; CHECK-LABEL: foo:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    cmpeqps %xmm1, %xmm0
 ; CHECK-NEXT:    andps {{.*}}(%rip), %xmm0
 ; CHECK-NEXT:    retq
@@ -27,7 +27,7 @@ define void @foo1(<4 x float> %val, <4 x float> %test, <4 x double>* %p) nounwin
 ; CHECK-NEXT: .long 1                       ## 0x1
 ; CHECK-NEXT: .long 1                       ## 0x1
 ; CHECK-LABEL: foo1:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    cmpeqps %xmm1, %xmm0
 ; CHECK-NEXT:    andps {{.*}}(%rip), %xmm0
 ; CHECK-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
@@ -51,8 +51,8 @@ define void @foo2(<4 x float>* noalias %result) nounwind {
 ; CHECK-NEXT: .long 1086324736              ## float 6
 ; CHECK-NEXT: .long 1088421888              ## float 7
 ; CHECK-LABEL: foo2:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [4.000000e+00,5.000000e+00,6.000000e+00,7.000000e+00]
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [4.0E+0,5.0E+0,6.0E+0,7.0E+0]
 ; CHECK-NEXT:    movaps %xmm0, (%rdi)
 ; CHECK-NEXT:    retq
   %val = uitofp <4 x i32> <i32 4, i32 5, i32 6, i32 7> to <4 x float>
@@ -69,7 +69,7 @@ define <4 x float> @foo3(<4 x float> %val, <4 x float> %test) nounwind {
 ; CHECK-NEXT: .long 1065353216              ## 0x3f800000
 ; CHECK-NEXT: .long 0                       ## 0x0
 ; CHECK-LABEL: foo3:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    cmpeqps %xmm1, %xmm0
 ; CHECK-NEXT:    andps {{.*}}(%rip), %xmm0
 ; CHECK-NEXT:    retq
@@ -88,8 +88,8 @@ define void @foo4(<4 x float>* noalias %result) nounwind {
 ; CHECK-NEXT: .long 1124073472              ## float 128
 ; CHECK-NEXT: .long 1132396544              ## float 255
 ; CHECK-LABEL: foo4:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [1.000000e+00,1.270000e+02,1.280000e+02,2.550000e+02]
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    movaps {{.*#+}} xmm0 = [1.0E+0,1.27E+2,1.28E+2,2.55E+2]
 ; CHECK-NEXT:    movaps %xmm0, (%rdi)
 ; CHECK-NEXT:    retq
   %val = uitofp <4 x i8> <i8 1, i8 127, i8 -128, i8 -1> to <4 x float>

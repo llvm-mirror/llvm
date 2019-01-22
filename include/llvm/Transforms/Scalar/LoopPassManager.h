@@ -1,9 +1,8 @@
 //===- LoopPassManager.h - Loop pass management -----------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -71,7 +70,7 @@ PassManager<Loop, LoopAnalysisManager, LoopStandardAnalysisResults &,
 extern template class PassManager<Loop, LoopAnalysisManager,
                                   LoopStandardAnalysisResults &, LPMUpdater &>;
 
-/// \brief The Loop pass manager.
+/// The Loop pass manager.
 ///
 /// See the documentation for the PassManager template for details. It runs
 /// a sequence of Loop passes over each Loop that the manager is run over. This
@@ -217,6 +216,19 @@ public:
     // shouldn't impact anything.
   }
 
+  /// Restart the current loop.
+  ///
+  /// Loop passes should call this method to indicate the current loop has been
+  /// sufficiently changed that it should be re-visited from the begining of
+  /// the loop pass pipeline rather than continuing.
+  void revisitCurrentLoop() {
+    // Tell the currently in-flight pipeline to stop running.
+    SkipCurrentLoop = true;
+
+    // And insert ourselves back into the worklist.
+    Worklist.insert(CurrentL);
+  }
+
 private:
   template <typename LoopPassT> friend class llvm::FunctionToLoopPassAdaptor;
 
@@ -240,7 +252,7 @@ private:
       : Worklist(Worklist), LAM(LAM) {}
 };
 
-/// \brief Adaptor that maps from a function to its loops.
+/// Adaptor that maps from a function to its loops.
 ///
 /// Designed to allow composition of a LoopPass(Manager) and a
 /// FunctionPassManager. Note that if this pass is constructed with a \c
@@ -251,18 +263,27 @@ template <typename LoopPassT>
 class FunctionToLoopPassAdaptor
     : public PassInfoMixin<FunctionToLoopPassAdaptor<LoopPassT>> {
 public:
-  explicit FunctionToLoopPassAdaptor(LoopPassT Pass) : Pass(std::move(Pass)) {
+  explicit FunctionToLoopPassAdaptor(LoopPassT Pass, bool DebugLogging = false)
+      : Pass(std::move(Pass)), LoopCanonicalizationFPM(DebugLogging) {
     LoopCanonicalizationFPM.addPass(LoopSimplifyPass());
     LoopCanonicalizationFPM.addPass(LCSSAPass());
   }
 
-  /// \brief Runs the loop passes across every loop in the function.
+  /// Runs the loop passes across every loop in the function.
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     // Before we even compute any loop analyses, first run a miniature function
     // pass pipeline to put loops into their canonical form. Note that we can
     // directly build up function analyses after this as the function pass
     // manager handles all the invalidation at that layer.
-    PreservedAnalyses PA = LoopCanonicalizationFPM.run(F, AM);
+    PassInstrumentation PI = AM.getResult<PassInstrumentationAnalysis>(F);
+
+    PreservedAnalyses PA = PreservedAnalyses::all();
+    // Check the PassInstrumentation's BeforePass callbacks before running the
+    // canonicalization pipeline.
+    if (PI.runBeforePass<Function>(LoopCanonicalizationFPM, F)) {
+      PA = LoopCanonicalizationFPM.run(F, AM);
+      PI.runAfterPass<Function>(LoopCanonicalizationFPM, F);
+    }
 
     // Get the loop structure for this function
     LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
@@ -272,13 +293,17 @@ public:
       return PA;
 
     // Get the analysis results needed by loop passes.
+    MemorySSA *MSSA = EnableMSSALoopDependency
+                          ? (&AM.getResult<MemorySSAAnalysis>(F).getMSSA())
+                          : nullptr;
     LoopStandardAnalysisResults LAR = {AM.getResult<AAManager>(F),
                                        AM.getResult<AssumptionAnalysis>(F),
                                        AM.getResult<DominatorTreeAnalysis>(F),
                                        AM.getResult<LoopAnalysis>(F),
                                        AM.getResult<ScalarEvolutionAnalysis>(F),
                                        AM.getResult<TargetLibraryAnalysis>(F),
-                                       AM.getResult<TargetIRAnalysis>(F)};
+                                       AM.getResult<TargetIRAnalysis>(F),
+                                       MSSA};
 
     // Setup the loop analysis manager from its proxy. It is important that
     // this is only done when there are loops to process and we have built the
@@ -319,8 +344,19 @@ public:
       assert(L->isRecursivelyLCSSAForm(LAR.DT, LI) &&
              "Loops must remain in LCSSA form!");
 #endif
-
+      // Check the PassInstrumentation's BeforePass callbacks before running the
+      // pass, skip its execution completely if asked to (callback returns
+      // false).
+      if (!PI.runBeforePass<Loop>(Pass, *L))
+        continue;
       PreservedAnalyses PassPA = Pass.run(*L, LAM, LAR, Updater);
+
+      // Do not pass deleted Loop into the instrumentation.
+      if (Updater.skipCurrentLoop())
+        PI.runAfterPassInvalidated<Loop>(Pass);
+      else
+        PI.runAfterPass<Loop>(Pass, *L);
+
       // FIXME: We should verify the set of analyses relevant to Loop passes
       // are preserved.
 
@@ -346,6 +382,8 @@ public:
     PA.preserve<DominatorTreeAnalysis>();
     PA.preserve<LoopAnalysis>();
     PA.preserve<ScalarEvolutionAnalysis>();
+    if (EnableMSSALoopDependency)
+      PA.preserve<MemorySSAAnalysis>();
     // FIXME: What we really want to do here is preserve an AA category, but
     // that concept doesn't exist yet.
     PA.preserve<AAManager>();
@@ -361,15 +399,15 @@ private:
   FunctionPassManager LoopCanonicalizationFPM;
 };
 
-/// \brief A function to deduce a loop pass type and wrap it in the templated
+/// A function to deduce a loop pass type and wrap it in the templated
 /// adaptor.
 template <typename LoopPassT>
 FunctionToLoopPassAdaptor<LoopPassT>
-createFunctionToLoopPassAdaptor(LoopPassT Pass) {
-  return FunctionToLoopPassAdaptor<LoopPassT>(std::move(Pass));
+createFunctionToLoopPassAdaptor(LoopPassT Pass, bool DebugLogging = false) {
+  return FunctionToLoopPassAdaptor<LoopPassT>(std::move(Pass), DebugLogging);
 }
 
-/// \brief Pass for printing a loop's contents as textual IR.
+/// Pass for printing a loop's contents as textual IR.
 class PrintLoopPass : public PassInfoMixin<PrintLoopPass> {
   raw_ostream &OS;
   std::string Banner;

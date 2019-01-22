@@ -9,13 +9,13 @@ target triple = "x86_64-unknown-linux-gnu"
 
 define void @patatino() {
 ; CHECK-LABEL: patatino:
-; CHECK:       # BB#0: # %bb
+; CHECK:       # %bb.0: # %bb
 ; CHECK-NEXT:    movl {{.*}}(%rip), %eax
 ; CHECK-NEXT:    movl %eax, %ecx
 ; CHECK-NEXT:    shrl $31, %ecx
 ; CHECK-NEXT:    addl $2147483647, %ecx # imm = 0x7FFFFFFF
 ; CHECK-NEXT:    shrl $31, %ecx
-; CHECK-NEXT:    andl $62, %ecx
+; CHECK-NEXT:    andl $-2, %ecx
 ; CHECK-NEXT:    andl $-536870912, %eax # imm = 0xE0000000
 ; CHECK-NEXT:    orl %ecx, %eax
 ; CHECK-NEXT:    movl %eax, {{.*}}(%rip)

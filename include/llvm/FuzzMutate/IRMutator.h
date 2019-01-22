@@ -1,9 +1,8 @@
 //===-- IRMutator.h - Mutation engine for fuzzing IR ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 #ifndef LLVM_FUZZMUTATE_IRMUTATOR_H
 #define LLVM_FUZZMUTATE_IRMUTATOR_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/FuzzMutate/OpDescriptor.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -74,7 +74,8 @@ public:
 class InjectorIRStrategy : public IRMutationStrategy {
   std::vector<fuzzerop::OpDescriptor> Operations;
 
-  fuzzerop::OpDescriptor chooseOperation(Value *Src, RandomIRBuilder &IB);
+  Optional<fuzzerop::OpDescriptor> chooseOperation(Value *Src,
+                                                   RandomIRBuilder &IB);
 
 public:
   InjectorIRStrategy(std::vector<fuzzerop::OpDescriptor> &&Operations)

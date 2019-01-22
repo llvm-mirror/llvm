@@ -1,9 +1,8 @@
 //===- AArch64AddressingModes.h - AArch64 Addressing Modes ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
@@ -213,7 +213,8 @@ static inline uint64_t ror(uint64_t elt, unsigned size) {
 static inline bool processLogicalImmediate(uint64_t Imm, unsigned RegSize,
                                            uint64_t &Encoding) {
   if (Imm == 0ULL || Imm == ~0ULL ||
-      (RegSize != 64 && (Imm >> RegSize != 0 || Imm == ~0U)))
+      (RegSize != 64 &&
+        (Imm >> RegSize != 0 || Imm == (~0ULL >> (64 - RegSize)))))
     return false;
 
   // First, determine the element size.
@@ -341,27 +342,23 @@ static inline bool isValidDecodeLogicalImmediate(uint64_t val,
 //
 static inline float getFPImmFloat(unsigned Imm) {
   // We expect an 8-bit binary encoding of a floating-point number here.
-  union {
-    uint32_t I;
-    float F;
-  } FPUnion;
 
   uint8_t Sign = (Imm >> 7) & 0x1;
   uint8_t Exp = (Imm >> 4) & 0x7;
   uint8_t Mantissa = Imm & 0xf;
 
-  //   8-bit FP    iEEEE Float Encoding
+  //   8-bit FP    IEEE Float Encoding
   //   abcd efgh   aBbbbbbc defgh000 00000000 00000000
   //
   // where B = NOT(b);
 
-  FPUnion.I = 0;
-  FPUnion.I |= Sign << 31;
-  FPUnion.I |= ((Exp & 0x4) != 0 ? 0 : 1) << 30;
-  FPUnion.I |= ((Exp & 0x4) != 0 ? 0x1f : 0) << 25;
-  FPUnion.I |= (Exp & 0x3) << 23;
-  FPUnion.I |= Mantissa << 19;
-  return FPUnion.F;
+  uint32_t I = 0;
+  I |= Sign << 31;
+  I |= ((Exp & 0x4) != 0 ? 0 : 1) << 30;
+  I |= ((Exp & 0x4) != 0 ? 0x1f : 0) << 25;
+  I |= (Exp & 0x3) << 23;
+  I |= Mantissa << 19;
+  return bit_cast<float>(I);
 }
 
 /// getFP16Imm - Return an 8-bit floating-point version of the 16-bit
@@ -751,6 +748,54 @@ static inline uint64_t decodeAdvSIMDModImmType12(uint8_t Imm) {
   if (Imm & 0x02) EncVal |= 0x0002000000000000ULL;
   if (Imm & 0x01) EncVal |= 0x0001000000000000ULL;
   return (EncVal << 32) | EncVal;
+}
+
+/// Returns true if Imm is the concatenation of a repeating pattern of type T.
+template <typename T>
+static inline bool isSVEMaskOfIdenticalElements(int64_t Imm) {
+  auto Parts = bit_cast<std::array<T, sizeof(int64_t) / sizeof(T)>>(Imm);
+  return all_of(Parts, [&](T Elem) { return Elem == Parts[0]; });
+}
+
+/// Returns true if Imm is valid for CPY/DUP.
+template <typename T>
+static inline bool isSVECpyImm(int64_t Imm) {
+  bool IsImm8 = int8_t(Imm) == Imm;
+  bool IsImm16 = int16_t(Imm & ~0xff) == Imm;
+
+  if (std::is_same<int8_t, typename std::make_signed<T>::type>::value)
+    return IsImm8 || uint8_t(Imm) == Imm;
+
+  if (std::is_same<int16_t, typename std::make_signed<T>::type>::value)
+    return IsImm8 || IsImm16 || uint16_t(Imm & ~0xff) == Imm;
+
+  return IsImm8 || IsImm16;
+}
+
+/// Returns true if Imm is valid for ADD/SUB.
+template <typename T>
+static inline bool isSVEAddSubImm(int64_t Imm) {
+  bool IsInt8t =
+      std::is_same<int8_t, typename std::make_signed<T>::type>::value;
+  return uint8_t(Imm) == Imm || (!IsInt8t && uint16_t(Imm & ~0xff) == Imm);
+}
+
+/// Return true if Imm is valid for DUPM and has no single CPY/DUP equivalent.
+static inline bool isSVEMoveMaskPreferredLogicalImmediate(int64_t Imm) {
+  if (isSVECpyImm<int64_t>(Imm))
+    return false;
+
+  auto S = bit_cast<std::array<int32_t, 2>>(Imm);
+  auto H = bit_cast<std::array<int16_t, 4>>(Imm);
+  auto B = bit_cast<std::array<int8_t, 8>>(Imm);
+
+  if (isSVEMaskOfIdenticalElements<int32_t>(Imm) && isSVECpyImm<int32_t>(S[0]))
+    return false;
+  if (isSVEMaskOfIdenticalElements<int16_t>(Imm) && isSVECpyImm<int16_t>(H[0]))
+    return false;
+  if (isSVEMaskOfIdenticalElements<int8_t>(Imm) && isSVECpyImm<int8_t>(B[0]))
+    return false;
+  return isLogicalImmediate(Imm, 64);
 }
 
 inline static bool isAnyMOVZMovAlias(uint64_t Value, int RegWidth) {

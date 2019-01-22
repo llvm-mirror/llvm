@@ -6,7 +6,7 @@
 
 define <8 x float> @insert_subvector_256(i16 %x0, i16 %x1, <8 x float> %v) nounwind {
 ; X32_AVX256-LABEL: insert_subvector_256:
-; X32_AVX256:       # BB#0:
+; X32_AVX256:       # %bb.0:
 ; X32_AVX256-NEXT:    vmovd {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X32_AVX256-NEXT:    vpinsrw $1, {{[0-9]+}}(%esp), %xmm1, %xmm1
 ; X32_AVX256-NEXT:    vpbroadcastd %xmm1, %xmm1
@@ -14,7 +14,7 @@ define <8 x float> @insert_subvector_256(i16 %x0, i16 %x1, <8 x float> %v) nounw
 ; X32_AVX256-NEXT:    retl
 ;
 ; X64_AVX256-LABEL: insert_subvector_256:
-; X64_AVX256:       # BB#0:
+; X64_AVX256:       # %bb.0:
 ; X64_AVX256-NEXT:    vmovd %edi, %xmm1
 ; X64_AVX256-NEXT:    vpinsrw $1, %esi, %xmm1, %xmm1
 ; X64_AVX256-NEXT:    vpbroadcastd %xmm1, %xmm1
@@ -22,7 +22,7 @@ define <8 x float> @insert_subvector_256(i16 %x0, i16 %x1, <8 x float> %v) nounw
 ; X64_AVX256-NEXT:    retq
 ;
 ; X32_AVX512-LABEL: insert_subvector_256:
-; X32_AVX512:       # BB#0:
+; X32_AVX512:       # %bb.0:
 ; X32_AVX512-NEXT:    vmovd {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X32_AVX512-NEXT:    vpinsrw $1, {{[0-9]+}}(%esp), %xmm1, %xmm1
 ; X32_AVX512-NEXT:    vpbroadcastd %xmm1, %xmm1
@@ -30,7 +30,7 @@ define <8 x float> @insert_subvector_256(i16 %x0, i16 %x1, <8 x float> %v) nounw
 ; X32_AVX512-NEXT:    retl
 ;
 ; X64_AVX512-LABEL: insert_subvector_256:
-; X64_AVX512:       # BB#0:
+; X64_AVX512:       # %bb.0:
 ; X64_AVX512-NEXT:    vmovd %edi, %xmm1
 ; X64_AVX512-NEXT:    vpinsrw $1, %esi, %xmm1, %xmm1
 ; X64_AVX512-NEXT:    vpbroadcastd %xmm1, %xmm1
@@ -45,7 +45,7 @@ define <8 x float> @insert_subvector_256(i16 %x0, i16 %x1, <8 x float> %v) nounw
 
 define <8 x i64> @insert_subvector_512(i32 %x0, i32 %x1, <8 x i64> %v) nounwind {
 ; X32_AVX256-LABEL: insert_subvector_512:
-; X32_AVX256:       # BB#0:
+; X32_AVX256:       # %bb.0:
 ; X32_AVX256-NEXT:    pushl %ebp
 ; X32_AVX256-NEXT:    movl %esp, %ebp
 ; X32_AVX256-NEXT:    andl $-8, %esp
@@ -61,7 +61,7 @@ define <8 x i64> @insert_subvector_512(i32 %x0, i32 %x1, <8 x i64> %v) nounwind 
 ; X32_AVX256-NEXT:    retl
 ;
 ; X64_AVX256-LABEL: insert_subvector_512:
-; X64_AVX256:       # BB#0:
+; X64_AVX256:       # %bb.0:
 ; X64_AVX256-NEXT:    vmovd %edi, %xmm2
 ; X64_AVX256-NEXT:    vpinsrd $1, %esi, %xmm2, %xmm2
 ; X64_AVX256-NEXT:    vmovq %xmm2, %rax
@@ -71,14 +71,14 @@ define <8 x i64> @insert_subvector_512(i32 %x0, i32 %x1, <8 x i64> %v) nounwind 
 ; X64_AVX256-NEXT:    retq
 ;
 ; X32_AVX512-LABEL: insert_subvector_512:
-; X32_AVX512:       # BB#0:
+; X32_AVX512:       # %bb.0:
 ; X32_AVX512-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
 ; X32_AVX512-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [0,0,1,0,8,0,3,0,4,0,5,0,6,0,7,0]
 ; X32_AVX512-NEXT:    vpermt2q %zmm1, %zmm2, %zmm0
 ; X32_AVX512-NEXT:    retl
 ;
 ; X64_AVX512-LABEL: insert_subvector_512:
-; X64_AVX512:       # BB#0:
+; X64_AVX512:       # %bb.0:
 ; X64_AVX512-NEXT:    vmovd %edi, %xmm1
 ; X64_AVX512-NEXT:    vpinsrd $1, %esi, %xmm1, %xmm1
 ; X64_AVX512-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [0,1,8,3,4,5,6,7]
@@ -96,27 +96,14 @@ define <8 x i64> @insert_subvector_512(i32 %x0, i32 %x1, <8 x i64> %v) nounwind 
 
 define <8 x i64> @insert_subvector_into_undef(i32 %x0, i32 %x1) nounwind {
 ; X32_AVX256-LABEL: insert_subvector_into_undef:
-; X32_AVX256:       # BB#0:
-; X32_AVX256-NEXT:    pushl %ebp
-; X32_AVX256-NEXT:    movl %esp, %ebp
-; X32_AVX256-NEXT:    andl $-8, %esp
-; X32_AVX256-NEXT:    subl $8, %esp
+; X32_AVX256:       # %bb.0:
 ; X32_AVX256-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
-; X32_AVX256-NEXT:    vmovlps %xmm0, (%esp)
-; X32_AVX256-NEXT:    movl (%esp), %eax
-; X32_AVX256-NEXT:    movl {{[0-9]+}}(%esp), %ecx
-; X32_AVX256-NEXT:    vmovd %eax, %xmm0
-; X32_AVX256-NEXT:    vpinsrd $1, %ecx, %xmm0, %xmm0
-; X32_AVX256-NEXT:    vpinsrd $2, %eax, %xmm0, %xmm0
-; X32_AVX256-NEXT:    vpinsrd $3, %ecx, %xmm0, %xmm0
-; X32_AVX256-NEXT:    vinserti128 $1, %xmm0, %ymm0, %ymm0
-; X32_AVX256-NEXT:    vmovdqa %ymm0, %ymm1
-; X32_AVX256-NEXT:    movl %ebp, %esp
-; X32_AVX256-NEXT:    popl %ebp
+; X32_AVX256-NEXT:    vbroadcastsd %xmm0, %ymm0
+; X32_AVX256-NEXT:    vmovaps %ymm0, %ymm1
 ; X32_AVX256-NEXT:    retl
 ;
 ; X64_AVX256-LABEL: insert_subvector_into_undef:
-; X64_AVX256:       # BB#0:
+; X64_AVX256:       # %bb.0:
 ; X64_AVX256-NEXT:    vmovd %edi, %xmm0
 ; X64_AVX256-NEXT:    vpinsrd $1, %esi, %xmm0, %xmm0
 ; X64_AVX256-NEXT:    vpbroadcastq %xmm0, %ymm0
@@ -124,13 +111,13 @@ define <8 x i64> @insert_subvector_into_undef(i32 %x0, i32 %x1) nounwind {
 ; X64_AVX256-NEXT:    retq
 ;
 ; X32_AVX512-LABEL: insert_subvector_into_undef:
-; X32_AVX512:       # BB#0:
+; X32_AVX512:       # %bb.0:
 ; X32_AVX512-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
 ; X32_AVX512-NEXT:    vbroadcastsd %xmm0, %zmm0
 ; X32_AVX512-NEXT:    retl
 ;
 ; X64_AVX512-LABEL: insert_subvector_into_undef:
-; X64_AVX512:       # BB#0:
+; X64_AVX512:       # %bb.0:
 ; X64_AVX512-NEXT:    vmovd %edi, %xmm0
 ; X64_AVX512-NEXT:    vpinsrd $1, %esi, %xmm0, %xmm0
 ; X64_AVX512-NEXT:    vpbroadcastq %xmm0, %zmm0

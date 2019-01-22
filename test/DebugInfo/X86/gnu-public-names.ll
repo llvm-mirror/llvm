@@ -65,11 +65,11 @@
 ; }
 
 ; ASM: .section        .debug_gnu_pubnames
-; ASM: .byte   32                      # Kind: VARIABLE, EXTERNAL
+; ASM: .byte   32                      # Attributes: VARIABLE, EXTERNAL
 ; ASM-NEXT: .asciz  "global_variable"       # External Name
 
 ; ASM: .section        .debug_gnu_pubtypes
-; ASM: .byte   16                      # Kind: TYPE, EXTERNAL
+; ASM: .byte   16                      # Attributes: TYPE, EXTERNAL
 ; ASM-NEXT: .asciz  "C"                     # External Name
 
 ; CHECK: .debug_info contents:
@@ -302,7 +302,7 @@ attributes #1 = { nounwind readnone }
 
 !0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = !DIGlobalVariable(name: "static_member_variable", linkageName: "_ZN1C22static_member_variableE", scope: !2, file: !3, line: 7, type: !9, isLocal: false, isDefinition: true, declaration: !8)
-!2 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !3, producer: "clang version 3.7.0 (trunk 234897) (llvm/trunk 234911)", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, retainedTypes: !5, globals: !21, imports: !44, gnuPubnames: true)
+!2 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !3, producer: "clang version 3.7.0 (trunk 234897) (llvm/trunk 234911)", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, retainedTypes: !5, globals: !21, imports: !44, nameTableKind: GNU)
 !3 = !DIFile(filename: "gnu-public-names.cpp", directory: "/tmp/dbginfo")
 !4 = !{}
 !5 = !{!6, !17}
@@ -330,7 +330,7 @@ attributes #1 = { nounwind readnone }
 !27 = !DIGlobalVariable(name: "d", linkageName: "_ZN2ns1dE", scope: !18, file: !3, line: 31, type: !17, isLocal: false, isDefinition: true)
 !28 = !DIGlobalVariableExpression(var: !29, expr: !DIExpression())
 !29 = !DIGlobalVariable(name: "z", scope: !30, file: !3, line: 41, type: !9, isLocal: true, isDefinition: true)
-!30 = distinct !DISubprogram(name: "f3", linkageName: "_Z2f3v", scope: !3, file: !3, line: 40, type: !31, isLocal: false, isDefinition: true, scopeLine: 40, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!30 = distinct !DISubprogram(name: "f3", linkageName: "_Z2f3v", scope: !3, file: !3, line: 40, type: !31, isLocal: false, isDefinition: true, scopeLine: 40, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !31 = !DISubroutineType(types: !32)
 !32 = !{!33}
 !33 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !9, size: 64, align: 64)
@@ -351,23 +351,23 @@ attributes #1 = { nounwind readnone }
 !48 = !{i32 2, !"Dwarf Version", i32 4}
 !49 = !{i32 2, !"Debug Info Version", i32 3}
 !50 = !{!"clang version 3.7.0 (trunk 234897) (llvm/trunk 234911)"}
-!51 = distinct !DISubprogram(name: "member_function", linkageName: "_ZN1C15member_functionEv", scope: !6, file: !3, line: 9, type: !11, isLocal: false, isDefinition: true, scopeLine: 9, flags: DIFlagPrototyped, isOptimized: false, unit: !2, declaration: !10, variables: !4)
+!51 = distinct !DISubprogram(name: "member_function", linkageName: "_ZN1C15member_functionEv", scope: !6, file: !3, line: 9, type: !11, isLocal: false, isDefinition: true, scopeLine: 9, flags: DIFlagPrototyped, isOptimized: false, unit: !2, declaration: !10, retainedNodes: !4)
 !52 = !DILocalVariable(name: "this", arg: 1, scope: !51, type: !53, flags: DIFlagArtificial | DIFlagObjectPointer)
 !53 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !6, size: 64, align: 64)
 !54 = !DIExpression()
 !55 = !DILocation(line: 0, scope: !51)
 !56 = !DILocation(line: 10, scope: !51)
 !57 = !DILocation(line: 11, scope: !51)
-!58 = distinct !DISubprogram(name: "static_member_function", linkageName: "_ZN1C22static_member_functionEv", scope: !6, file: !3, line: 13, type: !15, isLocal: false, isDefinition: true, scopeLine: 13, flags: DIFlagPrototyped, isOptimized: false, unit: !2, declaration: !14, variables: !4)
+!58 = distinct !DISubprogram(name: "static_member_function", linkageName: "_ZN1C22static_member_functionEv", scope: !6, file: !3, line: 13, type: !15, isLocal: false, isDefinition: true, scopeLine: 13, flags: DIFlagPrototyped, isOptimized: false, unit: !2, declaration: !14, retainedNodes: !4)
 !59 = !DILocation(line: 14, scope: !58)
-!60 = distinct !DISubprogram(name: "global_function", linkageName: "_Z15global_functionv", scope: !3, file: !3, line: 19, type: !15, isLocal: false, isDefinition: true, scopeLine: 19, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!60 = distinct !DISubprogram(name: "global_function", linkageName: "_Z15global_functionv", scope: !3, file: !3, line: 19, type: !15, isLocal: false, isDefinition: true, scopeLine: 19, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !61 = !DILocation(line: 20, scope: !60)
-!62 = distinct !DISubprogram(name: "global_namespace_function", linkageName: "_ZN2ns25global_namespace_functionEv", scope: !18, file: !3, line: 24, type: !63, isLocal: false, isDefinition: true, scopeLine: 24, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!62 = distinct !DISubprogram(name: "global_namespace_function", linkageName: "_ZN2ns25global_namespace_functionEv", scope: !18, file: !3, line: 24, type: !63, isLocal: false, isDefinition: true, scopeLine: 24, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !63 = !DISubroutineType(types: !64)
 !64 = !{null}
 !65 = !DILocation(line: 25, scope: !62)
 !66 = !DILocation(line: 26, scope: !62)
 !67 = !DILocation(line: 42, scope: !30)
-!68 = distinct !DISubprogram(name: "f7", linkageName: "_Z2f7v", scope: !3, file: !3, line: 57, type: !15, isLocal: false, isDefinition: true, scopeLine: 57, flags: DIFlagPrototyped, isOptimized: false, unit: !2, variables: !4)
+!68 = distinct !DISubprogram(name: "f7", linkageName: "_Z2f7v", scope: !3, file: !3, line: 57, type: !15, isLocal: false, isDefinition: true, scopeLine: 57, flags: DIFlagPrototyped, isOptimized: false, unit: !2, retainedNodes: !4)
 !69 = !DILocation(line: 58, scope: !68)
 

@@ -84,7 +84,7 @@ entry:
   ret i64 %mul
 
 ; CHECK-LABEL: test6:
-; CHECK: shlq	$3, %rdi
+; CHECK: shlq	$3, {{%r[a-z]+}}
 }
 
 define i32 @test7(i32 %x) nounwind ssp {
@@ -92,7 +92,7 @@ entry:
   %mul = mul nsw i32 %x, 8
   ret i32 %mul
 ; CHECK-LABEL: test7:
-; CHECK: shll	$3, %edi
+; CHECK: shll	$3, {{%e[a-z]+}}
 }
 
 
@@ -103,7 +103,7 @@ entry:
   ret i64 %add
 
 ; CHECK-LABEL: test8:
-; CHECK: addq	$7, %rdi
+; CHECK: addq	$7, {{%r[a-z]+}}
 }
 
 define i64 @test9(i64 %x) nounwind ssp {
@@ -172,11 +172,11 @@ entry:
 ; CHECK: callq
 }
 
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i32, i1)
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
 
 ; rdar://9289488 - fast-isel shouldn't bail out on llvm.memcpy
 define void @test15(i8* %a, i8* %b) nounwind {
-  call void @llvm.memcpy.p0i8.p0i8.i64(i8* %a, i8* %b, i64 4, i32 4, i1 false)
+  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 4 %a, i8* align 4 %b, i64 4, i1 false)
   ret void
 ; CHECK-LABEL: test15:
 ; CHECK-NEXT: movl	(%rsi), %eax
@@ -297,8 +297,10 @@ define void @test23(i8* noalias sret %result) {
   %b = call i8* @foo23()
   ret void
 ; CHECK-LABEL: test23:
+; CHECK: movq %rdi, [[STACK:[0-9]+\(%rsp\)]]
 ; CHECK: call
-; CHECK: movq  %rdi, %rax
+; CHECK: movq [[STACK]], %rdi
+; CHECK: movq %rdi, %rax
 ; CHECK: ret
 }
 

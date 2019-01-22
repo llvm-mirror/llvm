@@ -1,16 +1,14 @@
 //===- DAGISelMatcher.cpp - Representation of DAG pattern matcher ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "DAGISelMatcher.h"
 #include "CodeGenDAGPatterns.h"
 #include "CodeGenTarget.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TableGen/Record.h"
 using namespace llvm;
@@ -94,13 +92,23 @@ SwitchTypeMatcher::~SwitchTypeMatcher() {
     delete C.second;
 }
 
-CheckPredicateMatcher::CheckPredicateMatcher(const TreePredicateFn &pred)
-  : Matcher(CheckPredicate), Pred(pred.getOrigPatFragRecord()) {}
+CheckPredicateMatcher::CheckPredicateMatcher(
+    const TreePredicateFn &pred, const SmallVectorImpl<unsigned> &Ops)
+  : Matcher(CheckPredicate), Pred(pred.getOrigPatFragRecord()),
+    Operands(Ops.begin(), Ops.end()) {}
 
 TreePredicateFn CheckPredicateMatcher::getPredicate() const {
   return TreePredicateFn(Pred);
 }
 
+unsigned CheckPredicateMatcher::getNumOperands() const {
+  return Operands.size();
+}
+
+unsigned CheckPredicateMatcher::getOperandNo(unsigned i) const {
+  assert(i < Operands.size());
+  return Operands[i];
+}
 
 
 // printImpl methods.

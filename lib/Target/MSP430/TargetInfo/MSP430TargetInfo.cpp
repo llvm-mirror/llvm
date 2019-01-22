@@ -1,9 +1,8 @@
 //===-- MSP430TargetInfo.cpp - MSP430 Target Implementation ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,5 +18,5 @@ Target &llvm::getTheMSP430Target() {
 
 extern "C" void LLVMInitializeMSP430TargetInfo() {
   RegisterTarget<Triple::msp430> X(getTheMSP430Target(), "msp430",
-                                   "MSP430 [experimental]");
+                                   "MSP430 [experimental]", "MSP430");
 }

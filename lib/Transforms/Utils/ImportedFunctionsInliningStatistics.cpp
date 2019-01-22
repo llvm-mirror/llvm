@@ -1,9 +1,8 @@
 //===-- ImportedFunctionsInliningStats.cpp ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Generating inliner statistics for imported functions, mostly useful for
@@ -161,7 +160,7 @@ void ImportedFunctionsInliningStatistics::dump(const bool Verbose) {
 
 void ImportedFunctionsInliningStatistics::calculateRealInlines() {
   // Removing duplicated Callers.
-  std::sort(NonImportedCallers.begin(), NonImportedCallers.end());
+  llvm::sort(NonImportedCallers);
   NonImportedCallers.erase(
       std::unique(NonImportedCallers.begin(), NonImportedCallers.end()),
       NonImportedCallers.end());
@@ -190,16 +189,14 @@ ImportedFunctionsInliningStatistics::getSortedNodes() {
   for (const NodesMapTy::value_type& Node : NodesMap)
     SortedNodes.push_back(&Node);
 
-  std::sort(
-      SortedNodes.begin(), SortedNodes.end(),
-      [&](const SortedNodesTy::value_type &Lhs,
-          const SortedNodesTy::value_type &Rhs) {
-        if (Lhs->second->NumberOfInlines != Rhs->second->NumberOfInlines)
-          return Lhs->second->NumberOfInlines > Rhs->second->NumberOfInlines;
-        if (Lhs->second->NumberOfRealInlines != Rhs->second->NumberOfRealInlines)
-          return Lhs->second->NumberOfRealInlines >
-                 Rhs->second->NumberOfRealInlines;
-        return Lhs->first() < Rhs->first();
-      });
+  llvm::sort(SortedNodes, [&](const SortedNodesTy::value_type &Lhs,
+                              const SortedNodesTy::value_type &Rhs) {
+    if (Lhs->second->NumberOfInlines != Rhs->second->NumberOfInlines)
+      return Lhs->second->NumberOfInlines > Rhs->second->NumberOfInlines;
+    if (Lhs->second->NumberOfRealInlines != Rhs->second->NumberOfRealInlines)
+      return Lhs->second->NumberOfRealInlines >
+             Rhs->second->NumberOfRealInlines;
+    return Lhs->first() < Rhs->first();
+  });
   return SortedNodes;
 }

@@ -1,9 +1,8 @@
 //===- ARCISelLowering.cpp - ARC DAG Lowering Impl --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -72,7 +71,7 @@ static ARCCC::CondCode ISDCCtoARCCC(ISD::CondCode isdCC) {
 
 ARCTargetLowering::ARCTargetLowering(const TargetMachine &TM,
                                      const ARCSubtarget &Subtarget)
-    : TargetLowering(TM), TM(TM), Subtarget(Subtarget) {
+    : TargetLowering(TM), Subtarget(Subtarget) {
   // Set up the register classes.
   addRegisterClass(MVT::i32, &ARC::GPR32RegClass);
 
@@ -486,8 +485,8 @@ SDValue ARCTargetLowering::LowerCallArguments(
       EVT RegVT = VA.getLocVT();
       switch (RegVT.getSimpleVT().SimpleTy) {
       default: {
-        DEBUG(errs() << "LowerFormalArguments Unhandled argument type: "
-                     << RegVT.getSimpleVT().SimpleTy << "\n");
+        LLVM_DEBUG(errs() << "LowerFormalArguments Unhandled argument type: "
+                          << (unsigned)RegVT.getSimpleVT().SimpleTy << "\n");
         llvm_unreachable("Unhandled LowerFormalArguments type.");
       }
       case MVT::i32:

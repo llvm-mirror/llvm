@@ -1,9 +1,8 @@
 //===- llvm/unittest/ADT/TestGraph.h - Graph for testing ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -11,13 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef LLVM_UNITTESTS_ADT_TEST_GRAPH_H
+#define LLVM_UNITTESTS_ADT_TEST_GRAPH_H
+
 #include "llvm/ADT/GraphTraits.h"
 #include <cassert>
 #include <climits>
 #include <utility>
-
-#ifndef LLVM_UNITTESTS_ADT_TEST_GRAPH_H
-#define LLVM_UNITTESTS_ADT_TEST_GRAPH_H
 
 namespace llvm {
 

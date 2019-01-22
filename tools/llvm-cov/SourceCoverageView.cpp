@@ -1,9 +1,8 @@
 //===- SourceCoverageView.cpp - Code coverage view for source code --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -31,7 +30,7 @@ void CoveragePrinter::StreamDestructor::operator()(raw_ostream *OS) const {
 std::string CoveragePrinter::getOutputPath(StringRef Path, StringRef Extension,
                                            bool InToplevel,
                                            bool Relative) const {
-  assert(Extension.size() && "The file extension may not be empty");
+  assert(!Extension.empty() && "The file extension may not be empty");
 
   SmallString<256> FullPath;
 
@@ -65,7 +64,8 @@ CoveragePrinter::createOutputStream(StringRef Path, StringRef Extension,
     return errorCodeToError(E);
 
   std::error_code E;
-  raw_ostream *RawStream = new raw_fd_ostream(FullPath, E, sys::fs::F_RW);
+  raw_ostream *RawStream =
+      new raw_fd_ostream(FullPath, E, sys::fs::FA_Read | sys::fs::FA_Write);
   auto OS = CoveragePrinter::OwnedStream(RawStream);
   if (E)
     return errorCodeToError(E);
@@ -79,6 +79,10 @@ CoveragePrinter::create(const CoverageViewOptions &Opts) {
     return llvm::make_unique<CoveragePrinterText>(Opts);
   case CoverageViewOptions::OutputFormat::HTML:
     return llvm::make_unique<CoveragePrinterHTML>(Opts);
+  case CoverageViewOptions::OutputFormat::Lcov:
+    // Unreachable because CodeCoverage.cpp should terminate with an error
+    // before we get here.
+    llvm_unreachable("Lcov format is not supported!");
   }
   llvm_unreachable("Unknown coverage output format!");
 }
@@ -111,16 +115,19 @@ std::string SourceCoverageView::formatCount(uint64_t N) {
 }
 
 bool SourceCoverageView::shouldRenderRegionMarkers(
-    CoverageSegmentArray Segments) const {
+    const LineCoverageStats &LCS) const {
   if (!getOptions().ShowRegionMarkers)
     return false;
 
-  // Render the region markers if there's more than one count to show.
-  unsigned RegionCount = 0;
-  for (const auto *S : Segments)
-    if (S->IsRegionEntry)
-      if (++RegionCount > 1)
-        return true;
+  CoverageSegmentArray Segments = LCS.getLineSegments();
+  if (Segments.empty())
+    return false;
+  for (unsigned I = 0, E = Segments.size() - 1; I < E; ++I) {
+    const auto *CurSeg = Segments[I];
+    if (!CurSeg->IsRegionEntry || CurSeg->Count == LCS.getExecutionCount())
+      continue;
+    return true;
+  }
   return false;
 }
 
@@ -139,6 +146,10 @@ SourceCoverageView::create(StringRef SourceName, const MemoryBuffer &File,
   case CoverageViewOptions::OutputFormat::HTML:
     return llvm::make_unique<SourceCoverageViewHTML>(
         SourceName, File, Options, std::move(CoverageInfo));
+  case CoverageViewOptions::OutputFormat::Lcov:
+    // Unreachable because CodeCoverage.cpp should terminate with an error
+    // before we get here.
+    llvm_unreachable("Lcov format is not supported!");
   }
   llvm_unreachable("Unknown coverage output format!");
 }
@@ -220,7 +231,7 @@ void SourceCoverageView::print(raw_ostream &OS, bool WholeFile,
     renderLine(OS, {*LI, LI.line_number()}, *LCI, ExpansionColumn, ViewDepth);
 
     // Show the region markers.
-    if (shouldRenderRegionMarkers(LCI->getLineSegments()))
+    if (shouldRenderRegionMarkers(*LCI))
       renderRegionMarkers(OS, *LCI, ViewDepth);
 
     // Show the expansions and instantiations for this line.

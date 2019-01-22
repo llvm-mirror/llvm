@@ -1,9 +1,8 @@
 //===- PrettyVariableDumper.cpp ---------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -169,6 +168,9 @@ void VariableDumper::dumpRight(const PDBSymbolTypeFunctionSig &Symbol) {
     WithColor(Printer, PDB_ColorItem::Keyword).get() << " const";
   if (Symbol.isVolatileType())
     WithColor(Printer, PDB_ColorItem::Keyword).get() << " volatile";
+
+  if (Symbol.getRawSymbol().isRestrictedType())
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " __restrict";
 }
 
 void VariableDumper::dump(const PDBSymbolTypePointer &Symbol) {
@@ -189,6 +191,9 @@ void VariableDumper::dump(const PDBSymbolTypePointer &Symbol) {
     WithColor(Printer, PDB_ColorItem::Keyword).get() << " const ";
   if (Symbol.isVolatileType())
     WithColor(Printer, PDB_ColorItem::Keyword).get() << " volatile ";
+
+  if (Symbol.getRawSymbol().isRestrictedType())
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " __restrict ";
 }
 
 void VariableDumper::dumpRight(const PDBSymbolTypePointer &Symbol) {

@@ -1,9 +1,8 @@
 //===-- X86MCAsmInfo.cpp - X86 asm properties -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,10 +12,7 @@
 
 #include "X86MCAsmInfo.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/BinaryFormat/ELF.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/CommandLine.h"
 using namespace llvm;
@@ -27,11 +23,11 @@ enum AsmWriterFlavorTy {
   ATT = 0, Intel = 1
 };
 
-static cl::opt<AsmWriterFlavorTy>
-AsmWriterFlavor("x86-asm-syntax", cl::init(ATT),
-  cl::desc("Choose style of code to emit from X86 backend:"),
-  cl::values(clEnumValN(ATT,   "att",   "Emit AT&T-style assembly"),
-             clEnumValN(Intel, "intel", "Emit Intel-style assembly")));
+static cl::opt<AsmWriterFlavorTy> AsmWriterFlavor(
+    "x86-asm-syntax", cl::init(ATT), cl::Hidden,
+    cl::desc("Choose style of code to emit from X86 backend:"),
+    cl::values(clEnumValN(ATT, "att", "Emit AT&T-style assembly"),
+               clEnumValN(Intel, "intel", "Emit Intel-style assembly")));
 
 static cl::opt<bool>
 MarkedJTDataRegions("mark-data-regions", cl::init(true),

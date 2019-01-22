@@ -1,9 +1,8 @@
 //===-- EvergreenInstructions.td - EG Instruction defs  ----*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,7 +14,6 @@
 
 def isEG : Predicate<
   "Subtarget->getGeneration() >= AMDGPUSubtarget::EVERGREEN && "
-  "Subtarget->getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS && "
   "!Subtarget->hasCaymanISA()"
 >;
 
@@ -212,8 +210,8 @@ def VTX_READ_32_eg
   // to be caused by ALU instructions in the next instruction group that wrote
   // to the $src_gpr registers of the VTX_READ.
   // e.g.
-  // %T3_X<def> = VTX_READ_PARAM_32_eg %T2_X<kill>, 24
-  // %T2_X<def> = MOV %ZERO
+  // %t3_x = VTX_READ_PARAM_32_eg killed %t2_x, 24
+  // %t2_x = MOV %zero
   //Adding this constraint prevents this from happening.
   let Constraints = "$src_gpr.ptr = $dst_gpr";
 }
@@ -693,7 +691,7 @@ def : EGOrCaymanPat<(fp_to_sint f32:$src0), (FLT_TO_INT_eg (TRUNC $src0))>;
 def : EGOrCaymanPat<(fp_to_uint f32:$src0), (FLT_TO_UINT_eg (TRUNC $src0))>;
 
 // SHA-256 Patterns
-def : SHA256MaPattern <BFI_INT_eg, XOR_INT>;
+defm : SHA256MaPattern <BFI_INT_eg, XOR_INT, R600_Reg64>;
 
 def EG_ExportSwz : ExportSwzInst {
   let Word1{19-16} = 0; // BURST_COUNT

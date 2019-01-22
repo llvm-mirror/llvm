@@ -5,12 +5,19 @@
 target triple = "x86_64-unknown-unknown"
 
 define <8 x i64> @test1(<8 x i64> %m, <8 x i64> %a, <8 x i64> %b) {
-; CHECK-LABEL: test1:
-; CHECK:       # BB#0: # %entry
-; CHECK-NEXT:    vpsllq $63, %zmm0, %zmm0
-; CHECK-NEXT:    vptestmq %zmm0, %zmm0, %k1
-; CHECK-NEXT:    vpblendmq %zmm1, %zmm2, %zmm0 {%k1}
-; CHECK-NEXT:    retq
+; CHECK-SKX-LABEL: test1:
+; CHECK-SKX:       # %bb.0: # %entry
+; CHECK-SKX-NEXT:    vpsllq $63, %zmm0, %zmm0
+; CHECK-SKX-NEXT:    vpmovq2m %zmm0, %k1
+; CHECK-SKX-NEXT:    vpblendmq %zmm1, %zmm2, %zmm0 {%k1}
+; CHECK-SKX-NEXT:    retq
+;
+; CHECK-KNL-LABEL: test1:
+; CHECK-KNL:       # %bb.0: # %entry
+; CHECK-KNL-NEXT:    vpsllq $63, %zmm0, %zmm0
+; CHECK-KNL-NEXT:    vptestmq %zmm0, %zmm0, %k1
+; CHECK-KNL-NEXT:    vpblendmq %zmm1, %zmm2, %zmm0 {%k1}
+; CHECK-KNL-NEXT:    retq
 entry:
   %m.trunc = trunc <8 x i64> %m to <8 x i1>
   %ret = select <8 x i1> %m.trunc, <8 x i64> %a, <8 x i64> %b
@@ -24,7 +31,7 @@ entry:
 ; directly form an SDAG input to the lowering.
 define <16 x double> @test2(<16 x float> %x, <16 x float> %y, <16 x double> %a, <16 x double> %b) {
 ; CHECK-LABEL: test2:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    vxorps %xmm6, %xmm6, %xmm6
 ; CHECK-NEXT:    vcmpltps %zmm0, %zmm6, %k0
 ; CHECK-NEXT:    vcmpltps %zmm6, %zmm1, %k1

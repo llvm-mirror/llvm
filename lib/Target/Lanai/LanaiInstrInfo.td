@@ -1,9 +1,8 @@
 //===-- LanaiInstrInfo.td - Target Description for Lanai Target -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -842,6 +841,10 @@ def : Pat<(Call texternalsym:$dst), (CALL texternalsym:$dst)>;
 // Loads
 def : Pat<(extloadi8  ADDRspls:$src), (i32 (LDBz_RI ADDRspls:$src))>;
 def : Pat<(extloadi16 ADDRspls:$src), (i32 (LDHz_RI ADDRspls:$src))>;
+// Loads up to 32-bits are already atomic.
+// TODO: This is a workaround for a particular failing case and should be
+// handled more generally.
+def : Pat<(atomic_load_8  ADDRspls:$src), (i32 (LDBz_RI ADDRspls:$src))>;
 
 // GlobalAddress, ExternalSymbol, Jumptable, ConstantPool
 def : Pat<(LanaiHi tglobaladdr:$dst), (MOVHI tglobaladdr:$dst)>;

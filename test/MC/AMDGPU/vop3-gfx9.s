@@ -1,4 +1,4 @@
-// RUN: llvm-mc -arch=amdgcn -mcpu=gfx901 -show-encoding %s | FileCheck -check-prefix=GFX9 %s
+// RUN: llvm-mc -arch=amdgcn -mcpu=gfx900 -show-encoding %s | FileCheck -check-prefix=GFX9 %s
 // RUN: not llvm-mc -arch=amdgcn -mcpu=tahiti -show-encoding %s 2>&1 | FileCheck -check-prefix=NOVI %s
 // RUN: not llvm-mc -arch=amdgcn -mcpu=hawaii -show-encoding %s 2>&1 | FileCheck -check-prefix=NOVI %s
 // RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s 2>&1 | FileCheck -check-prefix=NOVI %s
@@ -385,3 +385,71 @@ v_mad_u16 v5, v1, v2, v3 op_sel:[0,0,0,1]
 
 v_mad_u16 v5, v1, v2, v3 op_sel:[1,1,1,1]
 // GFX9: v_mad_u16 v5, v1, v2, v3 op_sel:[1,1,1,1] ; encoding: [0x05,0x78,0x04,0xd2,0x01,0x05,0x0e,0x04]
+
+v_interp_p2_f16 v5, v2, attr0.x, v3
+// GFX9: v_interp_p2_f16 v5, v2, attr0.x, v3 ; encoding: [0x05,0x00,0x77,0xd2,0x00,0x04,0x0e,0x04]
+
+v_interp_p2_f16 v5, -v2, attr0.x, v3
+// GFX9: v_interp_p2_f16 v5, -v2, attr0.x, v3 ; encoding: [0x05,0x00,0x77,0xd2,0x00,0x04,0x0e,0x44]
+
+v_interp_p2_f16 v5, v2, attr0.x, |v3|
+// GFX9: v_interp_p2_f16 v5, v2, attr0.x, |v3| ; encoding: [0x05,0x04,0x77,0xd2,0x00,0x04,0x0e,0x04]
+
+v_interp_p2_f16 v5, v2, attr0.w, v3
+// GFX9: v_interp_p2_f16 v5, v2, attr0.w, v3 ; encoding: [0x05,0x00,0x77,0xd2,0xc0,0x04,0x0e,0x04]
+
+v_interp_p2_f16 v5, v2, attr0.x, v3 high
+// GFX9: v_interp_p2_f16 v5, v2, attr0.x, v3 high ; encoding: [0x05,0x00,0x77,0xd2,0x00,0x05,0x0e,0x04]
+
+v_interp_p2_f16 v5, v2, attr0.x, v3 clamp
+// GFX9: v_interp_p2_f16 v5, v2, attr0.x, v3 clamp ; encoding: [0x05,0x80,0x77,0xd2,0x00,0x04,0x0e,0x04]
+
+v_interp_p2_legacy_f16 v5, v2, attr31.x, v3
+// GFX9: v_interp_p2_legacy_f16 v5, v2, attr31.x, v3 ; encoding: [0x05,0x00,0x76,0xd2,0x1f,0x04,0x0e,0x04]
+
+v_interp_p2_legacy_f16 v5, -v2, attr0.x, v3
+// GFX9: v_interp_p2_legacy_f16 v5, -v2, attr0.x, v3 ; encoding: [0x05,0x00,0x76,0xd2,0x00,0x04,0x0e,0x44]
+
+v_interp_p2_legacy_f16 v5, v2, attr0.x, |v3|
+// GFX9: v_interp_p2_legacy_f16 v5, v2, attr0.x, |v3| ; encoding: [0x05,0x04,0x76,0xd2,0x00,0x04,0x0e,0x04]
+
+v_interp_p2_legacy_f16 v5, v2, attr0.w, v3
+// GFX9: v_interp_p2_legacy_f16 v5, v2, attr0.w, v3 ; encoding: [0x05,0x00,0x76,0xd2,0xc0,0x04,0x0e,0x04]
+
+v_interp_p2_legacy_f16 v5, v2, attr0.x, v3 high
+// GFX9: v_interp_p2_legacy_f16 v5, v2, attr0.x, v3 high ; encoding: [0x05,0x00,0x76,0xd2,0x00,0x05,0x0e,0x04]
+
+v_interp_p2_legacy_f16 v5, v2, attr0.x, v3 clamp
+// GFX9: v_interp_p2_legacy_f16 v5, v2, attr0.x, v3 clamp ; encoding: [0x05,0x80,0x76,0xd2,0x00,0x04,0x0e,0x04]
+
+v_cvt_norm_i16_f16_e64 v5, -v1
+// GFX9: v_cvt_norm_i16_f16_e64 v5, -v1 ; encoding: [0x05,0x00,0x8d,0xd1,0x01,0x01,0x00,0x20]
+// NOVI: error: instruction not supported on this GPU
+
+v_cvt_norm_i16_f16_e64 v5, |v1|
+// GFX9: v_cvt_norm_i16_f16_e64 v5, |v1| ; encoding: [0x05,0x01,0x8d,0xd1,0x01,0x01,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU
+
+v_cvt_norm_u16_f16_e64 v5, -v1
+// GFX9: v_cvt_norm_u16_f16_e64 v5, -v1 ; encoding: [0x05,0x00,0x8e,0xd1,0x01,0x01,0x00,0x20]
+// NOVI: error: instruction not supported on this GPU
+
+v_cvt_norm_u16_f16_e64 v5, |v1|
+// GFX9: v_cvt_norm_u16_f16_e64 v5, |v1| ; encoding: [0x05,0x01,0x8e,0xd1,0x01,0x01,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU
+
+v_sat_pk_u8_i16_e64 v5, -1
+// GFX9: v_sat_pk_u8_i16_e64 v5, -1 ; encoding: [0x05,0x00,0x8f,0xd1,0xc1,0x00,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU
+
+v_sat_pk_u8_i16_e64 v5, v255
+// GFX9: v_sat_pk_u8_i16_e64 v5, v255 ; encoding: [0x05,0x00,0x8f,0xd1,0xff,0x01,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU
+
+v_screen_partition_4se_b32_e64 v5, v1
+// GXF9: [0x05,0x00,0x77,0xd1,0x01,0x01,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU
+
+v_screen_partition_4se_b32_e64 v5, -1
+// GXF9: [0x05,0x00,0x77,0xd1,0xc1,0x00,0x00,0x00]
+// NOVI: error: instruction not supported on this GPU

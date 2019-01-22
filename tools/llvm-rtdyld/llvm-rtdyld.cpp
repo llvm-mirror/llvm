@@ -1,9 +1,8 @@
 //===-- llvm-rtdyld.cpp - MCJIT Testing Tool ------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,27 +23,23 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Object/MachO.h"
 #include "llvm/Object/SymbolSize.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DynamicLibrary.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Memory.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include <list>
-#include <system_error>
 
 using namespace llvm;
 using namespace llvm::object;
 
 static cl::list<std::string>
 InputFileList(cl::Positional, cl::ZeroOrMore,
-              cl::desc("<input file>"));
+              cl::desc("<input files>"));
 
 enum ActionType {
   AC_Execute,
@@ -92,25 +87,30 @@ CheckFiles("check",
            cl::desc("File containing RuntimeDyld verifier checks."),
            cl::ZeroOrMore);
 
-static cl::opt<uint64_t>
+// Tracking BUG: 19665
+// http://llvm.org/bugs/show_bug.cgi?id=19665
+//
+// Do not change these options to cl::opt<uint64_t> since this silently breaks
+// argument parsing.
+static cl::opt<unsigned long long>
 PreallocMemory("preallocate",
               cl::desc("Allocate memory upfront rather than on-demand"),
               cl::init(0));
 
-static cl::opt<uint64_t>
+static cl::opt<unsigned long long>
 TargetAddrStart("target-addr-start",
                 cl::desc("For -verify only: start of phony target address "
                          "range."),
                 cl::init(4096), // Start at "page 1" - no allocating at "null".
                 cl::Hidden);
 
-static cl::opt<uint64_t>
+static cl::opt<unsigned long long>
 TargetAddrEnd("target-addr-end",
               cl::desc("For -verify only: end of phony target address range."),
               cl::init(~0ULL),
               cl::Hidden);
 
-static cl::opt<uint64_t>
+static cl::opt<unsigned long long>
 TargetSectionSep("target-section-sep",
                  cl::desc("For -verify only: Separation between sections in "
                           "phony target address space."),
@@ -178,10 +178,14 @@ public:
   void deregisterEHFrames() override {}
 
   void preallocateSlab(uint64_t Size) {
-    std::string Err;
-    sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, nullptr, &Err);
+    std::error_code EC;
+    sys::MemoryBlock MB =
+      sys::Memory::allocateMappedMemory(Size, nullptr,
+                                        sys::Memory::MF_READ |
+                                        sys::Memory::MF_WRITE,
+                                        EC);
     if (!MB.base())
-      report_fatal_error("Can't allocate enough memory: " + Err);
+      report_fatal_error("Can't allocate enough memory: " + EC.message());
 
     PreallocSlab = MB;
     UsePreallocation = true;
@@ -222,10 +226,14 @@ uint8_t *TrivialMemoryManager::allocateCodeSection(uintptr_t Size,
   if (UsePreallocation)
     return allocateFromSlab(Size, Alignment, true /* isCode */);
 
-  std::string Err;
-  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, nullptr, &Err);
+  std::error_code EC;
+  sys::MemoryBlock MB =
+    sys::Memory::allocateMappedMemory(Size, nullptr,
+                                      sys::Memory::MF_READ |
+                                      sys::Memory::MF_WRITE,
+                                      EC);
   if (!MB.base())
-    report_fatal_error("MemoryManager allocation failed: " + Err);
+    report_fatal_error("MemoryManager allocation failed: " + EC.message());
   FunctionMemory.push_back(MB);
   return (uint8_t*)MB.base();
 }
@@ -242,10 +250,14 @@ uint8_t *TrivialMemoryManager::allocateDataSection(uintptr_t Size,
   if (UsePreallocation)
     return allocateFromSlab(Size, Alignment, false /* isCode */);
 
-  std::string Err;
-  sys::MemoryBlock MB = sys::Memory::AllocateRWX(Size, nullptr, &Err);
+  std::error_code EC;
+  sys::MemoryBlock MB =
+    sys::Memory::allocateMappedMemory(Size, nullptr,
+                                      sys::Memory::MF_READ |
+                                      sys::Memory::MF_WRITE,
+                                      EC);
   if (!MB.base())
-    report_fatal_error("MemoryManager allocation failed: " + Err);
+    report_fatal_error("MemoryManager allocation failed: " + EC.message());
   DataMemory.push_back(MB);
   return (uint8_t*)MB.base();
 }
@@ -296,7 +308,7 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }
@@ -425,7 +437,7 @@ static int executeInput() {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }
@@ -453,9 +465,11 @@ static int executeInput() {
 
     // Make sure the memory is executable.
     // setExecutable will call InvalidateInstructionCache.
-    std::string ErrorStr;
-    if (!sys::Memory::setExecutable(FM, &ErrorStr))
-      ErrorAndExit("unable to mark function executable: '" + ErrorStr + "'");
+    if (auto EC = sys::Memory::protectMappedMemory(FM,
+                                                   sys::Memory::MF_READ |
+                                                   sys::Memory::MF_EXEC))
+      ErrorAndExit("unable to mark function executable: '" + EC.message() +
+                   "'");
   }
 
   // Dispatch to _main().
@@ -567,7 +581,11 @@ static void remapSectionsAndSymbols(const llvm::Triple &TargetTriple,
     if (LoadAddr &&
         *LoadAddr != static_cast<uint64_t>(
                        reinterpret_cast<uintptr_t>(Tmp->first))) {
-      AlreadyAllocated[*LoadAddr] = Tmp->second;
+      // A section will have a LoadAddr of 0 if it wasn't loaded for whatever
+      // reason (e.g. zero byte COFF sections). Don't include those sections in
+      // the allocation map.
+      if (*LoadAddr != 0)
+        AlreadyAllocated[*LoadAddr] = Tmp->second;
       Worklist.erase(Tmp);
     }
   }
@@ -691,7 +709,7 @@ static int linkAndVerify() {
     if (!MaybeObj) {
       std::string Buf;
       raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      logAllUnhandledErrors(MaybeObj.takeError(), OS);
       OS.flush();
       ErrorAndExit("unable to create object file: '" + Buf + "'");
     }
@@ -724,11 +742,8 @@ static int linkAndVerify() {
 }
 
 int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-
+  InitLLVM X(argc, argv);
   ProgramName = argv[0];
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();

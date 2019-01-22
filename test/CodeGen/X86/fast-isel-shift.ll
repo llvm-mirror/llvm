@@ -3,10 +3,12 @@
 
 define i8 @shl_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: shl_i8:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    shlb %cl, %dil
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $cl killed $ecx
+; CHECK-NEXT:    shlb %cl, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i8 %a, %b
   ret i8 %c
@@ -14,11 +16,13 @@ define i8 @shl_i8(i8 %a, i8 %b) {
 
 define i16 @shl_i16(i16 %a, i16 %b) {
 ; CHECK-LABEL: shl_i16:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %CX<kill>
-; CHECK-NEXT:    shlw %cl, %di
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cx killed $cx killed $ecx
+; CHECK-NEXT:    ## kill: def $cl killed $cx
+; CHECK-NEXT:    shlw %cl, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i16 %a, %b
   ret i16 %c
@@ -26,11 +30,11 @@ define i16 @shl_i16(i16 %a, i16 %b) {
 
 define i32 @shl_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: shl_i32:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %ECX<kill>
-; CHECK-NEXT:    shll %cl, %edi
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $ecx
+; CHECK-NEXT:    shll %cl, %eax
 ; CHECK-NEXT:    retq
   %c = shl i32 %a, %b
   ret i32 %c
@@ -38,11 +42,11 @@ define i32 @shl_i32(i32 %a, i32 %b) {
 
 define i64 @shl_i64(i64 %a, i64 %b) {
 ; CHECK-LABEL: shl_i64:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rsi, %rcx
-; CHECK-NEXT:    ## kill: %CL<def> %RCX<kill>
-; CHECK-NEXT:    shlq %cl, %rdi
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    ## kill: def $cl killed $rcx
+; CHECK-NEXT:    shlq %cl, %rax
 ; CHECK-NEXT:    retq
   %c = shl i64 %a, %b
   ret i64 %c
@@ -50,10 +54,12 @@ define i64 @shl_i64(i64 %a, i64 %b) {
 
 define i8 @lshr_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: lshr_i8:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    shrb %cl, %dil
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $cl killed $ecx
+; CHECK-NEXT:    shrb %cl, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i8 %a, %b
   ret i8 %c
@@ -61,11 +67,13 @@ define i8 @lshr_i8(i8 %a, i8 %b) {
 
 define i16 @lshr_i16(i16 %a, i16 %b) {
 ; CHECK-LABEL: lshr_i16:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %CX<kill>
-; CHECK-NEXT:    shrw %cl, %di
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cx killed $cx killed $ecx
+; CHECK-NEXT:    ## kill: def $cl killed $cx
+; CHECK-NEXT:    shrw %cl, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i16 %a, %b
   ret i16 %c
@@ -73,11 +81,11 @@ define i16 @lshr_i16(i16 %a, i16 %b) {
 
 define i32 @lshr_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: lshr_i32:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %ECX<kill>
-; CHECK-NEXT:    shrl %cl, %edi
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $ecx
+; CHECK-NEXT:    shrl %cl, %eax
 ; CHECK-NEXT:    retq
   %c = lshr i32 %a, %b
   ret i32 %c
@@ -85,11 +93,11 @@ define i32 @lshr_i32(i32 %a, i32 %b) {
 
 define i64 @lshr_i64(i64 %a, i64 %b) {
 ; CHECK-LABEL: lshr_i64:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rsi, %rcx
-; CHECK-NEXT:    ## kill: %CL<def> %RCX<kill>
-; CHECK-NEXT:    shrq %cl, %rdi
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    ## kill: def $cl killed $rcx
+; CHECK-NEXT:    shrq %cl, %rax
 ; CHECK-NEXT:    retq
   %c = lshr i64 %a, %b
   ret i64 %c
@@ -97,10 +105,12 @@ define i64 @lshr_i64(i64 %a, i64 %b) {
 
 define i8 @ashr_i8(i8 %a, i8 %b) {
 ; CHECK-LABEL: ashr_i8:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    sarb %cl, %dil
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $cl killed $ecx
+; CHECK-NEXT:    sarb %cl, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i8 %a, %b
   ret i8 %c
@@ -108,11 +118,13 @@ define i8 @ashr_i8(i8 %a, i8 %b) {
 
 define i16 @ashr_i16(i16 %a, i16 %b) {
 ; CHECK-LABEL: ashr_i16:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %CX<kill>
-; CHECK-NEXT:    sarw %cl, %di
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cx killed $cx killed $ecx
+; CHECK-NEXT:    ## kill: def $cl killed $cx
+; CHECK-NEXT:    sarw %cl, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i16 %a, %b
   ret i16 %c
@@ -120,11 +132,11 @@ define i16 @ashr_i16(i16 %a, i16 %b) {
 
 define i32 @ashr_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: ashr_i32:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %esi, %ecx
-; CHECK-NEXT:    ## kill: %CL<def> %ECX<kill>
-; CHECK-NEXT:    sarl %cl, %edi
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    ## kill: def $cl killed $ecx
+; CHECK-NEXT:    sarl %cl, %eax
 ; CHECK-NEXT:    retq
   %c = ashr i32 %a, %b
   ret i32 %c
@@ -132,11 +144,11 @@ define i32 @ashr_i32(i32 %a, i32 %b) {
 
 define i64 @ashr_i64(i64 %a, i64 %b) {
 ; CHECK-LABEL: ashr_i64:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rsi, %rcx
-; CHECK-NEXT:    ## kill: %CL<def> %RCX<kill>
-; CHECK-NEXT:    sarq %cl, %rdi
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    ## kill: def $cl killed $rcx
+; CHECK-NEXT:    sarq %cl, %rax
 ; CHECK-NEXT:    retq
   %c = ashr i64 %a, %b
   ret i64 %c
@@ -144,9 +156,10 @@ define i64 @ashr_i64(i64 %a, i64 %b) {
 
 define i8 @shl_imm1_i8(i8 %a) {
 ; CHECK-LABEL: shl_imm1_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shlb $1, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shlb $1, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i8 %a, 1
   ret i8 %c
@@ -154,10 +167,10 @@ define i8 @shl_imm1_i8(i8 %a) {
 
 define i16 @shl_imm1_i16(i16 %a) {
 ; CHECK-LABEL: shl_imm1_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    ## kill: %EDI<def> %EDI<kill> %RDI<def>
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    ## kill: def $edi killed $edi def $rdi
 ; CHECK-NEXT:    leal (,%rdi,2), %eax
-; CHECK-NEXT:    ## kill: %AX<def> %AX<kill> %EAX<kill>
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i16 %a, 1
   ret i16 %c
@@ -165,8 +178,8 @@ define i16 @shl_imm1_i16(i16 %a) {
 
 define i32 @shl_imm1_i32(i32 %a) {
 ; CHECK-LABEL: shl_imm1_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    ## kill: %EDI<def> %EDI<kill> %RDI<def>
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    ## kill: def $edi killed $edi def $rdi
 ; CHECK-NEXT:    leal (,%rdi,2), %eax
 ; CHECK-NEXT:    retq
   %c = shl i32 %a, 1
@@ -175,7 +188,7 @@ define i32 @shl_imm1_i32(i32 %a) {
 
 define i64 @shl_imm1_i64(i64 %a) {
 ; CHECK-LABEL: shl_imm1_i64:
-; CHECK:       ## BB#0:
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    leaq (,%rdi,2), %rax
 ; CHECK-NEXT:    retq
   %c = shl i64 %a, 1
@@ -184,9 +197,10 @@ define i64 @shl_imm1_i64(i64 %a) {
 
 define i8 @lshr_imm1_i8(i8 %a) {
 ; CHECK-LABEL: lshr_imm1_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrb $1, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrb $1, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i8 %a, 1
   ret i8 %c
@@ -194,9 +208,10 @@ define i8 @lshr_imm1_i8(i8 %a) {
 
 define i16 @lshr_imm1_i16(i16 %a) {
 ; CHECK-LABEL: lshr_imm1_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrw $1, %di
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrw $1, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i16 %a, 1
   ret i16 %c
@@ -204,9 +219,9 @@ define i16 @lshr_imm1_i16(i16 %a) {
 
 define i32 @lshr_imm1_i32(i32 %a) {
 ; CHECK-LABEL: lshr_imm1_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrl $1, %edi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrl $1, %eax
 ; CHECK-NEXT:    retq
   %c = lshr i32 %a, 1
   ret i32 %c
@@ -214,9 +229,9 @@ define i32 @lshr_imm1_i32(i32 %a) {
 
 define i64 @lshr_imm1_i64(i64 %a) {
 ; CHECK-LABEL: lshr_imm1_i64:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrq $1, %rdi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    shrq $1, %rax
 ; CHECK-NEXT:    retq
   %c = lshr i64 %a, 1
   ret i64 %c
@@ -224,9 +239,10 @@ define i64 @lshr_imm1_i64(i64 %a) {
 
 define i8 @ashr_imm1_i8(i8 %a) {
 ; CHECK-LABEL: ashr_imm1_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarb $1, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarb $1, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i8 %a, 1
   ret i8 %c
@@ -234,9 +250,10 @@ define i8 @ashr_imm1_i8(i8 %a) {
 
 define i16 @ashr_imm1_i16(i16 %a) {
 ; CHECK-LABEL: ashr_imm1_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarw $1, %di
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarw $1, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i16 %a, 1
   ret i16 %c
@@ -244,9 +261,9 @@ define i16 @ashr_imm1_i16(i16 %a) {
 
 define i32 @ashr_imm1_i32(i32 %a) {
 ; CHECK-LABEL: ashr_imm1_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarl $1, %edi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarl $1, %eax
 ; CHECK-NEXT:    retq
   %c = ashr i32 %a, 1
   ret i32 %c
@@ -254,9 +271,9 @@ define i32 @ashr_imm1_i32(i32 %a) {
 
 define i64 @ashr_imm1_i64(i64 %a) {
 ; CHECK-LABEL: ashr_imm1_i64:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarq $1, %rdi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    sarq $1, %rax
 ; CHECK-NEXT:    retq
   %c = ashr i64 %a, 1
   ret i64 %c
@@ -264,9 +281,10 @@ define i64 @ashr_imm1_i64(i64 %a) {
 
 define i8 @shl_imm4_i8(i8 %a) {
 ; CHECK-LABEL: shl_imm4_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shlb $4, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shlb $4, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i8 %a, 4
   ret i8 %c
@@ -274,9 +292,10 @@ define i8 @shl_imm4_i8(i8 %a) {
 
 define i16 @shl_imm4_i16(i16 %a) {
 ; CHECK-LABEL: shl_imm4_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shlw $4, %di
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shlw $4, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = shl i16 %a, 4
   ret i16 %c
@@ -284,9 +303,9 @@ define i16 @shl_imm4_i16(i16 %a) {
 
 define i32 @shl_imm4_i32(i32 %a) {
 ; CHECK-LABEL: shl_imm4_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shll $4, %edi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shll $4, %eax
 ; CHECK-NEXT:    retq
   %c = shl i32 %a, 4
   ret i32 %c
@@ -294,9 +313,9 @@ define i32 @shl_imm4_i32(i32 %a) {
 
 define i64 @shl_imm4_i64(i64 %a) {
 ; CHECK-LABEL: shl_imm4_i64:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shlq $4, %rdi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    shlq $4, %rax
 ; CHECK-NEXT:    retq
   %c = shl i64 %a, 4
   ret i64 %c
@@ -304,9 +323,10 @@ define i64 @shl_imm4_i64(i64 %a) {
 
 define i8 @lshr_imm4_i8(i8 %a) {
 ; CHECK-LABEL: lshr_imm4_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrb $4, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrb $4, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i8 %a, 4
   ret i8 %c
@@ -314,9 +334,10 @@ define i8 @lshr_imm4_i8(i8 %a) {
 
 define i16 @lshr_imm4_i16(i16 %a) {
 ; CHECK-LABEL: lshr_imm4_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrw $4, %di
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrw $4, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = lshr i16 %a, 4
   ret i16 %c
@@ -324,9 +345,9 @@ define i16 @lshr_imm4_i16(i16 %a) {
 
 define i32 @lshr_imm4_i32(i32 %a) {
 ; CHECK-LABEL: lshr_imm4_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrl $4, %edi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    shrl $4, %eax
 ; CHECK-NEXT:    retq
   %c = lshr i32 %a, 4
   ret i32 %c
@@ -334,9 +355,9 @@ define i32 @lshr_imm4_i32(i32 %a) {
 
 define i64 @lshr_imm4_i64(i64 %a) {
 ; CHECK-LABEL: lshr_imm4_i64:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    shrq $4, %rdi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    shrq $4, %rax
 ; CHECK-NEXT:    retq
   %c = lshr i64 %a, 4
   ret i64 %c
@@ -344,9 +365,10 @@ define i64 @lshr_imm4_i64(i64 %a) {
 
 define i8 @ashr_imm4_i8(i8 %a) {
 ; CHECK-LABEL: ashr_imm4_i8:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarb $4, %dil
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarb $4, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i8 %a, 4
   ret i8 %c
@@ -354,9 +376,10 @@ define i8 @ashr_imm4_i8(i8 %a) {
 
 define i16 @ashr_imm4_i16(i16 %a) {
 ; CHECK-LABEL: ashr_imm4_i16:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarw $4, %di
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarw $4, %ax
+; CHECK-NEXT:    ## kill: def $ax killed $ax killed $eax
 ; CHECK-NEXT:    retq
   %c = ashr i16 %a, 4
   ret i16 %c
@@ -364,9 +387,9 @@ define i16 @ashr_imm4_i16(i16 %a) {
 
 define i32 @ashr_imm4_i32(i32 %a) {
 ; CHECK-LABEL: ashr_imm4_i32:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarl $4, %edi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    sarl $4, %eax
 ; CHECK-NEXT:    retq
   %c = ashr i32 %a, 4
   ret i32 %c
@@ -374,10 +397,23 @@ define i32 @ashr_imm4_i32(i32 %a) {
 
 define i64 @ashr_imm4_i64(i64 %a) {
 ; CHECK-LABEL: ashr_imm4_i64:
-; CHECK:       ## BB#0:
-; CHECK-NEXT:    sarq $4, %rdi
+; CHECK:       ## %bb.0:
 ; CHECK-NEXT:    movq %rdi, %rax
+; CHECK-NEXT:    sarq $4, %rax
 ; CHECK-NEXT:    retq
   %c = ashr i64 %a, 4
   ret i64 %c
+}
+
+; Make sure we don't crash on out of bounds i8 shifts.
+define i8 @PR36731(i8 %a) {
+; CHECK-LABEL: PR36731:
+; CHECK:       ## %bb.0:
+; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    movb $255, %cl
+; CHECK-NEXT:    shlb %cl, %al
+; CHECK-NEXT:    ## kill: def $al killed $al killed $eax
+; CHECK-NEXT:    retq
+  %b = shl i8 %a, -1
+  ret i8 %b
 }

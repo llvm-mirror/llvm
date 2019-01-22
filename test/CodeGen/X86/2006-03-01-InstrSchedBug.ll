@@ -3,11 +3,11 @@
 
 define i32 @f(i32 %a, i32 %b) {
 ; CHECK-LABEL: f:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; CHECK-NEXT:    movl %ecx, %edx
-; CHECK-NEXT:    imull %edx, %edx
+; CHECK-NEXT:    imull %ecx, %edx
 ; CHECK-NEXT:    imull %eax, %ecx
 ; CHECK-NEXT:    imull %eax, %eax
 ; CHECK-NEXT:    addl %edx, %eax

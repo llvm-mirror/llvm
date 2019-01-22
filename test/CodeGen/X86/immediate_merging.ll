@@ -15,7 +15,7 @@
 ; instructions.
 define i32 @foo() optsize {
 ; X86-LABEL: foo:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl $1234, %eax # imm = 0x4D2
 ; X86-NEXT:    movl %eax, a
 ; X86-NEXT:    movl %eax, b
@@ -23,7 +23,7 @@ define i32 @foo() optsize {
 ; X86-NEXT:    movl %eax, c
 ; X86-NEXT:    cmpl %eax, e
 ; X86-NEXT:    jne .LBB0_2
-; X86-NEXT:  # BB#1: # %if.then
+; X86-NEXT:  # %bb.1: # %if.then
 ; X86-NEXT:    movl $1, x
 ; X86-NEXT:  .LBB0_2: # %if.end
 ; X86-NEXT:    movl $1234, f # imm = 0x4D2
@@ -34,7 +34,7 @@ define i32 @foo() optsize {
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: foo:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movl $1234, %eax # imm = 0x4D2
 ; X64-NEXT:    movl %eax, {{.*}}(%rip)
 ; X64-NEXT:    movl %eax, {{.*}}(%rip)
@@ -42,7 +42,7 @@ define i32 @foo() optsize {
 ; X64-NEXT:    movl %eax, {{.*}}(%rip)
 ; X64-NEXT:    cmpl %eax, {{.*}}(%rip)
 ; X64-NEXT:    jne .LBB0_2
-; X64-NEXT:  # BB#1: # %if.then
+; X64-NEXT:  # %bb.1: # %if.then
 ; X64-NEXT:    movl $1, {{.*}}(%rip)
 ; X64-NEXT:  .LBB0_2: # %if.end
 ; X64-NEXT:    movl $1234, {{.*}}(%rip) # imm = 0x4D2
@@ -76,14 +76,14 @@ if.end:                                           ; preds = %if.then, %entry
 ; Test -O2 to make sure that all immediates get pulled in to their users.
 define i32 @foo2() {
 ; X86-LABEL: foo2:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl $1234, a # imm = 0x4D2
 ; X86-NEXT:    movl $1234, b # imm = 0x4D2
 ; X86-NEXT:    xorl %eax, %eax
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: foo2:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movl $1234, {{.*}}(%rip) # imm = 0x4D2
 ; X64-NEXT:    movl $1234, {{.*}}(%rip) # imm = 0x4D2
 ; X64-NEXT:    xorl %eax, %eax
@@ -94,7 +94,7 @@ entry:
   ret i32 0
 }
 
-declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i32, i1) #1
+declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i1) #1
 
 @AA = common global [100 x i8] zeroinitializer, align 1
 
@@ -103,7 +103,7 @@ declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i32, i1) #1
 ; sure we don't directly store the immediates.
 define void @foomemset() optsize {
 ; X86-LABEL: foomemset:
-; X86:       # BB#0: # %entry
+; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl $555819297, %eax # imm = 0x21212121
 ; X86-NEXT:    movl %eax, AA+20
 ; X86-NEXT:    movl %eax, AA+16
@@ -114,13 +114,13 @@ define void @foomemset() optsize {
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: foomemset:
-; X64:       # BB#0: # %entry
+; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movabsq $2387225703656530209, %rax # imm = 0x2121212121212121
 ; X64-NEXT:    movq %rax, AA+{{.*}}(%rip)
 ; X64-NEXT:    movq %rax, AA+{{.*}}(%rip)
 ; X64-NEXT:    movq %rax, {{.*}}(%rip)
 ; X64-NEXT:    retq
 entry:
-  call void @llvm.memset.p0i8.i32(i8* getelementptr inbounds ([100 x i8], [100 x i8]* @AA, i32 0, i32 0), i8 33, i32 24, i32 1, i1 false)
+  call void @llvm.memset.p0i8.i32(i8* getelementptr inbounds ([100 x i8], [100 x i8]* @AA, i32 0, i32 0), i8 33, i32 24, i1 false)
   ret void
 }

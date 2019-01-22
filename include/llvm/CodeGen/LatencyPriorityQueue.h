@@ -1,9 +1,8 @@
 //===---- LatencyPriorityQueue.h - A latency-oriented priority queue ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,6 +16,7 @@
 #define LLVM_CODEGEN_LATENCYPRIORITYQUEUE_H
 
 #include "llvm/CodeGen/ScheduleDAG.h"
+#include "llvm/Config/llvm-config.h"
 
 namespace llvm {
   class LatencyPriorityQueue;
@@ -26,7 +26,7 @@ namespace llvm {
     LatencyPriorityQueue *PQ;
     explicit latency_sort(LatencyPriorityQueue *pq) : PQ(pq) {}
 
-    bool operator()(const SUnit* left, const SUnit* right) const;
+    bool operator()(const SUnit* LHS, const SUnit* RHS) const;
   };
 
   class LatencyPriorityQueue : public SchedulingPriorityQueue {
@@ -83,11 +83,15 @@ namespace llvm {
 
     void remove(SUnit *SU) override;
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+    LLVM_DUMP_METHOD void dump(ScheduleDAG *DAG) const override;
+#endif
+
     // scheduledNode - As nodes are scheduled, we look to see if there are any
     // successor nodes that have a single unscheduled predecessor.  If so, that
     // single predecessor has a higher priority, since scheduling it will make
     // the node available.
-    void scheduledNode(SUnit *Node) override;
+    void scheduledNode(SUnit *SU) override;
 
 private:
     void AdjustPriorityOfUnscheduledPreds(SUnit *SU);

@@ -1,9 +1,8 @@
 //===- SafeStackLayout.h - SafeStack frame layout --------------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -47,6 +46,7 @@ class StackLayout {
   SmallVector<StackObject, 8> StackObjects;
 
   DenseMap<const Value *, unsigned> ObjectOffsets;
+  DenseMap<const Value *, unsigned> ObjectAlignments;
 
   void layoutObject(StackObject &Obj);
 
@@ -63,6 +63,9 @@ public:
 
   /// Returns the offset to the object start in the stack frame.
   unsigned getObjectOffset(const Value *V) { return ObjectOffsets[V]; }
+
+  /// Returns the alignment of the object
+  unsigned getObjectAlignment(const Value *V) { return ObjectAlignments[V]; }
 
   /// Returns the size of the entire frame.
   unsigned getFrameSize() { return Regions.empty() ? 0 : Regions.back().End; }

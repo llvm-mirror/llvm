@@ -1,9 +1,8 @@
 //===- ScopedNoAliasAA.cpp - Scoped No-Alias Alias Analysis ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -48,7 +47,7 @@ using namespace llvm;
 // can also be achieved by stripping the associated metadata tags from IR, but
 // this option is sometimes more convenient.
 static cl::opt<bool> EnableScopedNoAlias("enable-scoped-noalias",
-                                         cl::init(true));
+                                         cl::init(true), cl::Hidden);
 
 namespace {
 
@@ -95,39 +94,36 @@ AliasResult ScopedNoAliasAAResult::alias(const MemoryLocation &LocA,
   return AAResultBase::alias(LocA, LocB);
 }
 
-ModRefInfo ScopedNoAliasAAResult::getModRefInfo(ImmutableCallSite CS,
+ModRefInfo ScopedNoAliasAAResult::getModRefInfo(const CallBase *Call,
                                                 const MemoryLocation &Loc) {
   if (!EnableScopedNoAlias)
-    return AAResultBase::getModRefInfo(CS, Loc);
+    return AAResultBase::getModRefInfo(Call, Loc);
 
-  if (!mayAliasInScopes(Loc.AATags.Scope, CS.getInstruction()->getMetadata(
-                                              LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+  if (!mayAliasInScopes(Loc.AATags.Scope,
+                        Call->getMetadata(LLVMContext::MD_noalias)))
+    return ModRefInfo::NoModRef;
 
-  if (!mayAliasInScopes(
-          CS.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
-          Loc.AATags.NoAlias))
-    return MRI_NoModRef;
+  if (!mayAliasInScopes(Call->getMetadata(LLVMContext::MD_alias_scope),
+                        Loc.AATags.NoAlias))
+    return ModRefInfo::NoModRef;
 
-  return AAResultBase::getModRefInfo(CS, Loc);
+  return AAResultBase::getModRefInfo(Call, Loc);
 }
 
-ModRefInfo ScopedNoAliasAAResult::getModRefInfo(ImmutableCallSite CS1,
-                                                ImmutableCallSite CS2) {
+ModRefInfo ScopedNoAliasAAResult::getModRefInfo(const CallBase *Call1,
+                                                const CallBase *Call2) {
   if (!EnableScopedNoAlias)
-    return AAResultBase::getModRefInfo(CS1, CS2);
+    return AAResultBase::getModRefInfo(Call1, Call2);
 
-  if (!mayAliasInScopes(
-          CS1.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
-          CS2.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+  if (!mayAliasInScopes(Call1->getMetadata(LLVMContext::MD_alias_scope),
+                        Call2->getMetadata(LLVMContext::MD_noalias)))
+    return ModRefInfo::NoModRef;
 
-  if (!mayAliasInScopes(
-          CS2.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
-          CS1.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return MRI_NoModRef;
+  if (!mayAliasInScopes(Call2->getMetadata(LLVMContext::MD_alias_scope),
+                        Call1->getMetadata(LLVMContext::MD_noalias)))
+    return ModRefInfo::NoModRef;
 
-  return AAResultBase::getModRefInfo(CS1, CS2);
+  return AAResultBase::getModRefInfo(Call1, Call2);
 }
 
 static void collectMDInDomain(const MDNode *List, const MDNode *Domain,

@@ -1,9 +1,8 @@
 //=- HexagonIntrinsicsV60.td - Target Description for Hexagon -*- tablegen *-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -35,9 +34,6 @@ def : Pat <(v512i1 (bitconvert (v32i16 HvxVR:$src1))),
 def : Pat <(v512i1 (bitconvert (v64i8  HvxVR:$src1))),
            (v512i1 (V6_vandvrt(v64i8  HvxVR:$src1), (A2_tfrsi 0x01010101)))>;
 
-def : Pat <(v512i1 (bitconvert (v8i64  HvxVR:$src1))),
-           (v512i1 (V6_vandvrt(v8i64  HvxVR:$src1), (A2_tfrsi 0x01010101)))>;
-
 def : Pat <(v16i32 (bitconvert (v512i1 HvxQR:$src1))),
            (v16i32 (V6_vandqrt(v512i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
 
@@ -46,9 +42,6 @@ def : Pat <(v32i16 (bitconvert (v512i1 HvxQR:$src1))),
 
 def : Pat <(v64i8  (bitconvert (v512i1 HvxQR:$src1))),
            (v64i8  (V6_vandqrt(v512i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
-
-def : Pat <(v8i64  (bitconvert (v512i1 HvxQR:$src1))),
-           (v8i64  (V6_vandqrt(v512i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
 
 def : Pat <(v1024i1 (bitconvert (v32i32 HvxVR:$src1))),
            (v1024i1 (V6_vandvrt (v32i32 HvxVR:$src1), (A2_tfrsi 0x01010101)))>;
@@ -59,9 +52,6 @@ def : Pat <(v1024i1 (bitconvert (v64i16 HvxVR:$src1))),
 def : Pat <(v1024i1 (bitconvert (v128i8  HvxVR:$src1))),
            (v1024i1 (V6_vandvrt (v128i8  HvxVR:$src1), (A2_tfrsi 0x01010101)))>;
 
-def : Pat <(v1024i1 (bitconvert (v16i64  HvxVR:$src1))),
-           (v1024i1 (V6_vandvrt (v16i64  HvxVR:$src1), (A2_tfrsi 0x01010101)))>;
-
 def : Pat <(v32i32 (bitconvert (v1024i1 HvxQR:$src1))),
            (v32i32 (V6_vandqrt (v1024i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
 
@@ -70,9 +60,6 @@ def : Pat <(v64i16 (bitconvert (v1024i1 HvxQR:$src1))),
 
 def : Pat <(v128i8  (bitconvert (v1024i1 HvxQR:$src1))),
            (v128i8  (V6_vandqrt (v1024i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
-
-def : Pat <(v16i64  (bitconvert (v1024i1 HvxQR:$src1))),
-           (v16i64  (V6_vandqrt (v1024i1 HvxQR:$src1), (A2_tfrsi 0x01010101)))>;
 
 let AddedComplexity = 140 in {
 def : Pat <(store (v512i1 HvxQR:$src1), (i32 IntRegs:$addr)),

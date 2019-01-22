@@ -1,9 +1,8 @@
 //===-- APFloat.cpp - Implement APFloat class -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,6 +18,7 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -1743,6 +1743,7 @@ IEEEFloat::opStatus IEEEFloat::remainder(const IEEEFloat &rhs) {
 IEEEFloat::opStatus IEEEFloat::mod(const IEEEFloat &rhs) {
   opStatus fs;
   fs = modSpecials(rhs);
+  unsigned int origSign = sign;
 
   while (isFiniteNonZero() && rhs.isFiniteNonZero() &&
          compareAbsoluteValue(rhs) != cmpLessThan) {
@@ -1750,10 +1751,12 @@ IEEEFloat::opStatus IEEEFloat::mod(const IEEEFloat &rhs) {
     if (compareAbsoluteValue(V) == cmpLessThan)
       V = scalbn(V, -1, rmNearestTiesToEven);
     V.sign = sign;
-  
+
     fs = subtract(V, rmNearestTiesToEven);
     assert(fs==opOK);
   }
+  if (isZero())
+    sign = origSign; // fmod requires this
   return fs;
 }
 
@@ -2543,12 +2546,12 @@ IEEEFloat::convertFromDecimalString(StringRef str, roundingMode rounding_mode) {
 }
 
 bool IEEEFloat::convertFromStringSpecials(StringRef str) {
-  if (str.equals("inf") || str.equals("INFINITY")) {
+  if (str.equals("inf") || str.equals("INFINITY") || str.equals("+Inf")) {
     makeInf(false);
     return true;
   }
 
-  if (str.equals("-inf") || str.equals("-INFINITY")) {
+  if (str.equals("-inf") || str.equals("-INFINITY") || str.equals("-Inf")) {
     makeInf(true);
     return true;
   }
@@ -3028,27 +3031,29 @@ double IEEEFloat::convertToDouble() const {
 /// does not support these bit patterns:
 ///  exponent = all 1's, integer bit 0, significand 0 ("pseudoinfinity")
 ///  exponent = all 1's, integer bit 0, significand nonzero ("pseudoNaN")
-///  exponent = 0, integer bit 1 ("pseudodenormal")
 ///  exponent!=0 nor all 1's, integer bit 0 ("unnormal")
-/// At the moment, the first two are treated as NaNs, the second two as Normal.
+///  exponent = 0, integer bit 1 ("pseudodenormal")
+/// At the moment, the first three are treated as NaNs, the last one as Normal.
 void IEEEFloat::initFromF80LongDoubleAPInt(const APInt &api) {
   assert(api.getBitWidth()==80);
   uint64_t i1 = api.getRawData()[0];
   uint64_t i2 = api.getRawData()[1];
   uint64_t myexponent = (i2 & 0x7fff);
   uint64_t mysignificand = i1;
+  uint8_t myintegerbit = mysignificand >> 63;
 
   initialize(&semX87DoubleExtended);
   assert(partCount()==2);
 
   sign = static_cast<unsigned int>(i2>>15);
-  if (myexponent==0 && mysignificand==0) {
+  if (myexponent == 0 && mysignificand == 0) {
     // exponent, significand meaningless
     category = fcZero;
   } else if (myexponent==0x7fff && mysignificand==0x8000000000000000ULL) {
     // exponent, significand meaningless
     category = fcInfinity;
-  } else if (myexponent==0x7fff && mysignificand!=0x8000000000000000ULL) {
+  } else if ((myexponent == 0x7fff && mysignificand != 0x8000000000000000ULL) ||
+             (myexponent != 0x7fff && myexponent != 0 && myintegerbit == 0)) {
     // exponent meaningless
     category = fcNaN;
     significandParts()[0] = mysignificand;
@@ -4437,8 +4442,10 @@ APFloat::APFloat(const fltSemantics &Semantics, StringRef S)
 
 APFloat::opStatus APFloat::convert(const fltSemantics &ToSemantics,
                                    roundingMode RM, bool *losesInfo) {
-  if (&getSemantics() == &ToSemantics)
+  if (&getSemantics() == &ToSemantics) {
+    *losesInfo = false;
     return opOK;
+  }
   if (usesLayout<IEEEFloat>(getSemantics()) &&
       usesLayout<IEEEFloat>(ToSemantics))
     return U.IEEE.convert(ToSemantics, RM, losesInfo);

@@ -1,9 +1,8 @@
 //===- OrcRemoteTargetRPCAPI.h - Orc Remote-target RPC API ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -87,8 +86,7 @@ class SerializationTraits<ChannelT, JITSymbolFlags> {
 public:
 
   static Error serialize(ChannelT &C, const JITSymbolFlags &Flags) {
-    return serializeSeq(C, static_cast<JITSymbolFlags::UnderlyingType>(Flags),
-                        Flags.getTargetFlags());
+    return serializeSeq(C, Flags.getRawFlagsValue(), Flags.getTargetFlags());
   }
 
   static Error deserialize(ChannelT &C, JITSymbolFlags &Flags) {

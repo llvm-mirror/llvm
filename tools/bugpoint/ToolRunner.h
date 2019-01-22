@@ -1,9 +1,8 @@
 //===-- tools/bugpoint/ToolRunner.h -----------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -49,7 +48,8 @@ class CC {
 public:
   enum FileType { AsmFile, ObjectFile, CFile };
 
-  static CC *create(std::string &Message, const std::string &CCBinary,
+  static CC *create(const char *Argv0, std::string &Message,
+                    const std::string &CCBinary,
                     const std::vector<std::string> *Args);
 
   /// ExecuteProgram - Execute the program specified by "ProgramFile" (which is
@@ -98,11 +98,11 @@ public:
             const std::vector<std::string> *Args = nullptr);
 
   static AbstractInterpreter *
-  createCustomCompiler(std::string &Message,
+  createCustomCompiler(const char *Argv0, std::string &Message,
                        const std::string &CompileCommandLine);
 
   static AbstractInterpreter *
-  createCustomExecutor(std::string &Message,
+  createCustomExecutor(const char *Argv0, std::string &Message,
                        const std::string &ExecCommandLine);
 
   virtual ~AbstractInterpreter() {}
@@ -177,6 +177,13 @@ public:
                                     std::string &OutFile, unsigned Timeout = 0,
                                     unsigned MemoryLimit = 0) override;
 };
+
+/// Find the first executable file \ExeName, either in the user's PATH or,
+/// failing that, in the same directory as argv[0]. This allows us to find
+/// another LLVM tool if it is built in the same directory. If no executable is
+/// found, an error is returned.
+ErrorOr<std::string> FindProgramByName(const std::string &ExeName,
+                                       const char *Argv0, void *MainAddr);
 
 } // End llvm namespace
 

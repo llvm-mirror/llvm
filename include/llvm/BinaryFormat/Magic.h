@@ -1,9 +1,8 @@
 //===- llvm/BinaryFormat/Magic.h - File magic identification ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,7 +44,8 @@ struct file_magic {
     coff_import_library, ///< COFF import library
     pecoff_executable,   ///< PECOFF executable file
     windows_resource,    ///< Windows compiled resource file (.res)
-    wasm_object          ///< WebAssembly Object file
+    wasm_object,         ///< WebAssembly Object file
+    pdb,                 ///< Windows PDB debug info file
   };
 
   bool is_object() const { return V != unknown; }
@@ -58,10 +58,10 @@ private:
   Impl V = unknown;
 };
 
-/// @brief Identify the type of a binary file based on how magical it is.
+/// Identify the type of a binary file based on how magical it is.
 file_magic identify_magic(StringRef magic);
 
-/// @brief Get and identify \a path's type based on its content.
+/// Get and identify \a path's type based on its content.
 ///
 /// @param path Input path.
 /// @param result Set to the type of file, or file_magic::unknown.

@@ -1020,8 +1020,8 @@ be passed by value.
 
 .. _DEBUG:
 
-The ``DEBUG()`` macro and ``-debug`` option
--------------------------------------------
+The ``LLVM_DEBUG()`` macro and ``-debug`` option
+------------------------------------------------
 
 Often when working on your pass you will put a bunch of debugging printouts and
 other code into your pass.  After you get it working, you want to remove it, but
@@ -1033,14 +1033,14 @@ them out, allowing you to enable them if you need them in the future.
 
 The ``llvm/Support/Debug.h`` (`doxygen
 <http://llvm.org/doxygen/Debug_8h_source.html>`__) file provides a macro named
-``DEBUG()`` that is a much nicer solution to this problem.  Basically, you can
-put arbitrary code into the argument of the ``DEBUG`` macro, and it is only
+``LLVM_DEBUG()`` that is a much nicer solution to this problem.  Basically, you can
+put arbitrary code into the argument of the ``LLVM_DEBUG`` macro, and it is only
 executed if '``opt``' (or any other tool) is run with the '``-debug``' command
 line argument:
 
 .. code-block:: c++
 
-  DEBUG(errs() << "I am here!\n");
+  LLVM_DEBUG(dbgs() << "I am here!\n");
 
 Then you can run your pass like this:
 
@@ -1051,13 +1051,13 @@ Then you can run your pass like this:
   $ opt < a.bc > /dev/null -mypass -debug
   I am here!
 
-Using the ``DEBUG()`` macro instead of a home-brewed solution allows you to not
+Using the ``LLVM_DEBUG()`` macro instead of a home-brewed solution allows you to not
 have to create "yet another" command line option for the debug output for your
-pass.  Note that ``DEBUG()`` macros are disabled for non-asserts builds, so they
+pass.  Note that ``LLVM_DEBUG()`` macros are disabled for non-asserts builds, so they
 do not cause a performance impact at all (for the same reason, they should also
 not contain side-effects!).
 
-One additional nice thing about the ``DEBUG()`` macro is that you can enable or
+One additional nice thing about the ``LLVM_DEBUG()`` macro is that you can enable or
 disable it directly in gdb.  Just use "``set DebugFlag=0``" or "``set
 DebugFlag=1``" from the gdb if the program is running.  If the program hasn't
 been started yet, you can always just run it with ``-debug``.
@@ -1076,10 +1076,10 @@ follows:
 .. code-block:: c++
 
   #define DEBUG_TYPE "foo"
-  DEBUG(errs() << "'foo' debug type\n");
+  LLVM_DEBUG(dbgs() << "'foo' debug type\n");
   #undef  DEBUG_TYPE
   #define DEBUG_TYPE "bar"
-  DEBUG(errs() << "'bar' debug type\n"));
+  LLVM_DEBUG(dbgs() << "'bar' debug type\n");
   #undef  DEBUG_TYPE
 
 Then you can run your pass like this:
@@ -1120,8 +1120,8 @@ preceding example could be written as:
 
 .. code-block:: c++
 
-  DEBUG_WITH_TYPE("foo", errs() << "'foo' debug type\n");
-  DEBUG_WITH_TYPE("bar", errs() << "'bar' debug type\n"));
+  DEBUG_WITH_TYPE("foo", dbgs() << "'foo' debug type\n");
+  DEBUG_WITH_TYPE("bar", dbgs() << "'bar' debug type\n");
 
 .. _Statistic:
 
@@ -1435,7 +1435,7 @@ order (so you can do pointer arithmetic between elements), supports efficient
 push_back/pop_back operations, supports efficient random access to its elements,
 etc.
 
-The advantage of SmallVector is that it allocates space for some number of
+The main advantage of SmallVector is that it allocates space for some number of
 elements (N) **in the object itself**.  Because of this, if the SmallVector is
 dynamically smaller than N, no malloc is performed.  This can be a big win in
 cases where the malloc/free call is far more expensive than the code that
@@ -1449,6 +1449,21 @@ SmallVectors are most useful when on the stack.
 
 SmallVector also provides a nice portable and efficient replacement for
 ``alloca``.
+
+SmallVector has grown a few other minor advantages over std::vector, causing
+``SmallVector<Type, 0>`` to be preferred over ``std::vector<Type>``.
+
+#. std::vector is exception-safe, and some implementations have pessimizations
+   that copy elements when SmallVector would move them.
+
+#. SmallVector understands ``llvm::is_trivially_copyable<Type>`` and uses realloc aggressively.
+
+#. Many LLVM APIs take a SmallVectorImpl as an out parameter (see the note
+   below).
+
+#. SmallVector with N equal to 0 is smaller than std::vector on 64-bit
+   platforms, since it uses ``unsigned`` (instead of ``void*``) for its size
+   and capacity.
 
 .. note::
 
@@ -1482,12 +1497,10 @@ SmallVector also provides a nice portable and efficient replacement for
 <vector>
 ^^^^^^^^
 
-``std::vector`` is well loved and respected.  It is useful when SmallVector
-isn't: when the size of the vector is often large (thus the small optimization
-will rarely be a benefit) or if you will be allocating many instances of the
-vector itself (which would waste space for elements that aren't in the
-container).  vector is also useful when interfacing with code that expects
-vectors :).
+``std::vector<T>`` is well loved and respected.  However, ``SmallVector<T, 0>``
+is often a better option due to the advantages listed above.  std::vector is
+still useful when you need to store more than ``UINT32_MAX`` elements or when
+interfacing with code that expects vectors :).
 
 One worthwhile note about std::vector: avoid code like this:
 
@@ -1832,7 +1845,7 @@ A sorted 'vector'
 ^^^^^^^^^^^^^^^^^
 
 If you intend to insert a lot of elements, then do a lot of queries, a great
-approach is to use a vector (or other sequential container) with
+approach is to use an std::vector (or other sequential container) with
 std::sort+std::unique to remove duplicates.  This approach works really well if
 your usage pattern has these two distinct phases (insert then query), and can be
 coupled with a good choice of :ref:`sequential container <ds_sequential>`.
@@ -1859,9 +1872,7 @@ to :ref:`std::set <dss_set>`, but for pointers it uses something far better,
 :ref:`SmallPtrSet <dss_smallptrset>`.
 
 The magic of this class is that it handles small sets extremely efficiently, but
-gracefully handles extremely large sets without loss of efficiency.  The
-drawback is that the interface is quite small: it supports insertion, queries
-and erasing, but does not support iteration.
+gracefully handles extremely large sets without loss of efficiency.
 
 .. _dss_smallptrset:
 
@@ -1869,11 +1880,11 @@ llvm/ADT/SmallPtrSet.h
 ^^^^^^^^^^^^^^^^^^^^^^
 
 ``SmallPtrSet`` has all the advantages of ``SmallSet`` (and a ``SmallSet`` of
-pointers is transparently implemented with a ``SmallPtrSet``), but also supports
-iterators.  If more than N insertions are performed, a single quadratically
-probed hash table is allocated and grows as needed, providing extremely
-efficient access (constant time insertion/deleting/queries with low constant
-factors) and is very stingy with malloc traffic.
+pointers is transparently implemented with a ``SmallPtrSet``). If more than N
+insertions are performed, a single quadratically probed hash table is allocated
+and grows as needed, providing extremely efficient access (constant time
+insertion/deleting/queries with low constant factors) and is very stingy with
+malloc traffic.
 
 Note that, unlike :ref:`std::set <dss_set>`, the iterators of ``SmallPtrSet``
 are invalidated whenever an insertion occurs.  Also, the values visited by the
@@ -2894,37 +2905,6 @@ For example:
   GV->eraseFromParent();
 
 
-.. _create_types:
-
-How to Create Types
--------------------
-
-In generating IR, you may need some complex types.  If you know these types
-statically, you can use ``TypeBuilder<...>::get()``, defined in
-``llvm/Support/TypeBuilder.h``, to retrieve them.  ``TypeBuilder`` has two forms
-depending on whether you're building types for cross-compilation or native
-library use.  ``TypeBuilder<T, true>`` requires that ``T`` be independent of the
-host environment, meaning that it's built out of types from the ``llvm::types``
-(`doxygen <http://llvm.org/doxygen/namespacellvm_1_1types.html>`__) namespace
-and pointers, functions, arrays, etc. built of those.  ``TypeBuilder<T, false>``
-additionally allows native C types whose size may depend on the host compiler.
-For example,
-
-.. code-block:: c++
-
-  FunctionType *ft = TypeBuilder<types::i<8>(types::i<32>*), true>::get();
-
-is easier to read and write than the equivalent
-
-.. code-block:: c++
-
-  std::vector<const Type*> params;
-  params.push_back(PointerType::getUnqual(Type::Int32Ty));
-  FunctionType *ft = FunctionType::get(Type::Int8Ty, params, false);
-
-See the `class comment
-<http://llvm.org/doxygen/TypeBuilder_8h_source.html#l00001>`_ for more details.
-
 .. _threading:
 
 Threads and LLVM
@@ -2984,7 +2964,7 @@ Conceptually, ``LLVMContext`` provides isolation.  Every LLVM entity
 in-memory IR belongs to an ``LLVMContext``.  Entities in different contexts
 *cannot* interact with each other: ``Module``\ s in different contexts cannot be
 linked together, ``Function``\ s cannot be added to ``Module``\ s in different
-contexts, etc.  What this means is that is is safe to compile on multiple
+contexts, etc.  What this means is that is safe to compile on multiple
 threads simultaneously, as long as no two threads operate on entities within the
 same context.
 
@@ -3721,16 +3701,9 @@ Important Subclasses of the ``Instruction`` class
 
 * ``CmpInst``
 
-  This subclass respresents the two comparison instructions,
+  This subclass represents the two comparison instructions,
   `ICmpInst <LangRef.html#i_icmp>`_ (integer opreands), and
   `FCmpInst <LangRef.html#i_fcmp>`_ (floating point operands).
-
-.. _TerminatorInst:
-
-* ``TerminatorInst``
-
-  This subclass is the parent of all terminator instructions (those which can
-  terminate a block).
 
 .. _m_Instruction:
 
@@ -4057,7 +4030,7 @@ This class represents a single entry single exit section of the code, commonly
 known as a basic block by the compiler community.  The ``BasicBlock`` class
 maintains a list of Instruction_\ s, which form the body of the block.  Matching
 the language definition, the last element of this list of instructions is always
-a terminator instruction (a subclass of the TerminatorInst_ class).
+a terminator instruction.
 
 In addition to tracking the list of instructions that make up the block, the
 ``BasicBlock`` class also keeps track of the :ref:`Function <c_Function>` that
@@ -4108,7 +4081,7 @@ Important Public Members of the ``BasicBlock`` class
   Returns a pointer to :ref:`Function <c_Function>` the block is embedded into,
   or a null pointer if it is homeless.
 
-* ``TerminatorInst *getTerminator()``
+* ``Instruction *getTerminator()``
 
   Returns a pointer to the terminator instruction that appears at the end of the
   ``BasicBlock``.  If there is no terminator instruction, or if the last

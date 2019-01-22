@@ -1,10 +1,10 @@
-; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
-; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI -check-prefix=FUNC %s
+; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI -check-prefix=FUNC %s
 ; RUN:  llc -amdgpu-scalarize-global-loads=false  -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=R600 -check-prefix=FUNC %s
 
 ; FUNC-LABEL: {{^}}fneg_fabs_fadd_f32:
 ; SI-NOT: and
-; SI: v_sub_f32_e64 {{v[0-9]+}}, {{s[0-9]+}}, |{{v[0-9]+}}|
+; SI: v_sub_f32_e64 {{v[0-9]+}}, {{v[0-9]+}}, |{{s[0-9]+}}|
 define amdgpu_kernel void @fneg_fabs_fadd_f32(float addrspace(1)* %out, float %x, float %y) {
   %fabs = call float @llvm.fabs.f32(float %x)
   %fsub = fsub float -0.000000e+00, %fabs
@@ -15,7 +15,7 @@ define amdgpu_kernel void @fneg_fabs_fadd_f32(float addrspace(1)* %out, float %x
 
 ; FUNC-LABEL: {{^}}fneg_fabs_fmul_f32:
 ; SI-NOT: and
-; SI: v_mul_f32_e64 {{v[0-9]+}}, {{s[0-9]+}}, -|{{v[0-9]+}}|
+; SI: v_mul_f32_e64 {{v[0-9]+}}, {{v[0-9]+}}, -|{{s[0-9]+}}|
 ; SI-NOT: and
 define amdgpu_kernel void @fneg_fabs_fmul_f32(float addrspace(1)* %out, float %x, float %y) {
   %fabs = call float @llvm.fabs.f32(float %x)
@@ -35,6 +35,7 @@ define amdgpu_kernel void @fneg_fabs_fmul_f32(float addrspace(1)* %out, float %x
 ; R600: -PV
 
 ; SI: s_or_b32 s{{[0-9]+}}, s{{[0-9]+}}, 0x80000000
+; VI: s_bitset1_b32 s{{[0-9]+}}, 31
 define amdgpu_kernel void @fneg_fabs_free_f32(float addrspace(1)* %out, i32 %in) {
   %bc = bitcast i32 %in to float
   %fabs = call float @llvm.fabs.f32(float %bc)

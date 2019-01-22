@@ -1,9 +1,8 @@
 //===-- MSP430ISelLowering.h - MSP430 DAG Lowering Interface ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@
 
 #include "MSP430.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
   namespace MSP430ISD {
@@ -35,6 +34,9 @@ namespace llvm {
 
       /// Y = RRC X, rotate right via carry
       RRC,
+
+      /// Rotate right via carry, carry gets cleared beforehand by clrc
+      RRCL,
 
       /// CALL - These operations represent an abstract call
       /// instruction, which includes a bunch of information.
@@ -61,8 +63,9 @@ namespace llvm {
       /// is condition code and operand 4 is flag operand.
       SELECT_CC,
 
-      /// SHL, SRA, SRL - Non-constant shifts.
-      SHL, SRA, SRL
+      /// DADD - Decimal addition with carry
+      /// TODO Nothing generates a node of this type yet.
+      DADD,
     };
   }
 

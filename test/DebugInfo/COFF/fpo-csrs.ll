@@ -65,7 +65,7 @@ entry:
 ; ASM:         pushl   %esi
 ; ASM:         .cv_fpo_pushreg %esi
 ; ASM:         .cv_fpo_endprologue
-; ASM:         #DEBUG_VALUE: csr1:a <- %ESI
+; ASM:         #DEBUG_VALUE: csr1:a <- $esi
 ; ASM:         retl
 ; ASM:         .cv_fpo_endproc
 
@@ -78,11 +78,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + =
 ; OBJ-NEXT:   PrologSize: 0x1
 ; OBJ-NEXT:   SavedRegsSize: 0x0
 ; OBJ-NEXT:   Flags [ (0x4)
 ; OBJ-NEXT:     IsFunctionStart (0x4)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -91,10 +95,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $esi $T0 4 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x0
 ; OBJ-NEXT:   SavedRegsSize: 0x4
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $esi $T0 4 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NOT: FrameData
@@ -122,8 +131,8 @@ entry:
 ; ASM:         pushl   %esi
 ; ASM:         .cv_fpo_pushreg %esi
 ; ASM:         .cv_fpo_endprologue
-; ASM:         #DEBUG_VALUE: csr2:a <- %ESI
-; ASM:         #DEBUG_VALUE: csr2:b <- %EDI
+; ASM:         #DEBUG_VALUE: csr2:a <- $esi
+; ASM:         #DEBUG_VALUE: csr2:b <- $edi
 ; ASM:         retl
 ; ASM:         .cv_fpo_endproc
 
@@ -136,11 +145,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + =
 ; OBJ-NEXT:   PrologSize: 0x2
 ; OBJ-NEXT:   SavedRegsSize: 0x0
 ; OBJ-NEXT:   Flags [ (0x4)
 ; OBJ-NEXT:     IsFunctionStart (0x4)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -149,10 +162,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $edi $T0 4 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x1
 ; OBJ-NEXT:   SavedRegsSize: 0x4
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $edi $T0 4 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -161,10 +179,16 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $edi $T0 4 - ^ = $esi $T0 8 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x0
 ; OBJ-NEXT:   SavedRegsSize: 0x8
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $edi $T0 4 - ^ =
+; OBJ-NEXT:     $esi $T0 8 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NOT: FrameData
@@ -192,9 +216,9 @@ entry:
 ; ASM:         pushl   %esi
 ; ASM:         .cv_fpo_pushreg %esi
 ; ASM:         .cv_fpo_endprologue
-; ASM:         #DEBUG_VALUE: csr3:a <- %ESI
-; ASM:         #DEBUG_VALUE: csr3:b <- %EDI
-; ASM:         #DEBUG_VALUE: csr3:c <- %EBX
+; ASM:         #DEBUG_VALUE: csr3:a <- $esi
+; ASM:         #DEBUG_VALUE: csr3:b <- $edi
+; ASM:         #DEBUG_VALUE: csr3:c <- $ebx
 ; ASM:         retl
 ; ASM:         .cv_fpo_endproc
 
@@ -207,11 +231,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + =
 ; OBJ-NEXT:   PrologSize: 0x3
 ; OBJ-NEXT:   SavedRegsSize: 0x0
 ; OBJ-NEXT:   Flags [ (0x4)
 ; OBJ-NEXT:     IsFunctionStart (0x4)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -220,10 +248,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebx $T0 4 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x2
 ; OBJ-NEXT:   SavedRegsSize: 0x4
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebx $T0 4 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -232,10 +265,16 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebx $T0 4 - ^ = $edi $T0 8 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x1
 ; OBJ-NEXT:   SavedRegsSize: 0x8
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebx $T0 4 - ^ =
+; OBJ-NEXT:     $edi $T0 8 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -244,10 +283,17 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebx $T0 4 - ^ = $edi $T0 8 - ^ = $esi $T0 12 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x0
 ; OBJ-NEXT:   SavedRegsSize: 0xC
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebx $T0 4 - ^ =
+; OBJ-NEXT:     $edi $T0 8 - ^ =
+; OBJ-NEXT:     $esi $T0 12 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NOT: FrameData
@@ -279,10 +325,10 @@ entry:
 ; ASM:         pushl   %esi
 ; ASM:         .cv_fpo_pushreg %esi
 ; ASM:         .cv_fpo_endprologue
-; ASM:         #DEBUG_VALUE: csr4:a <- %ESI
-; ASM:         #DEBUG_VALUE: csr4:b <- %EDI
-; ASM:         #DEBUG_VALUE: csr4:c <- %EBX
-; ASM:         #DEBUG_VALUE: csr4:d <- %EBP
+; ASM:         #DEBUG_VALUE: csr4:a <- $esi
+; ASM:         #DEBUG_VALUE: csr4:b <- $edi
+; ASM:         #DEBUG_VALUE: csr4:c <- $ebx
+; ASM:         #DEBUG_VALUE: csr4:d <- $ebp
 ; ASM:         retl
 ; ASM:         .cv_fpo_endproc
 
@@ -295,11 +341,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + =
 ; OBJ-NEXT:   PrologSize: 0x4
 ; OBJ-NEXT:   SavedRegsSize: 0x0
 ; OBJ-NEXT:   Flags [ (0x4)
 ; OBJ-NEXT:     IsFunctionStart (0x4)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -308,10 +358,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x3
 ; OBJ-NEXT:   SavedRegsSize: 0x4
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -320,10 +375,16 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x2
 ; OBJ-NEXT:   SavedRegsSize: 0x8
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -332,10 +393,17 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ = $edi $T0 12 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x1
 ; OBJ-NEXT:   SavedRegsSize: 0xC
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
+; OBJ-NEXT:     $edi $T0 12 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -344,10 +412,18 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ = $edi $T0 12 - ^ = $esi $T0 16 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x0
 ; OBJ-NEXT:   SavedRegsSize: 0x10
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
+; OBJ-NEXT:     $edi $T0 12 - ^ =
+; OBJ-NEXT:     $esi $T0 16 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NOT: FrameData
@@ -395,11 +471,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + =
 ; OBJ-NEXT:   PrologSize: 0x7
 ; OBJ-NEXT:   SavedRegsSize: 0x0
 ; OBJ-NEXT:   Flags [ (0x4)
 ; OBJ-NEXT:     IsFunctionStart (0x4)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -408,10 +488,15 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x6
 ; OBJ-NEXT:   SavedRegsSize: 0x4
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -420,10 +505,16 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x5
 ; OBJ-NEXT:   SavedRegsSize: 0x8
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -432,10 +523,17 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ = $edi $T0 12 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x4
 ; OBJ-NEXT:   SavedRegsSize: 0xC
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
+; OBJ-NEXT:     $edi $T0 12 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -444,10 +542,18 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x0
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ = $edi $T0 12 - ^ = $esi $T0 16 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x3
 ; OBJ-NEXT:   SavedRegsSize: 0x10
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
+; OBJ-NEXT:     $edi $T0 12 - ^ =
+; OBJ-NEXT:     $esi $T0 16 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NEXT: FrameData {
@@ -456,10 +562,18 @@ entry:
 ; OBJ-NEXT:   LocalSize: 0x8
 ; OBJ-NEXT:   ParamsSize: 0x0
 ; OBJ-NEXT:   MaxStackSize: 0x0
-; OBJ-NEXT:   FrameFunc: $T0 .raSearch = $eip $T0 ^ = $esp $T0 4 + = $ebp $T0 4 - ^ = $ebx $T0 8 - ^ = $edi $T0 12 - ^ = $esi $T0 16 - ^ =
 ; OBJ-NEXT:   PrologSize: 0x0
 ; OBJ-NEXT:   SavedRegsSize: 0x10
 ; OBJ-NEXT:   Flags [ (0x0)
+; OBJ-NEXT:   ]
+; OBJ-NEXT:   FrameFunc [
+; OBJ-NEXT:     $T0 .raSearch =
+; OBJ-NEXT:     $eip $T0 ^ =
+; OBJ-NEXT:     $esp $T0 4 + =
+; OBJ-NEXT:     $ebp $T0 4 - ^ =
+; OBJ-NEXT:     $ebx $T0 8 - ^ =
+; OBJ-NEXT:     $edi $T0 12 - ^ =
+; OBJ-NEXT:     $esi $T0 16 - ^ =
 ; OBJ-NEXT:   ]
 ; OBJ-NEXT: }
 ; OBJ-NOT: FrameData
@@ -484,7 +598,7 @@ attributes #3 = { nounwind }
 !5 = !{i32 2, !"Debug Info Version", i32 3}
 !6 = !{i32 1, !"wchar_size", i32 2}
 !7 = !{!"clang version 6.0.0 "}
-!8 = distinct !DISubprogram(name: "csr1", scope: !1, file: !1, line: 3, type: !9, isLocal: false, isDefinition: true, scopeLine: 3, isOptimized: true, unit: !0, variables: !12)
+!8 = distinct !DISubprogram(name: "csr1", scope: !1, file: !1, line: 3, type: !9, isLocal: false, isDefinition: true, scopeLine: 3, isOptimized: true, unit: !0, retainedNodes: !12)
 !9 = !DISubroutineType(types: !10)
 !10 = !{!11}
 !11 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
@@ -495,7 +609,7 @@ attributes #3 = { nounwind }
 !16 = !DILocation(line: 5, column: 3, scope: !8)
 !17 = !DILocation(line: 6, column: 3, scope: !8)
 !18 = !DILocation(line: 7, column: 3, scope: !8)
-!19 = distinct !DISubprogram(name: "csr2", scope: !1, file: !1, line: 9, type: !9, isLocal: false, isDefinition: true, scopeLine: 9, isOptimized: true, unit: !0, variables: !20)
+!19 = distinct !DISubprogram(name: "csr2", scope: !1, file: !1, line: 9, type: !9, isLocal: false, isDefinition: true, scopeLine: 9, isOptimized: true, unit: !0, retainedNodes: !20)
 !20 = !{!21, !22}
 !21 = !DILocalVariable(name: "a", scope: !19, file: !1, line: 10, type: !11)
 !22 = !DILocalVariable(name: "b", scope: !19, file: !1, line: 11, type: !11)
@@ -506,7 +620,7 @@ attributes #3 = { nounwind }
 !27 = !DILocation(line: 12, column: 3, scope: !19)
 !28 = !DILocation(line: 13, column: 3, scope: !19)
 !29 = !DILocation(line: 14, column: 3, scope: !19)
-!30 = distinct !DISubprogram(name: "csr3", scope: !1, file: !1, line: 16, type: !9, isLocal: false, isDefinition: true, scopeLine: 16, isOptimized: true, unit: !0, variables: !31)
+!30 = distinct !DISubprogram(name: "csr3", scope: !1, file: !1, line: 16, type: !9, isLocal: false, isDefinition: true, scopeLine: 16, isOptimized: true, unit: !0, retainedNodes: !31)
 !31 = !{!32, !33, !34}
 !32 = !DILocalVariable(name: "a", scope: !30, file: !1, line: 17, type: !11)
 !33 = !DILocalVariable(name: "b", scope: !30, file: !1, line: 18, type: !11)
@@ -520,7 +634,7 @@ attributes #3 = { nounwind }
 !41 = !DILocation(line: 20, column: 3, scope: !30)
 !42 = !DILocation(line: 21, column: 3, scope: !30)
 !43 = !DILocation(line: 22, column: 3, scope: !30)
-!44 = distinct !DISubprogram(name: "csr4", scope: !1, file: !1, line: 24, type: !9, isLocal: false, isDefinition: true, scopeLine: 24, isOptimized: true, unit: !0, variables: !45)
+!44 = distinct !DISubprogram(name: "csr4", scope: !1, file: !1, line: 24, type: !9, isLocal: false, isDefinition: true, scopeLine: 24, isOptimized: true, unit: !0, retainedNodes: !45)
 !45 = !{!46, !47, !48, !49}
 !46 = !DILocalVariable(name: "a", scope: !44, file: !1, line: 25, type: !11)
 !47 = !DILocalVariable(name: "b", scope: !44, file: !1, line: 26, type: !11)
@@ -537,7 +651,7 @@ attributes #3 = { nounwind }
 !58 = !DILocation(line: 29, column: 3, scope: !44)
 !59 = !DILocation(line: 30, column: 3, scope: !44)
 !60 = !DILocation(line: 31, column: 3, scope: !44)
-!61 = distinct !DISubprogram(name: "spill", scope: !1, file: !1, line: 33, type: !9, isLocal: false, isDefinition: true, scopeLine: 33, isOptimized: true, unit: !0, variables: !62)
+!61 = distinct !DISubprogram(name: "spill", scope: !1, file: !1, line: 33, type: !9, isLocal: false, isDefinition: true, scopeLine: 33, isOptimized: true, unit: !0, retainedNodes: !62)
 !62 = !{!63, !64, !65, !66, !67}
 !63 = !DILocalVariable(name: "a", scope: !61, file: !1, line: 34, type: !11)
 !64 = !DILocalVariable(name: "b", scope: !61, file: !1, line: 35, type: !11)

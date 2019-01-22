@@ -1,14 +1,13 @@
 // WebAssemblyInstPrinter.h - Print wasm MCInst to assembly syntax -*- C++ -*-//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This class prints an WebAssembly MCInst to wasm file syntax.
+/// This class prints an WebAssembly MCInst to wasm file syntax.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -17,16 +16,21 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/Wasm.h"
-#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/MC/MCInstPrinter.h"
+#include "llvm/Support/MachineValueType.h"
 
 namespace llvm {
 
 class MCSubtargetInfo;
 
 class WebAssemblyInstPrinter final : public MCInstPrinter {
-  uint64_t ControlFlowCounter;
-  SmallVector<std::pair<uint64_t, bool>, 0> ControlFlowStack;
+  uint64_t ControlFlowCounter = 0;
+  uint64_t EHPadStackCounter = 0;
+  SmallVector<std::pair<uint64_t, bool>, 4> ControlFlowStack;
+  SmallVector<uint64_t, 4> EHPadStack;
+
+  enum EHInstKind { TRY, CATCH, END_TRY };
+  EHInstKind LastSeenEHInst = END_TRY;
 
 public:
   WebAssemblyInstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
@@ -38,6 +42,7 @@ public:
 
   // Used by tblegen code.
   void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBrList(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printWebAssemblyP2AlignOperand(const MCInst *MI, unsigned OpNo,
                                       raw_ostream &O);
   void printWebAssemblySignatureOperand(const MCInst *MI, unsigned OpNo,
@@ -50,8 +55,8 @@ public:
 
 namespace WebAssembly {
 
-const char *TypeToString(MVT Ty);
-const char *TypeToString(wasm::ValType Type);
+const char *typeToString(wasm::ValType Ty);
+const char *anyTypeToString(unsigned Ty);
 
 } // end namespace WebAssembly
 

@@ -121,6 +121,36 @@ body:
   ret void
 }
 
+; TODO: This should use s_mul_i32 instead of v_mul_u32_u24 + v_readfirstlane!
+;
+; GCN-LABEL: {{^}}test_mul24:
+; GCN: v_mul_u32_u24_e32
+; GCN: v_readfirstlane_b32
+; GCN: s_mov_b32 m0,
+; GCN: s_sendmsg sendmsg(MSG_INTERRUPT)
+define amdgpu_gs void @test_mul24(i32 inreg %arg) {
+body:
+  %tmp1 = and i32 %arg, 511
+  %tmp2 = mul nuw nsw i32 %tmp1, 12288
+  call void @llvm.amdgcn.s.sendmsg(i32 1, i32 %tmp2)
+  ret void
+}
+
+; GCN-LABEL: {{^}}if_sendmsg:
+; GCN: s_cbranch_execz
+; GCN: s_sendmsg sendmsg(MSG_GS_DONE, GS_OP_NOP)
+define amdgpu_gs void @if_sendmsg(i32 %flag) #0 {
+  %cc = icmp eq i32 %flag, 0
+  br i1 %cc, label %sendmsg, label %end
+
+sendmsg:
+  call void @llvm.amdgcn.s.sendmsg(i32 3, i32 0)
+  br label %end
+
+end:
+  ret void
+}
+
 declare void @llvm.amdgcn.s.sendmsg(i32, i32) #0
 declare void @llvm.amdgcn.s.sendmsghalt(i32, i32) #0
 

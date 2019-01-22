@@ -1,9 +1,8 @@
 //===-- llvm/ModuleSummaryIndexYAML.h - YAML I/O for summary ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -98,6 +97,8 @@ template <> struct ScalarEnumerationTraits<WholeProgramDevirtResolution::Kind> {
   static void enumeration(IO &io, WholeProgramDevirtResolution::Kind &value) {
     io.enumCase(value, "Indir", WholeProgramDevirtResolution::Indir);
     io.enumCase(value, "SingleImpl", WholeProgramDevirtResolution::SingleImpl);
+    io.enumCase(value, "BranchFunnel",
+                WholeProgramDevirtResolution::BranchFunnel);
   }
 };
 
@@ -135,7 +136,8 @@ template <> struct MappingTraits<TypeIdSummary> {
 
 struct FunctionSummaryYaml {
   unsigned Linkage;
-  bool NotEligibleToImport, Live;
+  bool NotEligibleToImport, Live, IsLocal;
+  std::vector<uint64_t> Refs;
   std::vector<uint64_t> TypeTests;
   std::vector<FunctionSummary::VFuncId> TypeTestAssumeVCalls,
       TypeCheckedLoadVCalls;
@@ -177,6 +179,8 @@ template <> struct MappingTraits<FunctionSummaryYaml> {
     io.mapOptional("Linkage", summary.Linkage);
     io.mapOptional("NotEligibleToImport", summary.NotEligibleToImport);
     io.mapOptional("Live", summary.Live);
+    io.mapOptional("Local", summary.IsLocal);
+    io.mapOptional("Refs", summary.Refs);
     io.mapOptional("TypeTests", summary.TypeTests);
     io.mapOptional("TypeTestAssumeVCalls", summary.TypeTestAssumeVCalls);
     io.mapOptional("TypeCheckedLoadVCalls", summary.TypeCheckedLoadVCalls);
@@ -190,7 +194,6 @@ template <> struct MappingTraits<FunctionSummaryYaml> {
 } // End yaml namespace
 } // End llvm namespace
 
-LLVM_YAML_IS_STRING_MAP(TypeIdSummary)
 LLVM_YAML_IS_SEQUENCE_VECTOR(FunctionSummaryYaml)
 
 namespace llvm {
@@ -206,13 +209,21 @@ template <> struct CustomMappingTraits<GlobalValueSummaryMapTy> {
       io.setError("key not an integer");
       return;
     }
-    auto &Elem = V[KeyInt];
+    if (!V.count(KeyInt))
+      V.emplace(KeyInt, /*IsAnalysis=*/false);
+    auto &Elem = V.find(KeyInt)->second;
     for (auto &FSum : FSums) {
+      std::vector<ValueInfo> Refs;
+      for (auto &RefGUID : FSum.Refs) {
+        if (!V.count(RefGUID))
+          V.emplace(RefGUID, /*IsAnalysis=*/false);
+        Refs.push_back(ValueInfo(/*IsAnalysis=*/false, &*V.find(RefGUID)));
+      }
       Elem.SummaryList.push_back(llvm::make_unique<FunctionSummary>(
           GlobalValueSummary::GVFlags(
               static_cast<GlobalValue::LinkageTypes>(FSum.Linkage),
-              FSum.NotEligibleToImport, FSum.Live),
-          0, FunctionSummary::FFlags{}, ArrayRef<ValueInfo>{},
+              FSum.NotEligibleToImport, FSum.Live, FSum.IsLocal),
+          /*NumInsts=*/0, FunctionSummary::FFlags{}, /*EntryCount=*/0, Refs,
           ArrayRef<FunctionSummary::EdgeTy>{}, std::move(FSum.TypeTests),
           std::move(FSum.TypeTestAssumeVCalls),
           std::move(FSum.TypeCheckedLoadVCalls),
@@ -224,18 +235,36 @@ template <> struct CustomMappingTraits<GlobalValueSummaryMapTy> {
     for (auto &P : V) {
       std::vector<FunctionSummaryYaml> FSums;
       for (auto &Sum : P.second.SummaryList) {
-        if (auto *FSum = dyn_cast<FunctionSummary>(Sum.get()))
+        if (auto *FSum = dyn_cast<FunctionSummary>(Sum.get())) {
+          std::vector<uint64_t> Refs;
+          for (auto &VI : FSum->refs())
+            Refs.push_back(VI.getGUID());
           FSums.push_back(FunctionSummaryYaml{
               FSum->flags().Linkage,
               static_cast<bool>(FSum->flags().NotEligibleToImport),
-              static_cast<bool>(FSum->flags().Live), FSum->type_tests(),
-              FSum->type_test_assume_vcalls(), FSum->type_checked_load_vcalls(),
+              static_cast<bool>(FSum->flags().Live),
+              static_cast<bool>(FSum->flags().DSOLocal), Refs,
+              FSum->type_tests(), FSum->type_test_assume_vcalls(),
+              FSum->type_checked_load_vcalls(),
               FSum->type_test_assume_const_vcalls(),
               FSum->type_checked_load_const_vcalls()});
+          }
       }
       if (!FSums.empty())
         io.mapRequired(llvm::utostr(P.first).c_str(), FSums);
     }
+  }
+};
+
+template <> struct CustomMappingTraits<TypeIdSummaryMapTy> {
+  static void inputOne(IO &io, StringRef Key, TypeIdSummaryMapTy &V) {
+    TypeIdSummary TId;
+    io.mapRequired(Key.str().c_str(), TId);
+    V.insert({GlobalValue::getGUID(Key), {Key, TId}});
+  }
+  static void output(IO &io, TypeIdSummaryMapTy &V) {
+    for (auto TidIter = V.begin(); TidIter != V.end(); TidIter++)
+      io.mapRequired(TidIter->second.first.c_str(), TidIter->second.second);
   }
 };
 

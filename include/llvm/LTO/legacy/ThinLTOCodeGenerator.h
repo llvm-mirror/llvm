@@ -1,9 +1,8 @@
 //===-ThinLTOCodeGenerator.h - LLVM Link Time Optimizer -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -131,7 +130,8 @@ public:
    * To avoid filling the disk space, a few knobs are provided:
    *  - The pruning interval limit the frequency at which the garbage collector
    *    will try to scan the cache directory to prune it from expired entries.
-   *    Setting to -1 disable the pruning (default).
+   *    Setting to -1 disable the pruning (default). Setting to 0 will force
+   *    pruning to occur.
    *  - The pruning expiration time indicates to the garbage collector how old
    *    an entry needs to be to be removed.
    *  - Finally, the garbage collector can be instructed to prune the cache till
@@ -148,10 +148,13 @@ public:
   /// incremental build.
   void setCacheDir(std::string Path) { CacheOptions.Path = std::move(Path); }
 
-  /// Cache policy: interval (seconds) between two prune of the cache. Set to a
-  /// negative value (default) to disable pruning. A value of 0 will be ignored.
+  /// Cache policy: interval (seconds) between two prunes of the cache. Set to a
+  /// negative value to disable pruning. A value of 0 will force pruning to
+  /// occur.
   void setCachePruningInterval(int Interval) {
-    if (Interval)
+    if(Interval < 0)
+      CacheOptions.Policy.Interval.reset();
+    else
       CacheOptions.Policy.Interval = std::chrono::seconds(Interval);
   }
 
@@ -164,8 +167,8 @@ public:
 
   /**
    * Sets the maximum cache size that can be persistent across build, in terms
-   * of percentage of the available space on the the disk. Set to 100 to
-   * indicate no limit, 50 to indicate that the cache size will not be left over
+   * of percentage of the available space on the disk. Set to 100 to indicate
+   * no limit, 50 to indicate that the cache size will not be left over
    * half the available space. A value over 100 will be reduced to 100, and a
    * value of 0 will be ignored.
    *
@@ -178,6 +181,21 @@ public:
   void setMaxCacheSizeRelativeToAvailableSpace(unsigned Percentage) {
     if (Percentage)
       CacheOptions.Policy.MaxSizePercentageOfAvailableSpace = Percentage;
+  }
+
+  /// Cache policy: the maximum size for the cache directory in bytes. A value
+  /// over the amount of available space on the disk will be reduced to the
+  /// amount of available space. A value of 0 will be ignored.
+  void setCacheMaxSizeBytes(uint64_t MaxSizeBytes) {
+    if (MaxSizeBytes)
+      CacheOptions.Policy.MaxSizeBytes = MaxSizeBytes;
+  }
+
+  /// Cache policy: the maximum number of files in the cache directory. A value
+  /// of 0 will be ignored.
+  void setCacheMaxSizeFiles(unsigned MaxSizeFiles) {
+    if (MaxSizeFiles)
+      CacheOptions.Policy.MaxSizeFiles = MaxSizeFiles;
   }
 
   /**@}*/
@@ -254,8 +272,8 @@ public:
   /**
    * Compute and emit the imported files for module at \p ModulePath.
    */
-  static void emitImports(StringRef ModulePath, StringRef OutputName,
-                          ModuleSummaryIndex &Index);
+  void emitImports(Module &Module, StringRef OutputName,
+                   ModuleSummaryIndex &Index);
 
   /**
    * Perform cross-module importing for the module identified by
@@ -266,8 +284,8 @@ public:
   /**
    * Compute the list of summaries needed for importing into module.
    */
-  static void gatherImportedSummariesForModule(
-      StringRef ModulePath, ModuleSummaryIndex &Index,
+  void gatherImportedSummariesForModule(
+      Module &Module, ModuleSummaryIndex &Index,
       std::map<std::string, GVSummaryMapTy> &ModuleToSummariesForIndex);
 
   /**
@@ -279,11 +297,6 @@ public:
    * Perform post-importing ThinLTO optimizations.
    */
   void optimize(Module &Module);
-
-  /**
-   * Perform ThinLTO CodeGen.
-   */
-  std::unique_ptr<MemoryBuffer> codegen(Module &Module);
 
   /**@}*/
 

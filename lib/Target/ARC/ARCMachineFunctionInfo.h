@@ -1,9 +1,8 @@
 //===- ARCMachineFunctionInfo.h - ARC machine function info -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,16 +24,15 @@ class ARCFunctionInfo : public MachineFunctionInfo {
   virtual void anchor();
   bool ReturnStackOffsetSet;
   int VarArgsFrameIndex;
-  unsigned VarArgFrameBytes;
   unsigned ReturnStackOffset;
 
 public:
   ARCFunctionInfo()
-      : ReturnStackOffsetSet(false), VarArgsFrameIndex(0), VarArgFrameBytes(0),
+      : ReturnStackOffsetSet(false), VarArgsFrameIndex(0),
         ReturnStackOffset(-1U), MaxCallStackReq(0) {}
 
   explicit ARCFunctionInfo(MachineFunction &MF)
-      : ReturnStackOffsetSet(false), VarArgsFrameIndex(0), VarArgFrameBytes(0),
+      : ReturnStackOffsetSet(false), VarArgsFrameIndex(0),
         ReturnStackOffset(-1U), MaxCallStackReq(0) {
     // Functions are 4-byte (2**2) aligned.
     MF.setAlignment(2);

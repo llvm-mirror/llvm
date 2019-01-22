@@ -1,9 +1,8 @@
 //===- PowerPCInstrFormats.td - PowerPC Instruction Formats --*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -46,6 +45,10 @@ class I<bits<6> opcode, dag OOL, dag IOL, string asmstr, InstrItinClass itin>
   bits<1> UseVSXReg = 0;
   let TSFlags{6}   = UseVSXReg;
 
+  // Indicate that this instruction is of type X-Form Load or Store
+  bits<1> XFormMemOp = 0;
+  let TSFlags{7}  = XFormMemOp;
+
   // Fields used for relation models.
   string BaseName = "";
 
@@ -71,6 +74,7 @@ class PPC970_Unit_VPERM    { bits<3> PPC970_Unit = 6;   }
 class PPC970_Unit_BRU      { bits<3> PPC970_Unit = 7;   }
 
 class UseVSXReg { bits<1> UseVSXReg = 1; }
+class XFormMemOp { bits<1> XFormMemOp = 1; }
 
 // Two joined instructions; used to emit two adjacent instructions as one.
 // The itinerary from the first instruction is used for scheduling and
@@ -108,6 +112,11 @@ class I2<bits<6> opcode1, bits<6> opcode2, dag OOL, dag IOL, string asmstr,
   string BaseName = "";
   bit Interpretation64Bit = 0;
 }
+
+// Base class for all X-Form memory instructions
+class IXFormMemOp<bits<6> opcode, dag OOL, dag IOL, string asmstr,
+                  InstrItinClass itin>
+        :I<opcode, OOL, IOL, asmstr, itin>, XFormMemOp;
 
 // 1.7.1 I-Form
 class IForm<bits<6> opcode, bit aa, bit lk, dag OOL, dag IOL, string asmstr,
@@ -437,6 +446,11 @@ class XForm_base_r3xo<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asms
   let Inst{31}    = RC;
 }
 
+class XForm_base_r3xo_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                            string asmstr, InstrItinClass itin,
+                            list<dag> pattern>
+  : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern>, XFormMemOp;
+
 class XForm_tlb<bits<10> xo, dag OOL, dag IOL, string asmstr,
                 InstrItinClass itin> : XForm_base_r3xo<31, xo, OOL, IOL, asmstr, itin, []> {
   let RST = 0;
@@ -469,8 +483,12 @@ class XForm_base_r3xo_swapped
 
 
 class XForm_1<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
-              InstrItinClass itin, list<dag> pattern> 
+              InstrItinClass itin, list<dag> pattern>
   : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern>;
+
+class XForm_1_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern>
+  : XForm_base_r3xo_memOp<opcode, xo, OOL, IOL, asmstr, itin, pattern>;
 
 class XForm_1a<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
               InstrItinClass itin, list<dag> pattern>
@@ -510,6 +528,10 @@ class XForm_6<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
 class XForm_8<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
               InstrItinClass itin, list<dag> pattern> 
   : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern>;
+
+class XForm_8_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern> 
+  : XForm_base_r3xo_memOp<opcode, xo, OOL, IOL, asmstr, itin, pattern>;
 
 class XForm_10<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
                InstrItinClass itin, list<dag> pattern> 
@@ -692,14 +714,19 @@ class XForm_24_sync<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
 }
 
 class XForm_24_eieio<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
-               string asmstr, InstrItinClass itin, list<dag> pattern> 
+               string asmstr, InstrItinClass itin, list<dag> pattern>
   : XForm_24_sync<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
   let L = 0;
 }
 
 class XForm_25<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
-               InstrItinClass itin, list<dag> pattern> 
+               InstrItinClass itin, list<dag> pattern>
   : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
+}
+
+class XForm_25_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                    string asmstr, InstrItinClass itin, list<dag> pattern>
+  : XForm_base_r3xo_memOp<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
 }
 
 class XForm_26<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
@@ -708,8 +735,13 @@ class XForm_26<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let A = 0;
 }
 
+class XForm_28_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                    string asmstr, InstrItinClass itin, list<dag> pattern>
+  : XForm_base_r3xo_memOp<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
+}
+
 class XForm_28<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
-               InstrItinClass itin, list<dag> pattern> 
+               InstrItinClass itin, list<dag> pattern>
   : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
 }
 
@@ -980,7 +1012,7 @@ class X_RD6_IMM8<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
 // to specify an SDAG pattern for matching.
 class X_RD5_RS5_IM5<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
                     string asmstr, InstrItinClass itin>
-  : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, []> {
+  : XForm_base_r3xo_memOp<opcode, xo, OOL, IOL, asmstr, itin, []> {
 }
 
 class X_BF3<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
@@ -1017,6 +1049,10 @@ class XX1Form<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let Inst{21-30} = xo;
   let Inst{31}    = XT{5};
 }
+
+class XX1Form_memOp<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                    string asmstr, InstrItinClass itin, list<dag> pattern>
+  : XX1Form<opcode, xo, OOL, IOL, asmstr, itin, pattern>, XFormMemOp;
 
 class XX1_RS6_RD5_XO<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
                      string asmstr, InstrItinClass itin, list<dag> pattern>
@@ -2094,8 +2130,31 @@ class Z23Form_3<bits<6> opcode, bits<8> xo, dag OOL, dag IOL, string asmstr,
   let Inst{31}    = RC;
 }
 
+class Z23Form_8<bits<6> opcode, bits<8> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern>
+         : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5> VRT;
+  bit R;
+  bits<5> VRB;
+  bits<2> idx;
+
+  let Pattern = pattern;
+
+  bit RC = 0;    // set by isDOT
+
+  let Inst{6-10}  = VRT;
+  let Inst{11-14} = 0;
+  let Inst{15} = R;
+  let Inst{16-20} = VRB;
+  let Inst{21-22} = idx;
+  let Inst{23-30} = xo;
+  let Inst{31}    = RC;
+}
+
 //===----------------------------------------------------------------------===//
-class Pseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
+// EmitTimePseudo won't have encoding information for the [MC]CodeEmitter
+// stuff
+class PPCEmitTimePseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
     : I<0, OOL, IOL, asmstr, NoItinerary> {
   let isCodeGenOnly = 1;
   let PPC64 = 0;
@@ -2103,3 +2162,22 @@ class Pseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
   let Inst{31-0} = 0;
   let hasNoSchedulingInfo = 1;
 }
+
+// Instruction that require custom insertion support
+// a.k.a. ISelPseudos, however, these won't have isPseudo set
+class PPCCustomInserterPseudo<dag OOL, dag IOL, string asmstr,
+                              list<dag> pattern>
+    : PPCEmitTimePseudo<OOL, IOL, asmstr, pattern> {
+  let usesCustomInserter = 1;
+}
+
+// PostRAPseudo will be expanded in expandPostRAPseudo, isPseudo flag in td
+// files is set only for PostRAPseudo
+class PPCPostRAExpPseudo<dag OOL, dag IOL, string asmstr, list<dag> pattern>
+    : PPCEmitTimePseudo<OOL, IOL, asmstr, pattern> {
+  let isPseudo = 1;
+}
+
+class PseudoXFormMemOp<dag OOL, dag IOL, string asmstr, list<dag> pattern>
+    : PPCPostRAExpPseudo<OOL, IOL, asmstr, pattern>, XFormMemOp;
+

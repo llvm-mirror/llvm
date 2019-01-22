@@ -1,9 +1,8 @@
 //===- ARCFrameLowering.cpp - ARC Frame Information -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,9 +16,9 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 
 #define DEBUG_TYPE "arc-frame-lowering"
 
@@ -59,8 +58,8 @@ static void generateStackAdjustment(MachineBasicBlock &MBB,
     Positive = true;
   }
 
-  DEBUG(dbgs() << "Internal: adjust stack by: " << Amount << "," << AbsAmount
-               << "\n");
+  LLVM_DEBUG(dbgs() << "Internal: adjust stack by: " << Amount << ","
+                    << AbsAmount << "\n");
 
   assert((AbsAmount % 4 == 0) && "Stack adjustments must be 4-byte aligned.");
   if (isUInt<6>(AbsAmount))
@@ -88,8 +87,7 @@ determineLastCalleeSave(const std::vector<CalleeSavedInfo> &CSI) {
 void ARCFrameLowering::determineCalleeSaves(MachineFunction &MF,
                                             BitVector &SavedRegs,
                                             RegScavenger *RS) const {
-  DEBUG(dbgs() << "Determine Callee Saves: " << MF.getFunction()->getName()
-               << "\n");
+  LLVM_DEBUG(dbgs() << "Determine Callee Saves: " << MF.getName() << "\n");
   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
   SavedRegs.set(ARC::BLINK);
 }
@@ -115,7 +113,7 @@ void ARCFrameLowering::adjustStackToMatchRecords(
 /// registers onto the stack, when enough callee saved registers are required.
 void ARCFrameLowering::emitPrologue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  DEBUG(dbgs() << "Emit Prologue: " << MF.getFunction()->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Emit Prologue: " << MF.getName() << "\n");
   auto *AFI = MF.getInfo<ARCFunctionInfo>();
   MachineModuleInfo &MMI = MF.getMMI();
   MCContext &Context = MMI.getContext();
@@ -131,9 +129,9 @@ void ARCFrameLowering::emitPrologue(MachineFunction &MF,
   unsigned StackSlotsUsedByFunclet = 0;
   bool SavedBlink = false;
   unsigned AlreadyAdjusted = 0;
-  if (MF.getFunction()->isVarArg()) {
+  if (MF.getFunction().isVarArg()) {
     // Add in the varargs area here first.
-    DEBUG(dbgs() << "Varargs\n");
+    LLVM_DEBUG(dbgs() << "Varargs\n");
     unsigned VarArgsBytes = MFI.getObjectSize(AFI->getVarArgsFrameIndex());
     BuildMI(MBB, MBBI, dl, TII->get(ARC::SUB_rru6))
         .addReg(ARC::SP)
@@ -141,7 +139,7 @@ void ARCFrameLowering::emitPrologue(MachineFunction &MF,
         .addImm(VarArgsBytes);
   }
   if (hasFP(MF)) {
-    DEBUG(dbgs() << "Saving FP\n");
+    LLVM_DEBUG(dbgs() << "Saving FP\n");
     BuildMI(MBB, MBBI, dl, TII->get(ARC::ST_AW_rs9))
         .addReg(ARC::SP, RegState::Define)
         .addReg(ARC::FP)
@@ -150,7 +148,7 @@ void ARCFrameLowering::emitPrologue(MachineFunction &MF,
     AlreadyAdjusted += 4;
   }
   if (UseSaveRestoreFunclet && Last > ARC::R14) {
-    DEBUG(dbgs() << "Creating store funclet.\n");
+    LLVM_DEBUG(dbgs() << "Creating store funclet.\n");
     // BL to __save_r13_to_<TRI->getRegAsmName()>
     StackSlotsUsedByFunclet = Last - ARC::R12;
     BuildMI(MBB, MBBI, dl, TII->get(ARC::PUSH_S_BLINK));
@@ -166,20 +164,20 @@ void ARCFrameLowering::emitPrologue(MachineFunction &MF,
   }
   // If we haven't saved BLINK, but we need to...do that now.
   if (MFI.hasCalls() && !SavedBlink) {
-    DEBUG(dbgs() << "Creating save blink.\n");
+    LLVM_DEBUG(dbgs() << "Creating save blink.\n");
     BuildMI(MBB, MBBI, dl, TII->get(ARC::PUSH_S_BLINK));
     AlreadyAdjusted += 4;
   }
   if (AFI->MaxCallStackReq > 0)
     MFI.setStackSize(MFI.getStackSize() + AFI->MaxCallStackReq);
   // We have already saved some of the stack...
-  DEBUG(dbgs() << "Adjusting stack by: "
-               << (MFI.getStackSize() - AlreadyAdjusted) << "\n");
+  LLVM_DEBUG(dbgs() << "Adjusting stack by: "
+                    << (MFI.getStackSize() - AlreadyAdjusted) << "\n");
   generateStackAdjustment(MBB, MBBI, *ST.getInstrInfo(), dl,
                           -(MFI.getStackSize() - AlreadyAdjusted), ARC::SP);
 
   if (hasFP(MF)) {
-    DEBUG(dbgs() << "Setting FP from SP.\n");
+    LLVM_DEBUG(dbgs() << "Setting FP from SP.\n");
     BuildMI(MBB, MBBI, dl,
             TII->get(isUInt<6>(MFI.getStackSize()) ? ARC::ADD_rru6
                                                    : ARC::ADD_rrlimm),
@@ -235,7 +233,7 @@ void ARCFrameLowering::emitPrologue(MachineFunction &MF,
 /// registers onto the stack, when enough callee saved registers are required.
 void ARCFrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  DEBUG(dbgs() << "Emit Epilogue: " << MF.getFunction()->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Emit Epilogue: " << MF.getName() << "\n");
   auto *AFI = MF.getInfo<ARCFunctionInfo>();
   const ARCInstrInfo *TII = MF.getSubtarget<ARCSubtarget>().getInstrInfo();
   MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
@@ -302,9 +300,9 @@ void ARCFrameLowering::emitEpilogue(MachineFunction &MF,
   }
 
   // Relieve the varargs area if necessary.
-  if (MF.getFunction()->isVarArg()) {
+  if (MF.getFunction().isVarArg()) {
     // Add in the varargs area here first.
-    DEBUG(dbgs() << "Varargs\n");
+    LLVM_DEBUG(dbgs() << "Varargs\n");
     unsigned VarArgsBytes = MFI.getObjectSize(AFI->getVarArgsFrameIndex());
     BuildMI(MBB, MBBI, MBB.findDebugLoc(MBBI), TII->get(ARC::ADD_rru6))
         .addReg(ARC::SP)
@@ -334,16 +332,16 @@ bool ARCFrameLowering::assignCalleeSavedSpillSlots(
   if (hasFP(MF)) {
     // Create a fixed slot at for FP
     int StackObj = MFI.CreateFixedSpillStackObject(4, CurOffset, true);
-    DEBUG(dbgs() << "Creating fixed object (" << StackObj << ") for FP at "
-                 << CurOffset << "\n");
+    LLVM_DEBUG(dbgs() << "Creating fixed object (" << StackObj << ") for FP at "
+                      << CurOffset << "\n");
     (void)StackObj;
     CurOffset -= 4;
   }
   if (MFI.hasCalls() || (UseSaveRestoreFunclet && Last > ARC::R14)) {
     // Create a fixed slot for BLINK.
     int StackObj  = MFI.CreateFixedSpillStackObject(4, CurOffset, true);
-    DEBUG(dbgs() << "Creating fixed object (" << StackObj << ") for BLINK at "
-                 << CurOffset << "\n");
+    LLVM_DEBUG(dbgs() << "Creating fixed object (" << StackObj
+                      << ") for BLINK at " << CurOffset << "\n");
     (void)StackObj;
     CurOffset -= 4;
   }
@@ -366,12 +364,12 @@ bool ARCFrameLowering::assignCalleeSavedSpillSlots(
       continue;
     if (I.getFrameIdx() == 0) {
       I.setFrameIdx(MFI.CreateFixedSpillStackObject(4, CurOffset, true));
-      DEBUG(dbgs() << "Creating fixed object (" << I.getFrameIdx()
-                   << ") for other register at " << CurOffset << "\n");
+      LLVM_DEBUG(dbgs() << "Creating fixed object (" << I.getFrameIdx()
+                        << ") for other register at " << CurOffset << "\n");
     } else {
       MFI.setObjectOffset(I.getFrameIdx(), CurOffset);
-      DEBUG(dbgs() << "Updating fixed object (" << I.getFrameIdx()
-                   << ") for other register at " << CurOffset << "\n");
+      LLVM_DEBUG(dbgs() << "Updating fixed object (" << I.getFrameIdx()
+                        << ") for other register at " << CurOffset << "\n");
     }
     CurOffset -= 4;
   }
@@ -382,8 +380,8 @@ bool ARCFrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     const std::vector<CalleeSavedInfo> &CSI,
     const TargetRegisterInfo *TRI) const {
-  DEBUG(dbgs() << "Spill callee saved registers: "
-               << MBB.getParent()->getFunction()->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Spill callee saved registers: "
+                    << MBB.getParent()->getName() << "\n");
   // There are routines for saving at least 3 registers (r13 to r15, etc.)
   unsigned Last = determineLastCalleeSave(CSI);
   if (UseSaveRestoreFunclet && Last > ARC::R14) {
@@ -399,8 +397,8 @@ bool ARCFrameLowering::spillCalleeSavedRegisters(
 bool ARCFrameLowering::restoreCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     std::vector<CalleeSavedInfo> &CSI, const TargetRegisterInfo *TRI) const {
-  DEBUG(dbgs() << "Restore callee saved registers: "
-               << MBB.getParent()->getFunction()->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Restore callee saved registers: "
+                    << MBB.getParent()->getName() << "\n");
   // There are routines for saving at least 3 registers (r13 to r15, etc.)
   unsigned Last = determineLastCalleeSave(CSI);
   if (UseSaveRestoreFunclet && Last > ARC::R14) {
@@ -414,16 +412,17 @@ bool ARCFrameLowering::restoreCalleeSavedRegisters(
 void ARCFrameLowering::processFunctionBeforeFrameFinalized(
     MachineFunction &MF, RegScavenger *RS) const {
   const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
-  DEBUG(dbgs() << "Process function before frame finalized: "
-               << MF.getFunction()->getName() << "\n");
+  LLVM_DEBUG(dbgs() << "Process function before frame finalized: "
+                    << MF.getName() << "\n");
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  DEBUG(dbgs() << "Current stack size: " << MFI.getStackSize() << "\n");
+  LLVM_DEBUG(dbgs() << "Current stack size: " << MFI.getStackSize() << "\n");
   const TargetRegisterClass *RC = &ARC::GPR32RegClass;
   if (MFI.hasStackObjects()) {
     int RegScavFI = MFI.CreateStackObject(
         RegInfo->getSpillSize(*RC), RegInfo->getSpillAlignment(*RC), false);
     RS->addScavengingFrameIndex(RegScavFI);
-    DEBUG(dbgs() << "Created scavenging index RegScavFI=" << RegScavFI << "\n");
+    LLVM_DEBUG(dbgs() << "Created scavenging index RegScavFI=" << RegScavFI
+                      << "\n");
   }
 }
 
@@ -440,8 +439,7 @@ static void emitRegUpdate(MachineBasicBlock &MBB,
 MachineBasicBlock::iterator ARCFrameLowering::eliminateCallFramePseudoInstr(
     MachineFunction &MF, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
-  DEBUG(dbgs() << "EmitCallFramePseudo: " << MF.getFunction()->getName()
-               << "\n");
+  LLVM_DEBUG(dbgs() << "EmitCallFramePseudo: " << MF.getName() << "\n");
   const ARCInstrInfo *TII = MF.getSubtarget<ARCSubtarget>().getInstrInfo();
   MachineInstr &Old = *I;
   DebugLoc dl = Old.getDebugLoc();

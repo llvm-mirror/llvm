@@ -1,9 +1,8 @@
 //===-- SystemZLongBranch.cpp - Branch lengthening for SystemZ ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -295,7 +294,7 @@ uint64_t SystemZLongBranch::initMBBInfo() {
 
     // Add the terminators.
     while (MI != End) {
-      if (!MI->isDebugValue()) {
+      if (!MI->isDebugInstr()) {
         assert(MI->isTerminator() && "Terminator followed by non-terminator");
         Terminators.push_back(describeTerminator(*MI));
         skipTerminator(Position, Terminators.back(), false);
@@ -312,7 +311,7 @@ uint64_t SystemZLongBranch::initMBBInfo() {
 // relaxed if it were placed at address Address.
 bool SystemZLongBranch::mustRelaxBranch(const TerminatorInfo &Terminator,
                                         uint64_t Address) {
-  if (!Terminator.Branch)
+  if (!Terminator.Branch || Terminator.ExtraRelaxSize == 0)
     return false;
 
   const MBBInfo &Target = MBBs[Terminator.TargetBlock];

@@ -1,14 +1,13 @@
 //===-- WebAssemblyOptimizeReturned.cpp - Optimize "returned" attributes --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief Optimize calls with "returned" attributes for WebAssembly.
+/// Optimize calls with "returned" attributes for WebAssembly.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -48,6 +47,10 @@ public:
 } // End anonymous namespace
 
 char OptimizeReturned::ID = 0;
+INITIALIZE_PASS(OptimizeReturned, DEBUG_TYPE,
+                "Optimize calls with \"returned\" attributes for WebAssembly",
+                false, false)
+
 FunctionPass *llvm::createWebAssemblyOptimizeReturned() {
   return new OptimizeReturned();
 }
@@ -70,6 +73,10 @@ void OptimizeReturned::visitCallSite(CallSite CS) {
 }
 
 bool OptimizeReturned::runOnFunction(Function &F) {
+  LLVM_DEBUG(dbgs() << "********** Optimize returned Attributes **********\n"
+                       "********** Function: "
+                    << F.getName() << '\n');
+
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   visit(F);
   return true;

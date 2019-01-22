@@ -1,9 +1,8 @@
 //===-- ThreadSanitizer.cpp - race detector -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,13 +18,15 @@
 // The rest is handled by the run-time library.
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/SmallSet.h"
+#include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -44,7 +45,6 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/EscapeEnumerator.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
 using namespace llvm;
@@ -86,15 +86,16 @@ static const char *const kTsanInitName = "__tsan_init";
 namespace {
 
 /// ThreadSanitizer: instrument the code in module to find races.
-struct ThreadSanitizer : public FunctionPass {
-  ThreadSanitizer() : FunctionPass(ID) {}
-  StringRef getPassName() const override;
-  void getAnalysisUsage(AnalysisUsage &AU) const override;
-  bool runOnFunction(Function &F) override;
-  bool doInitialization(Module &M) override;
-  static char ID;  // Pass identification, replacement for typeid.
+///
+/// Instantiating ThreadSanitizer inserts the tsan runtime library API function
+/// declarations into the module if they don't exist already. Instantiating
+/// ensures the __tsan_init function is in the list of global constructors for
+/// the module.
+struct ThreadSanitizer {
+  ThreadSanitizer(Module &M);
+  bool sanitizeFunction(Function &F, const TargetLibraryInfo &TLI);
 
- private:
+private:
   void initializeCallbacks(Module &M);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentAtomic(Instruction *I, const DataLayout &DL);
@@ -130,27 +131,55 @@ struct ThreadSanitizer : public FunctionPass {
   Function *MemmoveFn, *MemcpyFn, *MemsetFn;
   Function *TsanCtorFunction;
 };
+
+struct ThreadSanitizerLegacyPass : FunctionPass {
+  ThreadSanitizerLegacyPass() : FunctionPass(ID) {}
+  StringRef getPassName() const override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnFunction(Function &F) override;
+  bool doInitialization(Module &M) override;
+  static char ID; // Pass identification, replacement for typeid.
+private:
+  Optional<ThreadSanitizer> TSan;
+};
 }  // namespace
 
-char ThreadSanitizer::ID = 0;
-INITIALIZE_PASS_BEGIN(
-    ThreadSanitizer, "tsan",
-    "ThreadSanitizer: detects data races.",
-    false, false)
+PreservedAnalyses ThreadSanitizerPass::run(Function &F,
+                                           FunctionAnalysisManager &FAM) {
+  ThreadSanitizer TSan(*F.getParent());
+  if (TSan.sanitizeFunction(F, FAM.getResult<TargetLibraryAnalysis>(F)))
+    return PreservedAnalyses::none();
+  return PreservedAnalyses::all();
+}
+
+char ThreadSanitizerLegacyPass::ID = 0;
+INITIALIZE_PASS_BEGIN(ThreadSanitizerLegacyPass, "tsan",
+                      "ThreadSanitizer: detects data races.", false, false)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
-INITIALIZE_PASS_END(
-    ThreadSanitizer, "tsan",
-    "ThreadSanitizer: detects data races.",
-    false, false)
+INITIALIZE_PASS_END(ThreadSanitizerLegacyPass, "tsan",
+                    "ThreadSanitizer: detects data races.", false, false)
 
-StringRef ThreadSanitizer::getPassName() const { return "ThreadSanitizer"; }
+StringRef ThreadSanitizerLegacyPass::getPassName() const {
+  return "ThreadSanitizerLegacyPass";
+}
 
-void ThreadSanitizer::getAnalysisUsage(AnalysisUsage &AU) const {
+void ThreadSanitizerLegacyPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
 }
 
-FunctionPass *llvm::createThreadSanitizerPass() {
-  return new ThreadSanitizer();
+bool ThreadSanitizerLegacyPass::doInitialization(Module &M) {
+  TSan.emplace(M);
+  return true;
+}
+
+bool ThreadSanitizerLegacyPass::runOnFunction(Function &F) {
+  auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  TSan->sanitizeFunction(F, TLI);
+  return true;
+}
+
+FunctionPass *llvm::createThreadSanitizerLegacyPassPass() {
+  return new ThreadSanitizerLegacyPass();
 }
 
 void ThreadSanitizer::initializeCallbacks(Module &M) {
@@ -252,16 +281,16 @@ void ThreadSanitizer::initializeCallbacks(Module &M) {
                             IRB.getInt32Ty(), IntptrTy));
 }
 
-bool ThreadSanitizer::doInitialization(Module &M) {
+ThreadSanitizer::ThreadSanitizer(Module &M) {
   const DataLayout &DL = M.getDataLayout();
   IntptrTy = DL.getIntPtrType(M.getContext());
-  std::tie(TsanCtorFunction, std::ignore) = createSanitizerCtorAndInitFunctions(
-      M, kTsanModuleCtorName, kTsanInitName, /*InitArgTypes=*/{},
-      /*InitArgs=*/{});
-
-  appendToGlobalCtors(M, TsanCtorFunction, 0);
-
-  return true;
+  std::tie(TsanCtorFunction, std::ignore) =
+      getOrCreateSanitizerCtorAndInitFunctions(
+          M, kTsanModuleCtorName, kTsanInitName, /*InitArgTypes=*/{},
+          /*InitArgs=*/{},
+          // This callback is invoked when the functions are created the first
+          // time. Hook them into the global ctors list in that case:
+          [&](Function *Ctor, Function *) { appendToGlobalCtors(M, Ctor, 0); });
 }
 
 static bool isVtableAccess(Instruction *I) {
@@ -339,7 +368,7 @@ bool ThreadSanitizer::addrPointsToConstantData(Value *Addr) {
 void ThreadSanitizer::chooseInstructionsToInstrument(
     SmallVectorImpl<Instruction *> &Local, SmallVectorImpl<Instruction *> &All,
     const DataLayout &DL) {
-  SmallSet<Value*, 8> WriteTargets;
+  SmallPtrSet<Value*, 8> WriteTargets;
   // Iterate from the end.
   for (Instruction *I : reverse(Local)) {
     if (StoreInst *Store = dyn_cast<StoreInst>(I)) {
@@ -402,7 +431,8 @@ void ThreadSanitizer::InsertRuntimeIgnores(Function &F) {
   }
 }
 
-bool ThreadSanitizer::runOnFunction(Function &F) {
+bool ThreadSanitizer::sanitizeFunction(Function &F,
+                                       const TargetLibraryInfo &TLI) {
   // This is required to prevent instrumenting call to __tsan_init from within
   // the module constructor.
   if (&F == TsanCtorFunction)
@@ -416,8 +446,6 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
   bool HasCalls = false;
   bool SanitizeFunction = F.hasFnAttribute(Attribute::SanitizeThread);
   const DataLayout &DL = F.getParent()->getDataLayout();
-  const TargetLibraryInfo *TLI =
-      &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
 
   // Traverse all instructions, collect loads/stores/returns, check for calls.
   for (auto &BB : F) {
@@ -428,7 +456,7 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
         LocalLoadsAndStores.push_back(&Inst);
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
-          maybeMarkSanitizerLibraryCallNoBuiltin(CI, TLI);
+          maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
         HasCalls = true;
@@ -502,7 +530,7 @@ bool ThreadSanitizer::instrumentLoadOrStore(Instruction *I,
   if (Idx < 0)
     return false;
   if (IsWrite && isVtableAccess(I)) {
-    DEBUG(dbgs() << "  VPTR : " << *I << "\n");
+    LLVM_DEBUG(dbgs() << "  VPTR : " << *I << "\n");
     Value *StoredValue = cast<StoreInst>(I)->getValueOperand();
     // StoredValue may be a vector type if we are storing several vptrs at once.
     // In this case, just take the first element of the vector since this is

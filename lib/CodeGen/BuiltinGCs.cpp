@@ -1,19 +1,18 @@
 //===- BuiltinGCs.cpp - Boilerplate for our built in GC types -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 // This file contains the boilerplate required to define our various built in
-// gc lowering strategies.  
+// gc lowering strategies.
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/BuiltinGCs.h"
 #include "llvm/CodeGen/GCStrategy.h"
-#include "llvm/CodeGen/GCs.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/Casting.h"
 
@@ -28,10 +27,8 @@ namespace {
 class ErlangGC : public GCStrategy {
 public:
   ErlangGC() {
-    InitRoots = false;
-    NeededSafePoints = 1 << GC::PostCall;
+    NeededSafePoints = true;
     UsesMetadata = true;
-    CustomRoots = false;
   }
 };
 
@@ -41,7 +38,7 @@ public:
 class OcamlGC : public GCStrategy {
 public:
   OcamlGC() {
-    NeededSafePoints = 1 << GC::PostCall;
+    NeededSafePoints = true;
     UsesMetadata = true;
   }
 };
@@ -56,10 +53,7 @@ public:
 /// while introducing only minor runtime overhead.
 class ShadowStackGC : public GCStrategy {
 public:
-  ShadowStackGC() {
-    InitRoots = true;
-    CustomRoots = true;
-  }
+  ShadowStackGC() {}
 };
 
 /// A GCStrategy which serves as an example for the usage of a statepoint based
@@ -74,10 +68,8 @@ public:
     UseStatepoints = true;
     // These options are all gc.root specific, we specify them so that the
     // gc.root lowering code doesn't run.
-    InitRoots = false;
-    NeededSafePoints = 0;
+    NeededSafePoints = false;
     UsesMetadata = false;
-    CustomRoots = false;
   }
 
   Optional<bool> isGCManagedPointer(const Type *Ty) const override {
@@ -108,10 +100,8 @@ public:
     UseStatepoints = true;
     // These options are all gc.root specific, we specify them so that the
     // gc.root lowering code doesn't run.
-    InitRoots = false;
-    NeededSafePoints = 0;
+    NeededSafePoints = false;
     UsesMetadata = false;
-    CustomRoots = false;
   }
 
   Optional<bool> isGCManagedPointer(const Type *Ty) const override {
@@ -136,9 +126,5 @@ static GCRegistry::Add<StatepointGC> D("statepoint-example",
                                        "an example strategy for statepoint");
 static GCRegistry::Add<CoreCLRGC> E("coreclr", "CoreCLR-compatible GC");
 
-// Provide hooks to ensure the containing library is fully loaded.
-void llvm::linkErlangGC() {}
-void llvm::linkOcamlGC() {}
-void llvm::linkShadowStackGC() {}
-void llvm::linkStatepointExampleGC() {}
-void llvm::linkCoreCLRGC() {}
+// Provide hook to ensure the containing library is fully loaded.
+void llvm::linkAllBuiltinGCs() {}

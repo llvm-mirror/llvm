@@ -1,9 +1,8 @@
 //===- ThreadLocal.cpp - Thread Local Data ----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/ThreadLocal.h"
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Compiler.h"
 
 //===----------------------------------------------------------------------===//
@@ -41,8 +40,8 @@ void ThreadLocalImpl::removeInstance() {
 }
 #elif defined(LLVM_ON_UNIX)
 #include "Unix/ThreadLocal.inc"
-#elif defined( LLVM_ON_WIN32)
+#elif defined( _WIN32)
 #include "Windows/ThreadLocal.inc"
 #else
-#warning Neither LLVM_ON_UNIX nor LLVM_ON_WIN32 set in Support/ThreadLocal.cpp
+#warning Neither LLVM_ON_UNIX nor _WIN32 set in Support/ThreadLocal.cpp
 #endif

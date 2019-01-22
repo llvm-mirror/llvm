@@ -1,9 +1,8 @@
 //===-- ARMELFObjectWriter.cpp - ARM ELF Writer ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -14,6 +13,7 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -40,6 +40,8 @@ namespace {
 
     bool needsRelocateWithSymbol(const MCSymbol &Sym,
                                  unsigned Type) const override;
+
+    void addTargetSectionFlags(MCContext &Ctx, MCSectionELF &Sec) override;
   };
 
 } // end anonymous namespace
@@ -64,7 +66,7 @@ bool ARMELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
   }
 }
 
-// Need to examine the Fixup when determining whether to 
+// Need to examine the Fixup when determining whether to
 // emit the relocation as an explicit symbol or as a section relative
 // offset
 unsigned ARMELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
@@ -236,9 +238,22 @@ unsigned ARMELFObjectWriter::GetRelocTypeInner(const MCValue &Target,
   }
 }
 
-std::unique_ptr<MCObjectWriter>
-llvm::createARMELFObjectWriter(raw_pwrite_stream &OS, uint8_t OSABI,
-                               bool IsLittleEndian) {
-  return createELFObjectWriter(llvm::make_unique<ARMELFObjectWriter>(OSABI), OS,
-                               IsLittleEndian);
+void ARMELFObjectWriter::addTargetSectionFlags(MCContext &Ctx,
+                                               MCSectionELF &Sec) {
+  // The mix of execute-only and non-execute-only at link time is
+  // non-execute-only. To avoid the empty implicitly created .text
+  // section from making the whole .text section non-execute-only, we
+  // mark it execute-only if it is empty and there is at least one
+  // execute-only section in the object.
+  MCSectionELF *TextSection =
+      static_cast<MCSectionELF *>(Ctx.getObjectFileInfo()->getTextSection());
+  if (Sec.getKind().isExecuteOnly() && !TextSection->hasInstructions() &&
+      !TextSection->hasData()) {
+    TextSection->setFlags(TextSection->getFlags() | ELF::SHF_ARM_PURECODE);
+  }
+}
+
+std::unique_ptr<MCObjectTargetWriter>
+llvm::createARMELFObjectWriter(uint8_t OSABI) {
+  return llvm::make_unique<ARMELFObjectWriter>(OSABI);
 }

@@ -1,9 +1,8 @@
 //===-- llvm/MC/MCAsmInfo.h - Asm info --------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -83,6 +82,15 @@ protected:
   /// True if this is a MachO target that supports the macho-specific .tbss
   /// directive for emitting thread local BSS Symbols.  Default is false.
   bool HasMachoTBSSDirective = false;
+
+  /// True if this is a non-GNU COFF target. The COFF port of the GNU linker
+  /// doesn't handle associative comdats in the way that we would like to use
+  /// them.
+  bool HasCOFFAssociativeComdats = false;
+
+  /// True if this is a non-GNU COFF target. For GNU targets, we don't generate
+  /// constants into comdat sections.
+  bool HasCOFFComdatConstants = false;
 
   /// This is the maximum possible length of an instruction, which is needed to
   /// compute the size of an inline asm.  Defaults to 4.
@@ -165,7 +173,8 @@ protected:
   const char *ZeroDirective;
 
   /// This directive allows emission of an ascii string with the standard C
-  /// escape characters embedded into it.  Defaults to "\t.ascii\t"
+  /// escape characters embedded into it.  If a target doesn't support this, it
+  /// can be set to null. Defaults to "\t.ascii\t"
   const char *AsciiDirective;
 
   /// If not null, this allows for special handling of zero terminated strings
@@ -343,6 +352,10 @@ protected:
   /// For example, foo(plt) instead of foo@plt.  Defaults to false.
   bool UseParensForSymbolVariant = false;
 
+  /// True if the target supports flags in ".loc" directive, false if only
+  /// location is allowed.
+  bool SupportsExtendedDwarfLocDirective = true;
+
   //===--- Prologue State ----------------------------------------------===//
 
   std::vector<MCCFIInstruction> InitialFrameState;
@@ -415,7 +428,7 @@ public:
     return nullptr;
   }
 
-  /// \brief True if the section is atomized using the symbols in it.
+  /// True if the section is atomized using the symbols in it.
   /// This is false if the section is not atomized at all (most ELF sections) or
   /// if it is atomized based on its contents (MachO' __TEXT,__cstring for
   /// example).
@@ -458,6 +471,8 @@ public:
 
   bool hasMachoZeroFillDirective() const { return HasMachoZeroFillDirective; }
   bool hasMachoTBSSDirective() const { return HasMachoTBSSDirective; }
+  bool hasCOFFAssociativeComdats() const { return HasCOFFAssociativeComdats; }
+  bool hasCOFFComdatConstants() const { return HasCOFFComdatConstants; }
   unsigned getMaxInstLength() const { return MaxInstLength; }
   unsigned getMinInstAlignment() const { return MinInstAlignment; }
   bool getDollarIsPC() const { return DollarIsPC; }
@@ -578,6 +593,9 @@ public:
   bool doDwarfFDESymbolsUseAbsDiff() const { return DwarfFDESymbolsUseAbsDiff; }
   bool useDwarfRegNumForCFI() const { return DwarfRegNumForCFI; }
   bool useParensForSymbolVariant() const { return UseParensForSymbolVariant; }
+  bool supportsExtendedDwarfLocDirective() const {
+    return SupportsExtendedDwarfLocDirective;
+  }
 
   void addInitialFrameState(const MCCFIInstruction &Inst) {
     InitialFrameState.push_back(Inst);

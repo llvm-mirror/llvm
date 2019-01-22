@@ -1,9 +1,8 @@
 //=====- CFLSummary.h - Abstract stratified sets implementation. --------=====//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -13,7 +12,7 @@
 /// Summary-based analysis, also known as bottom-up analysis, is a style of
 /// interprocedrual static analysis that tries to analyze the callees before the
 /// callers get analyzed. The key idea of summary-based analysis is to first
-/// process each function indepedently, outline its behavior in a condensed
+/// process each function independently, outline its behavior in a condensed
 /// summary, and then instantiate the summary at the callsite when the said
 /// function is called elsewhere. This is often in contrast to another style
 /// called top-down analysis, in which callers are always analyzed first before

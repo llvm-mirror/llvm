@@ -6,7 +6,7 @@
 
 define void @FFT(%v4_varying_complex* noalias nocapture %destination, float* noalias %re, <4 x i32>* noalias nocapture %ptr_cast_for_load) nounwind {
 ; X86-LABEL: FFT:
-; X86:       # BB#0: # %begin
+; X86:       # %bb.0: # %begin
 ; X86-NEXT:    pushl %ebx
 ; X86-NEXT:    pushl %edi
 ; X86-NEXT:    pushl %esi
@@ -33,15 +33,17 @@ define void @FFT(%v4_varying_complex* noalias nocapture %destination, float* noa
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: FFT:
-; X64:       # BB#0: # %begin
+; X64:       # %bb.0: # %begin
 ; X64-NEXT:    movdqu (%rdx), %xmm0
 ; X64-NEXT:    pslld $4, %xmm0
-; X64-NEXT:    movq %xmm0, %rax
+; X64-NEXT:    movd %xmm0, %eax
 ; X64-NEXT:    movslq %eax, %r8
-; X64-NEXT:    sarq $32, %rax
-; X64-NEXT:    pextrq $1, %xmm0, %rdx
-; X64-NEXT:    movslq %edx, %rcx
-; X64-NEXT:    sarq $32, %rdx
+; X64-NEXT:    pextrd $1, %xmm0, %ecx
+; X64-NEXT:    movslq %ecx, %rcx
+; X64-NEXT:    pextrd $2, %xmm0, %edx
+; X64-NEXT:    movslq %edx, %rdx
+; X64-NEXT:    pextrd $3, %xmm0, %eax
+; X64-NEXT:    cltq
 ; X64-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
 ; X64-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; X64-NEXT:    movss {{.*#+}} xmm2 = mem[0],zero,zero,zero

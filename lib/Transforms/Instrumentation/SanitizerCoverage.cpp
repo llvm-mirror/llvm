@@ -1,9 +1,8 @@
 //===-- SanitizerCoverage.cpp - coverage instrumentation for sanitizers ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,13 +28,13 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Instrumentation.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
@@ -212,8 +211,8 @@ private:
                              bool IsLeafFunc = true);
   Function *CreateInitCallsForSections(Module &M, const char *InitFunctionName,
                                        Type *Ty, const char *Section);
-  std::pair<GlobalVariable *, GlobalVariable *>
-  CreateSecStartEnd(Module &M, const char *Section, Type *Ty);
+  std::pair<Value *, Value *> CreateSecStartEnd(Module &M, const char *Section,
+                                                Type *Ty);
 
   void SetNoSanitizeMetadata(Instruction *I) {
     I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
@@ -235,6 +234,7 @@ private:
   Type *IntptrTy, *IntptrPtrTy, *Int64Ty, *Int64PtrTy, *Int32Ty, *Int32PtrTy,
       *Int16Ty, *Int8Ty, *Int8PtrTy;
   Module *CurModule;
+  std::string CurModuleUniqueId;
   Triple TargetTriple;
   LLVMContext *C;
   const DataLayout *DL;
@@ -243,13 +243,14 @@ private:
   GlobalVariable *Function8bitCounterArray;  // for inline-8bit-counters.
   GlobalVariable *FunctionPCsArray;  // for pc-table.
   SmallVector<GlobalValue *, 20> GlobalsToAppendToUsed;
+  SmallVector<GlobalValue *, 20> GlobalsToAppendToCompilerUsed;
 
   SanitizerCoverageOptions Options;
 };
 
 } // namespace
 
-std::pair<GlobalVariable *, GlobalVariable *>
+std::pair<Value *, Value *>
 SanitizerCoverageModule::CreateSecStartEnd(Module &M, const char *Section,
                                            Type *Ty) {
   GlobalVariable *SecStart =
@@ -260,22 +261,28 @@ SanitizerCoverageModule::CreateSecStartEnd(Module &M, const char *Section,
       new GlobalVariable(M, Ty, false, GlobalVariable::ExternalLinkage,
                          nullptr, getSectionEnd(Section));
   SecEnd->setVisibility(GlobalValue::HiddenVisibility);
+  IRBuilder<> IRB(M.getContext());
+  Value *SecEndPtr = IRB.CreatePointerCast(SecEnd, Ty);
+  if (!TargetTriple.isOSBinFormatCOFF())
+    return std::make_pair(IRB.CreatePointerCast(SecStart, Ty), SecEndPtr);
 
-  return std::make_pair(SecStart, SecEnd);
+  // Account for the fact that on windows-msvc __start_* symbols actually
+  // point to a uint64_t before the start of the array.
+  auto SecStartI8Ptr = IRB.CreatePointerCast(SecStart, Int8PtrTy);
+  auto GEP = IRB.CreateGEP(SecStartI8Ptr,
+                           ConstantInt::get(IntptrTy, sizeof(uint64_t)));
+  return std::make_pair(IRB.CreatePointerCast(GEP, Ty), SecEndPtr);
 }
-
 
 Function *SanitizerCoverageModule::CreateInitCallsForSections(
     Module &M, const char *InitFunctionName, Type *Ty,
     const char *Section) {
-  IRBuilder<> IRB(M.getContext());
   auto SecStartEnd = CreateSecStartEnd(M, Section, Ty);
   auto SecStart = SecStartEnd.first;
   auto SecEnd = SecStartEnd.second;
   Function *CtorFunc;
   std::tie(CtorFunc, std::ignore) = createSanitizerCtorAndInitFunctions(
-      M, SanCovModuleCtorName, InitFunctionName, {Ty, Ty},
-      {IRB.CreatePointerCast(SecStart, Ty), IRB.CreatePointerCast(SecEnd, Ty)});
+      M, SanCovModuleCtorName, InitFunctionName, {Ty, Ty}, {SecStart, SecEnd});
 
   if (TargetTriple.supportsCOMDAT()) {
     // Use comdat to dedup CtorFunc.
@@ -283,6 +290,17 @@ Function *SanitizerCoverageModule::CreateInitCallsForSections(
     appendToGlobalCtors(M, CtorFunc, SanCtorAndDtorPriority, CtorFunc);
   } else {
     appendToGlobalCtors(M, CtorFunc, SanCtorAndDtorPriority);
+  }
+
+  if (TargetTriple.isOSBinFormatCOFF()) {
+    // In COFF files, if the contructors are set as COMDAT (they are because
+    // COFF supports COMDAT) and the linker flag /OPT:REF (strip unreferenced
+    // functions and data) is used, the constructors get stripped. To prevent
+    // this, give the constructors weak ODR linkage and ensure the linker knows
+    // to include the sancov constructor. This way the linker can deduplicate
+    // the constructors but always leave one copy.
+    CtorFunc->setLinkage(GlobalValue::WeakODRLinkage);
+    appendToUsed(M, CtorFunc);
   }
   return CtorFunc;
 }
@@ -293,6 +311,7 @@ bool SanitizerCoverageModule::runOnModule(Module &M) {
   C = &(M.getContext());
   DL = &M.getDataLayout();
   CurModule = &M;
+  CurModuleUniqueId = getUniqueModuleId(CurModule);
   TargetTriple = Triple(M.getTargetTriple());
   FunctionGuardArray = nullptr;
   Function8bitCounterArray = nullptr;
@@ -397,14 +416,13 @@ bool SanitizerCoverageModule::runOnModule(Module &M) {
     Function *InitFunction = declareSanitizerInitFunction(
         M, SanCovPCsInitName, {IntptrPtrTy, IntptrPtrTy});
     IRBuilder<> IRBCtor(Ctor->getEntryBlock().getTerminator());
-    IRBCtor.CreateCall(InitFunction,
-                       {IRB.CreatePointerCast(SecStartEnd.first, IntptrPtrTy),
-                        IRB.CreatePointerCast(SecStartEnd.second, IntptrPtrTy)});
+    IRBCtor.CreateCall(InitFunction, {SecStartEnd.first, SecStartEnd.second});
   }
   // We don't reference these arrays directly in any of our runtime functions,
   // so we need to prevent them from being dead stripped.
   if (TargetTriple.isOSBinFormatMachO())
     appendToUsed(M, GlobalsToAppendToUsed);
+  appendToCompilerUsed(M, GlobalsToAppendToCompilerUsed);
   return true;
 }
 
@@ -480,6 +498,8 @@ bool SanitizerCoverageModule::runOnFunction(Function &F) {
   if (F.getName() == "__local_stdio_printf_options" ||
       F.getName() == "__local_stdio_scanf_options")
     return false;
+  if (isa<UnreachableInst>(F.getEntryBlock().getTerminator()))
+    return false;
   // Don't instrument functions using SEH for now. Splitting basic blocks like
   // we do for coverage breaks WinEHPrepare.
   // FIXME: Remove this when SEH no longer uses landingpad pattern matching.
@@ -546,11 +566,19 @@ GlobalVariable *SanitizerCoverageModule::CreateFunctionLocalArrayInSection(
   auto Array = new GlobalVariable(
       *CurModule, ArrayTy, false, GlobalVariable::PrivateLinkage,
       Constant::getNullValue(ArrayTy), "__sancov_gen_");
-  if (auto Comdat = F.getComdat())
-    Array->setComdat(Comdat);
+
+  if (TargetTriple.supportsCOMDAT() && !F.isInterposable())
+    if (auto Comdat =
+            GetOrCreateFunctionComdat(F, TargetTriple, CurModuleUniqueId))
+      Array->setComdat(Comdat);
   Array->setSection(getSectionName(Section));
   Array->setAlignment(Ty->isPointerTy() ? DL->getPointerSize()
                                         : Ty->getPrimitiveSizeInBits() / 8);
+  GlobalsToAppendToUsed.push_back(Array);
+  GlobalsToAppendToCompilerUsed.push_back(Array);
+  MDNode *MD = MDNode::get(F.getContext(), ValueAsMetadata::get(&F));
+  Array->addMetadata(LLVMContext::MD_associated, *MD);
+
   return Array;
 }
 
@@ -584,20 +612,16 @@ SanitizerCoverageModule::CreatePCArray(Function &F,
 
 void SanitizerCoverageModule::CreateFunctionLocalArrays(
     Function &F, ArrayRef<BasicBlock *> AllBlocks) {
-  if (Options.TracePCGuard) {
+  if (Options.TracePCGuard)
     FunctionGuardArray = CreateFunctionLocalArrayInSection(
         AllBlocks.size(), F, Int32Ty, SanCovGuardsSectionName);
-    GlobalsToAppendToUsed.push_back(FunctionGuardArray);
-  }
-  if (Options.Inline8bitCounters) {
+
+  if (Options.Inline8bitCounters)
     Function8bitCounterArray = CreateFunctionLocalArrayInSection(
         AllBlocks.size(), F, Int8Ty, SanCovCountersSectionName);
-    GlobalsToAppendToUsed.push_back(Function8bitCounterArray);
-  }
-  if (Options.PCTable) {
+
+  if (Options.PCTable)
     FunctionPCsArray = CreatePCArray(F, AllBlocks);
-    GlobalsToAppendToUsed.push_back(FunctionPCsArray);
-  }
 }
 
 bool SanitizerCoverageModule::InjectCoverage(Function &F,
@@ -659,11 +683,11 @@ void SanitizerCoverageModule::InjectTraceForSwitch(
           C = ConstantExpr::getCast(CastInst::ZExt, It.getCaseValue(), Int64Ty);
         Initializers.push_back(C);
       }
-      std::sort(Initializers.begin() + 2, Initializers.end(),
-                [](const Constant *A, const Constant *B) {
-                  return cast<ConstantInt>(A)->getLimitedValue() <
-                         cast<ConstantInt>(B)->getLimitedValue();
-                });
+      llvm::sort(Initializers.begin() + 2, Initializers.end(),
+                 [](const Constant *A, const Constant *B) {
+                   return cast<ConstantInt>(A)->getLimitedValue() <
+                          cast<ConstantInt>(B)->getLimitedValue();
+                 });
       ArrayType *ArrayOfInt64Ty = ArrayType::get(Int64Ty, Initializers.size());
       GlobalVariable *GV = new GlobalVariable(
           *CurModule, ArrayOfInt64Ty, false, GlobalVariable::InternalLinkage,
@@ -799,8 +823,13 @@ void SanitizerCoverageModule::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
 
 std::string
 SanitizerCoverageModule::getSectionName(const std::string &Section) const {
-  if (TargetTriple.getObjectFormat() == Triple::COFF)
-    return ".SCOV$M";
+  if (TargetTriple.isOSBinFormatCOFF()) {
+    if (Section == SanCovCountersSectionName)
+      return ".SCOV$CM";
+    if (Section == SanCovPCsSectionName)
+      return ".SCOVP$M";
+    return ".SCOV$GM"; // For SanCovGuardsSectionName.
+  }
   if (TargetTriple.isOSBinFormatMachO())
     return "__DATA,__" + Section;
   return "__" + Section;

@@ -1,9 +1,8 @@
 //===-- Passes.h - Target independent code generation passes ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -42,9 +41,6 @@ namespace llvm {
   /// last LLVM modifying pass to clean up blocks that are not reachable from
   /// the entry block.
   FunctionPass *createUnreachableBlockEliminationPass();
-
-  /// Insert mcount-like function calls.
-  FunctionPass *createCountingFunctionInserterPass();
 
   /// MachineFunctionPrinter pass - This pass prints out the machine function to
   /// the given stream as a debugging tool.
@@ -157,6 +153,9 @@ namespace llvm {
   /// This pass adds dead/undef flags after analyzing subregister lanes.
   extern char &DetectDeadLanesID;
 
+  /// This pass perform post-ra machine sink for COPY instructions.
+  extern char &PostRAMachineSinkingID;
+
   /// FastRegisterAllocation Pass - This pass register allocates as fast as
   /// possible. It is best suited for debug code where live ranges are short.
   ///
@@ -215,6 +214,10 @@ namespace llvm {
   /// into tails of their predecessors.
   extern char &TailDuplicateID;
 
+  /// Duplicate blocks with unconditional branches into tails of their
+  /// predecessors. Variant that works before register allocation.
+  extern char &EarlyTailDuplicateID;
+
   /// MachineTraceMetrics - This pass computes critical path and CPU resource
   /// usage in an ensemble of traces.
   extern char &MachineTraceMetricsID;
@@ -272,8 +275,12 @@ namespace llvm {
   /// memory operations.
   extern char &ImplicitNullChecksID;
 
-  /// MachineLICM - This pass performs LICM on machine instructions.
+  /// This pass performs loop invariant code motion on machine instructions.
   extern char &MachineLICMID;
+
+  /// This pass performs loop invariant code motion on machine instructions.
+  /// This variant works before register allocation. \see MachineLICMID.
+  extern char &EarlyMachineLICMID;
 
   /// MachineSinking - This pass performs sinking on machine instructions.
   extern char &MachineSinkingID;
@@ -293,7 +300,7 @@ namespace llvm {
   /// StackSlotColoring - This pass performs stack slot coloring.
   extern char &StackSlotColoringID;
 
-  /// \brief This pass lays out funclets contiguously.
+  /// This pass lays out funclets contiguously.
   extern char &FuncletLayoutID;
 
   /// This pass inserts the XRay instrumentation sleds if they are supported by
@@ -303,7 +310,7 @@ namespace llvm {
   /// This pass inserts FEntry calls
   extern char &FEntryInserterID;
 
-  /// \brief This pass implements the "patchable-function" attribute.
+  /// This pass implements the "patchable-function" attribute.
   extern char &PatchableFunctionID;
 
   /// createStackProtectorPass - This pass adds stack protectors to functions.
@@ -321,12 +328,16 @@ namespace llvm {
 
   /// createWinEHPass - Prepares personality functions used by MSVC on Windows,
   /// in addition to the Itanium LSDA based personalities.
-  FunctionPass *createWinEHPass();
+  FunctionPass *createWinEHPass(bool DemoteCatchSwitchPHIOnly = false);
 
   /// createSjLjEHPreparePass - This pass adapts exception handling code to use
   /// the GCC-style builtin setjmp/longjmp (sjlj) to handling EH control flow.
   ///
   FunctionPass *createSjLjEHPreparePass();
+
+  /// createWasmEHPass - This pass adapts exception handling code to use
+  /// WebAssembly's exception handling scheme.
+  FunctionPass *createWasmEHPass();
 
   /// LocalStackSlotAllocation - This pass assigns local frame indices to stack
   /// slots relative to one another and allocates base registers to access them
@@ -367,14 +378,20 @@ namespace llvm {
   ///
   FunctionPass *createInterleavedAccessPass();
 
+  /// InterleavedLoadCombines Pass - This pass identifies interleaved loads and
+  /// combines them into wide loads detectable by InterleavedAccessPass
+  ///
+  FunctionPass *createInterleavedLoadCombinePass();
+
   /// LowerEmuTLS - This pass generates __emutls_[vt].xyz variables for all
   /// TLS variables for the emulated TLS model.
   ///
   ModulePass *createLowerEmuTLSPass();
 
-  /// This pass lowers the @llvm.load.relative intrinsic to instructions.
-  /// This is unsafe to do earlier because a pass may combine the constant
-  /// initializer into the load, which may result in an overflowing evaluation.
+  /// This pass lowers the \@llvm.load.relative and \@llvm.objc.* intrinsics to
+  /// instructions.  This is unsafe to do earlier because a pass may combine the
+  /// constant initializer into the load, which may result in an overflowing
+  /// evaluation.
   ModulePass *createPreISelIntrinsicLoweringPass();
 
   /// GlobalMerge - This pass merges internal (by default) globals into structs
@@ -411,11 +428,23 @@ namespace llvm {
 
   /// This pass performs outlining on machine instructions directly before
   /// printing assembly.
-  ModulePass *createMachineOutlinerPass(bool OutlineFromLinkOnceODRs = false);
+  ModulePass *createMachineOutlinerPass(bool RunOnAllFunctions = true);
 
   /// This pass expands the experimental reduction intrinsics into sequences of
   /// shuffles.
   FunctionPass *createExpandReductionsPass();
+
+  // This pass expands memcmp() to load/stores.
+  FunctionPass *createExpandMemCmpPass();
+
+  /// Creates Break False Dependencies pass. \see BreakFalseDeps.cpp
+  FunctionPass *createBreakFalseDeps();
+
+  // This pass expands indirectbr instructions.
+  FunctionPass *createIndirectBrExpandPass();
+
+  /// Creates CFI Instruction Inserter pass. \see CFIInstrInserter.cpp
+  FunctionPass *createCFIInstrInserter();
 
 } // End llvm namespace
 

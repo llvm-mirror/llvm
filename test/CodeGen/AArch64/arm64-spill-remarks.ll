@@ -38,7 +38,7 @@
 ; YAML: --- !Missed
 ; YAML: Pass:            regalloc
 ; YAML: Name:            LoopSpillReload
-; YAML: DebugLoc:        { File: /tmp/kk.c, Line: 3, Column: 20 }
+; YAML: DebugLoc:        { File: '/tmp/kk.c', Line: 3, Column: 20 }
 ; YAML: Function:        fpr128
 ; YAML: Hotness:         300
 ; YAML: Args:
@@ -51,7 +51,7 @@
 ; YAML: --- !Missed
 ; YAML: Pass:            regalloc
 ; YAML: Name:            LoopSpillReload
-; YAML: DebugLoc:        { File: /tmp/kk.c, Line: 2, Column: 20 }
+; YAML: DebugLoc:        { File: '/tmp/kk.c', Line: 2, Column: 20 }
 ; YAML: Function:        fpr128
 ; YAML: Hotness:         30000
 ; YAML: Args:
@@ -64,7 +64,7 @@
 ; YAML: --- !Missed
 ; YAML: Pass:            regalloc
 ; YAML: Name:            LoopSpillReload
-; YAML: DebugLoc:        { File: /tmp/kk.c, Line: 1, Column: 20 }
+; YAML: DebugLoc:        { File: '/tmp/kk.c', Line: 1, Column: 20 }
 ; YAML: Function:        fpr128
 ; YAML: Hotness:         300
 ; YAML: Args:
@@ -79,7 +79,7 @@
 ; THRESHOLD_YAML: --- !Missed
 ; THRESHOLD_YAML: Pass:            regalloc
 ; THRESHOLD_YAML: Name:            LoopSpillReload
-; THRESHOLD_YAML: DebugLoc:        { File: /tmp/kk.c, Line: 2, Column: 20 }
+; THRESHOLD_YAML: DebugLoc:        { File: '/tmp/kk.c', Line: 2, Column: 20 }
 ; THRESHOLD_YAML: Function:        fpr128
 ; THRESHOLD_YAML: Hotness:         30000
 ; THRESHOLD_YAML: Args:
@@ -135,7 +135,7 @@ end3:
 !3 = !{i32 2, !"Debug Info Version", i32 3}
 !4 = !{i32 1, !"PIC Level", i32 2}
 !5 = !{!"clang version 3.9.0 "}
-!6 = distinct !DISubprogram(name: "success", scope: !1, file: !1, line: 1, type: !7, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: true, unit: !0, variables: !2)
+!6 = distinct !DISubprogram(name: "success", scope: !1, file: !1, line: 1, type: !7, isLocal: false, isDefinition: true, scopeLine: 1, flags: DIFlagPrototyped, isOptimized: true, unit: !0, retainedNodes: !2)
 !7 = !DISubroutineType(types: !2)
 !8 = !DILocation(line: 1, column: 20, scope: !6)
 !9 = !DILocation(line: 2, column: 20, scope: !6)

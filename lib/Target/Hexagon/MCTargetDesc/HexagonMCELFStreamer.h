@@ -1,9 +1,8 @@
 //===- HexagonMCELFStreamer.h - Hexagon subclass of MCElfStreamer ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -23,11 +22,11 @@ class HexagonMCELFStreamer : public MCELFStreamer {
 
 public:
   HexagonMCELFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
-                       raw_pwrite_stream &OS,
+                       std::unique_ptr<MCObjectWriter> OW,
                        std::unique_ptr<MCCodeEmitter> Emitter);
 
   HexagonMCELFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> TAB,
-                       raw_pwrite_stream &OS,
+                       std::unique_ptr<MCObjectWriter> OW,
                        std::unique_ptr<MCCodeEmitter> Emitter,
                        MCAssembler *Assembler);
 
@@ -43,7 +42,7 @@ public:
 
 MCStreamer *createHexagonELFStreamer(Triple const &TT, MCContext &Context,
                                      std::unique_ptr<MCAsmBackend> MAB,
-                                     raw_pwrite_stream &OS,
+                                     std::unique_ptr<MCObjectWriter> OW,
                                      std::unique_ptr<MCCodeEmitter> CE);
 
 } // end namespace llvm

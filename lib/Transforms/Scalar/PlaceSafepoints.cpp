@@ -1,9 +1,8 @@
 //===- PlaceSafepoints.cpp - Place GC Safepoints --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -55,6 +54,7 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -65,7 +65,6 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/Transforms/Utils/Local.h"
 
 #define DEBUG_TYPE "safepoint-placement"
 
@@ -105,7 +104,7 @@ struct PlaceBackedgeSafepointsImpl : public FunctionPass {
 
   /// The output of the pass - gives a list of each backedge (described by
   /// pointing at the branch) which need a poll inserted.
-  std::vector<TerminatorInst *> PollLocations;
+  std::vector<Instruction *> PollLocations;
 
   /// True unless we're running spp-no-calls in which case we need to disable
   /// the call-dependent placement opts.
@@ -323,7 +322,7 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L) {
     // avoiding the runtime cost of the actual safepoint.
     if (!AllBackedges) {
       if (mustBeFiniteCountedLoop(L, SE, Pred)) {
-        DEBUG(dbgs() << "skipping safepoint placement in finite loop\n");
+        LLVM_DEBUG(dbgs() << "skipping safepoint placement in finite loop\n");
         FiniteExecution++;
         continue;
       }
@@ -332,7 +331,9 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L) {
         // Note: This is only semantically legal since we won't do any further
         // IPO or inlining before the actual call insertion..  If we hadn't, we
         // might latter loose this call safepoint.
-        DEBUG(dbgs() << "skipping safepoint placement due to unconditional call\n");
+        LLVM_DEBUG(
+            dbgs()
+            << "skipping safepoint placement due to unconditional call\n");
         CallInLoop++;
         continue;
       }
@@ -346,9 +347,9 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L) {
     // Safepoint insertion would involve creating a new basic block (as the
     // target of the current backedge) which does the safepoint (of all live
     // variables) and branches to the true header
-    TerminatorInst *Term = Pred->getTerminator();
+    Instruction *Term = Pred->getTerminator();
 
-    DEBUG(dbgs() << "[LSP] terminator instruction: " << *Term);
+    LLVM_DEBUG(dbgs() << "[LSP] terminator instruction: " << *Term);
 
     PollLocations.push_back(Term);
   }
@@ -522,7 +523,7 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
     };
     // We need the order of list to be stable so that naming ends up stable
     // when we split edges.  This makes test cases much easier to write.
-    std::sort(PollLocations.begin(), PollLocations.end(), OrderByBBName);
+    llvm::sort(PollLocations, OrderByBBName);
 
     // We can sometimes end up with duplicate poll locations.  This happens if
     // a single loop is visited more than once.   The fact this happens seems
@@ -533,7 +534,7 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
 
     // Insert a poll at each point the analysis pass identified
     // The poll location must be the terminator of a loop latch block.
-    for (TerminatorInst *Term : PollLocations) {
+    for (Instruction *Term : PollLocations) {
       // We are inserting a poll, the function is modified
       Modified = true;
 

@@ -10,20 +10,20 @@
 
 define void @test_select(fp128* %p, fp128* %q, i1 zeroext %c) {
 ; MMX-LABEL: test_select:
-; MMX:       # BB#0:
+; MMX:       # %bb.0:
 ; MMX-NEXT:    testl %edx, %edx
 ; MMX-NEXT:    jne .LBB0_1
-; MMX-NEXT:  # BB#2:
+; MMX-NEXT:  # %bb.2:
 ; MMX-NEXT:    movaps {{.*}}(%rip), %xmm0
 ; MMX-NEXT:    movaps %xmm0, (%rsi)
 ; MMX-NEXT:    retq
 ; MMX-NEXT:  .LBB0_1:
-; MMX-NEXT:    movaps (%rdi), %xmm0
+; MMX-NEXT:    movups (%rdi), %xmm0
 ; MMX-NEXT:    movaps %xmm0, (%rsi)
 ; MMX-NEXT:    retq
 ;
 ; CHECK-LABEL: test_select:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    xorl %eax, %eax
 ; CHECK-NEXT:    testl %edx, %edx
 ; CHECK-NEXT:    cmovneq (%rdi), %rax

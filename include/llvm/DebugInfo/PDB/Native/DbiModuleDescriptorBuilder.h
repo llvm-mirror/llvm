@@ -1,9 +1,8 @@
 //===- DbiModuleDescriptorBuilder.h - PDB module information ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -49,7 +48,9 @@ public:
 
   void setPdbFilePathNI(uint32_t NI);
   void setObjFileName(StringRef Name);
+  void setFirstSectionContrib(const SectionContrib &SC);
   void addSymbol(codeview::CVSymbol Symbol);
+  void addSymbolsInBulk(ArrayRef<uint8_t> BulkSymbols);
 
   void
   addDebugSubsection(std::shared_ptr<codeview::DebugSubsection> Subsection);
@@ -90,7 +91,7 @@ private:
   std::string ModuleName;
   std::string ObjFileName;
   std::vector<std::string> SourceFiles;
-  std::vector<codeview::CVSymbol> Symbols;
+  std::vector<ArrayRef<uint8_t>> Symbols;
 
   std::vector<std::unique_ptr<codeview::DebugSubsectionRecordBuilder>>
       C13Builders;

@@ -1,9 +1,8 @@
 //===- MipsAsmPrinter.h - Mips LLVM Assembly Printer -----------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -54,9 +53,6 @@ public:
   void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI);
   void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI);
   void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI);
-  // Helper function that emits the XRay sleds we've collected for a particular
-  // function.
-  void EmitXRayTable();
 
 private:
   /// MCP - Keep a pointer to constantpool entries of the current
@@ -163,7 +159,7 @@ public:
   void EmitStartOfAsmFile(Module &M) override;
   void EmitEndOfAsmFile(Module &M) override;
   void PrintDebugValueComment(const MachineInstr *MI, raw_ostream &OS);
-  void EmitDebugThreadLocal(const MCExpr *Value, unsigned Size) const override;
+  void EmitDebugValue(const MCExpr *Value, unsigned Size) const override;
 };
 
 } // end namespace llvm

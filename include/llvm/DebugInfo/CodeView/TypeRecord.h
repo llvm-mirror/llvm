@@ -1,9 +1,8 @@
 //===- TypeRecord.h ---------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -94,6 +93,11 @@ struct MemberAttributes {
     auto MP = getMethodKind();
     return MP == MethodKind::IntroducingVirtual ||
            MP == MethodKind::PureIntroducingVirtual;
+  }
+
+  /// Is this method static.
+  bool isStatic() const {
+    return getMethodKind() == MethodKind::Static;
   }
 };
 
@@ -264,14 +268,18 @@ public:
 // LF_POINTER
 class PointerRecord : public TypeRecord {
 public:
+  // ---------------------------XXXXX
   static const uint32_t PointerKindShift = 0;
   static const uint32_t PointerKindMask = 0x1F;
 
+  // ------------------------XXX-----
   static const uint32_t PointerModeShift = 5;
   static const uint32_t PointerModeMask = 0x07;
 
-  static const uint32_t PointerOptionMask = 0xFF;
+  // ----------XXX------XXXXX--------
+  static const uint32_t PointerOptionMask = 0x381f00;
 
+  // -------------XXXXXX------------
   static const uint32_t PointerSizeShift = 13;
   static const uint32_t PointerSizeMask = 0xFF;
 
@@ -305,7 +313,7 @@ public:
   }
 
   PointerOptions getOptions() const {
-    return static_cast<PointerOptions>(Attrs);
+    return static_cast<PointerOptions>(Attrs & PointerOptionMask);
   }
 
   uint8_t getSize() const {
@@ -330,9 +338,26 @@ public:
     return !!(Attrs & uint32_t(PointerOptions::Unaligned));
   }
 
+  bool isRestrict() const {
+    return !!(Attrs & uint32_t(PointerOptions::Restrict));
+  }
+
+  bool isLValueReferenceThisPtr() const {
+    return !!(Attrs & uint32_t(PointerOptions::LValueRefThisPointer));
+  }
+
+  bool isRValueReferenceThisPtr() const {
+    return !!(Attrs & uint32_t(PointerOptions::RValueRefThisPointer));
+  }
+
   TypeIndex ReferentType;
   uint32_t Attrs;
   Optional<MemberPointerInfo> MemberInfo;
+
+  void setAttrs(PointerKind PK, PointerMode PM, PointerOptions PO,
+                uint8_t Size) {
+    Attrs = calcAttrs(PK, PM, PO, Size);
+  }
 
 private:
   static uint32_t calcAttrs(PointerKind PK, PointerMode PM, PointerOptions PO,
@@ -418,6 +443,14 @@ public:
 
   bool isForwardRef() const {
     return (Options & ClassOptions::ForwardReference) != ClassOptions::None;
+  }
+
+  bool containsNestedClass() const {
+    return (Options & ClassOptions::ContainsNestedClass) != ClassOptions::None;
+  }
+
+  bool isScoped() const {
+    return (Options & ClassOptions::Scoped) != ClassOptions::None;
   }
 
   uint16_t getMemberCount() const { return MemberCount; }
@@ -646,7 +679,17 @@ public:
 
   ArrayRef<TypeIndex> getArgs() const { return ArgIndices; }
 
-  SmallVector<TypeIndex, 4> ArgIndices;
+  /// Indices of known build info arguments.
+  enum BuildInfoArg {
+    CurrentDirectory, ///< Absolute CWD path
+    BuildTool,        ///< Absolute compiler path
+    SourceFile,       ///< Path to main source file, relative or absolute
+    TypeServerPDB,    ///< Absolute path of type server PDB (/Fd)
+    CommandLine,      ///< Full canonical command line (maybe -cc1)
+    MaxArgs
+  };
+
+  SmallVector<TypeIndex, MaxArgs> ArgIndices;
 };
 
 // LF_VFTABLE
@@ -885,6 +928,34 @@ public:
   TypeIndex getContinuationIndex() const { return ContinuationIndex; }
 
   TypeIndex ContinuationIndex;
+};
+
+// LF_PRECOMP
+class PrecompRecord : public TypeRecord {
+public:
+  PrecompRecord() = default;
+  explicit PrecompRecord(TypeRecordKind Kind) : TypeRecord(Kind) {}
+
+  uint32_t getStartTypeIndex() const { return StartTypeIndex; }
+  uint32_t getTypesCount() const { return TypesCount; }
+  uint32_t getSignature() const { return Signature; }
+  StringRef getPrecompFilePath() const { return PrecompFilePath; }
+
+  uint32_t StartTypeIndex;
+  uint32_t TypesCount;
+  uint32_t Signature;
+  StringRef PrecompFilePath;
+};
+
+// LF_ENDPRECOMP
+class EndPrecompRecord : public TypeRecord {
+public:
+  EndPrecompRecord() = default;
+  explicit EndPrecompRecord(TypeRecordKind Kind) : TypeRecord(Kind) {}
+
+  uint32_t getSignature() const { return Signature; }
+
+  uint32_t Signature;
 };
 
 } // end namespace codeview

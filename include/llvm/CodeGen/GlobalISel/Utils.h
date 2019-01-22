@@ -1,9 +1,8 @@
 //==-- llvm/CodeGen/GlobalISel/Utils.h ---------------------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -19,8 +18,10 @@
 
 namespace llvm {
 
+class AnalysisUsage;
 class MachineFunction;
 class MachineInstr;
+class MachineOperand;
 class MachineOptimizationRemarkEmitter;
 class MachineOptimizationRemarkMissed;
 class MachineRegisterInfo;
@@ -32,6 +33,7 @@ class TargetRegisterInfo;
 class TargetRegisterClass;
 class Twine;
 class ConstantFP;
+class APFloat;
 
 /// Try to constrain Reg to the specified register class. If this fails,
 /// create a new virtual register in the correct class and insert a COPY before
@@ -57,8 +59,21 @@ unsigned constrainOperandRegClass(const MachineFunction &MF,
                                   const TargetInstrInfo &TII,
                                   const RegisterBankInfo &RBI,
                                   MachineInstr &InsertPt, const MCInstrDesc &II,
-                                  unsigned Reg, unsigned OpIdx);
+                                  const MachineOperand &RegMO, unsigned OpIdx);
 
+/// Mutate the newly-selected instruction \p I to constrain its (possibly
+/// generic) virtual register operands to the instruction's register class.
+/// This could involve inserting COPYs before (for uses) or after (for defs).
+/// This requires the number of operands to match the instruction description.
+/// \returns whether operand regclass constraining succeeded.
+///
+// FIXME: Not all instructions have the same number of operands. We should
+// probably expose a constrain helper per operand and let the target selector
+// constrain individual registers, like fast-isel.
+bool constrainSelectedInstRegOperands(MachineInstr &I,
+                                      const TargetInstrInfo &TII,
+                                      const TargetRegisterInfo &TRI,
+                                      const RegisterBankInfo &RBI);
 /// Check whether an instruction \p MI is dead: it only defines dead virtual
 /// registers, and doesn't have other side effects.
 bool isTriviallyDead(const MachineInstr &MI, const MachineRegisterInfo &MRI);
@@ -79,5 +94,21 @@ Optional<int64_t> getConstantVRegVal(unsigned VReg,
 const ConstantFP* getConstantFPVRegVal(unsigned VReg,
                                        const MachineRegisterInfo &MRI);
 
+/// See if Reg is defined by an single def instruction that is
+/// Opcode. Also try to do trivial folding if it's a COPY with
+/// same types. Returns null otherwise.
+MachineInstr *getOpcodeDef(unsigned Opcode, unsigned Reg,
+                           const MachineRegisterInfo &MRI);
+
+/// Returns an APFloat from Val converted to the appropriate size.
+APFloat getAPFloatFromSize(double Val, unsigned Size);
+
+/// Modify analysis usage so it preserves passes required for the SelectionDAG
+/// fallback.
+void getSelectionDAGFallbackAnalysisUsage(AnalysisUsage &AU);
+
+Optional<APInt> ConstantFoldBinOp(unsigned Opcode, const unsigned Op1,
+                                  const unsigned Op2,
+                                  const MachineRegisterInfo &MRI);
 } // End namespace llvm.
 #endif

@@ -1,9 +1,8 @@
 //===- llvm-pdbutil.h ----------------------------------------- *- C++ --*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -75,12 +74,18 @@ bool compareFunctionSymbols(
 bool compareDataSymbols(const std::unique_ptr<llvm::pdb::PDBSymbolData> &F1,
                         const std::unique_ptr<llvm::pdb::PDBSymbolData> &F2);
 
+extern llvm::cl::list<std::string> WithName;
+
 extern llvm::cl::opt<bool> Compilands;
 extern llvm::cl::opt<bool> Symbols;
 extern llvm::cl::opt<bool> Globals;
 extern llvm::cl::opt<bool> Classes;
 extern llvm::cl::opt<bool> Enums;
+extern llvm::cl::opt<bool> Funcsigs;
+extern llvm::cl::opt<bool> Arrays;
 extern llvm::cl::opt<bool> Typedefs;
+extern llvm::cl::opt<bool> Pointers;
+extern llvm::cl::opt<bool> VTShapes;
 extern llvm::cl::opt<bool> All;
 extern llvm::cl::opt<bool> ExcludeCompilerGenerated;
 
@@ -142,7 +147,9 @@ extern llvm::cl::opt<bool> DumpLines;
 extern llvm::cl::opt<bool> DumpInlineeLines;
 extern llvm::cl::opt<bool> DumpXmi;
 extern llvm::cl::opt<bool> DumpXme;
+extern llvm::cl::opt<bool> DumpNamedStreams;
 extern llvm::cl::opt<bool> DumpStringTable;
+extern llvm::cl::opt<bool> DumpStringTableDetails;
 extern llvm::cl::opt<bool> DumpTypes;
 extern llvm::cl::opt<bool> DumpTypeData;
 extern llvm::cl::opt<bool> DumpTypeExtras;
@@ -156,9 +163,12 @@ extern llvm::cl::opt<bool> DumpIdExtras;
 extern llvm::cl::list<uint32_t> DumpIdIndex;
 extern llvm::cl::opt<uint32_t> DumpModi;
 extern llvm::cl::opt<bool> JustMyCode;
+extern llvm::cl::opt<bool> DontResolveForwardRefs;
 extern llvm::cl::opt<bool> DumpSymbols;
 extern llvm::cl::opt<bool> DumpSymRecordBytes;
+extern llvm::cl::opt<bool> DumpGSIRecords;
 extern llvm::cl::opt<bool> DumpGlobals;
+extern llvm::cl::list<std::string> DumpGlobalNames;
 extern llvm::cl::opt<bool> DumpGlobalExtras;
 extern llvm::cl::opt<bool> DumpPublics;
 extern llvm::cl::opt<bool> DumpPublicExtras;
@@ -166,6 +176,7 @@ extern llvm::cl::opt<bool> DumpSectionContribs;
 extern llvm::cl::opt<bool> DumpSectionMap;
 extern llvm::cl::opt<bool> DumpModules;
 extern llvm::cl::opt<bool> DumpModuleFiles;
+extern llvm::cl::opt<bool> DumpFpo;
 extern llvm::cl::opt<bool> RawAll;
 }
 
@@ -180,6 +191,7 @@ extern llvm::cl::opt<bool> PdbStream;
 extern llvm::cl::opt<bool> DbiStream;
 extern llvm::cl::opt<bool> TpiStream;
 extern llvm::cl::opt<bool> IpiStream;
+extern llvm::cl::opt<bool> PublicsStream;
 extern llvm::cl::list<std::string> InputFilename;
 extern llvm::cl::opt<bool> DumpModules;
 extern llvm::cl::opt<bool> DumpModuleFiles;
@@ -187,13 +199,19 @@ extern llvm::cl::list<ModuleSubsection> DumpModuleSubsections;
 extern llvm::cl::opt<bool> DumpModuleSyms;
 } // namespace pdb2yaml
 
-namespace diff {
-extern llvm::cl::opt<bool> PrintValueColumns;
-extern llvm::cl::opt<bool> PrintResultColumn;
-extern llvm::DenseMap<uint32_t, uint32_t> Equivalences;
-extern llvm::cl::opt<std::string> LeftRoot;
-extern llvm::cl::opt<std::string> RightRoot;
-} // namespace diff
+namespace explain {
+enum class InputFileType { PDBFile, PDBStream, DBIStream, Names, ModuleStream };
+
+extern llvm::cl::list<std::string> InputFilename;
+extern llvm::cl::list<uint64_t> Offsets;
+extern llvm::cl::opt<InputFileType> InputType;
+} // namespace explain
+
+namespace exportstream {
+extern llvm::cl::opt<std::string> OutputFile;
+extern llvm::cl::opt<std::string> Stream;
+extern llvm::cl::opt<bool> ForceName;
+} // namespace exportstream
 }
 
 #endif

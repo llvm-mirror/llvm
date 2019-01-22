@@ -987,11 +987,11 @@ bb7:		; preds = %entry
 to:
 
 foo:                                    # @foo
-# BB#0:                                 # %entry
+# %bb.0:                                # %entry
 	movl	4(%esp), %ecx
 	cmpb	$0, 16(%esp)
 	je	.LBB0_2
-# BB#1:                                 # %bb
+# %bb.1:                                # %bb
 	movl	8(%esp), %eax
 	addl	%ecx, %eax
 	ret
@@ -1073,7 +1073,7 @@ declare void @exit(i32) noreturn nounwind
 
 This compiles into:
 _abort_gzip:                            ## @abort_gzip
-## BB#0:                                ## %entry
+## %bb.0:                               ## %entry
 	subl	$12, %esp
 	movb	_in_exit.4870.b, %al
 	cmpb	$1, %al
@@ -1396,7 +1396,7 @@ define i32 @bar(%struct.B* nocapture %a) nounwind readonly optsize {
 }
 
 bar:                                    # @bar
-# BB#0:
+# %bb.0:
         movb    (%rdi), %al
         andb    $1, %al
         movzbl  %al, %eax
@@ -1433,30 +1433,6 @@ GCC produces
 bar:
         movzbl  (%rdi), %eax
         ret
-
-//===---------------------------------------------------------------------===//
-
-Consider the following two functions compiled with clang:
-_Bool foo(int *x) { return !(*x & 4); }
-unsigned bar(int *x) { return !(*x & 4); }
-
-foo:
-	movl	4(%esp), %eax
-	testb	$4, (%eax)
-	sete	%al
-	movzbl	%al, %eax
-	ret
-
-bar:
-	movl	4(%esp), %eax
-	movl	(%eax), %eax
-	shrl	$2, %eax
-	andl	$1, %eax
-	xorl	$1, %eax
-	ret
-
-The second function generates more code even though the two functions are
-are functionally identical.
 
 //===---------------------------------------------------------------------===//
 
@@ -1633,7 +1609,7 @@ In the real code, we get a lot more wrong than this.  However, even in this
 code we generate:
 
 _foo:                                   ## @foo
-## BB#0:                                ## %entry
+## %bb.0:                               ## %entry
 	movb	(%rsi), %al
 	movb	(%rdi), %cl
 	cmpb	%al, %cl
@@ -1646,12 +1622,12 @@ LBB0_2:                                 ## %if.end
 	movb	1(%rdi), %cl
 	cmpb	%al, %cl
 	jne	LBB0_1
-## BB#3:                                ## %if.end38
+## %bb.3:                               ## %if.end38
 	movb	2(%rsi), %al
 	movb	2(%rdi), %cl
 	cmpb	%al, %cl
 	jne	LBB0_1
-## BB#4:                                ## %if.end60
+## %bb.4:                               ## %if.end60
 	movb	3(%rdi), %al
 	cmpb	3(%rsi), %al
 LBB0_5:                                 ## %if.end60

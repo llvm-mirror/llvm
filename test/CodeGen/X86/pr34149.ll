@@ -7,10 +7,8 @@ declare <4 x double> @llvm.maxnum.v4f64(<4 x double> %x, <4 x double> %y)
 
 define <4 x double> @via_minnum(<4 x double> %x, <4 x double> %y) {
 ; CHECK-LABEL: via_minnum:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vminpd %ymm0, %ymm1, %ymm2
-; CHECK-NEXT:    vcmpunordpd %ymm0, %ymm0, %ymm0
-; CHECK-NEXT:    vblendvpd %ymm0, %ymm1, %ymm2, %ymm0
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vminpd %ymm1, %ymm0, %ymm0
 ; CHECK-NEXT:    retq
   %z = call fast <4 x double> @llvm.minnum.v4f64(<4 x double> %x, <4 x double> %y) readnone
   ret <4 x double> %z
@@ -18,10 +16,8 @@ define <4 x double> @via_minnum(<4 x double> %x, <4 x double> %y) {
 
 define <4 x double> @via_maxnum(<4 x double> %x, <4 x double> %y) {
 ; CHECK-LABEL: via_maxnum:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vmaxpd %ymm0, %ymm1, %ymm2
-; CHECK-NEXT:    vcmpunordpd %ymm0, %ymm0, %ymm0
-; CHECK-NEXT:    vblendvpd %ymm0, %ymm1, %ymm2, %ymm0
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vmaxpd %ymm1, %ymm0, %ymm0
 ; CHECK-NEXT:    retq
   %z = call fast <4 x double> @llvm.maxnum.v4f64(<4 x double> %x, <4 x double> %y) readnone
   ret <4 x double> %z
@@ -29,7 +25,7 @@ define <4 x double> @via_maxnum(<4 x double> %x, <4 x double> %y) {
 
 define <4 x double> @via_fcmp(<4 x double> %x, <4 x double> %y) {
 ; CHECK-LABEL: via_fcmp:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vminpd %ymm0, %ymm1, %ymm0
 ; CHECK-NEXT:    retq
   %c = fcmp ule <4 x double> %x, %y

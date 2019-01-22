@@ -1,9 +1,8 @@
 //===- llvm/ADT/DenseMapInfo.h - Type traits for DenseMap -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -260,6 +259,13 @@ template <typename T> struct DenseMapInfo<ArrayRef<T>> {
       return LHS.data() == getTombstoneKey().data();
     return LHS == RHS;
   }
+};
+
+template <> struct DenseMapInfo<hash_code> {
+  static inline hash_code getEmptyKey() { return hash_code(-1); }
+  static inline hash_code getTombstoneKey() { return hash_code(-2); }
+  static unsigned getHashValue(hash_code val) { return val; }
+  static bool isEqual(hash_code LHS, hash_code RHS) { return LHS == RHS; }
 };
 
 } // end namespace llvm

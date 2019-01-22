@@ -1,9 +1,8 @@
 //===- MIRYAMLMapping.h - Describes the mapping between MIR and YAML ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,7 +55,7 @@ template <> struct ScalarTraits<StringValue> {
     return "";
   }
 
-  static bool mustQuote(StringRef Scalar) { return needsQuotes(Scalar); }
+  static QuotingType mustQuote(StringRef S) { return needsQuotes(S); }
 };
 
 struct FlowStringValue : StringValue {
@@ -73,7 +72,7 @@ template <> struct ScalarTraits<FlowStringValue> {
     return ScalarTraits<StringValue>::input(Scalar, Ctx, S);
   }
 
-  static bool mustQuote(StringRef Scalar) { return needsQuotes(Scalar); }
+  static QuotingType mustQuote(StringRef S) { return needsQuotes(S); }
 };
 
 struct BlockStringValue {
@@ -120,7 +119,7 @@ template <> struct ScalarTraits<UnsignedValue> {
     return ScalarTraits<unsigned>::input(Scalar, Ctx, Value.Value);
   }
 
-  static bool mustQuote(StringRef Scalar) {
+  static QuotingType mustQuote(StringRef Scalar) {
     return ScalarTraits<unsigned>::mustQuote(Scalar);
   }
 };
@@ -258,11 +257,11 @@ template <> struct MappingTraits<MachineStackObject> {
     YamlIO.mapOptional("callee-saved-restored", Object.CalleeSavedRestored,
                        true);
     YamlIO.mapOptional("local-offset", Object.LocalOffset, Optional<int64_t>());
-    YamlIO.mapOptional("di-variable", Object.DebugVar,
+    YamlIO.mapOptional("debug-info-variable", Object.DebugVar,
                        StringValue()); // Don't print it out when it's empty.
-    YamlIO.mapOptional("di-expression", Object.DebugExpr,
+    YamlIO.mapOptional("debug-info-expression", Object.DebugExpr,
                        StringValue()); // Don't print it out when it's empty.
-    YamlIO.mapOptional("di-location", Object.DebugLoc,
+    YamlIO.mapOptional("debug-info-location", Object.DebugLoc,
                        StringValue()); // Don't print it out when it's empty.
   }
 
@@ -283,6 +282,9 @@ struct FixedMachineStackObject {
   bool IsAliased = false;
   StringValue CalleeSavedRegister;
   bool CalleeSavedRestored = true;
+  StringValue DebugVar;
+  StringValue DebugExpr;
+  StringValue DebugLoc;
 
   bool operator==(const FixedMachineStackObject &Other) const {
     return ID == Other.ID && Type == Other.Type && Offset == Other.Offset &&
@@ -290,7 +292,9 @@ struct FixedMachineStackObject {
            StackID == Other.StackID &&
            IsImmutable == Other.IsImmutable && IsAliased == Other.IsAliased &&
            CalleeSavedRegister == Other.CalleeSavedRegister &&
-           CalleeSavedRestored == Other.CalleeSavedRestored;
+           CalleeSavedRestored == Other.CalleeSavedRestored &&
+           DebugVar == Other.DebugVar && DebugExpr == Other.DebugExpr
+           && DebugLoc == Other.DebugLoc;
   }
 };
 
@@ -321,6 +325,12 @@ template <> struct MappingTraits<FixedMachineStackObject> {
                        StringValue()); // Don't print it out when it's empty.
     YamlIO.mapOptional("callee-saved-restored", Object.CalleeSavedRestored,
                      true);
+    YamlIO.mapOptional("debug-info-variable", Object.DebugVar,
+                       StringValue()); // Don't print it out when it's empty.
+    YamlIO.mapOptional("debug-info-expression", Object.DebugExpr,
+                       StringValue()); // Don't print it out when it's empty.
+    YamlIO.mapOptional("debug-info-location", Object.DebugLoc,
+                       StringValue()); // Don't print it out when it's empty.
   }
 
   static const bool flow = true;
@@ -414,9 +424,11 @@ struct MachineFrameInfo {
   StringValue StackProtector;
   // TODO: Serialize FunctionContextIdx
   unsigned MaxCallFrameSize = ~0u; ///< ~0u means: not computed yet.
+  unsigned CVBytesOfCalleeSavedRegisters = 0;
   bool HasOpaqueSPAdjustment = false;
   bool HasVAStart = false;
   bool HasMustTailInVarArgFunc = false;
+  unsigned LocalFrameSize = 0;
   StringValue SavePoint;
   StringValue RestorePoint;
 
@@ -431,9 +443,12 @@ struct MachineFrameInfo {
            AdjustsStack == Other.AdjustsStack && HasCalls == Other.HasCalls &&
            StackProtector == Other.StackProtector &&
            MaxCallFrameSize == Other.MaxCallFrameSize &&
+           CVBytesOfCalleeSavedRegisters ==
+               Other.CVBytesOfCalleeSavedRegisters &&
            HasOpaqueSPAdjustment == Other.HasOpaqueSPAdjustment &&
            HasVAStart == Other.HasVAStart &&
            HasMustTailInVarArgFunc == Other.HasMustTailInVarArgFunc &&
+           LocalFrameSize == Other.LocalFrameSize &&
            SavePoint == Other.SavePoint && RestorePoint == Other.RestorePoint;
   }
 };
@@ -452,11 +467,14 @@ template <> struct MappingTraits<MachineFrameInfo> {
     YamlIO.mapOptional("stackProtector", MFI.StackProtector,
                        StringValue()); // Don't print it out when it's empty.
     YamlIO.mapOptional("maxCallFrameSize", MFI.MaxCallFrameSize, (unsigned)~0);
+    YamlIO.mapOptional("cvBytesOfCalleeSavedRegisters",
+                       MFI.CVBytesOfCalleeSavedRegisters, 0U);
     YamlIO.mapOptional("hasOpaqueSPAdjustment", MFI.HasOpaqueSPAdjustment,
                        false);
     YamlIO.mapOptional("hasVAStart", MFI.HasVAStart, false);
     YamlIO.mapOptional("hasMustTailInVarArgFunc", MFI.HasMustTailInVarArgFunc,
                        false);
+    YamlIO.mapOptional("localFrameSize", MFI.LocalFrameSize, (unsigned)0);
     YamlIO.mapOptional("savePoint", MFI.SavePoint,
                        StringValue()); // Don't print it out when it's empty.
     YamlIO.mapOptional("restorePoint", MFI.RestorePoint,
@@ -472,8 +490,10 @@ struct MachineFunction {
   bool Legalized = false;
   bool RegBankSelected = false;
   bool Selected = false;
+  bool FailedISel = false;
   // Register information
   bool TracksRegLiveness = false;
+  bool HasWinCFI = false;
   std::vector<VirtualRegisterDefinition> VirtualRegisters;
   std::vector<MachineFunctionLiveIn> LiveIns;
   Optional<std::vector<FlowStringValue>> CalleeSavedRegisters;
@@ -495,7 +515,9 @@ template <> struct MappingTraits<MachineFunction> {
     YamlIO.mapOptional("legalized", MF.Legalized, false);
     YamlIO.mapOptional("regBankSelected", MF.RegBankSelected, false);
     YamlIO.mapOptional("selected", MF.Selected, false);
+    YamlIO.mapOptional("failedISel", MF.FailedISel, false);
     YamlIO.mapOptional("tracksRegLiveness", MF.TracksRegLiveness, false);
+    YamlIO.mapOptional("hasWinCFI", MF.HasWinCFI, false);
     YamlIO.mapOptional("registers", MF.VirtualRegisters,
                        std::vector<VirtualRegisterDefinition>());
     YamlIO.mapOptional("liveins", MF.LiveIns,

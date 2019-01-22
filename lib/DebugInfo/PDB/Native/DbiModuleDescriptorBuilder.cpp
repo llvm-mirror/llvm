@@ -1,9 +1,8 @@
 //===- DbiModuleDescriptorBuilder.cpp - PDB Mod Info Creation ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,7 +18,6 @@
 #include "llvm/DebugInfo/PDB/Native/GSIStreamBuilder.h"
 #include "llvm/DebugInfo/PDB/Native/RawConstants.h"
 #include "llvm/DebugInfo/PDB/Native/RawError.h"
-#include "llvm/Support/BinaryItemStream.h"
 #include "llvm/Support/BinaryStreamWriter.h"
 
 using namespace llvm;
@@ -60,13 +58,28 @@ void DbiModuleDescriptorBuilder::setPdbFilePathNI(uint32_t NI) {
   PdbFilePathNI = NI;
 }
 
+void DbiModuleDescriptorBuilder::setFirstSectionContrib(
+    const SectionContrib &SC) {
+  Layout.SC = SC;
+}
+
 void DbiModuleDescriptorBuilder::addSymbol(CVSymbol Symbol) {
-  Symbols.push_back(Symbol);
-  // Symbols written to a PDB file are required to be 4 byte aligned.  The same
+  // Defer to the bulk API. It does the same thing.
+  addSymbolsInBulk(Symbol.data());
+}
+
+void DbiModuleDescriptorBuilder::addSymbolsInBulk(
+    ArrayRef<uint8_t> BulkSymbols) {
+  // Do nothing for empty runs of symbols.
+  if (BulkSymbols.empty())
+    return;
+
+  Symbols.push_back(BulkSymbols);
+  // Symbols written to a PDB file are required to be 4 byte aligned. The same
   // is not true of object files.
-  assert(Symbol.length() % alignOf(CodeViewContainer::Pdb) == 0 &&
+  assert(BulkSymbols.size() % alignOf(CodeViewContainer::Pdb) == 0 &&
          "Invalid Symbol alignment!");
-  SymbolByteSize += Symbol.length();
+  SymbolByteSize += BulkSymbols.size();
 }
 
 void DbiModuleDescriptorBuilder::addSourceFile(StringRef Path) {
@@ -90,7 +103,7 @@ uint32_t DbiModuleDescriptorBuilder::calculateSerializedLength() const {
 }
 
 void DbiModuleDescriptorBuilder::finalize() {
-  Layout.SC.ModuleIndex = Layout.Mod;
+  Layout.SC.Imod = Layout.Mod;
   Layout.FileNameOffs = 0; // TODO: Fix this
   Layout.Flags = 0;        // TODO: Fix this
   Layout.C11Bytes = 0;
@@ -140,16 +153,13 @@ Error DbiModuleDescriptorBuilder::commit(BinaryStreamWriter &ModiWriter,
     if (auto EC =
             SymbolWriter.writeInteger<uint32_t>(COFF::DEBUG_SECTION_MAGIC))
       return EC;
-    BinaryItemStream<CVSymbol> Records(llvm::support::endianness::little);
-    Records.setItems(Symbols);
-    BinaryStreamRef RecordsRef(Records);
-    if (auto EC = SymbolWriter.writeStreamRef(RecordsRef))
-      return EC;
-    if (auto EC = SymbolWriter.padToAlignment(4))
-      return EC;
-    // TODO: Write C11 Line data
+    for (ArrayRef<uint8_t> Syms : Symbols) {
+      if (auto EC = SymbolWriter.writeBytes(Syms))
+        return EC;
+    }
     assert(SymbolWriter.getOffset() % alignOf(CodeViewContainer::Pdb) == 0 &&
            "Invalid debug section alignment!");
+    // TODO: Write C11 Line data
     for (const auto &Builder : C13Builders) {
       assert(Builder && "Empty C13 Fragment Builder!");
       if (auto EC = Builder->commit(SymbolWriter))

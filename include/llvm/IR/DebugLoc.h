@@ -1,9 +1,8 @@
 //===- DebugLoc.h - Debug Location Information ------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,7 +23,7 @@ namespace llvm {
   class raw_ostream;
   class DILocation;
 
-  /// \brief A debug info location.
+  /// A debug info location.
   ///
   /// This class is a wrapper around a tracking reference to an \a DILocation
   /// pointer.
@@ -37,10 +36,10 @@ namespace llvm {
   public:
     DebugLoc() = default;
 
-    /// \brief Construct from an \a DILocation.
+    /// Construct from an \a DILocation.
     DebugLoc(const DILocation *L);
 
-    /// \brief Construct from an \a MDNode.
+    /// Construct from an \a MDNode.
     ///
     /// Note: if \c N is not an \a DILocation, a verifier check will fail, and
     /// accessors will crash.  However, construction from other nodes is
@@ -48,7 +47,7 @@ namespace llvm {
     /// IR.
     explicit DebugLoc(const MDNode *N);
 
-    /// \brief Get the underlying \a DILocation.
+    /// Get the underlying \a DILocation.
     ///
     /// \pre !*this or \c isa<DILocation>(getAsMDNode()).
     /// @{
@@ -58,7 +57,7 @@ namespace llvm {
     DILocation &operator*() const { return *get(); }
     /// @}
 
-    /// \brief Check for null.
+    /// Check for null.
     ///
     /// Check for null in a way that is safe with broken debug info.  Unlike
     /// the conversion to \c DILocation, this doesn't require that \c Loc is of
@@ -66,10 +65,10 @@ namespace llvm {
     /// \a Instruction::hasMetadata().
     explicit operator bool() const { return Loc; }
 
-    /// \brief Check whether this has a trivial destructor.
+    /// Check whether this has a trivial destructor.
     bool hasTrivialDestructor() const { return Loc.hasTrivialDestructor(); }
 
-    /// \brief Create a new DebugLoc.
+    /// Create a new DebugLoc.
     ///
     /// Create a new DebugLoc at the specified line/col and scope/inline.  This
     /// forwards to \a DILocation::get().
@@ -78,7 +77,8 @@ namespace llvm {
     ///
     /// FIXME: Remove this.  Users should use DILocation::get().
     static DebugLoc get(unsigned Line, unsigned Col, const MDNode *Scope,
-                        const MDNode *InlinedAt = nullptr);
+                        const MDNode *InlinedAt = nullptr,
+                        bool ImplicitCode = false);
 
     enum { ReplaceLastInlinedAt = true };
     /// Rebuild the entire inlined-at chain for this instruction so that the top of
@@ -95,12 +95,12 @@ namespace llvm {
     MDNode *getScope() const;
     DILocation *getInlinedAt() const;
 
-    /// \brief Get the fully inlined-at scope for a DebugLoc.
+    /// Get the fully inlined-at scope for a DebugLoc.
     ///
     /// Gets the inlined-at scope for a DebugLoc.
     MDNode *getInlinedAtScope() const;
 
-    /// \brief Find the debug info location for the start of the function.
+    /// Find the debug info location for the start of the function.
     ///
     /// Walk up the scope chain of given debug loc and find line number info
     /// for the function.
@@ -109,15 +109,19 @@ namespace llvm {
     /// find the subprogram, and then DILocation::get().
     DebugLoc getFnDebugLoc() const;
 
-    /// \brief Return \c this as a bar \a MDNode.
+    /// Return \c this as a bar \a MDNode.
     MDNode *getAsMDNode() const { return Loc; }
+
+    /// Check if the DebugLoc corresponds to an implicit code.
+    bool isImplicitCode() const;
+    void setImplicitCode(bool ImplicitCode);
 
     bool operator==(const DebugLoc &DL) const { return Loc == DL.Loc; }
     bool operator!=(const DebugLoc &DL) const { return Loc != DL.Loc; }
 
     void dump() const;
 
-    /// \brief prints source location /path/to/file.exe:line:col @[inlined at]
+    /// prints source location /path/to/file.exe:line:col @[inlined at]
     void print(raw_ostream &OS) const;
   };
 

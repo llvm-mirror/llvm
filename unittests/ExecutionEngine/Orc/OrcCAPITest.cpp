@@ -1,9 +1,8 @@
 //===--------------- OrcCAPITest.cpp - Unit tests Orc C API ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -27,8 +26,15 @@ class OrcCAPIExecutionTest : public testing::Test, public OrcExecutionTest {
 protected:
   std::unique_ptr<Module> createTestModule(const Triple &TT) {
     ModuleBuilder MB(Context, TT.str(), "");
-    Function *TestFunc = MB.createFunctionDecl<int()>("testFunc");
-    Function *Main = MB.createFunctionDecl<int(int, char*[])>("main");
+    Type *IntTy = Type::getScalarTy<int>(Context);
+    Function *TestFunc =
+        MB.createFunctionDecl(FunctionType::get(IntTy, {}, false), "testFunc");
+    Function *Main = MB.createFunctionDecl(
+        FunctionType::get(
+            IntTy,
+            {IntTy, Type::getInt8PtrTy(Context)->getPointerTo()},
+            false),
+        "main");
 
     Main->getBasicBlockList().push_back(BasicBlock::Create(Context));
     IRBuilder<> B(&Main->back());
@@ -38,13 +44,11 @@ protected:
     return MB.takeModule();
   }
 
-  std::shared_ptr<object::OwningBinary<object::ObjectFile>>
-  createTestObject() {
+  std::unique_ptr<MemoryBuffer> createTestObject() {
     orc::SimpleCompiler IRCompiler(*TM);
     auto M = createTestModule(TM->getTargetTriple());
     M->setDataLayout(TM->createDataLayout());
-    return std::make_shared<object::OwningBinary<object::ObjectFile>>(
-      IRCompiler(*M));
+    return IRCompiler(*M);
   }
 
   typedef int (*MainFnTy)();
@@ -75,9 +79,8 @@ protected:
     CompileContext *CCtx = static_cast<CompileContext*>(Ctx);
     auto *ET = CCtx->APIExecTest;
     CCtx->M = ET->createTestModule(ET->TM->getTargetTriple());
-    LLVMSharedModuleRef SM = LLVMOrcMakeSharedModule(wrap(CCtx->M.release()));
-    LLVMOrcAddEagerlyCompiledIR(JITStack, &CCtx->H, SM, myResolver, nullptr);
-    LLVMOrcDisposeSharedModuleRef(SM);
+    LLVMOrcAddEagerlyCompiledIR(JITStack, &CCtx->H, wrap(CCtx->M.release()),
+                                myResolver, nullptr);
     CCtx->Compiled = true;
     LLVMOrcTargetAddress MainAddr;
     LLVMOrcGetSymbolAddress(JITStack, &MainAddr, "main");
@@ -89,7 +92,7 @@ protected:
 char *OrcCAPIExecutionTest::testFuncName = nullptr;
 
 TEST_F(OrcCAPIExecutionTest, TestEagerIRCompilation) {
-  if (!TM)
+  if (!SupportsJIT)
     return;
 
   LLVMOrcJITStackRef JIT =
@@ -99,16 +102,28 @@ TEST_F(OrcCAPIExecutionTest, TestEagerIRCompilation) {
 
   LLVMOrcGetMangledSymbol(JIT, &testFuncName, "testFunc");
 
-  LLVMSharedModuleRef SM = LLVMOrcMakeSharedModule(wrap(M.release()));
   LLVMOrcModuleHandle H;
-  LLVMOrcAddEagerlyCompiledIR(JIT, &H, SM, myResolver, nullptr);
-  LLVMOrcDisposeSharedModuleRef(SM);
-  LLVMOrcTargetAddress MainAddr;
-  LLVMOrcGetSymbolAddress(JIT, &MainAddr, "main");
-  MainFnTy MainFn = (MainFnTy)MainAddr;
-  int Result = MainFn();
-  EXPECT_EQ(Result, 42)
-    << "Eagerly JIT'd code did not return expected result";
+  LLVMOrcAddEagerlyCompiledIR(JIT, &H, wrap(M.release()), myResolver, nullptr);
+
+  // get symbol address searching the entire stack
+  {
+    LLVMOrcTargetAddress MainAddr;
+    LLVMOrcGetSymbolAddress(JIT, &MainAddr, "main");
+    MainFnTy MainFn = (MainFnTy)MainAddr;
+    int Result = MainFn();
+    EXPECT_EQ(Result, 42)
+      << "Eagerly JIT'd code did not return expected result";
+  }
+
+  // and then just searching a single handle
+  {
+    LLVMOrcTargetAddress MainAddr;
+    LLVMOrcGetSymbolAddressIn(JIT, &MainAddr, H, "main");
+    MainFnTy MainFn = (MainFnTy)MainAddr;
+    int Result = MainFn();
+    EXPECT_EQ(Result, 42)
+      << "Eagerly JIT'd code did not return expected result";
+  }
 
   LLVMOrcRemoveModule(JIT, H);
 
@@ -117,7 +132,7 @@ TEST_F(OrcCAPIExecutionTest, TestEagerIRCompilation) {
 }
 
 TEST_F(OrcCAPIExecutionTest, TestLazyIRCompilation) {
-  if (!TM)
+  if (!SupportsIndirection)
     return;
 
   LLVMOrcJITStackRef JIT =
@@ -127,10 +142,8 @@ TEST_F(OrcCAPIExecutionTest, TestLazyIRCompilation) {
 
   LLVMOrcGetMangledSymbol(JIT, &testFuncName, "testFunc");
 
-  LLVMSharedModuleRef SM = LLVMOrcMakeSharedModule(wrap(M.release()));
   LLVMOrcModuleHandle H;
-  LLVMOrcAddLazilyCompiledIR(JIT, &H, SM, myResolver, nullptr);
-  LLVMOrcDisposeSharedModuleRef(SM);
+  LLVMOrcAddLazilyCompiledIR(JIT, &H, wrap(M.release()), myResolver, nullptr);
   LLVMOrcTargetAddress MainAddr;
   LLVMOrcGetSymbolAddress(JIT, &MainAddr, "main");
   MainFnTy MainFn = (MainFnTy)MainAddr;
@@ -145,15 +158,10 @@ TEST_F(OrcCAPIExecutionTest, TestLazyIRCompilation) {
 }
 
 TEST_F(OrcCAPIExecutionTest, TestAddObjectFile) {
-  if (!TM)
+  if (!SupportsJIT)
     return;
 
-  std::unique_ptr<MemoryBuffer> ObjBuffer;
-  {
-    auto OwningObj = createTestObject();
-    auto ObjAndBuffer = OwningObj->takeBinary();
-    ObjBuffer = std::move(ObjAndBuffer.second);
-  }
+  auto ObjBuffer = createTestObject();
 
   LLVMOrcJITStackRef JIT =
     LLVMOrcCreateInstance(wrap(TM.get()));
@@ -175,7 +183,7 @@ TEST_F(OrcCAPIExecutionTest, TestAddObjectFile) {
 }
 
 TEST_F(OrcCAPIExecutionTest, TestDirectCallbacksAPI) {
-  if (!TM)
+  if (!SupportsIndirection)
     return;
 
   LLVMOrcJITStackRef JIT =

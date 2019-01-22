@@ -1,9 +1,9 @@
 /*===-- llvm-c/lto.h - LTO Public C Interface ---------------------*- C -*-===*\
 |*                                                                            *|
-|*                     The LLVM Compiler Infrastructure                       *|
-|*                                                                            *|
-|* This file is distributed under the University of Illinois Open Source      *|
-|* License. See LICENSE.TXT for details.                                      *|
+|* Part of the LLVM Project, under the Apache License v2.0 with LLVM          *|
+|* Exceptions.                                                                *|
+|* See https://llvm.org/LICENSE.txt for license information.                  *|
+|* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception                    *|
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
@@ -44,7 +44,7 @@ typedef bool lto_bool_t;
  * @{
  */
 
-#define LTO_API_VERSION 21
+#define LTO_API_VERSION 23
 
 /**
  * \since prior to LTO_API_VERSION=3
@@ -190,7 +190,7 @@ lto_module_create_from_memory_with_path(const void* mem, size_t length,
                                         const char *path);
 
 /**
- * \brief Loads an object file in its own context.
+ * Loads an object file in its own context.
  *
  * Loads an object file in its own LLVMContext.  This function call is
  * thread-safe.  However, modules created this way should not be merged into an
@@ -205,7 +205,7 @@ lto_module_create_in_local_context(const void *mem, size_t length,
                                    const char *path);
 
 /**
- * \brief Loads an object file in the codegen context.
+ * Loads an object file in the codegen context.
  *
  * Loads an object file into the same context as \c cg.  The module is safe to
  * add using \a lto_codegen_add_module().
@@ -345,7 +345,7 @@ extern lto_code_gen_t
 lto_codegen_create(void);
 
 /**
- * \brief Instantiate a code generator in its own context.
+ * Instantiate a code generator in its own context.
  *
  * Instantiates a code generator in its own context.  Modules added via \a
  * lto_codegen_add_module() must have all been created in the same context,
@@ -539,7 +539,7 @@ lto_codegen_set_should_internalize(lto_code_gen_t cg,
                                    lto_bool_t ShouldInternalize);
 
 /**
- * \brief Set whether to embed uselists in bitcode.
+ * Set whether to embed uselists in bitcode.
  *
  * Sets whether \a lto_codegen_write_merged_modules() should embed uselists in
  * output bitcode.  This should be turned on for all -save-temps output.
@@ -757,17 +757,17 @@ extern void thinlto_codegen_add_cross_referenced_symbol(thinlto_code_gen_t cg,
  * @ingroup LLVMCTLTO
  *
  * These entry points control the ThinLTO cache. The cache is intended to
- * support incremental build, and thus needs to be persistent accross build.
- * The client enabled the cache by supplying a path to an existing directory.
+ * support incremental builds, and thus needs to be persistent across builds.
+ * The client enables the cache by supplying a path to an existing directory.
  * The code generator will use this to store objects files that may be reused
  * during a subsequent build.
  * To avoid filling the disk space, a few knobs are provided:
- *  - The pruning interval limit the frequency at which the garbage collector
- *    will try to scan the cache directory to prune it from expired entries.
- *    Setting to -1 disable the pruning (default).
+ *  - The pruning interval limits the frequency at which the garbage collector
+ *    will try to scan the cache directory to prune expired entries.
+ *    Setting to a negative number disables the pruning.
  *  - The pruning expiration time indicates to the garbage collector how old an
  *    entry needs to be to be removed.
- *  - Finally, the garbage collector can be instructed to prune the cache till
+ *  - Finally, the garbage collector can be instructed to prune the cache until
  *    the occupied space goes below a threshold.
  * @{
  */
@@ -782,9 +782,9 @@ extern void thinlto_codegen_set_cache_dir(thinlto_code_gen_t cg,
                                           const char *cache_dir);
 
 /**
- * Sets the cache pruning interval (in seconds). A negative value disable the
+ * Sets the cache pruning interval (in seconds). A negative value disables the
  * pruning. An unspecified default value will be applied, and a value of 0 will
- * be ignored.
+ * force prunning to occur.
  *
  * \since LTO_API_VERSION=18
  */
@@ -793,7 +793,7 @@ extern void thinlto_codegen_set_cache_pruning_interval(thinlto_code_gen_t cg,
 
 /**
  * Sets the maximum cache size that can be persistent across build, in terms of
- * percentage of the available space on the the disk. Set to 100 to indicate
+ * percentage of the available space on the disk. Set to 100 to indicate
  * no limit, 50 to indicate that the cache size will not be left over half the
  * available space. A value over 100 will be reduced to 100, a value of 0 will
  * be ignored. An unspecified default value will be applied.
@@ -815,6 +815,38 @@ extern void thinlto_codegen_set_final_cache_size_relative_to_available_space(
  */
 extern void thinlto_codegen_set_cache_entry_expiration(thinlto_code_gen_t cg,
                                                        unsigned expiration);
+
+/**
+ * Sets the maximum size of the cache directory (in bytes). A value over the
+ * amount of available space on the disk will be reduced to the amount of
+ * available space. An unspecified default value will be applied. A value of 0
+ * will be ignored.
+ *
+ * \since LTO_API_VERSION=22
+ */
+extern void thinlto_codegen_set_cache_size_bytes(thinlto_code_gen_t cg,
+                                                 unsigned max_size_bytes);
+
+/**
+ * Same as thinlto_codegen_set_cache_size_bytes, except the maximum size is in
+ * megabytes (2^20 bytes).
+ *
+ * \since LTO_API_VERSION=23
+ */
+extern void
+thinlto_codegen_set_cache_size_megabytes(thinlto_code_gen_t cg,
+                                         unsigned max_size_megabytes);
+
+/**
+ * Sets the maximum number of files in the cache directory. An unspecified
+ * default value will be applied. A value of 0 will be ignored.
+ *
+ * \since LTO_API_VERSION=22
+ */
+extern void thinlto_codegen_set_cache_size_files(thinlto_code_gen_t cg,
+                                                 unsigned max_size_files);
+
+
 
 /**
  * @} // endgroup LLVMCTLTO_CACHING

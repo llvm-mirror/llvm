@@ -1,19 +1,18 @@
 //===------ utils/obj2yaml.cpp - obj2yaml conversion tool -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "obj2yaml.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/DebugInfo/CodeView/DebugChecksumsSubsection.h"
 #include "llvm/DebugInfo/CodeView/DebugStringTableSubsection.h"
 #include "llvm/DebugInfo/CodeView/StringsAndChecksums.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/ObjectYAML/COFFYAML.h"
-#include "llvm/ObjectYAML/CodeViewYAMLSymbols.h"
 #include "llvm/ObjectYAML/CodeViewYAMLTypes.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/YAMLTraits.h"
@@ -143,12 +142,24 @@ void COFFDumper::dumpSections(unsigned NumSections) {
   codeview::StringsAndChecksumsRef SC;
   initializeFileAndStringTable(Obj, SC);
 
+  StringMap<bool> SymbolUnique;
+  for (const auto &S : Obj.symbols()) {
+    object::COFFSymbolRef Symbol = Obj.getCOFFSymbol(S);
+    StringRef Name;
+    Obj.getSymbolName(Symbol, Name);
+    StringMap<bool>::iterator It;
+    bool Inserted;
+    std::tie(It, Inserted) = SymbolUnique.insert(std::make_pair(Name, true));
+    if (!Inserted)
+      It->second = false;
+  }
+
   for (const auto &ObjSection : Obj.sections()) {
     const object::coff_section *COFFSection = Obj.getCOFFSection(ObjSection);
     COFFYAML::Section NewYAMLSection;
     ObjSection.getName(NewYAMLSection.Name);
     NewYAMLSection.Header.Characteristics = COFFSection->Characteristics;
-    NewYAMLSection.Header.VirtualAddress = ObjSection.getAddress();
+    NewYAMLSection.Header.VirtualAddress = COFFSection->VirtualAddress;
     NewYAMLSection.Header.VirtualSize = COFFSection->VirtualSize;
     NewYAMLSection.Header.NumberOfLineNumbers =
         COFFSection->NumberOfLinenumbers;
@@ -160,7 +171,8 @@ void COFFDumper::dumpSections(unsigned NumSections) {
     NewYAMLSection.Header.PointerToRelocations =
         COFFSection->PointerToRelocations;
     NewYAMLSection.Header.SizeOfRawData = COFFSection->SizeOfRawData;
-    NewYAMLSection.Alignment = ObjSection.getAlignment();
+    uint32_t Shift = (COFFSection->Characteristics >> 20) & 0xF;
+    NewYAMLSection.Alignment = (1U << Shift) >> 1;
     assert(NewYAMLSection.Alignment <= 8192);
 
     ArrayRef<uint8_t> sectionData;
@@ -171,7 +183,13 @@ void COFFDumper::dumpSections(unsigned NumSections) {
     if (NewYAMLSection.Name == ".debug$S")
       NewYAMLSection.DebugS = CodeViewYAML::fromDebugS(sectionData, SC);
     else if (NewYAMLSection.Name == ".debug$T")
-      NewYAMLSection.DebugT = CodeViewYAML::fromDebugT(sectionData);
+      NewYAMLSection.DebugT = CodeViewYAML::fromDebugT(sectionData,
+                                                       NewYAMLSection.Name);
+    else if (NewYAMLSection.Name == ".debug$P")
+      NewYAMLSection.DebugP = CodeViewYAML::fromDebugT(sectionData,
+                                                       NewYAMLSection.Name);
+    else if (NewYAMLSection.Name == ".debug$H")
+      NewYAMLSection.DebugH = CodeViewYAML::fromDebugH(sectionData);
 
     std::vector<COFFYAML::Relocation> Relocations;
     for (const auto &Reloc : ObjSection.relocations()) {
@@ -182,11 +200,14 @@ void COFFDumper::dumpSections(unsigned NumSections) {
       if (!SymbolNameOrErr) {
        std::string Buf;
        raw_string_ostream OS(Buf);
-       logAllUnhandledErrors(SymbolNameOrErr.takeError(), OS, "");
+       logAllUnhandledErrors(SymbolNameOrErr.takeError(), OS);
        OS.flush();
        report_fatal_error(Buf);
       }
-      Rel.SymbolName = *SymbolNameOrErr;
+      if (SymbolUnique.lookup(*SymbolNameOrErr))
+        Rel.SymbolName = *SymbolNameOrErr;
+      else
+        Rel.SymbolTableIndex = reloc->SymbolTableIndex;
       Rel.VirtualAddress = reloc->VirtualAddress;
       Rel.Type = reloc->Type;
       Relocations.push_back(Rel);

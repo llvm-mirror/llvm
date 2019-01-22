@@ -1,9 +1,8 @@
 //===-- AArch64BaseInfo.cpp - AArch64 Base encoding information------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -53,9 +52,45 @@ namespace llvm {
 #include "AArch64GenSystemOperands.inc"
   }
 }
+
+namespace llvm {
+  namespace AArch64TSB {
+#define GET_TSB_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
+namespace llvm {
+  namespace AArch64PRCTX {
+#define GET_PRCTX_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
 namespace llvm {
   namespace AArch64PRFM {
 #define GET_PRFM_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
+namespace llvm {
+  namespace AArch64SVEPRFM {
+#define GET_SVEPRFM_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
+namespace llvm {
+  namespace AArch64SVEPredPattern {
+#define GET_SVEPREDPAT_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
+namespace llvm {
+  namespace AArch64ExactFPImm {
+#define GET_EXACTFPIMM_IMPL
 #include "AArch64GenSystemOperands.inc"
   }
 }
@@ -70,6 +105,13 @@ namespace llvm {
 namespace llvm {
   namespace AArch64PSBHint {
 #define GET_PSB_IMPL
+#include "AArch64GenSystemOperands.inc"
+  }
+}
+
+namespace llvm {
+  namespace AArch64BTIHint {
+#define GET_BTI_IMPL
 #include "AArch64GenSystemOperands.inc"
   }
 }

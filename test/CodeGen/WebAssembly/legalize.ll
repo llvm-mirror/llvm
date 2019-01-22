@@ -1,9 +1,9 @@
-; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -disable-wasm-explicit-locals | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -wasm-disable-explicit-locals -wasm-keep-registers | FileCheck %s
 
 ; Test various types and operators that need to be legalized.
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; CHECK-LABEL: shl_i3:
 ; CHECK: i32.const   $push0=, 7{{$}}
@@ -34,7 +34,7 @@ define i64 @sext_in_reg_i32_i64(i64 %a) {
 
 ; CHECK-LABEL: fpext_f32_f64:
 ; CHECK: f32.load $push0=, 0($0){{$}}
-; CHECK: f64.promote/f32 $push1=, $pop0{{$}}
+; CHECK: f64.promote_f32 $push1=, $pop0{{$}}
 ; CHECK: return $pop1{{$}}
 define double @fpext_f32_f64(float *%p) {
   %v = load float, float* %p
@@ -44,7 +44,7 @@ define double @fpext_f32_f64(float *%p) {
 
 ; CHECK-LABEL: fpconv_f64_f32:
 ; CHECK: f64.load $push0=, 0($0){{$}}
-; CHECK: f32.demote/f64 $push1=, $pop0{{$}}
+; CHECK: f32.demote_f64 $push1=, $pop0{{$}}
 ; CHECK: return $pop1{{$}}
 define float @fpconv_f64_f32(double *%p) {
   %v = load double, double* %p

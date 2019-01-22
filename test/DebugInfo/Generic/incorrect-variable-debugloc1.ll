@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 ; This test is failing for powerpc64, because a location list for the
-; variable 'c' is not generated at all. Temporary marking this test as XFAIL 
+; variable 'c' is not generated at all. Temporary marking this test as XFAIL
 ; for powerpc, until PR21881 is fixed.
 ; XFAIL: powerpc64
 
@@ -9,13 +9,14 @@
 ; RUN: %llc_dwarf -O2  -dwarf-version 4 -filetype=obj < %s | llvm-dwarfdump - | FileCheck %s  --check-prefix=DWARF4
 
 ; This is a test for PR21176.
-; DW_OP_const <const> doesn't describe a constant value, but a value at a constant address. 
+; DW_OP_const <const> doesn't describe a constant value, but a value at a constant address.
 ; The proper way to describe a constant value is DW_OP_constu <const>, DW_OP_stack_value.
+; For values < 32 we emit the canonical DW_OP_lit<const>.
 
 ; Generated with clang -S -emit-llvm -g -O2 test.cpp
 
 ; extern int func();
-; 
+;
 ; int main()
 ; {
 ;   volatile int c = 13;
@@ -26,8 +27,8 @@
 ; CHECK: DW_TAG_variable
 ; CHECK: DW_AT_location
 ; CHECK-NOT: DW_AT
-; DWARF23: DW_OP_constu 0xd{{$}}
-; DWARF4: DW_OP_constu 0xd, DW_OP_stack_value{{$}}
+; DWARF23: DW_OP_lit13{{$}}
+; DWARF4: DW_OP_lit13, DW_OP_stack_value{{$}}
 
 ; Function Attrs: uwtable
 define i32 @main() #0 !dbg !4 {
@@ -59,7 +60,7 @@ attributes #2 = { nounwind readnone }
 !0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.6.0 (trunk 223522)", isOptimized: true, emissionKind: FullDebug, file: !1, enums: !2, retainedTypes: !2, globals: !2, imports: !2)
 !1 = !DIFile(filename: "test.cpp", directory: "/home/kromanova/ngh/ToT_latest/llvm/test/DebugInfo")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "main", line: 3, isLocal: false, isDefinition: true, flags: DIFlagPrototyped, isOptimized: true, unit: !0, scopeLine: 4, file: !1, scope: !5, type: !6, variables: !9)
+!4 = distinct !DISubprogram(name: "main", line: 3, isLocal: false, isDefinition: true, flags: DIFlagPrototyped, isOptimized: true, unit: !0, scopeLine: 4, file: !1, scope: !5, type: !6, retainedNodes: !9)
 !5 = !DIFile(filename: "test.cpp", directory: "/home/kromanova/ngh/ToT_latest/llvm/test/DebugInfo")
 !6 = !DISubroutineType(types: !7)
 !7 = !{!8}

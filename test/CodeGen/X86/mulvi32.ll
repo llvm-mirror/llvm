@@ -8,29 +8,13 @@
 
 define <2 x i32> @_mul2xi32a(<2 x i32>, <2 x i32>) {
 ; SSE-LABEL: _mul2xi32a:
-; SSE:       # BB#0:
-; SSE-NEXT:    movdqa %xmm0, %xmm2
-; SSE-NEXT:    psrlq $32, %xmm2
-; SSE-NEXT:    pmuludq %xmm1, %xmm2
-; SSE-NEXT:    movdqa %xmm1, %xmm3
-; SSE-NEXT:    psrlq $32, %xmm3
-; SSE-NEXT:    pmuludq %xmm0, %xmm3
-; SSE-NEXT:    paddq %xmm2, %xmm3
-; SSE-NEXT:    psllq $32, %xmm3
+; SSE:       # %bb.0:
 ; SSE-NEXT:    pmuludq %xmm1, %xmm0
-; SSE-NEXT:    paddq %xmm3, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: _mul2xi32a:
-; AVX:       # BB#0:
-; AVX-NEXT:    vpsrlq $32, %xmm0, %xmm2
-; AVX-NEXT:    vpmuludq %xmm1, %xmm2, %xmm2
-; AVX-NEXT:    vpsrlq $32, %xmm1, %xmm3
-; AVX-NEXT:    vpmuludq %xmm3, %xmm0, %xmm3
-; AVX-NEXT:    vpaddq %xmm2, %xmm3, %xmm2
-; AVX-NEXT:    vpsllq $32, %xmm2, %xmm2
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
-; AVX-NEXT:    vpaddq %xmm2, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %r = mul <2 x i32> %0, %1
   ret <2 x i32> %r
@@ -38,25 +22,19 @@ define <2 x i32> @_mul2xi32a(<2 x i32>, <2 x i32>) {
 
 define <2 x i32> @_mul2xi32b(<2 x i32>, <2 x i32>) {
 ; SSE2-LABEL: _mul2xi32b:
-; SSE2:       # BB#0:
-; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
-; SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
-; SSE2-NEXT:    pmuludq %xmm0, %xmm1
-; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm1[0,1,1,3]
+; SSE2:       # %bb.0:
+; SSE2-NEXT:    pmuludq %xmm1, %xmm0
+; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,1,1,3]
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul2xi32b:
-; SSE42:       # BB#0:
-; SSE42-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
-; SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
-; SSE42-NEXT:    pmuludq %xmm0, %xmm1
-; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm0 = xmm1[0],zero,xmm1[1],zero
+; SSE42:       # %bb.0:
+; SSE42-NEXT:    pmuludq %xmm1, %xmm0
+; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; SSE42-NEXT:    retq
 ;
 ; AVX-LABEL: _mul2xi32b:
-; AVX:       # BB#0:
-; AVX-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
-; AVX-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX-NEXT:    retq
@@ -70,7 +48,7 @@ define <2 x i32> @_mul2xi32b(<2 x i32>, <2 x i32>) {
 
 define <4 x i32> @_mul4xi32a(<4 x i32>, <4 x i32>) {
 ; SSE2-LABEL: _mul4xi32a:
-; SSE2:       # BB#0:
+; SSE2:       # %bb.0:
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,3,3]
 ; SSE2-NEXT:    pmuludq %xmm1, %xmm0
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
@@ -81,12 +59,12 @@ define <4 x i32> @_mul4xi32a(<4 x i32>, <4 x i32>) {
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul4xi32a:
-; SSE42:       # BB#0:
+; SSE42:       # %bb.0:
 ; SSE42-NEXT:    pmulld %xmm1, %xmm0
 ; SSE42-NEXT:    retq
 ;
 ; AVX-LABEL: _mul4xi32a:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmulld %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %r = mul <4 x i32> %0, %1
@@ -95,7 +73,7 @@ define <4 x i32> @_mul4xi32a(<4 x i32>, <4 x i32>) {
 
 define <4 x i32> @_mul4xi32b(<4 x i32>, <4 x i32>) {
 ; SSE2-LABEL: _mul4xi32b:
-; SSE2:       # BB#0:
+; SSE2:       # %bb.0:
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,3,3]
 ; SSE2-NEXT:    pmuludq %xmm1, %xmm0
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -106,7 +84,7 @@ define <4 x i32> @_mul4xi32b(<4 x i32>, <4 x i32>) {
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul4xi32b:
-; SSE42:       # BB#0:
+; SSE42:       # %bb.0:
 ; SSE42-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,3,3]
 ; SSE42-NEXT:    pmuludq %xmm1, %xmm0
 ; SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -116,7 +94,7 @@ define <4 x i32> @_mul4xi32b(<4 x i32>, <4 x i32>) {
 ; SSE42-NEXT:    retq
 ;
 ; AVX1-LABEL: _mul4xi32b:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vpmuludq %xmm1, %xmm0, %xmm2
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -126,7 +104,7 @@ define <4 x i32> @_mul4xi32b(<4 x i32>, <4 x i32>) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: _mul4xi32b:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vpmuludq %xmm1, %xmm0, %xmm2
 ; AVX2-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
 ; AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -152,110 +130,42 @@ define <4 x i32> @_mul4xi32b(<4 x i32>, <4 x i32>) {
 ; %ext1 = zext <4 x i32> %1 to <4 x i64>
 define <4 x i64> @_mul4xi32toi64a(<4 x i32>, <4 x i32>) {
 ; SSE2-LABEL: _mul4xi32toi64a:
-; SSE2:       # BB#0:
-; SSE2-NEXT:    movq %xmm1, %rax
-; SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[2,3,0,1]
-; SSE2-NEXT:    movq %xmm1, %rcx
-; SSE2-NEXT:    movd %ecx, %xmm1
-; SSE2-NEXT:    shrq $32, %rcx
-; SSE2-NEXT:    movq %xmm0, %rdx
-; SSE2-NEXT:    movd %edx, %xmm2
-; SSE2-NEXT:    shrq $32, %rdx
-; SSE2-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[2,3,0,1]
-; SSE2-NEXT:    movq %xmm0, %rsi
-; SSE2-NEXT:    movd %esi, %xmm3
-; SSE2-NEXT:    shrq $32, %rsi
-; SSE2-NEXT:    movd %esi, %xmm0
-; SSE2-NEXT:    punpcklqdq {{.*#+}} xmm3 = xmm3[0],xmm0[0]
-; SSE2-NEXT:    movd %edx, %xmm0
-; SSE2-NEXT:    punpcklqdq {{.*#+}} xmm2 = xmm2[0],xmm0[0]
-; SSE2-NEXT:    movd %ecx, %xmm0
-; SSE2-NEXT:    punpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm0[0]
-; SSE2-NEXT:    movd %eax, %xmm0
-; SSE2-NEXT:    shrq $32, %rax
+; SSE2:       # %bb.0:
+; SSE2-NEXT:    pshufd {{.*#+}} xmm3 = xmm1[0,1,1,3]
+; SSE2-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[0,1,1,3]
+; SSE2-NEXT:    pmuludq %xmm3, %xmm2
+; SSE2-NEXT:    pshufd {{.*#+}} xmm3 = xmm1[2,1,3,3]
+; SSE2-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,1,3,3]
 ; SSE2-NEXT:    pmuludq %xmm3, %xmm1
-; SSE2-NEXT:    movd %eax, %xmm3
-; SSE2-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm3[0]
-; SSE2-NEXT:    pmuludq %xmm2, %xmm0
+; SSE2-NEXT:    movdqa %xmm2, %xmm0
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul4xi32toi64a:
-; SSE42:       # BB#0:
-; SSE42-NEXT:    movq %xmm1, %rax
-; SSE42-NEXT:    pextrq $1, %xmm1, %rcx
-; SSE42-NEXT:    movd %ecx, %xmm1
-; SSE42-NEXT:    shrq $32, %rcx
-; SSE42-NEXT:    movq %xmm0, %rdx
-; SSE42-NEXT:    movd %edx, %xmm2
-; SSE42-NEXT:    shrq $32, %rdx
-; SSE42-NEXT:    pextrq $1, %xmm0, %rsi
-; SSE42-NEXT:    movd %esi, %xmm3
-; SSE42-NEXT:    shrq $32, %rsi
-; SSE42-NEXT:    movd %esi, %xmm0
-; SSE42-NEXT:    punpcklqdq {{.*#+}} xmm3 = xmm3[0],xmm0[0]
-; SSE42-NEXT:    movd %edx, %xmm0
-; SSE42-NEXT:    punpcklqdq {{.*#+}} xmm2 = xmm2[0],xmm0[0]
-; SSE42-NEXT:    movd %ecx, %xmm0
-; SSE42-NEXT:    punpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm0[0]
-; SSE42-NEXT:    movd %eax, %xmm0
-; SSE42-NEXT:    shrq $32, %rax
+; SSE42:       # %bb.0:
+; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm3 = xmm1[0],zero,xmm1[1],zero
+; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm2 = xmm0[0],zero,xmm0[1],zero
+; SSE42-NEXT:    pmuludq %xmm3, %xmm2
+; SSE42-NEXT:    pshufd {{.*#+}} xmm3 = xmm1[2,2,3,3]
+; SSE42-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[2,2,3,3]
 ; SSE42-NEXT:    pmuludq %xmm3, %xmm1
-; SSE42-NEXT:    movd %eax, %xmm3
-; SSE42-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm3[0]
-; SSE42-NEXT:    pmuludq %xmm2, %xmm0
+; SSE42-NEXT:    movdqa %xmm2, %xmm0
 ; SSE42-NEXT:    retq
 ;
 ; AVX1-LABEL: _mul4xi32toi64a:
-; AVX1:       # BB#0:
-; AVX1-NEXT:    vmovq %xmm0, %rax
-; AVX1-NEXT:    vmovd %eax, %xmm2
-; AVX1-NEXT:    shrq $32, %rax
-; AVX1-NEXT:    vmovq %xmm1, %rcx
-; AVX1-NEXT:    vpextrq $1, %xmm0, %rdx
-; AVX1-NEXT:    vmovd %edx, %xmm0
-; AVX1-NEXT:    shrq $32, %rdx
-; AVX1-NEXT:    vpextrq $1, %xmm1, %rsi
-; AVX1-NEXT:    vmovd %esi, %xmm1
-; AVX1-NEXT:    shrq $32, %rsi
-; AVX1-NEXT:    vmovd %esi, %xmm3
-; AVX1-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm3[0]
-; AVX1-NEXT:    vmovd %edx, %xmm3
-; AVX1-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm3[0]
-; AVX1-NEXT:    vmovd %ecx, %xmm3
-; AVX1-NEXT:    shrq $32, %rcx
+; AVX1:       # %bb.0:
+; AVX1-NEXT:    vpshufd {{.*#+}} xmm2 = xmm1[2,2,3,3]
+; AVX1-NEXT:    vpshufd {{.*#+}} xmm3 = xmm0[2,2,3,3]
+; AVX1-NEXT:    vpmuludq %xmm2, %xmm3, %xmm2
+; AVX1-NEXT:    vpmovzxdq {{.*#+}} xmm1 = xmm1[0],zero,xmm1[1],zero
+; AVX1-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX1-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
-; AVX1-NEXT:    vmovd %ecx, %xmm1
-; AVX1-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm3[0],xmm1[0]
-; AVX1-NEXT:    vmovd %eax, %xmm3
-; AVX1-NEXT:    vpunpcklqdq {{.*#+}} xmm2 = xmm2[0],xmm3[0]
-; AVX1-NEXT:    vpmuludq %xmm1, %xmm2, %xmm1
-; AVX1-NEXT:    vinsertf128 $1, %xmm0, %ymm1, %ymm0
+; AVX1-NEXT:    vinsertf128 $1, %xmm2, %ymm0, %ymm0
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: _mul4xi32toi64a:
-; AVX2:       # BB#0:
-; AVX2-NEXT:    vmovq %xmm1, %rax
-; AVX2-NEXT:    vmovd %eax, %xmm2
-; AVX2-NEXT:    shrq $32, %rax
-; AVX2-NEXT:    vpextrq $1, %xmm1, %rcx
-; AVX2-NEXT:    vmovq %xmm0, %rdx
-; AVX2-NEXT:    vmovd %edx, %xmm1
-; AVX2-NEXT:    shrq $32, %rdx
-; AVX2-NEXT:    vpextrq $1, %xmm0, %rsi
-; AVX2-NEXT:    vmovd %esi, %xmm0
-; AVX2-NEXT:    shrq $32, %rsi
-; AVX2-NEXT:    vmovd %esi, %xmm3
-; AVX2-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm3[0]
-; AVX2-NEXT:    vmovd %edx, %xmm3
-; AVX2-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm1[0],xmm3[0]
-; AVX2-NEXT:    vmovd %ecx, %xmm3
-; AVX2-NEXT:    shrq $32, %rcx
-; AVX2-NEXT:    vinserti128 $1, %xmm0, %ymm1, %ymm0
-; AVX2-NEXT:    vmovd %ecx, %xmm1
-; AVX2-NEXT:    vpunpcklqdq {{.*#+}} xmm1 = xmm3[0],xmm1[0]
-; AVX2-NEXT:    vmovd %eax, %xmm3
-; AVX2-NEXT:    vpunpcklqdq {{.*#+}} xmm2 = xmm2[0],xmm3[0]
-; AVX2-NEXT:    vinserti128 $1, %xmm1, %ymm2, %ymm1
+; AVX2:       # %bb.0:
+; AVX2-NEXT:    vpmovzxdq {{.*#+}} ymm0 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero
+; AVX2-NEXT:    vpmovzxdq {{.*#+}} ymm1 = xmm1[0],zero,xmm1[1],zero,xmm1[2],zero,xmm1[3],zero
 ; AVX2-NEXT:    vpmuludq %ymm1, %ymm0, %ymm0
 ; AVX2-NEXT:    retq
   %f00 = extractelement <4 x i32> %0, i32 0
@@ -290,9 +200,9 @@ define <4 x i64> @_mul4xi32toi64a(<4 x i32>, <4 x i32>) {
 ; there is no bitcast and the final shuffle is a little different
 define <4 x i64> @_mul4xi32toi64b(<4 x i32>, <4 x i32>) {
 ; SSE-LABEL: _mul4xi32toi64b:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    movdqa %xmm0, %xmm2
-; SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm2[1,1,3,3]
+; SSE-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
 ; SSE-NEXT:    pmuludq %xmm1, %xmm2
 ; SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
 ; SSE-NEXT:    pmuludq %xmm0, %xmm1
@@ -303,7 +213,7 @@ define <4 x i64> @_mul4xi32toi64b(<4 x i32>, <4 x i32>) {
 ; SSE-NEXT:    retq
 ;
 ; AVX1-LABEL: _mul4xi32toi64b:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vpmuludq %xmm1, %xmm0, %xmm2
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -314,7 +224,7 @@ define <4 x i64> @_mul4xi32toi64b(<4 x i32>, <4 x i32>) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: _mul4xi32toi64b:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vpmuludq %xmm1, %xmm0, %xmm2
 ; AVX2-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,3,3]
 ; AVX2-NEXT:    vpshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
@@ -338,7 +248,7 @@ define <4 x i64> @_mul4xi32toi64b(<4 x i32>, <4 x i32>) {
 ; but the final shuffle is a no-op.
 define <4 x i64> @_mul4xi32toi64c(<4 x i32>, <4 x i32>) {
 ; SSE2-LABEL: _mul4xi32toi64c:
-; SSE2:       # BB#0:
+; SSE2:       # %bb.0:
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm3 = xmm0[0,1,1,3]
 ; SSE2-NEXT:    pshufd {{.*#+}} xmm2 = xmm1[0,1,1,3]
 ; SSE2-NEXT:    pmuludq %xmm3, %xmm2
@@ -349,7 +259,7 @@ define <4 x i64> @_mul4xi32toi64c(<4 x i32>, <4 x i32>) {
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul4xi32toi64c:
-; SSE42:       # BB#0:
+; SSE42:       # %bb.0:
 ; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm3 = xmm0[0],zero,xmm0[1],zero
 ; SSE42-NEXT:    pmovzxdq {{.*#+}} xmm2 = xmm1[0],zero,xmm1[1],zero
 ; SSE42-NEXT:    pmuludq %xmm3, %xmm2
@@ -360,7 +270,7 @@ define <4 x i64> @_mul4xi32toi64c(<4 x i32>, <4 x i32>) {
 ; SSE42-NEXT:    retq
 ;
 ; AVX1-LABEL: _mul4xi32toi64c:
-; AVX1:       # BB#0:
+; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vpmovzxdq {{.*#+}} xmm2 = xmm0[0],zero,xmm0[1],zero
 ; AVX1-NEXT:    vpmovzxdq {{.*#+}} xmm3 = xmm1[0],zero,xmm1[1],zero
 ; AVX1-NEXT:    vpmuludq %xmm3, %xmm2, %xmm2
@@ -371,7 +281,7 @@ define <4 x i64> @_mul4xi32toi64c(<4 x i32>, <4 x i32>) {
 ; AVX1-NEXT:    retq
 ;
 ; AVX2-LABEL: _mul4xi32toi64c:
-; AVX2:       # BB#0:
+; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vpmovzxdq {{.*#+}} xmm2 = xmm0[0],zero,xmm0[1],zero
 ; AVX2-NEXT:    vpmovzxdq {{.*#+}} xmm3 = xmm1[0],zero,xmm1[1],zero
 ; AVX2-NEXT:    vpmuludq %xmm3, %xmm2, %xmm2
@@ -403,7 +313,7 @@ define <4 x i64> @_mul4xi32toi64c(<4 x i32>, <4 x i32>) {
 ; %ext1 = zext <2 x i32> %1 to <2 x i64>
 define <2 x i64> @_mul2xi64toi64a(<2 x i64>, <2 x i64>) {
 ; SSE2-LABEL: _mul2xi64toi64a:
-; SSE2:       # BB#0:
+; SSE2:       # %bb.0:
 ; SSE2-NEXT:    movdqa {{.*#+}} xmm2 = [4294967295,4294967295]
 ; SSE2-NEXT:    pand %xmm2, %xmm0
 ; SSE2-NEXT:    pand %xmm2, %xmm1
@@ -411,28 +321,14 @@ define <2 x i64> @_mul2xi64toi64a(<2 x i64>, <2 x i64>) {
 ; SSE2-NEXT:    retq
 ;
 ; SSE42-LABEL: _mul2xi64toi64a:
-; SSE42:       # BB#0:
-; SSE42-NEXT:    pxor %xmm2, %xmm2
-; SSE42-NEXT:    pblendw {{.*#+}} xmm0 = xmm0[0,1],xmm2[2,3],xmm0[4,5],xmm2[6,7]
-; SSE42-NEXT:    pblendw {{.*#+}} xmm1 = xmm1[0,1],xmm2[2,3],xmm1[4,5],xmm2[6,7]
+; SSE42:       # %bb.0:
 ; SSE42-NEXT:    pmuludq %xmm1, %xmm0
 ; SSE42-NEXT:    retq
 ;
-; AVX1-LABEL: _mul2xi64toi64a:
-; AVX1:       # BB#0:
-; AVX1-NEXT:    vpxor %xmm2, %xmm2, %xmm2
-; AVX1-NEXT:    vpblendw {{.*#+}} xmm0 = xmm0[0,1],xmm2[2,3],xmm0[4,5],xmm2[6,7]
-; AVX1-NEXT:    vpblendw {{.*#+}} xmm1 = xmm1[0,1],xmm2[2,3],xmm1[4,5],xmm2[6,7]
-; AVX1-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
-; AVX1-NEXT:    retq
-;
-; AVX2-LABEL: _mul2xi64toi64a:
-; AVX2:       # BB#0:
-; AVX2-NEXT:    vpxor %xmm2, %xmm2, %xmm2
-; AVX2-NEXT:    vpblendd {{.*#+}} xmm0 = xmm0[0],xmm2[1],xmm0[2],xmm2[3]
-; AVX2-NEXT:    vpblendd {{.*#+}} xmm1 = xmm1[0],xmm2[1],xmm1[2],xmm2[3]
-; AVX2-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
-; AVX2-NEXT:    retq
+; AVX-LABEL: _mul2xi64toi64a:
+; AVX:       # %bb.0:
+; AVX-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
+; AVX-NEXT:    retq
   %f00 = extractelement <2 x i64> %0, i32 0
   %f01 = extractelement <2 x i64> %0, i32 1
   %f10 = extractelement <2 x i64> %1, i32 0
@@ -455,12 +351,12 @@ define <2 x i64> @_mul2xi64toi64a(<2 x i64>, <2 x i64>) {
 
 define <2 x i64> @_mul2xi64toi64b(<2 x i64>, <2 x i64>) {
 ; SSE-LABEL: _mul2xi64toi64b:
-; SSE:       # BB#0:
+; SSE:       # %bb.0:
 ; SSE-NEXT:    pmuludq %xmm1, %xmm0
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: _mul2xi64toi64b:
-; AVX:       # BB#0:
+; AVX:       # %bb.0:
 ; AVX-NEXT:    vpmuludq %xmm1, %xmm0, %xmm0
 ; AVX-NEXT:    retq
   %f0 = bitcast <2 x i64> %0 to <4 x i32>

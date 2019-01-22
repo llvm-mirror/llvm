@@ -1,9 +1,8 @@
 //===-- PPC.h - Top-level interface for PowerPC Target ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,6 +40,7 @@ namespace llvm {
   FunctionPass *createPPCVSXCopyPass();
   FunctionPass *createPPCVSXFMAMutatePass();
   FunctionPass *createPPCVSXSwapRemovalPass();
+  FunctionPass *createPPCReduceCRLogicalsPass();
   FunctionPass *createPPCMIPeepholePass();
   FunctionPass *createPPCBranchSelectionPass();
   FunctionPass *createPPCBranchCoalescingPass();
@@ -49,6 +49,7 @@ namespace llvm {
   FunctionPass *createPPCTLSDynamicCallPass();
   FunctionPass *createPPCBoolRetToIntPass();
   FunctionPass *createPPCExpandISELPass();
+  FunctionPass *createPPCPreEmitPeepholePass();
   void LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                     AsmPrinter &AP, bool isDarwin);
   bool LowerPPCMachineOperandToMCOperand(const MachineOperand &MO,
@@ -58,11 +59,13 @@ namespace llvm {
   void initializePPCVSXFMAMutatePass(PassRegistry&);
   void initializePPCBoolRetToIntPass(PassRegistry&);
   void initializePPCExpandISELPass(PassRegistry &);
+  void initializePPCPreEmitPeepholePass(PassRegistry &);
   void initializePPCTLSDynamicCallPass(PassRegistry &);
+  void initializePPCMIPeepholePass(PassRegistry&);
   extern char &PPCVSXFMAMutateID;
 
   namespace PPCII {
-    
+
   /// Target Operand Flag enum.
   enum TOF {
     //===------------------------------------------------------------------===//
@@ -107,7 +110,7 @@ namespace llvm {
     MO_TLS = 8 << 4
   };
   } // end namespace PPCII
-  
+
 } // end namespace llvm;
 
 #endif

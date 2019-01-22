@@ -1,9 +1,8 @@
 //===- SplitModule.cpp - Split a module into partitions -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,7 +100,8 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
   // At this point module should have the proper mix of globals and locals.
   // As we attempt to partition this module, we must not change any
   // locals to globals.
-  DEBUG(dbgs() << "Partition module with (" << M->size() << ")functions\n");
+  LLVM_DEBUG(dbgs() << "Partition module with (" << M->size()
+                    << ")functions\n");
   ClusterMapType GVtoClusterMap;
   ComdatMembersType ComdatMembers;
 
@@ -144,9 +144,9 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
       addAllGlobalValueUsers(GVtoClusterMap, &GV, &GV);
   };
 
-  std::for_each(M->begin(), M->end(), recordGVSet);
-  std::for_each(M->global_begin(), M->global_end(), recordGVSet);
-  std::for_each(M->alias_begin(), M->alias_end(), recordGVSet);
+  llvm::for_each(M->functions(), recordGVSet);
+  llvm::for_each(M->globals(), recordGVSet);
+  llvm::for_each(M->aliases(), recordGVSet);
 
   // Assigned all GVs to merged clusters while balancing number of objects in
   // each.
@@ -180,7 +180,7 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
           std::make_pair(std::distance(GVtoClusterMap.member_begin(I),
                                        GVtoClusterMap.member_end()), I));
 
-  std::sort(Sets.begin(), Sets.end(), [](const SortType &a, const SortType &b) {
+  llvm::sort(Sets, [](const SortType &a, const SortType &b) {
     if (a.first == b.first)
       return a.second->getData()->getName() > b.second->getData()->getName();
     else
@@ -192,16 +192,17 @@ static void findPartitions(Module *M, ClusterIDMapType &ClusterIDMap,
     unsigned CurrentClusterSize = BalancinQueue.top().second;
     BalancinQueue.pop();
 
-    DEBUG(dbgs() << "Root[" << CurrentClusterID << "] cluster_size(" << I.first
-                 << ") ----> " << I.second->getData()->getName() << "\n");
+    LLVM_DEBUG(dbgs() << "Root[" << CurrentClusterID << "] cluster_size("
+                      << I.first << ") ----> " << I.second->getData()->getName()
+                      << "\n");
 
     for (ClusterMapType::member_iterator MI =
              GVtoClusterMap.findLeader(I.second);
          MI != GVtoClusterMap.member_end(); ++MI) {
       if (!Visited.insert(*MI).second)
         continue;
-      DEBUG(dbgs() << "----> " << (*MI)->getName()
-                   << ((*MI)->hasLocalLinkage() ? " l " : " e ") << "\n");
+      LLVM_DEBUG(dbgs() << "----> " << (*MI)->getName()
+                        << ((*MI)->hasLocalLinkage() ? " l " : " e ") << "\n");
       Visited.insert(*MI);
       ClusterIDMap[*MI] = CurrentClusterID;
       CurrentClusterSize++;
@@ -270,7 +271,7 @@ void llvm::SplitModule(
   for (unsigned I = 0; I < N; ++I) {
     ValueToValueMapTy VMap;
     std::unique_ptr<Module> MPart(
-        CloneModule(M.get(), VMap, [&](const GlobalValue *GV) {
+        CloneModule(*M, VMap, [&](const GlobalValue *GV) {
           if (ClusterIDMap.count(GV))
             return (ClusterIDMap[GV] == I);
           else

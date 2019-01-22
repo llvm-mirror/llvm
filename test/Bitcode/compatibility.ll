@@ -230,8 +230,6 @@ declare void @g.f1()
 ; Aliases -- DLLStorageClass
 @a.dlldefault = default alias i32, i32* @g.dlldefault
 ; CHECK: @a.dlldefault = alias i32, i32* @g.dlldefault
-@a.dllimport = dllimport alias i32, i32* @g1
-; CHECK: @a.dllimport = dllimport alias i32, i32* @g1
 @a.dllexport = dllexport alias i32, i32* @g.dllexport
 ; CHECK: @a.dllexport = dllexport alias i32, i32* @g.dllexport
 
@@ -763,8 +761,34 @@ define void @atomics(i32* %word) {
   ret void
 }
 
+define void @fp_atomics(float* %word) {
+; CHECK: %atomicrmw.xchg = atomicrmw xchg float* %word, float 1.000000e+00 monotonic
+  %atomicrmw.xchg = atomicrmw xchg float* %word, float 1.0 monotonic
+  ret void
+}
+
 ;; Fast Math Flags
-define void @fastmathflags(float %op1, float %op2) {
+define void @fastmathflags_unop(float %op1) {
+  %f.nnan = fneg nnan float %op1
+  ; CHECK: %f.nnan = fneg nnan float %op1
+  %f.ninf = fneg ninf float %op1
+  ; CHECK: %f.ninf = fneg ninf float %op1
+  %f.nsz = fneg nsz float %op1
+  ; CHECK: %f.nsz = fneg nsz float %op1
+  %f.arcp = fneg arcp float %op1
+  ; CHECK: %f.arcp = fneg arcp float %op1
+  %f.contract = fneg contract float %op1
+  ; CHECK: %f.contract = fneg contract float %op1
+  %f.afn = fneg afn float %op1
+  ; CHECK: %f.afn = fneg afn float %op1
+  %f.reassoc = fneg reassoc float %op1
+  ; CHECK: %f.reassoc = fneg reassoc float %op1
+  %f.fast = fneg fast float %op1
+  ; CHECK: %f.fast = fneg fast float %op1
+  ret void
+}
+
+define void @fastmathflags_binops(float %op1, float %op2) {
   %f.nnan = fadd nnan float %op1, %op2
   ; CHECK: %f.nnan = fadd nnan float %op1, %op2
   %f.ninf = fadd ninf float %op1, %op2
@@ -775,6 +799,10 @@ define void @fastmathflags(float %op1, float %op2) {
   ; CHECK: %f.arcp = fadd arcp float %op1, %op2
   %f.contract = fadd contract float %op1, %op2
   ; CHECK: %f.contract = fadd contract float %op1, %op2
+  %f.afn = fadd afn float %op1, %op2
+  ; CHECK: %f.afn = fadd afn float %op1, %op2
+  %f.reassoc = fadd reassoc float %op1, %op2
+  ; CHECK: %f.reassoc = fadd reassoc float %op1, %op2
   %f.fast = fadd fast float %op1, %op2
   ; CHECK: %f.fast = fadd fast float %op1, %op2
   ret void
@@ -993,6 +1021,13 @@ terminate:
 
 continue:
   ret i32 0
+}
+
+; Instructions -- Unary Operations
+define void @instructions.unops(double %op1) {
+  fneg double %op1
+  ; CHECK: fneg double %op1
+  ret void
 }
 
 ; Instructions -- Binary Operations

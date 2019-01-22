@@ -1,9 +1,8 @@
 //===-- RuntimeDyldCheckerImpl.h -- RuntimeDyld test framework --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -40,6 +39,9 @@ private:
   typedef std::map<std::string, SectionMap> StubMap;
 
   RuntimeDyldImpl &getRTDyld() const { return *RTDyld.Dyld; }
+
+  Expected<JITSymbolResolver::LookupResult>
+  lookup(const JITSymbolResolver::LookupSet &Symbols) const;
 
   bool isSymbolValid(StringRef Symbol) const;
   uint64_t getSymbolLocalAddr(StringRef Symbol) const;

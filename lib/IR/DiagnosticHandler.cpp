@@ -1,9 +1,8 @@
 //===- DiagnosticHandler.h - DiagnosticHandler class for LLVM -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,7 @@ using namespace llvm;
 
 namespace {
 
-/// \brief Regular expression corresponding to the value given in one of the
+/// Regular expression corresponding to the value given in one of the
 /// -pass-remarks* command line flags. Passes whose name matches this regexp
 /// will emit a diagnostic when calling the associated diagnostic function
 /// (emitOptimizationRemark, emitOptimizationRemarkMissed or

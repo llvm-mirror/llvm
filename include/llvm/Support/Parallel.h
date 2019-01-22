@@ -1,9 +1,8 @@
 //===- llvm/Support/Parallel.h - Parallel algorithms ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -56,12 +55,12 @@ public:
   ~Latch() { sync(); }
 
   void inc() {
-    std::unique_lock<std::mutex> lock(Mutex);
+    std::lock_guard<std::mutex> lock(Mutex);
     ++Count;
   }
 
   void dec() {
-    std::unique_lock<std::mutex> lock(Mutex);
+    std::lock_guard<std::mutex> lock(Mutex);
     if (--Count == 0)
       Cond.notify_all();
   }
@@ -100,7 +99,7 @@ void parallel_for_each_n(IndexTy Begin, IndexTy End, FuncTy Fn) {
 #else
 const ptrdiff_t MinParallelSize = 1024;
 
-/// \brief Inclusive median.
+/// Inclusive median.
 template <class RandomAccessIterator, class Comparator>
 RandomAccessIterator medianOf3(RandomAccessIterator Start,
                                RandomAccessIterator End,
@@ -118,7 +117,7 @@ void parallel_quick_sort(RandomAccessIterator Start, RandomAccessIterator End,
                          const Comparator &Comp, TaskGroup &TG, size_t Depth) {
   // Do a sequential sort for small inputs.
   if (std::distance(Start, End) < detail::MinParallelSize || Depth == 0) {
-    std::sort(Start, End, Comp);
+    llvm::sort(Start, End, Comp);
     return;
   }
 
@@ -200,7 +199,7 @@ void sort(Policy policy, RandomAccessIterator Start, RandomAccessIterator End,
           const Comparator &Comp = Comparator()) {
   static_assert(is_execution_policy<Policy>::value,
                 "Invalid execution policy!");
-  std::sort(Start, End, Comp);
+  llvm::sort(Start, End, Comp);
 }
 
 template <class Policy, class IterTy, class FuncTy>

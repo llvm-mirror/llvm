@@ -1,9 +1,8 @@
 //===- HexagonConstExtenders.cpp ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -39,31 +38,57 @@ namespace llvm {
   FunctionPass *createHexagonConstExtenders();
 }
 
+static int32_t adjustUp(int32_t V, uint8_t A, uint8_t O) {
+  assert(isPowerOf2_32(A));
+  int32_t U = (V & -A) + O;
+  return U >= V ? U : U+A;
+}
+
+static int32_t adjustDown(int32_t V, uint8_t A, uint8_t O) {
+  assert(isPowerOf2_32(A));
+  int32_t U = (V & -A) + O;
+  return U <= V ? U : U-A;
+}
+
 namespace {
   struct OffsetRange {
+    // The range of values between Min and Max that are of form Align*N+Offset,
+    // for some integer N. Min and Max are required to be of that form as well,
+    // except in the case of an empty range.
     int32_t Min = INT_MIN, Max = INT_MAX;
     uint8_t Align = 1;
+    uint8_t Offset = 0;
 
     OffsetRange() = default;
-    OffsetRange(int32_t L, int32_t H, uint8_t A)
-      : Min(L), Max(H), Align(A) {}
+    OffsetRange(int32_t L, int32_t H, uint8_t A, uint8_t O = 0)
+      : Min(L), Max(H), Align(A), Offset(O) {}
     OffsetRange &intersect(OffsetRange A) {
-      Align = std::max(Align, A.Align);
-      Min = std::max(Min, A.Min);
-      Max = std::min(Max, A.Max);
+      if (Align < A.Align)
+        std::swap(*this, A);
+
+      // Align >= A.Align.
+      if (Offset >= A.Offset && (Offset - A.Offset) % A.Align == 0) {
+        Min = adjustUp(std::max(Min, A.Min), Align, Offset);
+        Max = adjustDown(std::min(Max, A.Max), Align, Offset);
+      } else {
+        // Make an empty range.
+        Min = 0;
+        Max = -1;
+      }
       // Canonicalize empty ranges.
       if (Min > Max)
         std::tie(Min, Max, Align) = std::make_tuple(0, -1, 1);
       return *this;
     }
     OffsetRange &shift(int32_t S) {
-      assert(alignTo(std::abs(S), Align) == uint64_t(std::abs(S)));
       Min += S;
       Max += S;
+      Offset = (Offset+S) % Align;
       return *this;
     }
     OffsetRange &extendBy(int32_t D) {
       // If D < 0, extend Min, otherwise extend Max.
+      assert(D % Align == 0);
       if (D < 0)
         Min = (INT_MIN-D < Min) ? Min+D : INT_MIN;
       else
@@ -74,7 +99,7 @@ namespace {
       return Min > Max;
     }
     bool contains(int32_t V) const {
-      return Min <= V && V <= Max && (V % Align) == 0;
+      return Min <= V && V <= Max && (V-Offset) % Align == 0;
     }
     bool operator==(const OffsetRange &R) const {
       return Min == R.Min && Max == R.Max && Align == R.Align;
@@ -350,7 +375,7 @@ namespace {
     using IndexList = SetVector<unsigned>;
     using ExtenderInit = std::pair<ExtValue, ExtExpr>;
     using AssignmentMap = std::map<ExtenderInit, IndexList>;
-    using LocDefMap = std::map<Loc, IndexList>;
+    using LocDefList = std::vector<std::pair<Loc, IndexList>>;
 
     const HexagonInstrInfo *HII = nullptr;
     const HexagonRegisterInfo *HRI = nullptr;
@@ -373,7 +398,7 @@ namespace {
     void assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
                      AssignmentMap &IMap);
     void calculatePlacement(const ExtenderInit &ExtI, const IndexList &Refs,
-                            LocDefMap &Defs);
+                            LocDefList &Defs);
     Register insertInitializer(Loc DefL, const ExtenderInit &ExtI);
     bool replaceInstrExact(const ExtDesc &ED, Register ExtR);
     bool replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
@@ -408,7 +433,8 @@ namespace {
   raw_ostream &operator<< (raw_ostream &OS, const OffsetRange &OR) {
     if (OR.Min > OR.Max)
       OS << '!';
-    OS << '[' << OR.Min << ',' << OR.Max << "]a" << unsigned(OR.Align);
+    OS << '[' << OR.Min << ',' << OR.Max << "]a" << unsigned(OR.Align)
+       << '+' << unsigned(OR.Offset);
     return OS;
   }
 
@@ -422,7 +448,7 @@ namespace {
   LLVM_ATTRIBUTE_UNUSED
   raw_ostream &operator<< (raw_ostream &OS, const PrintRegister &P) {
     if (P.Rs.Reg != 0)
-      OS << PrintReg(P.Rs.Reg, &P.HRI, P.Rs.Sub);
+      OS << printReg(P.Rs.Reg, &P.HRI, P.Rs.Sub);
     else
       OS << "noreg";
     return OS;
@@ -439,7 +465,7 @@ namespace {
   raw_ostream &operator<< (raw_ostream &OS, const PrintExpr &P) {
     OS << "## " << (P.Ex.Neg ? "- " : "+ ");
     if (P.Ex.Rs.Reg != 0)
-      OS << PrintReg(P.Ex.Rs.Reg, &P.HRI, P.Ex.Rs.Sub);
+      OS << printReg(P.Ex.Rs.Reg, &P.HRI, P.Ex.Rs.Sub);
     else
       OS << "__";
     OS << " << " << P.Ex.S;
@@ -468,7 +494,7 @@ namespace {
     const auto &HRI = *MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
     OS << "bb#" << MBB.getNumber() << ": ";
     if (ED.Rd.Reg != 0)
-      OS << PrintReg(ED.Rd.Reg, &HRI, ED.Rd.Sub);
+      OS << printReg(ED.Rd.Reg, &HRI, ED.Rd.Sub);
     else
       OS << "__";
     OS << " = " << PrintExpr(ED.Expr, HRI);
@@ -548,13 +574,14 @@ static unsigned ReplaceCounter = 0;
 
 char HCE::ID = 0;
 
+#ifndef NDEBUG
 LLVM_DUMP_METHOD void RangeTree::dump() const {
   dbgs() << "Root: " << Root << '\n';
   if (Root)
     dump(Root);
 }
 
-void RangeTree::dump(const Node *N) const {
+LLVM_DUMP_METHOD void RangeTree::dump(const Node *N) const {
   dbgs() << "Node: " << N << '\n';
   dbgs() << "  Height: " << N->Height << '\n';
   dbgs() << "  Count: " << N->Count << '\n';
@@ -568,6 +595,7 @@ void RangeTree::dump(const Node *N) const {
   if (N->Right)
     dump(N->Right);
 }
+#endif
 
 void RangeTree::order(Node *N, SmallVectorImpl<Node*> &Seq) const {
   if (N == nullptr)
@@ -702,7 +730,11 @@ bool HCE::ExtRoot::operator< (const HCE::ExtRoot &ER) const {
     case MachineOperand::MO_ExternalSymbol:
       return StringRef(V.SymbolName) < StringRef(ER.V.SymbolName);
     case MachineOperand::MO_GlobalAddress:
-      assert(V.GV->hasName() && ER.V.GV->hasName());
+      // Do not use GUIDs, since they depend on the source path. Moving the
+      // source file to a different directory could cause different GUID
+      // values for a pair of given symbols. These symbols could then compare
+      // "less" in one directory, but "greater" in another.
+      assert(!V.GV->getName().empty() && !ER.V.GV->getName().empty());
       return V.GV->getName() < ER.V.GV->getName();
     case MachineOperand::MO_BlockAddress: {
       const BasicBlock *ThisB = V.BA->getBasicBlock();
@@ -755,6 +787,7 @@ HCE::ExtValue::operator MachineOperand() const {
       return MachineOperand::CreateCPI(V.ImmVal, Offset, TF);
     case MachineOperand::MO_JumpTableIndex:
       assert(Offset == 0);
+      return MachineOperand::CreateJTI(V.ImmVal, TF);
     default:
       llvm_unreachable("Unhandled kind");
  }
@@ -997,15 +1030,19 @@ unsigned HCE::getDirectRegReplacement(unsigned ExtOpc) const {
   return 0;
 }
 
-// Return the allowable deviation from the current value of Rb which the
+// Return the allowable deviation from the current value of Rb (i.e. the
+// range of values that can be added to the current value) which the
 // instruction MI can accommodate.
 // The instruction MI is a user of register Rb, which is defined via an
 // extender. It may be possible for MI to be tweaked to work for a register
 // defined with a slightly different value. For example
-//   ... = L2_loadrub_io Rb, 0
+//   ... = L2_loadrub_io Rb, 1
 // can be modifed to be
-//   ... = L2_loadrub_io Rb', 1
-// if Rb' = Rb-1.
+//   ... = L2_loadrub_io Rb', 0
+// if Rb' = Rb+1.
+// The range for Rb would be [Min+1, Max+1], where [Min, Max] is a range
+// for L2_loadrub with offset 0. That means that Rb could be replaced with
+// Rc, where Rc-Rb belongs to [Min+1, Max+1].
 OffsetRange HCE::getOffsetRange(Register Rb, const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   // Instructions that are constant-extended may be replaced with something
@@ -1107,6 +1144,13 @@ void HCE::recordExtender(MachineInstr &MI, unsigned OpNum) {
   bool IsLoad = MI.mayLoad();
   bool IsStore = MI.mayStore();
 
+  // Fixed stack slots have negative indexes, and they cannot be used
+  // with TRI::stackSlot2Index and TRI::index2StackSlot. This is somewhat
+  // unfortunate, but should not be a frequent thing.
+  for (MachineOperand &Op : MI.operands())
+    if (Op.isFI() && Op.getIndex() < 0)
+      return;
+
   if (IsLoad || IsStore) {
     unsigned AM = HII->getAddrMode(MI);
     switch (AM) {
@@ -1163,12 +1207,19 @@ void HCE::recordExtender(MachineInstr &MI, unsigned OpNum) {
       case Hexagon::S4_subaddi:       // (__: ## - Rs<<0)
         ED.Expr.Rs = MI.getOperand(OpNum+1);
         ED.Expr.Neg = true;
+        break;
       default:                        // (__: ## + __<<_)
         break;
     }
   }
 
   ED.UseMI = &MI;
+
+  // Ignore unnamed globals.
+  ExtRoot ER(ED.getOp());
+  if (ER.Kind == MachineOperand::MO_GlobalAddress)
+    if (ER.V.GV->getName().empty())
+      return;
   Extenders.push_back(ED);
 }
 
@@ -1191,9 +1242,13 @@ void HCE::collectInstr(MachineInstr &MI) {
 
 void HCE::collect(MachineFunction &MF) {
   Extenders.clear();
-  for (MachineBasicBlock &MBB : MF)
+  for (MachineBasicBlock &MBB : MF) {
+    // Skip unreachable blocks.
+    if (MBB.getNumber() == -1)
+      continue;
     for (MachineInstr &MI : MBB)
       collectInstr(MI);
+  }
 }
 
 void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
@@ -1218,7 +1273,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     if (!ED.IsDef)
       continue;
     ExtValue EV(ED);
-    DEBUG(dbgs() << " =" << I << ". " << EV << "  " << ED << '\n');
+    LLVM_DEBUG(dbgs() << " =" << I << ". " << EV << "  " << ED << '\n');
     assert(ED.Rd.Reg != 0);
     Ranges[I-Begin] = getOffsetRange(ED.Rd).shift(EV.Offset);
     // A2_tfrsi is a special case: it will be replaced with A2_addi, which
@@ -1238,7 +1293,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     if (ED.IsDef)
       continue;
     ExtValue EV(ED);
-    DEBUG(dbgs() << "  " << I << ". " << EV << "  " << ED << '\n');
+    LLVM_DEBUG(dbgs() << "  " << I << ". " << EV << "  " << ED << '\n');
     OffsetRange Dev = getOffsetRange(ED);
     Ranges[I-Begin].intersect(Dev.shift(EV.Offset));
   }
@@ -1250,7 +1305,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   for (unsigned I = Begin; I != End; ++I)
     RangeMap[Ranges[I-Begin]].insert(I);
 
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "Ranges\n";
     for (unsigned I = Begin; I != End; ++I)
       dbgs() << "  " << I << ". " << Ranges[I-Begin] << '\n';
@@ -1278,11 +1333,17 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   SmallVector<RangeTree::Node*,8> Nodes;
   Tree.order(Nodes);
 
-  auto MaxAlign = [](const SmallVectorImpl<RangeTree::Node*> &Nodes) {
-    uint8_t Align = 1;
-    for (RangeTree::Node *N : Nodes)
-      Align = std::max(Align, N->Range.Align);
-    return Align;
+  auto MaxAlign = [](const SmallVectorImpl<RangeTree::Node*> &Nodes,
+                     uint8_t Align, uint8_t Offset) {
+    for (RangeTree::Node *N : Nodes) {
+      if (N->Range.Align <= Align || N->Range.Offset < Offset)
+        continue;
+      if ((N->Range.Offset - Offset) % Align != 0)
+        continue;
+      Align = N->Range.Align;
+      Offset = N->Range.Offset;
+    }
+    return std::make_pair(Align, Offset);
   };
 
   // Construct the set of all potential definition points from the endpoints
@@ -1292,14 +1353,14 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   std::set<int32_t> CandSet;
   for (RangeTree::Node *N : Nodes) {
     const OffsetRange &R = N->Range;
-    uint8_t A0 = MaxAlign(Tree.nodesWith(R.Min, false));
+    auto P0 = MaxAlign(Tree.nodesWith(R.Min, false), R.Align, R.Offset);
     CandSet.insert(R.Min);
-    if (R.Align < A0)
-      CandSet.insert(R.Min < 0 ? -alignDown(-R.Min, A0) : alignTo(R.Min, A0));
-    uint8_t A1 = MaxAlign(Tree.nodesWith(R.Max, false));
+    if (R.Align < P0.first)
+      CandSet.insert(adjustUp(R.Min, P0.first, P0.second));
+    auto P1 = MaxAlign(Tree.nodesWith(R.Max, false), R.Align, R.Offset);
     CandSet.insert(R.Max);
-    if (R.Align < A1)
-      CandSet.insert(R.Max < 0 ? -alignTo(-R.Max, A1) : alignDown(R.Max, A1));
+    if (R.Align < P1.first)
+      CandSet.insert(adjustDown(R.Max, P1.first, P1.second));
   }
 
   // Build the assignment map: candidate C -> { list of extender indexes }.
@@ -1338,7 +1399,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     }
   }
 
-  DEBUG(dbgs() << "IMap (before fixup) = " << PrintIMap(IMap, *HRI));
+  LLVM_DEBUG(dbgs() << "IMap (before fixup) = " << PrintIMap(IMap, *HRI));
 
   // There is some ambiguity in what initializer should be used, if the
   // descriptor's subexpression is non-trivial: it can be the entire
@@ -1357,10 +1418,50 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     AssignmentMap::iterator F = IMap.find({EV, ExtExpr()});
     if (F == IMap.end())
       continue;
+
     // Finally, check if all extenders have the same value as the initializer.
-    auto SameValue = [&EV,this](unsigned I) {
+    // Make sure that extenders that are a part of a stack address are not
+    // merged with those that aren't. Stack addresses need an offset field
+    // (to be used by frame index elimination), while non-stack expressions
+    // can be replaced with forms (such as rr) that do not have such a field.
+    // Example:
+    //
+    // Collected 3 extenders
+    //  =2. imm:0  off:32968  bb#2: %7 = ## + __ << 0, def
+    //   0. imm:0  off:267  bb#0: __ = ## + SS#1 << 0
+    //   1. imm:0  off:267  bb#1: __ = ## + SS#1 << 0
+    // Ranges
+    //   0. [-756,267]a1+0
+    //   1. [-756,267]a1+0
+    //   2. [201,65735]a1+0
+    // RangeMap
+    //   [-756,267]a1+0 -> 0 1
+    //   [201,65735]a1+0 -> 2
+    // IMap (before fixup) = {
+    //   [imm:0  off:267, ## + __ << 0] -> { 2 }
+    //   [imm:0  off:267, ## + SS#1 << 0] -> { 0 1 }
+    // }
+    // IMap (after fixup) = {
+    //   [imm:0  off:267, ## + __ << 0] -> { 2 0 1 }
+    //   [imm:0  off:267, ## + SS#1 << 0] -> { }
+    // }
+    // Inserted def in bb#0 for initializer: [imm:0  off:267, ## + __ << 0]
+    //   %12:intregs = A2_tfrsi 267
+    //
+    // The result was
+    //   %12:intregs = A2_tfrsi 267
+    //   S4_pstorerbt_rr %3, %12, %stack.1, 0, killed %4
+    // Which became
+    //   r0 = #267
+    //   if (p0.new) memb(r0+r29<<#4) = r2
+
+    bool IsStack = any_of(F->second, [this](unsigned I) {
+                      return Extenders[I].Expr.Rs.isSlot();
+                   });
+    auto SameValue = [&EV,this,IsStack](unsigned I) {
       const ExtDesc &ED = Extenders[I];
-      return ExtValue(ED).Offset == EV.Offset;
+      return ED.Expr.Rs.isSlot() == IsStack &&
+             ExtValue(ED).Offset == EV.Offset;
     };
     if (all_of(P.second, SameValue)) {
       F->second.insert(P.second.begin(), P.second.end());
@@ -1368,11 +1469,11 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     }
   }
 
-  DEBUG(dbgs() << "IMap (after fixup) = " << PrintIMap(IMap, *HRI));
+  LLVM_DEBUG(dbgs() << "IMap (after fixup) = " << PrintIMap(IMap, *HRI));
 }
 
 void HCE::calculatePlacement(const ExtenderInit &ExtI, const IndexList &Refs,
-      LocDefMap &Defs) {
+      LocDefList &Defs) {
   if (Refs.empty())
     return;
 
@@ -1419,7 +1520,7 @@ void HCE::calculatePlacement(const ExtenderInit &ExtI, const IndexList &Refs,
     It = DomB->getFirstTerminator();
   }
   Loc DefLoc(DomB, It);
-  Defs.emplace(DefLoc, Refs);
+  Defs.emplace_back(DefLoc, Refs);
 }
 
 HCE::Register HCE::insertInitializer(Loc DefL, const ExtenderInit &ExtI) {
@@ -1471,9 +1572,9 @@ HCE::Register HCE::insertInitializer(Loc DefL, const ExtenderInit &ExtI) {
 
   assert(InitI);
   (void)InitI;
-  DEBUG(dbgs() << "Inserted def in bb#" << MBB.getNumber()
-               << " for initializer: " << PrintInit(ExtI, *HRI)
-               << "\n  " << *InitI);
+  LLVM_DEBUG(dbgs() << "Inserted def in bb#" << MBB.getNumber()
+                    << " for initializer: " << PrintInit(ExtI, *HRI) << "\n  "
+                    << *InitI);
   return { DefR, 0 };
 }
 
@@ -1531,7 +1632,7 @@ bool HCE::replaceInstrExact(const ExtDesc &ED, Register ExtR) {
       else
         MIB.add(MachineOperand(ExtR));
     }
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1582,7 +1683,7 @@ bool HCE::replaceInstrExact(const ExtDesc &ED, Register ExtR) {
     // Add the stored value for stores.
     if (MI.mayStore())
       MIB.add(getStoredValueOp(MI));
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1616,7 +1717,16 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     assert(IdxOpc == Hexagon::A2_addi);
 
     // Clamp Diff to the 16 bit range.
-    int32_t D = isInt<16>(Diff) ? Diff : (Diff > 32767 ? 32767 : -32767);
+    int32_t D = isInt<16>(Diff) ? Diff : (Diff > 0 ? 32767 : -32768);
+    if (Diff > 32767) {
+      // Split Diff into two values: one that is close to min/max int16,
+      // and the other being the rest, and such that both have the same
+      // "alignment" as Diff.
+      uint32_t UD = Diff;
+      OffsetRange R = getOffsetRange(MI.getOperand(0));
+      uint32_t A = std::min<uint32_t>(R.Align, 1u << countTrailingZeros(UD));
+      D &= ~(A-1);
+    }
     BuildMI(MBB, At, dl, HII->get(IdxOpc))
       .add(MI.getOperand(0))
       .add(MachineOperand(ExtR))
@@ -1624,11 +1734,13 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     Diff -= D;
 #ifndef NDEBUG
     // Make sure the output is within allowable range for uses.
+    // "Diff" is a difference in the "opposite direction", i.e. Ext - DefV,
+    // not DefV - Ext, as the getOffsetRange would calculate.
     OffsetRange Uses = getOffsetRange(MI.getOperand(0));
-    if (!Uses.contains(Diff))
-      dbgs() << "Diff: " << Diff << " out of range " << Uses
+    if (!Uses.contains(-Diff))
+      dbgs() << "Diff: " << -Diff << " out of range " << Uses
              << " for " << MI;
-    assert(Uses.contains(Diff));
+    assert(Uses.contains(-Diff));
 #endif
     MBB.erase(MI);
     return true;
@@ -1697,7 +1809,7 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     // Add the stored value for stores.
     if (MI.mayStore())
       MIB.add(getStoredValueOp(MI));
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1724,8 +1836,8 @@ bool HCE::replaceInstr(unsigned Idx, Register ExtR, const ExtenderInit &ExtI) {
   ExtValue EV(ED);
   int32_t Diff = EV.Offset - DefV.Offset;
   const MachineInstr &MI = *ED.UseMI;
-  DEBUG(dbgs() << __func__ << " Idx:" << Idx << " ExtR:"
-               << PrintRegister(ExtR, *HRI) << " Diff:" << Diff << '\n');
+  LLVM_DEBUG(dbgs() << __func__ << " Idx:" << Idx << " ExtR:"
+                    << PrintRegister(ExtR, *HRI) << " Diff:" << Diff << '\n');
 
   // These two addressing modes must be converted into indexed forms
   // regardless of what the initializer looks like.
@@ -1778,7 +1890,7 @@ bool HCE::replaceInstr(unsigned Idx, Register ExtR, const ExtenderInit &ExtI) {
 }
 
 bool HCE::replaceExtenders(const AssignmentMap &IMap) {
-  LocDefMap Defs;
+  LocDefList Defs;
   bool Changed = false;
 
   for (const std::pair<ExtenderInit,IndexList> &P : IMap) {
@@ -1829,9 +1941,14 @@ const MachineOperand &HCE::getStoredValueOp(const MachineInstr &MI) const {
 }
 
 bool HCE::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(*MF.getFunction()))
+  if (skipFunction(MF.getFunction()))
     return false;
-  DEBUG(MF.print(dbgs() << "Before " << getPassName() << '\n', nullptr));
+  if (MF.getFunction().hasPersonalityFn()) {
+    LLVM_DEBUG(dbgs() << getPassName() << ": skipping " << MF.getName()
+                      << " due to exception handling\n");
+    return false;
+  }
+  LLVM_DEBUG(MF.print(dbgs() << "Before " << getPassName() << '\n', nullptr));
 
   HII = MF.getSubtarget<HexagonSubtarget>().getInstrInfo();
   HRI = MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
@@ -1840,13 +1957,27 @@ bool HCE::runOnMachineFunction(MachineFunction &MF) {
   AssignmentMap IMap;
 
   collect(MF);
-  std::sort(Extenders.begin(), Extenders.end(),
-    [](const ExtDesc &A, const ExtDesc &B) {
-      return ExtValue(A) < ExtValue(B);
-    });
+  llvm::sort(Extenders, [this](const ExtDesc &A, const ExtDesc &B) {
+    ExtValue VA(A), VB(B);
+    if (VA != VB)
+      return VA < VB;
+    const MachineInstr *MA = A.UseMI;
+    const MachineInstr *MB = B.UseMI;
+    if (MA == MB) {
+      // If it's the same instruction, compare operand numbers.
+      return A.OpNum < B.OpNum;
+    }
+
+    const MachineBasicBlock *BA = MA->getParent();
+    const MachineBasicBlock *BB = MB->getParent();
+    assert(BA->getNumber() != -1 && BB->getNumber() != -1);
+    if (BA != BB)
+      return BA->getNumber() < BB->getNumber();
+    return MDT->dominates(MA, MB);
+  });
 
   bool Changed = false;
-  DEBUG(dbgs() << "Collected " << Extenders.size() << " extenders\n");
+  LLVM_DEBUG(dbgs() << "Collected " << Extenders.size() << " extenders\n");
   for (unsigned I = 0, E = Extenders.size(); I != E; ) {
     unsigned B = I;
     const ExtRoot &T = Extenders[B].getOp();
@@ -1858,7 +1989,7 @@ bool HCE::runOnMachineFunction(MachineFunction &MF) {
     Changed |= replaceExtenders(IMap);
   }
 
-  DEBUG({
+  LLVM_DEBUG({
     if (Changed)
       MF.print(dbgs() << "After " << getPassName() << '\n', nullptr);
     else

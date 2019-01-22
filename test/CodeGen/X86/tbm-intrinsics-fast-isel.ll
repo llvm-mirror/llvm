@@ -6,29 +6,29 @@
 
 define i32 @test__bextri_u32(i32 %a0) {
 ; X32-LABEL: test__bextri_u32:
-; X32:       # BB#0:
-; X32-NEXT:    bextr $1, {{[0-9]+}}(%esp), %eax
+; X32:       # %bb.0:
+; X32-NEXT:    bextrl $3841, {{[0-9]+}}(%esp), %eax # imm = 0xF01
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__bextri_u32:
-; X64:       # BB#0:
-; X64-NEXT:    bextr $1, %edi, %eax
+; X64:       # %bb.0:
+; X64-NEXT:    bextrl $3841, %edi, %eax # imm = 0xF01
 ; X64-NEXT:    retq
-  %1 = call i32 @llvm.x86.tbm.bextri.u32(i32 %a0, i32 1)
+  %1 = call i32 @llvm.x86.tbm.bextri.u32(i32 %a0, i32 3841)
   ret i32 %1
 }
 
 define i32 @test__blcfill_u32(i32 %a0) {
 ; X32-LABEL: test__blcfill_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    leal 1(%ecx), %eax
 ; X32-NEXT:    andl %ecx, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blcfill_u32:
-; X64:       # BB#0:
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0:
+; X64-NEXT:    # kill: def $edi killed $edi def $rdi
 ; X64-NEXT:    leal 1(%rdi), %eax
 ; X64-NEXT:    andl %edi, %eax
 ; X64-NEXT:    retq
@@ -39,7 +39,7 @@ define i32 @test__blcfill_u32(i32 %a0) {
 
 define i32 @test__blci_u32(i32 %a0) {
 ; X32-LABEL: test__blci_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    leal 1(%ecx), %eax
 ; X32-NEXT:    xorl $-1, %eax
@@ -47,8 +47,8 @@ define i32 @test__blci_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blci_u32:
-; X64:       # BB#0:
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0:
+; X64-NEXT:    # kill: def $edi killed $edi def $rdi
 ; X64-NEXT:    leal 1(%rdi), %eax
 ; X64-NEXT:    xorl $-1, %eax
 ; X64-NEXT:    orl %edi, %eax
@@ -61,7 +61,7 @@ define i32 @test__blci_u32(i32 %a0) {
 
 define i32 @test__blcic_u32(i32 %a0) {
 ; X32-LABEL: test__blcic_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl %eax, %ecx
 ; X32-NEXT:    xorl $-1, %ecx
@@ -70,12 +70,12 @@ define i32 @test__blcic_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blcic_u32:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %eax
-; X64-NEXT:    xorl $-1, %eax
-; X64-NEXT:    addl $1, %edi
-; X64-NEXT:    andl %eax, %edi
-; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    xorl $-1, %ecx
+; X64-NEXT:    addl $1, %eax
+; X64-NEXT:    andl %ecx, %eax
 ; X64-NEXT:    retq
   %1 = xor i32 %a0, -1
   %2 = add i32 %a0, 1
@@ -85,15 +85,15 @@ define i32 @test__blcic_u32(i32 %a0) {
 
 define i32 @test__blcmsk_u32(i32 %a0) {
 ; X32-LABEL: test__blcmsk_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    leal 1(%ecx), %eax
 ; X32-NEXT:    xorl %ecx, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blcmsk_u32:
-; X64:       # BB#0:
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0:
+; X64-NEXT:    # kill: def $edi killed $edi def $rdi
 ; X64-NEXT:    leal 1(%rdi), %eax
 ; X64-NEXT:    xorl %edi, %eax
 ; X64-NEXT:    retq
@@ -104,15 +104,15 @@ define i32 @test__blcmsk_u32(i32 %a0) {
 
 define i32 @test__blcs_u32(i32 %a0) {
 ; X32-LABEL: test__blcs_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    leal 1(%ecx), %eax
 ; X32-NEXT:    orl %ecx, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blcs_u32:
-; X64:       # BB#0:
-; X64-NEXT:    # kill: %EDI<def> %EDI<kill> %RDI<def>
+; X64:       # %bb.0:
+; X64-NEXT:    # kill: def $edi killed $edi def $rdi
 ; X64-NEXT:    leal 1(%rdi), %eax
 ; X64-NEXT:    orl %edi, %eax
 ; X64-NEXT:    retq
@@ -123,7 +123,7 @@ define i32 @test__blcs_u32(i32 %a0) {
 
 define i32 @test__blsfill_u32(i32 %a0) {
 ; X32-LABEL: test__blsfill_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    movl %ecx, %eax
 ; X32-NEXT:    subl $1, %eax
@@ -131,7 +131,7 @@ define i32 @test__blsfill_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blsfill_u32:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %eax
 ; X64-NEXT:    subl $1, %eax
 ; X64-NEXT:    orl %edi, %eax
@@ -143,7 +143,7 @@ define i32 @test__blsfill_u32(i32 %a0) {
 
 define i32 @test__blsic_u32(i32 %a0) {
 ; X32-LABEL: test__blsic_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl %eax, %ecx
 ; X32-NEXT:    xorl $-1, %ecx
@@ -152,12 +152,12 @@ define i32 @test__blsic_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__blsic_u32:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %eax
-; X64-NEXT:    xorl $-1, %eax
-; X64-NEXT:    subl $1, %edi
-; X64-NEXT:    orl %eax, %edi
-; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    xorl $-1, %ecx
+; X64-NEXT:    subl $1, %eax
+; X64-NEXT:    orl %ecx, %eax
 ; X64-NEXT:    retq
   %1 = xor i32 %a0, -1
   %2 = sub i32 %a0, 1
@@ -167,7 +167,7 @@ define i32 @test__blsic_u32(i32 %a0) {
 
 define i32 @test__t1mskc_u32(i32 %a0) {
 ; X32-LABEL: test__t1mskc_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl %eax, %ecx
 ; X32-NEXT:    xorl $-1, %ecx
@@ -176,12 +176,12 @@ define i32 @test__t1mskc_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__t1mskc_u32:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %eax
-; X64-NEXT:    xorl $-1, %eax
-; X64-NEXT:    addl $1, %edi
-; X64-NEXT:    orl %eax, %edi
-; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    xorl $-1, %ecx
+; X64-NEXT:    addl $1, %eax
+; X64-NEXT:    orl %ecx, %eax
 ; X64-NEXT:    retq
   %1 = xor i32 %a0, -1
   %2 = add i32 %a0, 1
@@ -191,7 +191,7 @@ define i32 @test__t1mskc_u32(i32 %a0) {
 
 define i32 @test__tzmsk_u32(i32 %a0) {
 ; X32-LABEL: test__tzmsk_u32:
-; X32:       # BB#0:
+; X32:       # %bb.0:
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X32-NEXT:    movl %eax, %ecx
 ; X32-NEXT:    xorl $-1, %ecx
@@ -200,12 +200,12 @@ define i32 @test__tzmsk_u32(i32 %a0) {
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test__tzmsk_u32:
-; X64:       # BB#0:
+; X64:       # %bb.0:
 ; X64-NEXT:    movl %edi, %eax
-; X64-NEXT:    xorl $-1, %eax
-; X64-NEXT:    subl $1, %edi
-; X64-NEXT:    andl %eax, %edi
-; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    movl %edi, %ecx
+; X64-NEXT:    xorl $-1, %ecx
+; X64-NEXT:    subl $1, %eax
+; X64-NEXT:    andl %ecx, %eax
 ; X64-NEXT:    retq
   %1 = xor i32 %a0, -1
   %2 = sub i32 %a0, 1

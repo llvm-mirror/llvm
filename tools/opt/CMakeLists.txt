@@ -1,5 +1,6 @@
 set(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
+  AggressiveInstCombine
   Analysis
   BitWriter
   CodeGen
@@ -25,6 +26,7 @@ set(LLVM_NO_DEAD_STRIP 1)
 add_llvm_tool(opt
   AnalysisWrappers.cpp
   BreakpointPrinter.cpp
+  Debugify.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
   PassPrinters.cpp
@@ -37,5 +39,5 @@ add_llvm_tool(opt
 export_executable_symbols(opt)
 
 if(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)
-  target_link_libraries(opt Polly)
+  target_link_libraries(opt PRIVATE Polly)
 endif(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)

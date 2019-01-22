@@ -1,9 +1,8 @@
 //===- llvm/ADT/ilist_node.h - Intrusive Linked List Helper -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -271,7 +270,7 @@ private:
 public:
   /// @name Adjacent Node Accessors
   /// @{
-  /// \brief Get the previous node, or \c nullptr for the list head.
+  /// Get the previous node, or \c nullptr for the list head.
   NodeTy *getPrevNode() {
     // Should be separated to a reused function, but then we couldn't use auto
     // (and would need the type of the list).
@@ -280,12 +279,12 @@ public:
     return List.getPrevNode(*static_cast<NodeTy *>(this));
   }
 
-  /// \brief Get the previous node, or \c nullptr for the list head.
+  /// Get the previous node, or \c nullptr for the list head.
   const NodeTy *getPrevNode() const {
     return const_cast<ilist_node_with_parent *>(this)->getPrevNode();
   }
 
-  /// \brief Get the next node, or \c nullptr for the list tail.
+  /// Get the next node, or \c nullptr for the list tail.
   NodeTy *getNextNode() {
     // Should be separated to a reused function, but then we couldn't use auto
     // (and would need the type of the list).
@@ -294,7 +293,7 @@ public:
     return List.getNextNode(*static_cast<NodeTy *>(this));
   }
 
-  /// \brief Get the next node, or \c nullptr for the list tail.
+  /// Get the next node, or \c nullptr for the list tail.
   const NodeTy *getNextNode() const {
     return const_cast<ilist_node_with_parent *>(this)->getNextNode();
   }

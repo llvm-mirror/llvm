@@ -1,9 +1,8 @@
 //===- llvm/MC/MCMachObjectWriter.h - Mach Object Writer --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -26,7 +25,7 @@ namespace llvm {
 
 class MachObjectWriter;
 
-class MCMachObjectTargetWriter {
+class MCMachObjectTargetWriter : public MCObjectTargetWriter {
   const unsigned Is64Bit : 1;
   const uint32_t CPUType;
   const uint32_t CPUSubtype;
@@ -42,6 +41,11 @@ protected:
 
 public:
   virtual ~MCMachObjectTargetWriter();
+
+  virtual Triple::ObjectFormatType getFormat() const { return Triple::MachO; }
+  static bool classof(const MCObjectTargetWriter *W) {
+    return W->getFormat() == Triple::MachO;
+  }
 
   /// \name Lifetime Management
   /// @{
@@ -116,11 +120,15 @@ class MachObjectWriter : public MCObjectWriter {
 
   MachSymbolData *findSymbolData(const MCSymbol &Sym);
 
+  void writeWithPadding(StringRef Str, uint64_t Size);
+
 public:
   MachObjectWriter(std::unique_ptr<MCMachObjectTargetWriter> MOTW,
                    raw_pwrite_stream &OS, bool IsLittleEndian)
-      : MCObjectWriter(OS, IsLittleEndian),
-        TargetObjectWriter(std::move(MOTW)) {}
+      : TargetObjectWriter(std::move(MOTW)),
+        W(OS, IsLittleEndian ? support::little : support::big) {}
+
+  support::endian::Writer W;
 
   const MCSymbol &findAliasedSymbol(const MCSymbol &Sym) const;
 
@@ -260,7 +268,7 @@ public:
                                               const MCFragment &FB, bool InSet,
                                               bool IsPCRel) const override;
 
-  void writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
+  uint64_t writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
 };
 
 /// Construct a new Mach-O writer instance.

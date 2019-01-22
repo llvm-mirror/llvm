@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=x86_64-pc-linux -mcpu=prescott | FileCheck %s --check-prefix=PRESCOTT
+; RUN: llc < %s -mtriple=x86_64-pc-linux -mcpu=nocona | FileCheck %s --check-prefix=PRESCOTT
 ; RUN: llc < %s -mtriple=x86_64-pc-linux -mcpu=nehalem | FileCheck %s --check-prefix=NEHALEM
 
 ;;; TODO: (1) Some of the loads and stores are certainly unaligned and (2) the first load and first
@@ -8,7 +8,7 @@
 
 define float @foo(i8* nocapture %buf, float %a, float %b) nounwind uwtable {
 ; PRESCOTT-LABEL: foo:
-; PRESCOTT:       # BB#0: # %entry
+; PRESCOTT:       # %bb.0: # %entry
 ; PRESCOTT-NEXT:    movq   .Ltmp0+14(%rip), %rax
 ; PRESCOTT-NEXT:    movq   %rax, 14(%rdi)
 ; PRESCOTT-NEXT:    movq   .Ltmp0+8(%rip), %rax
@@ -17,14 +17,14 @@ define float @foo(i8* nocapture %buf, float %a, float %b) nounwind uwtable {
 ; PRESCOTT-NEXT:    movq   %rax, (%rdi)
 ;
 ; NEHALEM-LABEL: foo:
-; NEHALEM:       # BB#0: # %entry
+; NEHALEM:       # %bb.0: # %entry
 ; NEHALEM-NEXT:    movq .Ltmp0+14(%rip), %rax
 ; NEHALEM-NEXT:    movq %rax, 14(%rdi)
 ; NEHALEM-NEXT:    movups .Ltmp0(%rip), %xmm2
 ; NEHALEM-NEXT:    movups %xmm2, (%rdi)
 
 entry:
-  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* %buf, i8* blockaddress(@foo, %out), i64 22, i32 1, i1 false)
+  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* %buf, i8* blockaddress(@foo, %out), i64 22, i1 false)
   br label %out
 
 out:                                              ; preds = %entry
@@ -32,4 +32,4 @@ out:                                              ; preds = %entry
   ret float %add
 }
 
-declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, i1) nounwind
+declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i1) nounwind

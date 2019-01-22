@@ -1,9 +1,8 @@
 //===- ARMTargetParser.def - ARM target parsing defines ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,6 +100,16 @@ ARM_ARCH("armv8.3-a", ARMV8_3A, "8.3-A", "v8.3a",
          ARMBuildAttrs::CPUArch::v8_A, FK_CRYPTO_NEON_FP_ARMV8,
          (ARM::AEK_SEC | ARM::AEK_MP | ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
           ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP | ARM::AEK_CRC | ARM::AEK_RAS))
+ARM_ARCH("armv8.4-a", ARMV8_4A, "8.4-A", "v8.4a",
+         ARMBuildAttrs::CPUArch::v8_A, FK_CRYPTO_NEON_FP_ARMV8,
+         (ARM::AEK_SEC | ARM::AEK_MP | ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
+          ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP | ARM::AEK_CRC | ARM::AEK_RAS |
+          ARM::AEK_DOTPROD))
+ARM_ARCH("armv8.5-a", ARMV8_5A, "8.5-A", "v8.5a",
+         ARMBuildAttrs::CPUArch::v8_A, FK_CRYPTO_NEON_FP_ARMV8,
+         (ARM::AEK_SEC | ARM::AEK_MP | ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
+          ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP | ARM::AEK_CRC | ARM::AEK_RAS |
+          ARM::AEK_DOTPROD))
 ARM_ARCH("armv8-r", ARMV8R, "8-R", "v8r", ARMBuildAttrs::CPUArch::v8_R,
           FK_NEON_FP_ARMV8,
           (ARM::AEK_MP | ARM::AEK_VIRT | ARM::AEK_HWDIVARM | ARM::AEK_HWDIVTHUMB |
@@ -130,6 +139,8 @@ ARM_ARCH_EXT_NAME("invalid",  ARM::AEK_INVALID,  nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("none",     ARM::AEK_NONE,     nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("crc",      ARM::AEK_CRC,      "+crc",   "-crc")
 ARM_ARCH_EXT_NAME("crypto",   ARM::AEK_CRYPTO,   "+crypto","-crypto")
+ARM_ARCH_EXT_NAME("sha2",     ARM::AEK_SHA2,     "+sha2",  "-sha2")
+ARM_ARCH_EXT_NAME("aes",      ARM::AEK_AES,      "+aes",   "-aes")
 ARM_ARCH_EXT_NAME("dotprod",  ARM::AEK_DOTPROD,  "+dotprod","-dotprod")
 ARM_ARCH_EXT_NAME("dsp",      ARM::AEK_DSP,      "+dsp",   "-dsp")
 ARM_ARCH_EXT_NAME("fp",       ARM::AEK_FP,       nullptr,  nullptr)
@@ -145,6 +156,8 @@ ARM_ARCH_EXT_NAME("iwmmxt",   ARM::AEK_IWMMXT,   nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("iwmmxt2",  ARM::AEK_IWMMXT2,  nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("maverick", ARM::AEK_MAVERICK, nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("xscale",   ARM::AEK_XSCALE,   nullptr,  nullptr)
+ARM_ARCH_EXT_NAME("fp16fml",  ARM::AEK_FP16FML,  "+fp16fml", "-fp16fml")
+ARM_ARCH_EXT_NAME("sb",       ARM::AEK_SB,       "+sb",      "-sb")
 #undef ARM_ARCH_EXT_NAME
 
 #ifndef ARM_HW_DIV_NAME
@@ -195,10 +208,9 @@ ARM_CPU_NAME("arm926ej-s", ARMV5TEJ, FK_NONE, true, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1136j-s", ARMV6, FK_NONE, false, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1136jf-s", ARMV6, FK_VFPV2, true, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1136jz-s", ARMV6, FK_NONE, false, ARM::AEK_NONE)
-ARM_CPU_NAME("arm1176j-s", ARMV6K, FK_NONE, true, ARM::AEK_NONE)
-ARM_CPU_NAME("arm1176jz-s", ARMV6KZ, FK_NONE, false, ARM::AEK_NONE)
-ARM_CPU_NAME("mpcore", ARMV6K, FK_VFPV2, false, ARM::AEK_NONE)
+ARM_CPU_NAME("mpcore", ARMV6K, FK_VFPV2, true, ARM::AEK_NONE)
 ARM_CPU_NAME("mpcorenovfp", ARMV6K, FK_NONE, false, ARM::AEK_NONE)
+ARM_CPU_NAME("arm1176jz-s", ARMV6KZ, FK_NONE, false, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1176jzf-s", ARMV6KZ, FK_VFPV2, true, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1156t2-s", ARMV6T2, FK_NONE, true, ARM::AEK_NONE)
 ARM_CPU_NAME("arm1156t2f-s", ARMV6T2, FK_VFPV2, false, ARM::AEK_NONE)
@@ -253,6 +265,8 @@ ARM_CPU_NAME("cyclone", ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, ARM::AEK_CRC)
 ARM_CPU_NAME("exynos-m1", ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, ARM::AEK_CRC)
 ARM_CPU_NAME("exynos-m2", ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, ARM::AEK_CRC)
 ARM_CPU_NAME("exynos-m3", ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, ARM::AEK_CRC)
+ARM_CPU_NAME("exynos-m4", ARMV8_2A, FK_CRYPTO_NEON_FP_ARMV8, false,
+             (ARM::AEK_FP16 | ARM::AEK_DOTPROD))
 ARM_CPU_NAME("kryo", ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, ARM::AEK_CRC)
 // Non-standard Arch names.
 ARM_CPU_NAME("iwmmxt", IWMMXT, FK_NONE, true, ARM::AEK_NONE)

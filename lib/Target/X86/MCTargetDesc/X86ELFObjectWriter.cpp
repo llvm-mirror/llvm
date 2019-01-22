@@ -1,9 +1,8 @@
 //===-- X86ELFObjectWriter.cpp - X86 ELF Writer ---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -74,6 +73,9 @@ static X86_64RelType getType64(unsigned Kind,
   case X86::reloc_riprel_4byte_relax:
   case X86::reloc_riprel_4byte_relax_rex:
   case X86::reloc_riprel_4byte_movq_load:
+    return RT64_32;
+  case X86::reloc_branch_4byte_pcrel:
+    Modifier = MCSymbolRefExpr::VK_PLT;
     return RT64_32;
   case FK_PCRel_2:
   case FK_Data_2:
@@ -298,9 +300,7 @@ unsigned X86ELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
   return getRelocType32(Ctx, Modifier, getType32(Type), IsPCRel, Kind);
 }
 
-std::unique_ptr<MCObjectWriter>
-llvm::createX86ELFObjectWriter(raw_pwrite_stream &OS, bool IsELF64,
-                               uint8_t OSABI, uint16_t EMachine) {
-  auto MOTW = llvm::make_unique<X86ELFObjectWriter>(IsELF64, OSABI, EMachine);
-  return createELFObjectWriter(std::move(MOTW), OS, /*IsLittleEndian=*/true);
+std::unique_ptr<MCObjectTargetWriter>
+llvm::createX86ELFObjectWriter(bool IsELF64, uint8_t OSABI, uint16_t EMachine) {
+  return llvm::make_unique<X86ELFObjectWriter>(IsELF64, OSABI, EMachine);
 }

@@ -1,9 +1,8 @@
 //===-- X86SelectionDAGInfo.cpp - X86 SelectionDAG Info -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,8 +16,8 @@
 #include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
 
@@ -89,8 +88,9 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemset(
     // Check to see if there is a specialized entry-point for memory zeroing.
     ConstantSDNode *ValC = dyn_cast<ConstantSDNode>(Val);
 
-    if (const char *bzeroEntry = ValC &&
-        ValC->isNullValue() ? Subtarget.getBZeroEntry() : nullptr) {
+    if (const char *bzeroName = (ValC && ValC->isNullValue())
+        ? DAG.getTargetLoweringInfo().getLibcallName(RTLIB::BZERO)
+        : nullptr) {
       const TargetLowering &TLI = DAG.getTargetLoweringInfo();
       EVT IntPtr = TLI.getPointerTy(DAG.getDataLayout());
       Type *IntPtrTy = DAG.getDataLayout().getIntPtrType(*DAG.getContext());
@@ -106,7 +106,7 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemset(
       CLI.setDebugLoc(dl)
           .setChain(Chain)
           .setLibCallee(CallingConv::C, Type::getVoidTy(*DAG.getContext()),
-                        DAG.getExternalSymbol(bzeroEntry, IntPtr),
+                        DAG.getExternalSymbol(bzeroName, IntPtr),
                         std::move(Args))
           .setDiscardResult();
 
@@ -169,10 +169,11 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemset(
     InFlag = Chain.getValue(1);
   }
 
-  Chain = DAG.getCopyToReg(Chain, dl, Subtarget.is64Bit() ? X86::RCX : X86::ECX,
+  bool Use64BitRegs = Subtarget.isTarget64BitLP64();
+  Chain = DAG.getCopyToReg(Chain, dl, Use64BitRegs ? X86::RCX : X86::ECX,
                            Count, InFlag);
   InFlag = Chain.getValue(1);
-  Chain = DAG.getCopyToReg(Chain, dl, Subtarget.is64Bit() ? X86::RDI : X86::EDI,
+  Chain = DAG.getCopyToReg(Chain, dl, Use64BitRegs ? X86::RDI : X86::EDI,
                            Dst, InFlag);
   InFlag = Chain.getValue(1);
 
@@ -247,21 +248,22 @@ SDValue X86SelectionDAGInfo::EmitTargetCodeForMemcpy(
       Repeats.AVT = Subtarget.is64Bit() ? MVT::i64 : MVT::i32;
 
     if (Repeats.BytesLeft() > 0 &&
-        DAG.getMachineFunction().getFunction()->optForMinSize()) {
-      // When agressively optimizing for size, avoid generating the code to
+        DAG.getMachineFunction().getFunction().optForMinSize()) {
+      // When aggressively optimizing for size, avoid generating the code to
       // handle BytesLeft.
       Repeats.AVT = MVT::i8;
     }
   }
 
+  bool Use64BitRegs = Subtarget.isTarget64BitLP64();
   SDValue InFlag;
-  Chain = DAG.getCopyToReg(Chain, dl, Subtarget.is64Bit() ? X86::RCX : X86::ECX,
+  Chain = DAG.getCopyToReg(Chain, dl, Use64BitRegs ? X86::RCX : X86::ECX,
                            DAG.getIntPtrConstant(Repeats.Count(), dl), InFlag);
   InFlag = Chain.getValue(1);
-  Chain = DAG.getCopyToReg(Chain, dl, Subtarget.is64Bit() ? X86::RDI : X86::EDI,
+  Chain = DAG.getCopyToReg(Chain, dl, Use64BitRegs ? X86::RDI : X86::EDI,
                            Dst, InFlag);
   InFlag = Chain.getValue(1);
-  Chain = DAG.getCopyToReg(Chain, dl, Subtarget.is64Bit() ? X86::RSI : X86::ESI,
+  Chain = DAG.getCopyToReg(Chain, dl, Use64BitRegs ? X86::RSI : X86::ESI,
                            Src, InFlag);
   InFlag = Chain.getValue(1);
 
