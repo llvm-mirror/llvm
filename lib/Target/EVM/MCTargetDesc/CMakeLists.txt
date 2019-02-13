@@ -1,0 +1,10 @@
+add_llvm_library(LLVMEVMDesc
+  EVMAsmBackend.cpp
+  EVMELFObjectWriter.cpp
+  EVMMCAsmInfo.cpp
+  EVMMCCodeEmitter.cpp
+  EVMMCExpr.cpp
+  EVMMCTargetDesc.cpp
+  EVMTargetStreamer.cpp
+  EVMELFStreamer.cpp
+)

@@ -1,0 +1,280 @@
+//===-- EVMMCCodeEmitter.cpp - Convert EVM code to machine code -------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the EVMMCCodeEmitter class.
+//
+//===----------------------------------------------------------------------===//
+
+#include "MCTargetDesc/EVMFixupKinds.h"
+#include "MCTargetDesc/EVMMCExpr.h"
+#include "MCTargetDesc/EVMMCTargetDesc.h"
+#include "Utils/EVMBaseInfo.h"
+#include "llvm/ADT/Statistic.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeEmitter.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstBuilder.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/EndianStream.h"
+#include "llvm/Support/raw_ostream.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "mccodeemitter"
+
+STATISTIC(MCNumEmitted, "Number of MC instructions emitted");
+STATISTIC(MCNumFixups, "Number of MC fixups created");
+
+namespace {
+class EVMMCCodeEmitter : public MCCodeEmitter {
+  EVMMCCodeEmitter(const EVMMCCodeEmitter &) = delete;
+  void operator=(const EVMMCCodeEmitter &) = delete;
+  MCContext &Ctx;
+  MCInstrInfo const &MCII;
+
+public:
+  EVMMCCodeEmitter(MCContext &ctx, MCInstrInfo const &MCII)
+      : Ctx(ctx), MCII(MCII) {}
+
+  ~EVMMCCodeEmitter() override {}
+
+  void encodeInstruction(const MCInst &MI, raw_ostream &OS,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const override;
+
+  void expandFunctionCall(const MCInst &MI, raw_ostream &OS,
+                          SmallVectorImpl<MCFixup> &Fixups,
+                          const MCSubtargetInfo &STI) const;
+
+  /// TableGen'erated function for getting the binary encoding for an
+  /// instruction.
+  uint64_t getBinaryCodeForInstr(const MCInst &MI,
+                                 SmallVectorImpl<MCFixup> &Fixups,
+                                 const MCSubtargetInfo &STI) const;
+
+  /// Return binary encoding of operand. If the machine operand requires
+  /// relocation, record the relocation and return zero.
+  unsigned getMachineOpValue(const MCInst &MI, const MCOperand &MO,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const;
+
+  unsigned getImmOpValueAsr1(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const;
+
+  unsigned getImmOpValue(const MCInst &MI, unsigned OpNo,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const;
+};
+} // end anonymous namespace
+
+MCCodeEmitter *llvm::createEVMMCCodeEmitter(const MCInstrInfo &MCII,
+                                              const MCRegisterInfo &MRI,
+                                              MCContext &Ctx) {
+  return new EVMMCCodeEmitter(Ctx, MCII);
+}
+
+// Expand PseudoCALL and PseudoTAIL to AUIPC and JALR with relocation types.
+// We expand PseudoCALL and PseudoTAIL while encoding, meaning AUIPC and JALR
+// won't go through EVM MC to MC compressed instruction transformation. This
+// is acceptable because AUIPC has no 16-bit form and C_JALR have no immediate
+// operand field.  We let linker relaxation deal with it. When linker
+// relaxation enabled, AUIPC and JALR have chance relax to JAL. If C extension
+// is enabled, JAL has chance relax to C_JAL.
+void EVMMCCodeEmitter::expandFunctionCall(const MCInst &MI, raw_ostream &OS,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  MCInst TmpInst;
+  MCOperand Func = MI.getOperand(0);
+  unsigned Ra = (MI.getOpcode() == EVM::PseudoTAIL) ? EVM::X6 : EVM::X1;
+  uint32_t Binary;
+
+  assert(Func.isExpr() && "Expected expression");
+
+  const MCExpr *Expr = Func.getExpr();
+
+  // Create function call expression CallExpr for AUIPC.
+  const MCExpr *CallExpr =
+      EVMMCExpr::create(Expr, EVMMCExpr::VK_EVM_CALL, Ctx);
+
+  // Emit AUIPC Ra, Func with R_EVM_CALL relocation type.
+  TmpInst = MCInstBuilder(EVM::AUIPC)
+                .addReg(Ra)
+                .addOperand(MCOperand::createExpr(CallExpr));
+  Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+  support::endian::write(OS, Binary, support::little);
+
+  if (MI.getOpcode() == EVM::PseudoTAIL)
+    // Emit JALR X0, X6, 0
+    TmpInst = MCInstBuilder(EVM::JALR).addReg(EVM::X0).addReg(Ra).addImm(0);
+  else
+    // Emit JALR X1, X1, 0
+    TmpInst = MCInstBuilder(EVM::JALR).addReg(Ra).addReg(Ra).addImm(0);
+  Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+  support::endian::write(OS, Binary, support::little);
+}
+
+void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  // Get byte count of instruction.
+  unsigned Size = Desc.getSize();
+
+  if (MI.getOpcode() == EVM::PseudoCALL ||
+      MI.getOpcode() == EVM::PseudoTAIL) {
+    expandFunctionCall(MI, OS, Fixups, STI);
+    MCNumEmitted += 2;
+    return;
+  }
+
+  switch (Size) {
+  default:
+    llvm_unreachable("Unhandled encodeInstruction length!");
+  case 2: {
+    uint16_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    support::endian::write<uint16_t>(OS, Bits, support::little);
+    break;
+  }
+  case 4: {
+    uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    support::endian::write(OS, Bits, support::little);
+    break;
+  }
+  }
+
+  ++MCNumEmitted; // Keep track of the # of mi's emitted.
+}
+
+unsigned
+EVMMCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const {
+
+  if (MO.isReg())
+    return Ctx.getRegisterInfo()->getEncodingValue(MO.getReg());
+
+  if (MO.isImm())
+    return static_cast<unsigned>(MO.getImm());
+
+  llvm_unreachable("Unhandled expression!");
+  return 0;
+}
+
+unsigned
+EVMMCCodeEmitter::getImmOpValueAsr1(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+
+  if (MO.isImm()) {
+    unsigned Res = MO.getImm();
+    assert((Res & 1) == 0 && "LSB is non-zero");
+    return Res >> 1;
+  }
+
+  return getImmOpValue(MI, OpNo, Fixups, STI);
+}
+
+unsigned EVMMCCodeEmitter::getImmOpValue(const MCInst &MI, unsigned OpNo,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  bool EnableRelax = STI.getFeatureBits()[EVM::FeatureRelax];
+  const MCOperand &MO = MI.getOperand(OpNo);
+
+  MCInstrDesc const &Desc = MCII.get(MI.getOpcode());
+  unsigned MIFrm = Desc.TSFlags & EVMII::InstFormatMask;
+
+  // If the destination is an immediate, there is nothing to do.
+  if (MO.isImm())
+    return MO.getImm();
+
+  assert(MO.isExpr() &&
+         "getImmOpValue expects only expressions or immediates");
+  const MCExpr *Expr = MO.getExpr();
+  MCExpr::ExprKind Kind = Expr->getKind();
+  EVM::Fixups FixupKind = EVM::fixup_evm_invalid;
+  bool RelaxCandidate = false;
+  if (Kind == MCExpr::Target) {
+    const EVMMCExpr *RVExpr = cast<EVMMCExpr>(Expr);
+
+    switch (RVExpr->getKind()) {
+    case EVMMCExpr::VK_EVM_None:
+    case EVMMCExpr::VK_EVM_Invalid:
+      llvm_unreachable("Unhandled fixup kind!");
+    case EVMMCExpr::VK_EVM_LO:
+      if (MIFrm == EVMII::InstFormatI)
+        FixupKind = EVM::fixup_evm_lo12_i;
+      else if (MIFrm == EVMII::InstFormatS)
+        FixupKind = EVM::fixup_evm_lo12_s;
+      else
+        llvm_unreachable("VK_EVM_LO used with unexpected instruction format");
+      RelaxCandidate = true;
+      break;
+    case EVMMCExpr::VK_EVM_HI:
+      FixupKind = EVM::fixup_evm_hi20;
+      RelaxCandidate = true;
+      break;
+    case EVMMCExpr::VK_EVM_PCREL_LO:
+      if (MIFrm == EVMII::InstFormatI)
+        FixupKind = EVM::fixup_evm_pcrel_lo12_i;
+      else if (MIFrm == EVMII::InstFormatS)
+        FixupKind = EVM::fixup_evm_pcrel_lo12_s;
+      else
+        llvm_unreachable(
+            "VK_EVM_PCREL_LO used with unexpected instruction format");
+      RelaxCandidate = true;
+      break;
+    case EVMMCExpr::VK_EVM_PCREL_HI:
+      FixupKind = EVM::fixup_evm_pcrel_hi20;
+      RelaxCandidate = true;
+      break;
+    case EVMMCExpr::VK_EVM_CALL:
+      FixupKind = EVM::fixup_evm_call;
+      RelaxCandidate = true;
+      break;
+    }
+  } else if (Kind == MCExpr::SymbolRef &&
+             cast<MCSymbolRefExpr>(Expr)->getKind() == MCSymbolRefExpr::VK_None) {
+    if (Desc.getOpcode() == EVM::JAL) {
+      FixupKind = EVM::fixup_evm_jal;
+    } else if (MIFrm == EVMII::InstFormatB) {
+      FixupKind = EVM::fixup_evm_branch;
+    } else if (MIFrm == EVMII::InstFormatCJ) {
+      FixupKind = EVM::fixup_evm_rvc_jump;
+    } else if (MIFrm == EVMII::InstFormatCB) {
+      FixupKind = EVM::fixup_evm_rvc_branch;
+    }
+  }
+
+  assert(FixupKind != EVM::fixup_evm_invalid && "Unhandled expression!");
+
+  Fixups.push_back(
+      MCFixup::create(0, Expr, MCFixupKind(FixupKind), MI.getLoc()));
+  ++MCNumFixups;
+
+  // Ensure an R_EVM_RELAX relocation will be emitted if linker relaxation is
+  // enabled and the current fixup will result in a relocation that may be
+  // relaxed.
+  if (EnableRelax && RelaxCandidate) {
+    const MCConstantExpr *Dummy = MCConstantExpr::create(0, Ctx);
+    Fixups.push_back(
+    MCFixup::create(0, Dummy, MCFixupKind(EVM::fixup_evm_relax),
+                    MI.getLoc()));
+    ++MCNumFixups;
+  }
+
+  return 0;
+}
+
+#include "EVMGenMCCodeEmitter.inc"
