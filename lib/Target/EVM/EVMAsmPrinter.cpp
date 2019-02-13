@@ -132,6 +132,5 @@ bool EVMAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 
 // Force static initialization.
 extern "C" void LLVMInitializeEVMAsmPrinter() {
-  RegisterAsmPrinter<EVMAsmPrinter> X(getTheEVM32Target());
-  RegisterAsmPrinter<EVMAsmPrinter> Y(getTheEVM64Target());
+  RegisterAsmPrinter<EVMAsmPrinter> Y(getTheEVMTarget());
 }

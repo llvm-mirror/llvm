@@ -32,8 +32,6 @@ class Triple;
 class raw_ostream;
 class raw_pwrite_stream;
 
-Target &getTheEVM64Target();
-
 Target &getTheEVMTarget();
 
 MCCodeEmitter *createEVMMCCodeEmitter(const MCInstrInfo &MCII,

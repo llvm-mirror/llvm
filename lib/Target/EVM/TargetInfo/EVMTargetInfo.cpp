@@ -10,13 +10,13 @@
 using namespace llvm;
 
 namespace llvm {
-Target &getTheEVM64Target() {
-  static Target TheEVM64Target;
-  return TheEVM64Target;
+Target &getTheEVMTarget() {
+  static Target TheEVMTarget;
+  return TheEVMTarget;
 }
 }
 
 extern "C" void LLVMInitializeEVMTargetInfo() {
-  RegisterTarget<Triple::evm64> Y(getTheEVM64Target(), "evm64",
+  RegisterTarget<Triple::evm64> Y(getTheEVMTarget(), "evm64",
                                     "64-bit EVM", "EVM");
 }

@@ -26,17 +26,10 @@ using namespace llvm;
 void EVMSubtarget::anchor() {}
 
 EVMSubtarget &EVMSubtarget::initializeSubtargetDependencies(StringRef CPU,
-                                                                StringRef FS,
-                                                                bool Is64Bit) {
+                                                            StringRef FS,
+                                                            bool Is64Bit) {
   // Determine default and user-specified characteristics
-  std::string CPUName = CPU;
-  if (CPUName.empty())
-    CPUName = Is64Bit ? "generic-rv64" : "generic-rv32";
   ParseSubtargetFeatures(CPUName, FS);
-  if (Is64Bit) {
-    XLenVT = MVT::i64;
-    XLen = 64;
-  }
   return *this;
 }
 

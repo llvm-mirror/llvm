@@ -49,9 +49,7 @@ static MCDisassembler *createEVMDisassembler(const Target &T,
 
 extern "C" void LLVMInitializeEVMDisassembler() {
   // Register the disassembler for each target.
-  TargetRegistry::RegisterMCDisassembler(getTheEVM32Target(),
-                                         createEVMDisassembler);
-  TargetRegistry::RegisterMCDisassembler(getTheEVM64Target(),
+  TargetRegistry::RegisterMCDisassembler(getTheEVMTarget(),
                                          createEVMDisassembler);
 }
 

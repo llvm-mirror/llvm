@@ -84,7 +84,7 @@ static MCTargetStreamer *createEVMAsmTargetStreamer(MCStreamer &S,
 }
 
 extern "C" void LLVMInitializeEVMTargetMC() {
-  for (Target *T : {&getTheEVM64Target()}) {
+  for (Target *T : {&getTheEVMTarget()}) {
     TargetRegistry::RegisterMCAsmInfo(*T, createEVMMCAsmInfo);
     TargetRegistry::RegisterMCInstrInfo(*T, createEVMMCInstrInfo);
     TargetRegistry::RegisterMCRegInfo(*T, createEVMMCRegisterInfo);

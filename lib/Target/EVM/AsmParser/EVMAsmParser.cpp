@@ -1472,6 +1472,5 @@ bool EVMAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
 }
 
 extern "C" void LLVMInitializeEVMAsmParser() {
-  RegisterMCAsmParser<EVMAsmParser> X(getTheEVM32Target());
-  RegisterMCAsmParser<EVMAsmParser> Y(getTheEVM64Target());
+  RegisterMCAsmParser<EVMAsmParser> Y(getTheEVMTarget());
 }
