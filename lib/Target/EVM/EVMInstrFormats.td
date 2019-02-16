@@ -6,280 +6,121 @@
 //
 //===----------------------------------------------------------------------===//
 
-//===----------------------------------------------------------------------===//
-//
-//  These instruction format definitions are structured to match the
-//  description in the EVM User-Level ISA specification as closely as
-//  possible. For instance, the specification describes instructions with the
-//  MSB (31st bit) on the left and the LSB (0th bit) on the right. This is
-//  reflected in the order of parameters to each instruction class.
-//
-//  One area of divergence is in the description of immediates. The
-//  specification describes immediate encoding in terms of bit-slicing
-//  operations on the logical value represented. The immediate argument to
-//  these instruction formats instead represents the bit sequence that will be
-//  inserted into the instruction. e.g. although JAL's immediate is logically
-//  a 21-bit value (where the LSB is always zero), we describe it as an imm20
-//  to match how it is encoded.
-//
-//===----------------------------------------------------------------------===//
+def HasEIP615 : Predicate<"!Subtarget->hasEIP615()">;
 
-// Format specifies the encoding used by the instruction. This is used by
-// EVMMCCodeEmitter to determine which form of fixup to use. These
-// definitions must be kept in-sync with EVMBaseInfo.h.
-class InstFormat<bits<5> val> {
-  bits<5> Value = val;
+class StackRel;
+def getStackOpcode : InstrMapping {
+  let FilterClass = "StackRel";
+  let RowFields = ["BaseName"];
+  let ColFields = ["StackBased"];
+  let KeyCol = ["false"];
+  let ValueCols = [["true"]];
 }
-def InstFormatPseudo : InstFormat<0>;
-def InstFormatR      : InstFormat<1>;
-def InstFormatR4     : InstFormat<2>;
-def InstFormatI      : InstFormat<3>;
-def InstFormatS      : InstFormat<4>;
-def InstFormatB      : InstFormat<5>;
-def InstFormatU      : InstFormat<6>;
-def InstFormatJ      : InstFormat<7>;
-def InstFormatCR     : InstFormat<8>;
-def InstFormatCI     : InstFormat<9>;
-def InstFormatCSS    : InstFormat<10>;
-def InstFormatCIW    : InstFormat<11>;
-def InstFormatCL     : InstFormat<12>;
-def InstFormatCS     : InstFormat<13>;
-def InstFormatCA     : InstFormat<14>;
-def InstFormatCB     : InstFormat<15>;
-def InstFormatCJ     : InstFormat<16>;
-def InstFormatOther  : InstFormat<17>;
 
-// The following opcode names match those given in Table 19.1 in the
-// EVM User-level ISA specification ("EVM base opcode map").
-class EVMOpcode<bits<7> val> {
-  bits<7> Value = val;
-}
-def OPC_LOAD      : EVMOpcode<0b0000011>;
-def OPC_LOAD_FP   : EVMOpcode<0b0000111>;
-def OPC_MISC_MEM  : EVMOpcode<0b0001111>;
-def OPC_OP_IMM    : EVMOpcode<0b0010011>;
-def OPC_AUIPC     : EVMOpcode<0b0010111>;
-def OPC_OP_IMM_32 : EVMOpcode<0b0011011>;
-def OPC_STORE     : EVMOpcode<0b0100011>;
-def OPC_STORE_FP  : EVMOpcode<0b0100111>;
-def OPC_AMO       : EVMOpcode<0b0101111>;
-def OPC_OP        : EVMOpcode<0b0110011>;
-def OPC_LUI       : EVMOpcode<0b0110111>;
-def OPC_OP_32     : EVMOpcode<0b0111011>;
-def OPC_MADD      : EVMOpcode<0b1000011>;
-def OPC_MSUB      : EVMOpcode<0b1000111>;
-def OPC_NMSUB     : EVMOpcode<0b1001011>;
-def OPC_NMADD     : EVMOpcode<0b1001111>;
-def OPC_OP_FP     : EVMOpcode<0b1010011>;
-def OPC_BRANCH    : EVMOpcode<0b1100011>;
-def OPC_JALR      : EVMOpcode<0b1100111>;
-def OPC_JAL       : EVMOpcode<0b1101111>;
-def OPC_SYSTEM    : EVMOpcode<0b1110011>;
-
-class RVInst<dag outs, dag ins, string opcodestr, string argstr,
-             list<dag> pattern, InstFormat format>
-    : Instruction {
-  field bits<32> Inst;
-  // SoftFail is a field the disassembler can use to provide a way for
-  // instructions to not match without killing the whole decode process. It is
-  // mainly used for ARM, but Tablegen expects this field to exist or it fails
-  // to build the decode table.
-  field bits<32> SoftFail = 0;
-  let Size = 4;
-
-  bits<7> Opcode = 0;
-
-  let Inst{6-0} = Opcode;
-
+class EVMInstruction<bits<8> inst, string asmstr, string stack, int cost>
+    : StackRel, Instruction {
+  bit<8> Inst = inst;
   let Namespace = "EVM";
+  let AsmString = asmstr;
+  let Pattern = [];
 
-  dag OutOperandList = outs;
-  dag InOperandList = ins;
-  let AsmString = opcodestr # "\t" # argstr;
-  let Pattern = pattern;
-
-  let TSFlags{4-0} = format.Value;
+  let gas = cost;
 }
 
-// Pseudo instructions
-class Pseudo<dag outs, dag ins, list<dag> pattern, string opcodestr = "", string argstr = "">
-    : RVInst<outs, ins, opcodestr, argstr, pattern, InstFormatPseudo> {
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
+// Our register-based instructions
+class Inst<dag oops, dag iops, list<dag> pattern, string stack,
+           string asmstr = "", bits<8> inst = -1, int cost = -1>
+    : EVMInstruction<inst, asmstr, stack, cost> {
+  dag OutOperandList = oops;
+  dag InOperandList  = iops;
+  let Pattern        = pattern;
+  let Defs           = [REG_ARGS];
 }
 
-// Instruction formats are listed in the order they appear in the EVM
-// instruction set manual (R, I, S, B, U, J) with sub-formats (e.g. RVInstR4,
-// RVInstRAtomic) sorted alphabetically.
-
-class RVInstR<bits<7> funct7, bits<3> funct3, EVMOpcode opcode, dag outs,
-              dag ins, string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatR> {
-  bits<5> rs2;
-  bits<5> rs1;
-  bits<5> rd;
-
-  let Inst{31-25} = funct7;
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+// Both Register and Stack based instructions
+multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
+                list<dag> pattern_r, string asmstr_r, string asmstr_s,
+                bits<8> inst, int cost> {
+  let isCodeGenOnly = 1 in
+  def _r : Inst<outs_r, ins_r, pattern_r, "false", asmstr_r, inst, cost>;
+  let BaseName = NAME in
+  def _s : Inst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
 }
 
-class RVInstR4<bits<2> funct2, EVMOpcode opcode, dag outs, dag ins,
-               string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatR4> {
-  bits<5> rs3;
-  bits<5> rs2;
-  bits<5> rs1;
-  bits<3> funct3;
-  bits<5> rd;
-
-  let Inst{31-27} = rs3;
-  let Inst{26-25} = funct2;
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+def I256IMM : Operand<I256> {
+  // TODO: implement Imm256 print
+  let PrintMethod = "printImm256Operand";
 }
 
-class RVInstRAtomic<bits<5> funct5, bit aq, bit rl, bits<3> funct3,
-                    EVMOpcode opcode, dag outs, dag ins, string opcodestr,
-                    string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatR> {
-  bits<5> rs2;
-  bits<5> rs1;
-  bits<5> rd;
-
-  let Inst{31-27} = funct5;
-  let Inst{26} = aq;
-  let Inst{25} = rl;
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+def ADDR : Operand<I160> {
+  // TODO: implement address print
+  let PrintMethod = "printAddressOperand";
 }
 
-class RVInstRFrm<bits<7> funct7, EVMOpcode opcode, dag outs, dag ins,
-                 string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatR> {
-  bits<5> rs2;
-  bits<5> rs1;
-  bits<3> funct3;
-  bits<5> rd;
+// Alpha: number of additional items placed on the stack. (return value)
+// Delta: items removed from stack. (arguments)
+// i : int256, a : addr, 0 : none
 
-  let Inst{31-25} = funct7;
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+// delta = 0, alpha = 1
+class Inst_0_i<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs I256:$dst), (ins), (outs), (ins), pattern,
+             !strconcat(name, "\t$dst")),
+             inst, cost> {
 }
 
-class RVInstI<bits<3> funct3, EVMOpcode opcode, dag outs, dag ins,
-              string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatI> {
-  bits<12> imm12;
-  bits<5> rs1;
-  bits<5> rd;
+class Inst_0_a<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs ADDR:$dst), (ins), (outs), (ins), pattern,
+             !strconcat(name, "\t$dst")), inst, cost>;
 
-  let Inst{31-20} = imm12;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+
+// delta = 0, alpha = 0
+class Inst_0_0<string name, bits<8> inst, int cost>
+    : RSInst<(outs), (ins), (outs), (ins), [], name, inst, cost> {
 }
 
-class RVInstIShift<bit arithshift, bits<3> funct3, EVMOpcode opcode,
-                   dag outs, dag ins, string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatI> {
-  bits<6> shamt;
-  bits<5> rs1;
-  bits<5> rd;
-
-  let Inst{31} = 0;
-  let Inst{30} = arithshift;
-  let Inst{29-26} = 0;
-  let Inst{25-20} = shamt;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+// delta = 1, alpha = 1
+class Inst_i_i<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs I256:$dst), (ins I256:$src),         // register based
+             (outs), (ins),                             // stack based
+             pattern,
+             !strconcat(name, "\t$dst, $src")),         // reg asm
+             name,                                      // stack asm
+             inst, cost> {
 }
 
-class RVInstIShiftW<bit arithshift, bits<3> funct3, EVMOpcode opcode,
-                    dag outs, dag ins, string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatI> {
-  bits<5> shamt;
-  bits<5> rs1;
-  bits<5> rd;
+class ArithmaticUnaryInst<SDNode node, string name, bits<8> inst, int cost>
+    : Inst_i_i<name, [(set I256:$dst, (node I256:$src))], name, inst, cost>;
 
-  let Inst{31} = 0;
-  let Inst{30} = arithshift;
-  let Inst{29-25} = 0;
-  let Inst{24-20} = shamt;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
+class Inst_a_i<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs I256:$dst), (ins ADDR:$src),         // register based
+             (outs), (ins),                             // stack based
+             pattern,
+             !strconcat(name, "\t$dst, $src")),         // reg asm
+             name,                                      // stack asm
+             inst, cost>;
+
+// delta = 2, alpha = 1
+class Inst_ii_i<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs I256:$dst), (ins I256:$lhs, I256:$rhs),         //register based
+             (outs), (ins),                                        // stack based
+             pattern,
+             !strconcat(name, "\t$dst, $lhs, $rhs")),              // reg asm
+             name,                                                 // stack asm
+             inst, cost> {
 }
 
-class RVInstS<bits<3> funct3, EVMOpcode opcode, dag outs, dag ins,
-              string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatS> {
-  bits<12> imm12;
-  bits<5> rs2;
-  bits<5> rs1;
+class BinaryInst<SDNode node, string name, bits<8> inst, int cost>
+    : Inst_ii_i<name, [(set I256:$dst, (node I256:$lhs, I256:$rhs))], inst, cost>;
 
-  let Inst{31-25} = imm12{11-5};
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-7} = imm12{4-0};
-  let Opcode = opcode.Value;
-}
+class ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
+    : Inst_ii_i<name, [(set I256:$dst, (setcc I256:$lhs, I256:$rhs, cond))], inst, cost>;
 
-class RVInstB<bits<3> funct3, EVMOpcode opcode, dag outs, dag ins,
-              string opcodestr, string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatB> {
-  bits<12> imm12;
-  bits<5> rs2;
-  bits<5> rs1;
 
-  let Inst{31} = imm12{11};
-  let Inst{30-25} = imm12{9-4};
-  let Inst{24-20} = rs2;
-  let Inst{19-15} = rs1;
-  let Inst{14-12} = funct3;
-  let Inst{11-8} = imm12{3-0};
-  let Inst{7} = imm12{10};
-  let Opcode = opcode.Value;
-}
+// delta = 3, alpha = 1
+class Inst_3_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs), (ins I256:$src1, I256:src2, I256:src3),
+             (outs), (ins), pattern,
+             !strconcat(name, " \t$src1, $src2, $src3")),
+             name, inst, cost>;
 
-class RVInstU<EVMOpcode opcode, dag outs, dag ins, string opcodestr,
-              string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatU> {
-  bits<20> imm20;
-  bits<5> rd;
 
-  let Inst{31-12} = imm20;
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
-}
-
-class RVInstJ<EVMOpcode opcode, dag outs, dag ins, string opcodestr,
-              string argstr>
-    : RVInst<outs, ins, opcodestr, argstr, [], InstFormatJ> {
-  bits<20> imm20;
-  bits<5> rd;
-
-  let Inst{31} = imm20{19};
-  let Inst{30-21} = imm20{9-0};
-  let Inst{20} = imm20{10};
-  let Inst{19-12} = imm20{18-11};
-  let Inst{11-7} = rd;
-  let Opcode = opcode.Value;
-}

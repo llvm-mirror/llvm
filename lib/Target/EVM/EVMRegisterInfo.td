@@ -34,6 +34,15 @@ def SP : EVMReg<"%SP">;
 def INTREG : EVMReg<"%intreg">;
 
 // The register classes.
-def I256 : EVMRegClass<[i256], 256, (add FP, SP, INTREG)>;
+def I256 : EVMRegClass<[i256], 32, (add FP, SP, INTREG)>;
+def ADDR : EVMRegClass<[i160], 32, (add FP, SP, INTREG)>;
 
+// The value stack "register". This is an opaque entity which serves to order
+// uses and defs that must remain in LIFO order.
+def REG_STACK : WebAssemblyReg<"Stack_Reg">;
+
+// The incoming arguments "register". This is an opaque entity which serves to
+// order the ARGUMENT instructions that are emulating live-in registers and
+// must not be scheduled below other instructions.
+def REG_ARGS : WebAssemblyReg<"Arg_Reg">;
 

@@ -32,6 +32,9 @@ class EVMSubtarget : public EVMGenSubtargetInfo {
 
   // EVM Change
   bool HasEIP615 = false;
+  bool HasEIP211 = false;
+
+  bool hasEIP211 const () { return HasEIP211; }
   bool hasEIP615 const () { return HasEIP615; }
   // end of EVM Change
 
