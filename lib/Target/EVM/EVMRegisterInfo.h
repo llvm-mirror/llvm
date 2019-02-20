@@ -13,8 +13,6 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMREGISTERINFO_H
 #define LLVM_LIB_TARGET_EVM_EVMREGISTERINFO_H
 
-#include "llvm/CodeGen/TargetRegisterInfo.h"
-
 #define GET_REGINFO_HEADER
 #include "EVMGenRegisterInfo.inc"
 
@@ -25,12 +23,17 @@ class RegScavenger;
 class TargetRegisterClass;
 class Triple;
 
-struct EVMRegisterInfo : public EVMGenRegisterInfo {
+class EVMRegisterInfo final : public EVMGenRegisterInfo {
+  const Triple &TT;
 
-  EVMRegisterInfo(const Triple &TT);
+public:
+  explicit EVMRegisterInfo(const Triple &TT);
 
+  // Code Generation virtual methods.
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;
+
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+
   void eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
@@ -38,11 +41,9 @@ struct EVMRegisterInfo : public EVMGenRegisterInfo {
   // Debug information queries.
   unsigned getFrameRegister(const MachineFunction &MF) const override;
 
-  const TargetRegisterClass *
-  getPointerRegClass(const MachineFunction &MF,
-                     unsigned Kind = 0) const override;
   const uint32_t *getNoPreservedMask() const override { return nullptr; }
 };
-}
+
+} // end namespace llvm
 
 #endif
