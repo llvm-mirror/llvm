@@ -63,8 +63,7 @@ public:
 #include "EVMGenCompressInstEmitter.inc"
 void EVMAsmPrinter::EmitToStreamer(MCStreamer &S, const MCInst &Inst) {
   MCInst CInst;
-  bool Res = compressInst(CInst, Inst, *TM.getMCSubtargetInfo(),
-                          OutStreamer->getContext());
+
   AsmPrinter::EmitToStreamer(*OutStreamer, Res ? CInst : Inst);
 }
 
@@ -73,39 +72,12 @@ void EVMAsmPrinter::EmitToStreamer(MCStreamer &S, const MCInst &Inst) {
 #include "EVMGenMCPseudoLowering.inc"
 
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  // Do any auto-generated pseudo lowerings.
-  if (emitPseudoExpansionLowering(*OutStreamer, MI))
-    return;
-
-  MCInst TmpInst;
-  LowerEVMMachineInstrToMCInst(MI, TmpInst, *this);
   EmitToStreamer(*OutStreamer, TmpInst);
 }
 
 bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                                       unsigned AsmVariant,
                                       const char *ExtraCode, raw_ostream &OS) {
-  if (AsmVariant != 0)
-    report_fatal_error("There are no defined alternate asm variants");
-
-  // First try the generic code, which knows about modifiers like 'c' and 'n'.
-  if (!AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, OS))
-    return false;
-
-  if (!ExtraCode) {
-    const MachineOperand &MO = MI->getOperand(OpNo);
-    switch (MO.getType()) {
-    case MachineOperand::MO_Immediate:
-      OS << MO.getImm();
-      return false;
-    case MachineOperand::MO_Register:
-      OS << EVMInstPrinter::getRegisterName(MO.getReg());
-      return false;
-    default:
-      break;
-    }
-  }
-
   return true;
 }
 
@@ -113,19 +85,6 @@ bool EVMAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                             unsigned OpNo, unsigned AsmVariant,
                                             const char *ExtraCode,
                                             raw_ostream &OS) {
-  if (AsmVariant != 0)
-    report_fatal_error("There are no defined alternate asm variants");
-
-  if (!ExtraCode) {
-    const MachineOperand &MO = MI->getOperand(OpNo);
-    // For now, we only support register memory operands in registers and
-    // assume there is no addend
-    if (!MO.isReg())
-      return true;
-
-    OS << "0(" << EVMInstPrinter::getRegisterName(MO.getReg()) << ")";
-    return false;
-  }
 
   return AsmPrinter::PrintAsmMemoryOperand(MI, OpNo, AsmVariant, ExtraCode, OS);
 }

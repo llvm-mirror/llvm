@@ -68,7 +68,6 @@ public:
   void addIRPasses() override;
   bool addInstSelector() override;
   void addPreEmitPass() override;
-  void addPreEmitPass2() override;
   void addPreRegAlloc() override;
 };
 }
@@ -78,7 +77,7 @@ TargetPassConfig *EVMTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void EVMPassConfig::addIRPasses() {
-  addPass(createAtomicExpandPass());
+  //addPass(createAtomicExpandPass());
   TargetPassConfig::addIRPasses();
 }
 
@@ -88,15 +87,10 @@ bool EVMPassConfig::addInstSelector() {
   return false;
 }
 
-void EVMPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
+void EVMPassConfig::addPreEmitPass() {
 
-void EVMPassConfig::addPreEmitPass2() {
-  // Schedule the expansion of AMOs at the last possible moment, avoiding the
-  // possibility for other passes to break the requirements for forward
-  // progress in the LR/SC block.
-  addPass(createEVMExpandPseudoPass());
 }
 
 void EVMPassConfig::addPreRegAlloc() {
-  addPass(createEVMMergeBaseOffsetOptPass());
+
 }

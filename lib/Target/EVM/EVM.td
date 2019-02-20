@@ -12,73 +12,30 @@ include "llvm/Target/Target.td"
 // EVM subtarget features and instruction predicates.
 //===----------------------------------------------------------------------===//
 
-def FeatureStdExtM
-    : SubtargetFeature<"m", "HasStdExtM", "true",
-                       "'M' (Integer Multiplication and Division)">;
-def HasStdExtM : Predicate<"Subtarget->hasStdExtM()">,
-                           AssemblerPredicate<"FeatureStdExtM">;
+def FeatureEIP211
+    : SubtargetFeature<"EIP211", "HasEIP211", "true", "EIP211 support">;
 
-def FeatureStdExtA
-    : SubtargetFeature<"a", "HasStdExtA", "true",
-                       "'A' (Atomic Instructions)">;
-def HasStdExtA : Predicate<"Subtarget->hasStdExtA()">,
-                           AssemblerPredicate<"FeatureStdExtA">;
+def HasEIP211 : Predicate<"Subtarget->HasEIP211()">,
+                          AssemblerPredicate<"FeatureEIP211">;
 
-def FeatureStdExtF
-    : SubtargetFeature<"f", "HasStdExtF", "true",
-                       "'F' (Single-Precision Floating-Point)">;
-def HasStdExtF : Predicate<"Subtarget->hasStdExtF()">,
-                           AssemblerPredicate<"FeatureStdExtF">;
+def FeatureEIP615
+    : SubtargetFeature<"EIP615", "HasEIP615", "true", "EIP615 support">;
 
-def FeatureStdExtD
-    : SubtargetFeature<"d", "HasStdExtD", "true",
-                       "'D' (Double-Precision Floating-Point)",
-                       [FeatureStdExtF]>;
-def HasStdExtD : Predicate<"Subtarget->hasStdExtD()">,
-                           AssemblerPredicate<"FeatureStdExtD">;
-
-def FeatureStdExtC
-    : SubtargetFeature<"c", "HasStdExtC", "true",
-                       "'C' (Compressed Instructions)">;
-def HasStdExtC : Predicate<"Subtarget->hasStdExtC()">,
-                           AssemblerPredicate<"FeatureStdExtC">;
-
-
-def Feature64Bit
-    : SubtargetFeature<"64bit", "HasRV64", "true", "Implements RV64">;
-def IsRV64 : Predicate<"Subtarget->is64Bit()">,
-                       AssemblerPredicate<"Feature64Bit">;
-def IsRV32 : Predicate<"!Subtarget->is64Bit()">,
-                       AssemblerPredicate<"!Feature64Bit">;
-
-def RV64           : HwMode<"+64bit">;
-def RV32           : HwMode<"-64bit">;
-
-def FeatureRelax
-    : SubtargetFeature<"relax", "EnableLinkerRelax", "true",
-                       "Enable Linker relaxation.">;
+def HasEIP615 : Predicate<"Subtarget->HasEIP615()">,
+                          AssemblerPredicate<"FeatureEIP615">;
 
 //===----------------------------------------------------------------------===//
-// Registers, calling conventions, instruction descriptions.
+// Registers, instruction descriptions.
 //===----------------------------------------------------------------------===//
 
 include "EVMRegisterInfo.td"
-include "EVMCallingConv.td"
 include "EVMInstrInfo.td"
-
-//===----------------------------------------------------------------------===//
-// Named operands for CSR instructions.
-//===----------------------------------------------------------------------===//
-
-include "EVMSystemOperands.td"
 
 //===----------------------------------------------------------------------===//
 // EVM processors supported.
 //===----------------------------------------------------------------------===//
 
-def : ProcessorModel<"generic-rv32", NoSchedModel, []>;
-
-def : ProcessorModel<"generic-rv64", NoSchedModel, [Feature64Bit]>;
+def : ProcessorModel<"generic", NoSchedModel, []>;
 
 //===----------------------------------------------------------------------===//
 // Define the EVM target.

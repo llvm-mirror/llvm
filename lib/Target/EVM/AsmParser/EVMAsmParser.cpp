@@ -42,10 +42,7 @@ namespace {
 struct EVMOperand;
 
 class EVMAsmParser : public MCTargetAsmParser {
-  SmallVector<FeatureBitset, 4> FeatureBitStack;
 
-  SMLoc getLoc() const { return getParser().getTok().getLoc(); }
-  bool isRV64() const { return getSTI().hasFeature(EVM::Feature64Bit); }
 
   EVMTargetStreamer &getTargetStreamer() {
     MCTargetStreamer &TS = *getParser().getStreamer().getTargetStreamer();
@@ -105,35 +102,8 @@ class EVMAsmParser : public MCTargetAsmParser {
   bool parseDirectiveOption();
 
   void setFeatureBits(uint64_t Feature, StringRef FeatureString) {
-    if (!(getSTI().getFeatureBits()[Feature])) {
-      MCSubtargetInfo &STI = copySTI();
-      setAvailableFeatures(
-          ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
-    }
   }
 
-  void clearFeatureBits(uint64_t Feature, StringRef FeatureString) {
-    if (getSTI().getFeatureBits()[Feature]) {
-      MCSubtargetInfo &STI = copySTI();
-      setAvailableFeatures(
-          ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
-    }
-  }
-
-  void pushFeatureBits() {
-    FeatureBitStack.push_back(getSTI().getFeatureBits());
-  }
-
-  bool popFeatureBits() {
-    if (FeatureBitStack.empty())
-      return true;
-
-    FeatureBitset FeatureBits = FeatureBitStack.pop_back_val();
-    copySTI().setFeatureBits(FeatureBits);
-    setAvailableFeatures(ComputeAvailableFeatures(FeatureBits));
-
-    return false;
-  }
 public:
   enum EVMMatchResultTy {
     Match_Dummy = FIRST_TARGET_MATCH_RESULT_TY,
@@ -198,24 +168,6 @@ struct EVMOperand : public MCParsedAsmOperand {
 
 public:
   EVMOperand(const EVMOperand &o) : MCParsedAsmOperand() {
-    Kind = o.Kind;
-    IsRV64 = o.IsRV64;
-    StartLoc = o.StartLoc;
-    EndLoc = o.EndLoc;
-    switch (Kind) {
-    case Register:
-      Reg = o.Reg;
-      break;
-    case Immediate:
-      Imm = o.Imm;
-      break;
-    case Token:
-      Tok = o.Tok;
-      break;
-    case SystemRegister:
-      SysReg = o.SysReg;
-      break;
-    }
   }
 
   bool isToken() const override { return Kind == Token; }
@@ -226,299 +178,13 @@ public:
 
   static bool evaluateConstantImm(const MCExpr *Expr, int64_t &Imm,
                                   EVMMCExpr::VariantKind &VK) {
-    if (auto *RE = dyn_cast<EVMMCExpr>(Expr)) {
-      VK = RE->getKind();
-      return RE->evaluateAsConstant(Imm);
-    }
-
-    if (auto CE = dyn_cast<MCConstantExpr>(Expr)) {
-      VK = EVMMCExpr::VK_EVM_None;
-      Imm = CE->getValue();
-      return true;
-    }
-
     return false;
   }
-
-  // True if operand is a symbol with no modifiers, or a constant with no
-  // modifiers and isShiftedInt<N-1, 1>(Op).
-  template <int N> bool isBareSimmNLsb0() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    bool IsValid;
-    if (!IsConstantImm)
-      IsValid = EVMAsmParser::classifySymbolRef(getImm(), VK, Imm);
-    else
-      IsValid = isShiftedInt<N - 1, 1>(Imm);
-    return IsValid && VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  // Predicate methods for AsmOperands defined in EVMInstrInfo.td
-
-  bool isBareSymbol() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    // Must be of 'immediate' type but not a constant.
-    if (!isImm() || evaluateConstantImm(getImm(), Imm, VK))
-      return false;
-    return EVMAsmParser::classifySymbolRef(getImm(), VK, Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isCSRSystemRegister() const { return isSystemRegister(); }
-
-  /// Return true if the operand is a valid for the fence instruction e.g.
-  /// ('iorw').
-  bool isFenceArg() const {
-    if (!isImm())
-      return false;
-    const MCExpr *Val = getImm();
-    auto *SVal = dyn_cast<MCSymbolRefExpr>(Val);
-    if (!SVal || SVal->getKind() != MCSymbolRefExpr::VK_None)
-      return false;
-
-    StringRef Str = SVal->getSymbol().getName();
-    // Letters must be unique, taken from 'iorw', and in ascending order. This
-    // holds as long as each individual character is one of 'iorw' and is
-    // greater than the previous character.
-    char Prev = '\0';
-    for (char c : Str) {
-      if (c != 'i' && c != 'o' && c != 'r' && c != 'w')
-        return false;
-      if (c <= Prev)
-        return false;
-      Prev = c;
-    }
-    return true;
-  }
-
-  /// Return true if the operand is a valid floating point rounding mode.
-  bool isFRMArg() const {
-    if (!isImm())
-      return false;
-    const MCExpr *Val = getImm();
-    auto *SVal = dyn_cast<MCSymbolRefExpr>(Val);
-    if (!SVal || SVal->getKind() != MCSymbolRefExpr::VK_None)
-      return false;
-
-    StringRef Str = SVal->getSymbol().getName();
-
-    return EVMFPRndMode::stringToRoundingMode(Str) != EVMFPRndMode::Invalid;
-  }
-
-  bool isImmXLenLI() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    if (VK == EVMMCExpr::VK_EVM_LO || VK == EVMMCExpr::VK_EVM_PCREL_LO)
-      return true;
-    // Given only Imm, ensuring that the actually specified constant is either
-    // a signed or unsigned 64-bit number is unfortunately impossible.
-    bool IsInRange = isRV64() ? true : isInt<32>(Imm) || isUInt<32>(Imm);
-    return IsConstantImm && IsInRange && VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImmLog2XLen() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    if (!evaluateConstantImm(getImm(), Imm, VK) ||
-        VK != EVMMCExpr::VK_EVM_None)
-      return false;
-    return (isRV64() && isUInt<6>(Imm)) || isUInt<5>(Imm);
-  }
-
-  bool isUImmLog2XLenNonZero() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    if (!evaluateConstantImm(getImm(), Imm, VK) ||
-        VK != EVMMCExpr::VK_EVM_None)
-      return false;
-    if (Imm == 0)
-      return false;
-    return (isRV64() && isUInt<6>(Imm)) || isUInt<5>(Imm);
-  }
-
-  bool isUImm5() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isUInt<5>(Imm) && VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm5NonZero() const {
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isUInt<5>(Imm) && (Imm != 0) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isSImm6() const {
-    if (!isImm())
-      return false;
-    EVMMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isInt<6>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isSImm6NonZero() const {
-    if (!isImm())
-      return false;
-    EVMMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isInt<6>(Imm) && (Imm != 0) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isCLUIImm() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && (Imm != 0) &&
-           (isUInt<5>(Imm) || (Imm >= 0xfffe0 && Imm <= 0xfffff)) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm7Lsb00() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isShiftedUInt<5, 2>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm8Lsb00() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isShiftedUInt<6, 2>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm8Lsb000() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isShiftedUInt<5, 3>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isSImm9Lsb0() const { return isBareSimmNLsb0<9>(); }
-
-  bool isUImm9Lsb000() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isShiftedUInt<6, 3>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm10Lsb00NonZero() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && isShiftedUInt<8, 2>(Imm) && (Imm != 0) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isSImm12() const {
-    EVMMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsValid;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    if (!IsConstantImm)
-      IsValid = EVMAsmParser::classifySymbolRef(getImm(), VK, Imm);
-    else
-      IsValid = isInt<12>(Imm);
-    return IsValid && ((IsConstantImm && VK == EVMMCExpr::VK_EVM_None) ||
-                       VK == EVMMCExpr::VK_EVM_LO ||
-                       VK == EVMMCExpr::VK_EVM_PCREL_LO);
-  }
-
-  bool isSImm12Lsb0() const { return isBareSimmNLsb0<12>(); }
-
-  bool isSImm13Lsb0() const { return isBareSimmNLsb0<13>(); }
-
-  bool isSImm10Lsb0000NonZero() const {
-    if (!isImm())
-      return false;
-    int64_t Imm;
-    EVMMCExpr::VariantKind VK;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    return IsConstantImm && (Imm != 0) && isShiftedInt<6, 4>(Imm) &&
-           VK == EVMMCExpr::VK_EVM_None;
-  }
-
-  bool isUImm20LUI() const {
-    EVMMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsValid;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    if (!IsConstantImm) {
-      IsValid = EVMAsmParser::classifySymbolRef(getImm(), VK, Imm);
-      return IsValid && VK == EVMMCExpr::VK_EVM_HI;
-    } else {
-      return isUInt<20>(Imm) && (VK == EVMMCExpr::VK_EVM_None ||
-                                 VK == EVMMCExpr::VK_EVM_HI);
-    }
-  }
-
-  bool isUImm20AUIPC() const {
-    EVMMCExpr::VariantKind VK;
-    int64_t Imm;
-    bool IsValid;
-    if (!isImm())
-      return false;
-    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
-    if (!IsConstantImm) {
-      IsValid = EVMAsmParser::classifySymbolRef(getImm(), VK, Imm);
-      return IsValid && VK == EVMMCExpr::VK_EVM_PCREL_HI;
-    } else {
-      return isUInt<20>(Imm) && (VK == EVMMCExpr::VK_EVM_None ||
-                                 VK == EVMMCExpr::VK_EVM_PCREL_HI);
-    }
-  }
-
-  bool isSImm21Lsb0JAL() const { return isBareSimmNLsb0<21>(); }
 
   /// getStartLoc - Gets location of the first token of this operand
   SMLoc getStartLoc() const override { return StartLoc; }
   /// getEndLoc - Gets location of the last token of this operand
   SMLoc getEndLoc() const override { return EndLoc; }
-  /// True if this operand is for an RV64 instruction
-  bool isRV64() const { return IsRV64; }
 
   unsigned getReg() const override {
     assert(Kind == Register && "Invalid type access!");
@@ -541,62 +207,6 @@ public:
   }
 
   void print(raw_ostream &OS) const override {
-    switch (Kind) {
-    case Immediate:
-      OS << *getImm();
-      break;
-    case Register:
-      OS << "<register x";
-      OS << getReg() << ">";
-      break;
-    case Token:
-      OS << "'" << getToken() << "'";
-      break;
-    case SystemRegister:
-      OS << "<sysreg: " << getSysReg() << '>';
-      break;
-    }
-  }
-
-  static std::unique_ptr<EVMOperand> createToken(StringRef Str, SMLoc S,
-                                                   bool IsRV64) {
-    auto Op = make_unique<EVMOperand>(Token);
-    Op->Tok = Str;
-    Op->StartLoc = S;
-    Op->EndLoc = S;
-    Op->IsRV64 = IsRV64;
-    return Op;
-  }
-
-  static std::unique_ptr<EVMOperand> createReg(unsigned RegNo, SMLoc S,
-                                                 SMLoc E, bool IsRV64) {
-    auto Op = make_unique<EVMOperand>(Register);
-    Op->Reg.RegNum = RegNo;
-    Op->StartLoc = S;
-    Op->EndLoc = E;
-    Op->IsRV64 = IsRV64;
-    return Op;
-  }
-
-  static std::unique_ptr<EVMOperand> createImm(const MCExpr *Val, SMLoc S,
-                                                 SMLoc E, bool IsRV64) {
-    auto Op = make_unique<EVMOperand>(Immediate);
-    Op->Imm.Val = Val;
-    Op->StartLoc = S;
-    Op->EndLoc = E;
-    Op->IsRV64 = IsRV64;
-    return Op;
-  }
-
-  static std::unique_ptr<EVMOperand>
-  createSysReg(StringRef Str, SMLoc S, unsigned Encoding, bool IsRV64) {
-    auto Op = make_unique<EVMOperand>(SystemRegister);
-    Op->SysReg.Data = Str.data();
-    Op->SysReg.Length = Str.size();
-    Op->SysReg.Encoding = Encoding;
-    Op->StartLoc = S;
-    Op->IsRV64 = IsRV64;
-    return Op;
   }
 
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
@@ -668,47 +278,6 @@ public:
 #define GET_MATCHER_IMPLEMENTATION
 #include "EVMGenAsmMatcher.inc"
 
-// Return the matching FPR64 register for the given FPR32.
-// FIXME: Ideally this function could be removed in favour of using
-// information from TableGen.
-unsigned convertFPR32ToFPR64(unsigned Reg) {
-  switch (Reg) {
-  default:
-    llvm_unreachable("Not a recognised FPR32 register");
-  case EVM::F0_32: return EVM::F0_64;
-  case EVM::F1_32: return EVM::F1_64;
-  case EVM::F2_32: return EVM::F2_64;
-  case EVM::F3_32: return EVM::F3_64;
-  case EVM::F4_32: return EVM::F4_64;
-  case EVM::F5_32: return EVM::F5_64;
-  case EVM::F6_32: return EVM::F6_64;
-  case EVM::F7_32: return EVM::F7_64;
-  case EVM::F8_32: return EVM::F8_64;
-  case EVM::F9_32: return EVM::F9_64;
-  case EVM::F10_32: return EVM::F10_64;
-  case EVM::F11_32: return EVM::F11_64;
-  case EVM::F12_32: return EVM::F12_64;
-  case EVM::F13_32: return EVM::F13_64;
-  case EVM::F14_32: return EVM::F14_64;
-  case EVM::F15_32: return EVM::F15_64;
-  case EVM::F16_32: return EVM::F16_64;
-  case EVM::F17_32: return EVM::F17_64;
-  case EVM::F18_32: return EVM::F18_64;
-  case EVM::F19_32: return EVM::F19_64;
-  case EVM::F20_32: return EVM::F20_64;
-  case EVM::F21_32: return EVM::F21_64;
-  case EVM::F22_32: return EVM::F22_64;
-  case EVM::F23_32: return EVM::F23_64;
-  case EVM::F24_32: return EVM::F24_64;
-  case EVM::F25_32: return EVM::F25_64;
-  case EVM::F26_32: return EVM::F26_64;
-  case EVM::F27_32: return EVM::F27_64;
-  case EVM::F28_32: return EVM::F28_64;
-  case EVM::F29_32: return EVM::F29_64;
-  case EVM::F30_32: return EVM::F30_64;
-  case EVM::F31_32: return EVM::F31_64;
-  }
-}
 
 unsigned EVMAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
                                                     unsigned Kind) {

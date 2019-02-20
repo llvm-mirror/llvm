@@ -34,9 +34,6 @@ bool LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
 
 FunctionPass *createEVMISelDag(EVMTargetMachine &TM);
 
-FunctionPass *createEVMMergeBaseOffsetOptPass();
-void initializeEVMMergeBaseOffsetOptPass(PassRegistry &);
-
 FunctionPass *createEVMExpandPseudoPass();
 void initializeEVMExpandPseudoPass(PassRegistry &);
 }
