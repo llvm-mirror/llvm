@@ -47,30 +47,26 @@ multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
   def _s : Inst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
 }
 
-def I256IMM : Operand<I256> {
+def I256IMM : Operand<GPR256> {
   // TODO: implement Imm256 print
   let PrintMethod = "printImm256Operand";
 }
 
-def ADDR : Operand<I160> {
+def ADDR : Operand<GPR256> {
   // TODO: implement address print
   let PrintMethod = "printAddressOperand";
 }
 
 // Alpha: number of additional items placed on the stack. (return value)
 // Delta: items removed from stack. (arguments)
-// i : int256, a : addr, 0 : none
+// i : int256, 0 : none
 
 // delta = 0, alpha = 1
-class Inst_0_i<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs I256:$dst), (ins), (outs), (ins), pattern,
+class Inst_0_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs GPR256:$dst), (ins), (outs), (ins), pattern,
              !strconcat(name, "\t$dst")),
              inst, cost> {
 }
-
-class Inst_0_a<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs ADDR:$dst), (ins), (outs), (ins), pattern,
-             !strconcat(name, "\t$dst")), inst, cost>;
 
 
 // delta = 0, alpha = 0
@@ -79,8 +75,8 @@ class Inst_0_0<string name, bits<8> inst, int cost>
 }
 
 // delta = 1, alpha = 1
-class Inst_i_i<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs I256:$dst), (ins I256:$src),         // register based
+class Inst_1_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs GPR256:$dst), (ins GPR256:$src),         // register based
              (outs), (ins),                             // stack based
              pattern,
              !strconcat(name, "\t$dst, $src")),         // reg asm
@@ -89,19 +85,11 @@ class Inst_i_i<string name, list<dag> pattern, bits<8> inst, int cost>
 }
 
 class ArithmaticUnaryInst<SDNode node, string name, bits<8> inst, int cost>
-    : Inst_i_i<name, [(set I256:$dst, (node I256:$src))], name, inst, cost>;
-
-class Inst_a_i<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs I256:$dst), (ins ADDR:$src),         // register based
-             (outs), (ins),                             // stack based
-             pattern,
-             !strconcat(name, "\t$dst, $src")),         // reg asm
-             name,                                      // stack asm
-             inst, cost>;
+    : Inst_1_1<name, [(set GPR256:$dst, (node GPR256:$src))], name, inst, cost>;
 
 // delta = 2, alpha = 1
-class Inst_ii_i<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs I256:$dst), (ins I256:$lhs, I256:$rhs),         //register based
+class Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs GPR256:$dst), (ins GPR256:$lhs, GPR256:$rhs),         //register based
              (outs), (ins),                                        // stack based
              pattern,
              !strconcat(name, "\t$dst, $lhs, $rhs")),              // reg asm
@@ -110,15 +98,15 @@ class Inst_ii_i<string name, list<dag> pattern, bits<8> inst, int cost>
 }
 
 class BinaryInst<SDNode node, string name, bits<8> inst, int cost>
-    : Inst_ii_i<name, [(set I256:$dst, (node I256:$lhs, I256:$rhs))], inst, cost>;
+    : Inst_2_1<name, [(set GPR256:$dst, (node GPR256:$lhs, GPR256:$rhs))], inst, cost>;
 
 class ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
-    : Inst_ii_i<name, [(set I256:$dst, (setcc I256:$lhs, I256:$rhs, cond))], inst, cost>;
+    : Inst_2_1<name, [(set GPR256:$dst, (setcc GPR256:$lhs, GPR256:$rhs, cond))], inst, cost>;
 
 
 // delta = 3, alpha = 1
 class Inst_3_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins I256:$src1, I256:src2, I256:src3),
+    : RSInst<(outs), (ins GPR256:$src1, GPR256:src2, GPR256:src3),
              (outs), (ins), pattern,
              !strconcat(name, " \t$src1, $src2, $src3")),
              name, inst, cost>;
