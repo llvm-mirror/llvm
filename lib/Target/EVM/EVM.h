@@ -14,7 +14,6 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVM_H
 #define LLVM_LIB_TARGET_EVM_EVM_H
 
-#include "Utils/EVMBaseInfo.h"
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {

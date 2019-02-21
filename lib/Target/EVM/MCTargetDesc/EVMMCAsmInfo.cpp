@@ -17,10 +17,4 @@ using namespace llvm;
 void EVMMCAsmInfo::anchor() {}
 
 EVMMCAsmInfo::EVMMCAsmInfo(const Triple &TT) {
-  CodePointerSize = CalleeSaveStackSlotSize = TT.isArch64Bit() ? 8 : 4;
-  CommentString = "#";
-  AlignmentIsInBytes = false;
-  SupportsDebugInformation = true;
-  Data16bitsDirective = "\t.half\t";
-  Data32bitsDirective = "\t.word\t";
 }

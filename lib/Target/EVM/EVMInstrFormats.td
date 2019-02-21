@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+def HasEIP211 : Predicate<"!Subtarget->hasEIP211()">;
 def HasEIP615 : Predicate<"!Subtarget->hasEIP615()">;
 
 class StackRel;

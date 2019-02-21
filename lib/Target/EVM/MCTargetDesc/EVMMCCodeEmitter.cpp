@@ -13,7 +13,6 @@
 #include "MCTargetDesc/EVMFixupKinds.h"
 #include "MCTargetDesc/EVMMCExpr.h"
 #include "MCTargetDesc/EVMMCTargetDesc.h"
-#include "Utils/EVMBaseInfo.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"

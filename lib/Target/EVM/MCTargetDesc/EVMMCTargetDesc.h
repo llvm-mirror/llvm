@@ -35,15 +35,15 @@ class raw_pwrite_stream;
 Target &getTheEVMTarget();
 
 MCCodeEmitter *createEVMMCCodeEmitter(const MCInstrInfo &MCII,
-                                        const MCRegisterInfo &MRI,
-                                        MCContext &Ctx);
+                                      const MCRegisterInfo &MRI,
+                                      MCContext &Ctx);
 
 MCAsmBackend *createEVMAsmBackend(const Target &T, const MCSubtargetInfo &STI,
-                                    const MCRegisterInfo &MRI,
-                                    const MCTargetOptions &Options);
+                                  const MCRegisterInfo &MRI,
+                                  const MCTargetOptions &Options);
 
 std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI,
-                                                                 bool Is64Bit);
+                                                               bool Is64Bit);
 }
 
 // Defines symbolic names for EVM registers.

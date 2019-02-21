@@ -13,7 +13,6 @@
 #include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVM.h"
 #include "EVMTargetMachine.h"
-#include "Utils/EVMMatInt.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Support/Debug.h"

@@ -12,7 +12,6 @@
 
 #include "EVMInstPrinter.h"
 #include "MCTargetDesc/EVMMCExpr.h"
-#include "Utils/EVMBaseInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -24,7 +23,7 @@
 #include "llvm/Support/FormattedStream.h"
 using namespace llvm;
 
-#define DEBUG_TYPE "asm-printer"
+#define DEBUG_TYPE "evm-asm-printer"
 
 // Include the auto-generated portion of the assembly writer.
 #define PRINT_ALIAS_INSTR
@@ -43,72 +42,18 @@ void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot, const MCSubtargetInfo &STI) {
   bool Res = false;
   const MCInst *NewMI = MI;
-  MCInst UncompressedMI;
-  if (!NoAliases)
-    Res = uncompressInst(UncompressedMI, *MI, MRI, STI);
-  if (Res)
-    NewMI = const_cast<MCInst *>(&UncompressedMI);
-  if (NoAliases || !printAliasInstr(NewMI, STI, O))
-    printInstruction(NewMI, STI, O);
+
+  printInstruction(MI, STI, O);
   printAnnotation(O, Annot);
 }
 
 void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {
-  O << getRegisterName(RegNo);
+  llvm_unreachable("unimplemented.");
 }
 
 void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                     const MCSubtargetInfo &STI, raw_ostream &O,
                                     const char *Modifier) {
-  assert((Modifier == 0 || Modifier[0] == 0) && "No modifiers supported");
-  const MCOperand &MO = MI->getOperand(OpNo);
-
-  if (MO.isReg()) {
-    printRegName(O, MO.getReg());
-    return;
-  }
-
-  if (MO.isImm()) {
-    O << MO.getImm();
-    return;
-  }
-
-  assert(MO.isExpr() && "Unknown operand kind in printOperand");
-  MO.getExpr()->print(O, &MAI);
+  llvm_unreachable("unimpleted");
 }
 
-void EVMInstPrinter::printCSRSystemRegister(const MCInst *MI, unsigned OpNo,
-                                              const MCSubtargetInfo &STI,
-                                              raw_ostream &O) {
-  unsigned Imm = MI->getOperand(OpNo).getImm();
-  auto SysReg = EVMSysReg::lookupSysRegByEncoding(Imm);
-  if (SysReg && SysReg->haveRequiredFeatures(STI.getFeatureBits()))
-    O << SysReg->Name;
-  else
-    O << Imm;
-}
-
-void EVMInstPrinter::printFenceArg(const MCInst *MI, unsigned OpNo,
-                                     const MCSubtargetInfo &STI,
-                                     raw_ostream &O) {
-  unsigned FenceArg = MI->getOperand(OpNo).getImm();
-  assert (((FenceArg >> 4) == 0) && "Invalid immediate in printFenceArg");
-
-  if ((FenceArg & EVMFenceField::I) != 0)
-    O << 'i';
-  if ((FenceArg & EVMFenceField::O) != 0)
-    O << 'o';
-  if ((FenceArg & EVMFenceField::R) != 0)
-    O << 'r';
-  if ((FenceArg & EVMFenceField::W) != 0)
-    O << 'w';
-  if (FenceArg == 0)
-    O << "unknown";
-}
-
-void EVMInstPrinter::printFRMArg(const MCInst *MI, unsigned OpNo,
-                                   const MCSubtargetInfo &STI, raw_ostream &O) {
-  auto FRMArg =
-      static_cast<EVMFPRndMode::RoundingMode>(MI->getOperand(OpNo).getImm());
-  O << EVMFPRndMode::roundingModeToString(FRMArg);
-}
