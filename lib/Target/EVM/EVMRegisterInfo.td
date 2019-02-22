@@ -32,16 +32,19 @@ def SP : EVMReg<"%SP">;
 // classes since we otherwise don't need a physical register in those classes.
 // These are also used a "types" in the generated assembly matcher.
 def INTREG : EVMReg<"%intreg">;
+def GPR256 : EVMReg<"%intreg">;
+
+//def GPR256 : Operand<i128>;
 
 // The register classes.
-def GPR256 : EVMRegClass<[i256], 32, (add FP, SP, INTREG)>;
+def AllRegs : EVMRegClass<[i128], 32, (add FP, SP, INTREG, GPR256)>;
 
 // The value stack "register". This is an opaque entity which serves to order
 // uses and defs that must remain in LIFO order.
-def REG_STACK : WebAssemblyReg<"Stack_Reg">;
+def REG_STACK : EVMReg<"Stack_Reg">;
 
 // The incoming arguments "register". This is an opaque entity which serves to
 // order the ARGUMENT instructions that are emulating live-in registers and
 // must not be scheduled below other instructions.
-def REG_ARGS : WebAssemblyReg<"Arg_Reg">;
+def REG_ARGS : EVMReg<"Arg_Reg">;
 
