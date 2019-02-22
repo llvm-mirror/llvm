@@ -29,7 +29,6 @@ EVMSubtarget &EVMSubtarget::initializeSubtargetDependencies(StringRef CPU,
                                                             StringRef FS,
                                                             bool Is64Bit) {
   // Determine default and user-specified characteristics
-  ParseSubtargetFeatures(CPUName, FS);
   return *this;
 }
 
@@ -37,4 +36,4 @@ EVMSubtarget::EVMSubtarget(const Triple &TT, const std::string &CPU,
                                const std::string &FS, const TargetMachine &TM)
     : EVMGenSubtargetInfo(TT, CPU, FS),
       FrameLowering(initializeSubtargetDependencies(CPU, FS, TT.isArch64Bit())),
-      InstrInfo(), RegInfo(getHwMode()), TLInfo(TM, *this) {}
+      InstrInfo(), TLInfo(TM, *this) {}

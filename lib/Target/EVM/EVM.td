@@ -12,17 +12,26 @@ include "llvm/Target/Target.td"
 // EVM subtarget features and instruction predicates.
 //===----------------------------------------------------------------------===//
 
-def FeatureEIP211
-    : SubtargetFeature<"EIP211", "HasEIP211", "true", "EIP211 support">;
+/*
+def EIP211 : SubtargetFeature<"eip211", "HasEIP211", "true",
+                              "Ethereum Improvement Proposal 211">;
+
+def EIP615 : SubtargetFeature<"eip615", "HasEIP615", "true",
+                              "Ethereum Improvement Proposal 615">;
 
 def HasEIP211 : Predicate<"Subtarget->hasEIP211()">,
                           AssemblerPredicate<"FeatureEIP211">;
 
-def FeatureEIP615
-    : SubtargetFeature<"EIP615", "HasEIP615", "true", "EIP615 support">;
-
 def HasEIP615 : Predicate<"Subtarget->hasEIP615()">,
                           AssemblerPredicate<"FeatureEIP615">;
+
+class Proc<string Name, list<SubtargetFeature> Features>
+ : Processor<Name, NoItineraries, Features>;
+
+def : Proc<"generic", []>;
+def : Proc<"eip211", [EIP211]>;
+def : Proc<"eip615", [EIP211, EIP615]>;
+*/
 
 //===----------------------------------------------------------------------===//
 // Registers, instruction descriptions.

@@ -26,7 +26,6 @@ using namespace llvm;
 extern "C" void LLVMInitializeEVMTarget() {
   RegisterTargetMachine<EVMTargetMachine> Y(getTheEVMTarget());
   auto PR = PassRegistry::getPassRegistry();
-  initializeEVMExpandPseudoPass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT) {

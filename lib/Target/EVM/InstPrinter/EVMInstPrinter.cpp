@@ -11,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "EVMInstPrinter.h"
-#include "MCTargetDesc/EVMMCExpr.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -25,14 +24,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "evm-asm-printer"
 
-// Include the auto-generated portion of the assembly writer.
-#define PRINT_ALIAS_INSTR
-#include "EVMGenAsmWriter.inc"
-
-// Include the auto-generated portion of the compress emitter.
-#define GEN_UNCOMPRESS_INSTR
-#include "EVMGenCompressInstEmitter.inc"
-
 static cl::opt<bool>
     NoAliases("evm-no-aliases",
               cl::desc("Disable the emission of assembler pseudo instructions"),
@@ -40,11 +31,7 @@ static cl::opt<bool>
 
 void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot, const MCSubtargetInfo &STI) {
-  bool Res = false;
-  const MCInst *NewMI = MI;
-
-  printInstruction(MI, STI, O);
-  printAnnotation(O, Annot);
+  llvm_unreachable("unimplemented.");
 }
 
 void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {

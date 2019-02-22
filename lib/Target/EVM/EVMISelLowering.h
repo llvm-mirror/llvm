@@ -20,37 +20,6 @@
 
 namespace llvm {
 class EVMSubtarget;
-namespace EVMISD {
-enum NodeType : unsigned {
-  FIRST_NUMBER = ISD::BUILTIN_OP_END,
-  RET_FLAG,
-  URET_FLAG,
-  SRET_FLAG,
-  MRET_FLAG,
-  CALL,
-  SELECT_CC,
-  BuildPairF64,
-  SplitF64,
-  TAIL,
-  // RV64I shifts, directly matching the semantics of the named EVM
-  // instructions.
-  SLLW,
-  SRAW,
-  SRLW,
-  // 32-bit operations from RV64M that can't be simply matched with a pattern
-  // at instruction selection time.
-  DIVW,
-  DIVUW,
-  REMUW,
-  // FPR32<->GPR transfer operations for RV64. Needed as an i32<->f32 bitcast
-  // is not legal on RV64. FMV_W_X_RV64 matches the semantics of the FMV.W.X.
-  // FMV_X_ANYEXTW_RV64 is similar to FMV.X.W but has an any-extended result.
-  // This is a more convenient semantic for producing dagcombines that remove
-  // unnecessary GPR->FPR->GPR moves.
-  FMV_W_X_RV64,
-  FMV_X_ANYEXTW_RV64
-};
-}
 
 class EVMTargetLowering : public TargetLowering {
   const EVMSubtarget &Subtarget;
@@ -79,11 +48,6 @@ public:
 
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
-  unsigned ComputeNumSignBitsForTargetNode(SDValue Op,
-                                           const APInt &DemandedElts,
-                                           const SelectionDAG &DAG,
-                                           unsigned Depth) const override;
-
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;
 
@@ -107,12 +71,6 @@ public:
                                  AtomicOrdering Ord) const override;
 
 private:
-  void analyzeInputArgs(MachineFunction &MF, CCState &CCInfo,
-                        const SmallVectorImpl<ISD::InputArg> &Ins,
-                        bool IsRet) const;
-  void analyzeOutputArgs(MachineFunction &MF, CCState &CCInfo,
-                         const SmallVectorImpl<ISD::OutputArg> &Outs,
-                         bool IsRet, CallLoweringInfo *CLI) const;
   // Lower incoming arguments, copy physregs into vregs
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
@@ -133,30 +91,10 @@ private:
                                          Type *Ty) const override {
     return true;
   }
-  SDValue lowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerSELECT(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
-  SDValue lowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
 
   bool IsEligibleForTailCallOptimization(CCState &CCInfo,
     CallLoweringInfo &CLI, MachineFunction &MF,
     const SmallVector<CCValAssign, 16> &ArgLocs) const;
-
-  TargetLowering::AtomicExpansionKind
-  shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
-  virtual Value *emitMaskedAtomicRMWIntrinsic(
-      IRBuilder<> &Builder, AtomicRMWInst *AI, Value *AlignedAddr, Value *Incr,
-      Value *Mask, Value *ShiftAmt, AtomicOrdering Ord) const override;
-  TargetLowering::AtomicExpansionKind
-  shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *CI) const override;
-  virtual Value *
-  emitMaskedAtomicCmpXchgIntrinsic(IRBuilder<> &Builder, AtomicCmpXchgInst *CI,
-                                   Value *AlignedAddr, Value *CmpVal,
-                                   Value *NewVal, Value *Mask,
-                                   AtomicOrdering Ord) const override;
 };
 }
 

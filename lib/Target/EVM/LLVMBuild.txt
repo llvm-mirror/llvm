@@ -15,13 +15,12 @@
 ;===------------------------------------------------------------------------===;
 
 [common]
-subdirectories = AsmParser Disassembler InstPrinter TargetInfo MCTargetDesc
+subdirectories = Disassembler InstPrinter TargetInfo MCTargetDesc
 
 [component_0]
 type = TargetGroup
 name = EVM
 parent = Target
-has_asmparser = 1
 has_asmprinter = 1
 has_disassembler = 1
 

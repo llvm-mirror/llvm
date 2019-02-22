@@ -1,4 +1,4 @@
-//===-- EVMMCTargetDesc.h - EVM Target Descriptions ---------*- C++ -*-===//
+//===-- EVMMCTargetDesc.h - EVM Target Descriptions -------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -14,8 +14,8 @@
 #define LLVM_LIB_TARGET_EVM_MCTARGETDESC_EVMMCTARGETDESC_H
 
 #include "llvm/Config/config.h"
-#include "llvm/MC/MCTargetOptions.h"
 #include "llvm/Support/DataTypes.h"
+
 #include <memory>
 
 namespace llvm {
@@ -26,6 +26,7 @@ class MCInstrInfo;
 class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
+class MCTargetOptions;
 class StringRef;
 class Target;
 class Triple;
@@ -37,20 +38,25 @@ Target &getTheEVMTarget();
 MCCodeEmitter *createEVMMCCodeEmitter(const MCInstrInfo &MCII,
                                       const MCRegisterInfo &MRI,
                                       MCContext &Ctx);
+MCCodeEmitter *createEVMbeMCCodeEmitter(const MCInstrInfo &MCII,
+                                        const MCRegisterInfo &MRI,
+                                        MCContext &Ctx);
 
 MCAsmBackend *createEVMAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                   const MCRegisterInfo &MRI,
                                   const MCTargetOptions &Options);
 
-std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI,
-                                                               bool Is64Bit);
+std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI);
 }
 
-// Defines symbolic names for EVM registers.
+// Defines symbolic names for EVM registers.  This defines a mapping from
+// register name to register number.
+//
 #define GET_REGINFO_ENUM
 #include "EVMGenRegisterInfo.inc"
 
-// Defines symbolic names for EVM instructions.
+// Defines symbolic names for the EVM instructions.
+//
 #define GET_INSTRINFO_ENUM
 #include "EVMGenInstrInfo.inc"
 

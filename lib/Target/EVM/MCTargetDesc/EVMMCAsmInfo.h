@@ -1,4 +1,4 @@
-//===-- EVMMCAsmInfo.h - EVM Asm Info ----------------------*- C++ -*--===//
+//===-- EVMMCAsmInfo.h - EVM asm properties -------------------*- C++ -*--====//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -13,18 +13,17 @@
 #ifndef LLVM_LIB_TARGET_EVM_MCTARGETDESC_EVMMCASMINFO_H
 #define LLVM_LIB_TARGET_EVM_MCTARGETDESC_EVMMCASMINFO_H
 
-#include "llvm/MC/MCAsmInfoELF.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/MC/MCAsmInfo.h"
 
 namespace llvm {
-class Triple;
+class Target;
 
-class EVMMCAsmInfo : public MCAsmInfoELF {
-  void anchor() override;
-
+class EVMMCAsmInfo : public MCAsmInfo {
 public:
-  explicit EVMMCAsmInfo(const Triple &TargetTriple);
+  explicit EVMMCAsmInfo(const Triple &TT) {
+  }
 };
-
-} // namespace llvm
+}
 
 #endif

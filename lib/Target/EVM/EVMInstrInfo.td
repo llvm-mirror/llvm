@@ -78,10 +78,10 @@ defm EXTCODECOPY : RSInst<(outs), (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$sr
                           "EXTCODECOPY \t$src1, $src2, $src3, $src4",
                           "EXTCODECOPY", 0x3c, 700>;  // TODO: verify
 
-let Predicates = [HasEIP211] in {
+//let Predicates = [HasEIP211] in {
 defm RETURNDATASIZE : Inst_0_0<"RETURNDATASIZE", [], 0x3d, 2>;
 defm RETURNDATACOPY : Inst_3_0<"RETURNDATACOPY", [], 0x3e, 3>;
-}
+//}
 
 defm BLOCKHASH  : Inst_1_1<"BLOCKHASH",  [], 0x40, 20>;
 defm COINBASE   : Inst_0_1<"COINBASE",   [], 0x41, 2>;
@@ -121,14 +121,14 @@ defm MSIZE    : Inst_0_1<"MSIZE",    [], 0x59, 2>;
 defm GAS      : Inst_0_1<"GAS",      [], 0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
-let Predicates = [HasEIP615] in {
+//let Predicates = [HasEIP615] in {
 
 let isBranch = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 //defm JUMPIF : Inst_2_0<"JUMPIF", [], 0xb1, 10>; // TODO: argument type is 4 bytes.
 }
 
-}
+//}
 
 defm CREATE : Inst_3_1<"CREATE", [], 0xf0, 32000>;
 

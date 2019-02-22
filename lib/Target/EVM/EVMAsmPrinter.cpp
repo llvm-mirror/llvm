@@ -13,7 +13,6 @@
 
 #include "EVM.h"
 #include "InstPrinter/EVMInstPrinter.h"
-#include "MCTargetDesc/EVMMCExpr.h"
 #include "EVMTargetMachine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -59,20 +58,10 @@ public:
 };
 }
 
-#define GEN_COMPRESS_INSTR
-#include "EVMGenCompressInstEmitter.inc"
 void EVMAsmPrinter::EmitToStreamer(MCStreamer &S, const MCInst &Inst) {
-  MCInst CInst;
-
-  AsmPrinter::EmitToStreamer(*OutStreamer, Res ? CInst : Inst);
 }
 
-// Simple pseudo-instructions have their lowering (with expansion to real
-// instructions) auto-generated.
-#include "EVMGenMCPseudoLowering.inc"
-
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  EmitToStreamer(*OutStreamer, TmpInst);
 }
 
 bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,

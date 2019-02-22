@@ -17,6 +17,5 @@ Target &getTheEVMTarget() {
 }
 
 extern "C" void LLVMInitializeEVMTargetInfo() {
-  RegisterTarget<Triple::evm64> Y(getTheEVMTarget(), "evm64",
-                                    "64-bit EVM", "EVM");
+  llvm_unreachable("unimplemented.");
 }

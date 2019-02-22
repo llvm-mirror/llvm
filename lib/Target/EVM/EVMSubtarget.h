@@ -31,8 +31,8 @@ class EVMSubtarget : public EVMGenSubtargetInfo {
   virtual void anchor();
 
   // EVM Change
-  bool HasEIP615 = false;
   bool HasEIP211 = false;
+  bool HasEIP615 = false;
 
   bool hasEIP211() const { return HasEIP211; }
   bool hasEIP615() const { return HasEIP615; }
@@ -40,7 +40,6 @@ class EVMSubtarget : public EVMGenSubtargetInfo {
 
   EVMFrameLowering FrameLowering;
   EVMInstrInfo InstrInfo;
-  EVMRegisterInfo RegInfo;
   EVMTargetLowering TLInfo;
   SelectionDAGTargetInfo TSInfo;
 
@@ -62,9 +61,6 @@ public:
     return &FrameLowering;
   }
   const EVMInstrInfo *getInstrInfo() const override { return &InstrInfo; }
-  const EVMRegisterInfo *getRegisterInfo() const override {
-    return &RegInfo;
-  }
   const EVMTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
