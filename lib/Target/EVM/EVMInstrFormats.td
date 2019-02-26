@@ -49,12 +49,12 @@ multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
     def _s : EVMInst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
 }
 
-def I256IMM : Operand<i128> {
+def I256IMM : Operand<i256> {
   // TODO: implement Imm256 print
   let PrintMethod = "printImm256Operand";
 }
 
-def ADDR : Operand<i128> {
+def ADDR : Operand<i256> {
   // TODO: implement address print
   let PrintMethod = "printAddressOperand";
 }
