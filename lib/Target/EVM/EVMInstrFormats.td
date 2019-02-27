@@ -21,9 +21,10 @@ def getStackOpcode : InstrMapping {
 // Our register-based instructions
 class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
            string asmstr = "", bits<8> inst, int cost = -1>
-    : /*StackRel,*/ Instruction {
+    : StackRel, Instruction {
 
   field bits<8> Inst = inst;
+  string StackBased = stack;
   string BaseName    = NAME;
   dag OutOperandList = oops;
   dag InOperandList  = iops;
