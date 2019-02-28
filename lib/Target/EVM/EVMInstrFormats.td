@@ -98,28 +98,28 @@ multiclass UnaryInst<SDNode node, string name, bits<8> inst, int cost>
 
 // delta = 2, alpha = 0
 multiclass Inst_2_0<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins AllRegs:$lhs, AllRegs:$rhs),   //register based
+    : RSInst<(outs), (ins AllRegs:$src0, AllRegs:$src1),   //register based
              (outs), (ins),                            // stack based
              pattern,
-             !strconcat(name, "\t$lhs, $rhs"),         // reg asm
+             !strconcat(name, "\t$src0, $src1"),       // reg asm
              name,                                     // stack asm
              inst, cost>;
 
 
 // delta = 2, alpha = 1
 multiclass Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs AllRegs:$dst), (ins AllRegs:$lhs, AllRegs:$rhs),   //register based
+    : RSInst<(outs AllRegs:$dst), (ins AllRegs:$src0, AllRegs:$src1),   //register based
              (outs), (ins),                                        // stack based
              pattern,
-             !strconcat(name, "\t$dst = $lhs, $rhs"),               // reg asm
+             !strconcat(name, "\t$dst = $src0, $src1"),               // reg asm
              name,                                                 // stack asm
              inst, cost>;
 
 multiclass BinaryInst<SDNode node, string name, bits<8> inst, int cost>
-    : Inst_2_1<name, [(set AllRegs:$dst, (node AllRegs:$lhs, AllRegs:$rhs))], inst, cost>;
+    : Inst_2_1<name, [(set AllRegs:$dst, (node AllRegs:$src0, AllRegs:$src1))], inst, cost>;
 
 multiclass ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
-    : Inst_2_1<name, [(set AllRegs:$dst, (setcc AllRegs:$lhs, AllRegs:$rhs, cond))], inst, cost>;
+    : Inst_2_1<name, [(set AllRegs:$dst, (setcc AllRegs:$src0, AllRegs:$src1, cond))], inst, cost>;
 
 // delta = 3, alpha = 0
 multiclass Inst_3_0<string name, list<dag> pattern, bits<8> inst, int cost>

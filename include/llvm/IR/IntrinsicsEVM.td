@@ -13,7 +13,7 @@
 // Specialized loads from packet
 let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
   def int_evm_exp : GCCBuiltin<"__builtin_evm_exp">,
-              Intrinsic<[llvm_i256_ty], [llvm_ptr_ty, llvm_i64_ty], [IntrNoMem]>;
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
   def int_evm_sha3 : GCCBuiltin<"__builtin_evm_sha3">,
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrArgMemOnly]>;
   def int_evm_address : GCCBuiltin<"__builtin_evm_address">,

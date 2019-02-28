@@ -38,7 +38,9 @@ defm MOD    : Inst_2_1<"MOD",    [], 0x06, 5>;
 defm SMOD   : Inst_2_1<"SMOD",   [], 0x07, 5>;
 defm ADDMOD : Inst_2_1<"ADDMOD", [], 0x08, 5>;
 defm MULMOD : Inst_2_1<"MULMOD", [], 0x09, 5>;
-defm EXP    : Inst_2_1<"EXP",    [], 0x0a, 10>;
+defm EXP    : Inst_2_1<"EXP",
+                       [(set AllRegs:$dst, (int_evm_exp AllRegs:$src0, AllRegs:$src1))],
+                       0x0a, 10>;
 defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
 
 // Comparison instructions ////////////////////////////////////////////////////
