@@ -39,7 +39,7 @@ defm SMOD   : Inst_2_1<"SMOD",   [], 0x07, 5>;
 defm ADDMOD : Inst_2_1<"ADDMOD", [], 0x08, 5>;
 defm MULMOD : Inst_2_1<"MULMOD", [], 0x09, 5>;
 defm EXP    : Inst_2_1<"EXP",
-                       [(set AllRegs:$dst, (int_evm_exp AllRegs:$src0, AllRegs:$src1))],
+                       [(set AllRegs:$dst, (int_evm_exp AllRegs:$src1, AllRegs:$src2))],
                        0x0a, 10>;
 defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
 
@@ -62,38 +62,108 @@ defm NOT  :  Inst_1_1<"NOT" , [(set AllRegs:$dst, (setcc AllRegs:$src, 0, SETEQ)
 }
 defm BYTE :  Inst_2_1<"BYTE", [], 0x20, 3>;
 
-defm SHA3      : Inst_2_1<"SHA3",      [], 0x21, 30>;
-defm ADDRESS   : Inst_0_1<"ADDRESS",   [], 0x30, 2>;
-defm BALANCE   : Inst_1_1<"BALANCE",   [], 0x31, 400>;
-defm ORIGIN    : Inst_0_1<"ORIGIN",    [], 0x32, 2>;
-defm CALLER    : Inst_0_1<"CALLER",    [], 0x33, 2>;
-defm CALLVALUE : Inst_0_1<"CALLVALUE", [], 0x34, 2>;
+let mayLoad = 1, mayStore = 0 in {
+defm SHA3      : Inst_2_1<"SHA3",
+                          [(set AllRegs:$dst, (int_evm_sha3 AllRegs:$src1, AllRegs:$src2))],
+                          0x21, 30>;
+}
 
-defm CALLDATALOAD : Inst_1_1<"CALLDATALOAD", [], 0x35, 3>;
+defm ADDRESS   : Inst_0_1<"ADDRESS",
+                          [(set AllRegs:$dst, (int_evm_address))],
+                          0x30, 2>;
+defm BALANCE   : Inst_1_1<"BALANCE",
+                          [(set AllRegs:$dst, (int_evm_balance AllRegs:$src))],
+                          0x31, 400>;
+defm ORIGIN    : Inst_0_1<"ORIGIN",
+                          [(set AllRegs:$dst, (int_evm_origin))],
+                          0x32, 2>;
+defm CALLER    : Inst_0_1<"CALLER",
+                          [(set AllRegs:$dst, (int_evm_caller))],
+                          0x33, 2>;
+defm CALLVALUE : Inst_0_1<"CALLVALUE",
+                          [(set AllRegs:$dst, (int_evm_callvalue))],
+                          0x34, 2>;
 
-defm CALLDATASIZE : Inst_0_1<"CALLDATASIZE", [], 0x36, 2>;
-defm CALLDATACOPY : Inst_3_0<"CALLDATACOPY", [], 0x37, 3>;
-defm CODESIZE     : Inst_0_0<"CODESIZE",     [], 0x38, 2>;
-defm CODECOPY     : Inst_3_0<"CODECOPY",     [], 0x39, 3>;
-defm GASPRICE     : Inst_0_1<"GASPRICE",     [], 0x3a, 2>;
-defm EXTCODESIZE  : Inst_1_1<"EXTCODESIZE",  [], 0x3b, 700>;
+let hasSideEffects = 1 in {
+defm CALLDATALOAD : Inst_1_1<"CALLDATALOAD",
+                             [(set AllRegs:$dst, (int_evm_calldataload AllRegs:$src))],
+                             0x35, 3>;
+}
 
-defm EXTCODECOPY : RSInst<(outs), (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$src3, AllRegs:$src4),
-                          (outs), (ins), [],
+defm CALLDATASIZE : Inst_0_1<"CALLDATASIZE",
+                             [(set AllRegs:$dst, (int_evm_calldatasize))],
+                             0x36, 2>;
+
+let mayStore = 1, hasSideEffects = 1 in {
+defm CALLDATACOPY : Inst_3_0<"CALLDATACOPY",
+                             [(int_evm_calldatacopy
+                               AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                             0x37, 3>;
+}
+
+defm CODESIZE     : Inst_0_1<"CODESIZE",
+                             [(set AllRegs:$dst, (int_evm_codesize))],
+                             0x38, 2>;
+
+let hasSideEffects = 1 in {
+
+let mayStore = 1 in {
+defm CODECOPY     : Inst_3_0<"CODECOPY",
+                             [(int_evm_codecopy
+                               AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                             0x39, 3>;
+}
+defm GASPRICE     : Inst_0_1<"GASPRICE",
+                             [(set AllRegs:$dst, (int_evm_gasprice))],
+                             0x3a, 2>;
+defm EXTCODESIZE  : Inst_1_1<"EXTCODESIZE",
+                             [(set AllRegs:$dst, (int_evm_extcodesize AllRegs:$src))],
+                             0x3b, 700>;
+}
+
+let mayStore = 1, hasSideEffects = 1 in {
+defm EXTCODECOPY : RSInst<(outs),
+                          (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$src3, AllRegs:$src4),
+                          (outs), (ins),
+                          [(int_evm_extcodecopy AllRegs:$src1, AllRegs:$src2,
+                                                AllRegs:$src3, AllRegs:$src4)],
                           "EXTCODECOPY \t$src1, $src2, $src3, $src4",
                           "EXTCODECOPY", 0x3c, 700>;  // TODO: verify
+}
 
 //let Predicates = [HasEIP211] in {
-defm RETURNDATASIZE : Inst_0_0<"RETURNDATASIZE", [], 0x3d, 2>;
-defm RETURNDATACOPY : Inst_3_0<"RETURNDATACOPY", [], 0x3e, 3>;
+let hasSideEffects = 1 in {
+defm RETURNDATASIZE : Inst_0_1<"RETURNDATASIZE",
+                               [(set AllRegs:$dst, (int_evm_returndatasize))],
+                               0x3d, 2>;
+
+let mayStore = 1 in {
+defm RETURNDATACOPY : Inst_3_0<"RETURNDATACOPY",
+                               [(int_evm_returndatacopy
+                                 AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                               0x3e, 3>;
+}
+}
 //}
 
-defm BLOCKHASH  : Inst_1_1<"BLOCKHASH",  [], 0x40, 20>;
-defm COINBASE   : Inst_0_1<"COINBASE",   [], 0x41, 2>;
-defm TIMESTAMP  : Inst_0_1<"TIMESTAMP",  [], 0x42, 2>;
-defm NUMBER     : Inst_0_1<"NUMBER",     [], 0x43, 2>;
-defm DIFFICULTY : Inst_0_1<"DIFFICULTY", [], 0x44, 2>;
-defm GASLIMIT   : Inst_0_1<"GASLIMIT",   [], 0x45, 2>;
+defm BLOCKHASH  : Inst_1_1<"BLOCKHASH",
+                           [(set AllRegs:$dst, (int_evm_blockhash AllRegs:$src))],
+                           0x40, 20>;
+defm COINBASE   : Inst_0_1<"COINBASE",
+                           [(set AllRegs:$dst, (int_evm_coinbase))],
+                           0x41, 2>;
+defm TIMESTAMP  : Inst_0_1<"TIMESTAMP",
+                           [(set AllRegs:$dst, (int_evm_timestamp))],
+                           0x42, 2>;
+defm NUMBER     : Inst_0_1<"NUMBER",
+                           [(set AllRegs:$dst, (int_evm_number))],
+                           0x43, 2>;
+defm DIFFICULTY : Inst_0_1<"DIFFICULTY",
+                           [(set AllRegs:$dst, (int_evm_difficulty))],
+                           0x44, 2>;
+defm GASLIMIT   : Inst_0_1<"GASLIMIT",
+                           [(set AllRegs:$dst, (int_evm_gaslimit))],
+                           0x45, 2>;
 
 
 let hasSideEffects = 1 in {
@@ -106,13 +176,13 @@ defm MSTORE : Inst_2_0<"MSTORE", [], 0x52, 3>;
 //defm MSTORE8 : ??
 }
 
-let mayLoad = 1 in {
-defm SLOAD  : Inst_1_1<"SLOAD",      [], 0x54, 200>;
-}
+defm SLOAD  : Inst_1_1<"SLOAD",
+                       [(set AllRegs:$dst, (int_evm_sload AllRegs:$src))],
+                       0x54, 200>;
 
-let mayStore = 1 in {
-defm SSTORE : Inst_2_0<"SSTORE",     [], 0x55, 200000>;
-}
+defm SSTORE : Inst_2_0<"SSTORE",
+                       [(int_evm_sstore AllRegs:$src1, AllRegs:$src2)],
+                       0x55, 200000>;
 }
 
 let isBranch = 1 in {
@@ -120,10 +190,16 @@ defm JUMP     : Inst_1_0<"JUMP",     [], 0x56, 8>;
 defm JUMPI    : Inst_2_0<"JUMPI",    [], 0x57, 10>;
 }
 
-defm PC       : Inst_0_1<"PC",       [], 0x58, 2>;
+defm PC       : Inst_0_1<"PC",
+                         [(set AllRegs:$dst, (int_evm_getpc))],
+                         0x58, 2>;
 
-defm MSIZE    : Inst_0_1<"MSIZE",    [], 0x59, 2>;
-defm GAS      : Inst_0_1<"GAS",      [], 0x5a, 2>;
+defm MSIZE    : Inst_0_1<"MSIZE",
+                         [(set AllRegs:$dst, (int_evm_msize))],
+                         0x59, 2>;
+defm GAS      : Inst_0_1<"GAS",
+                         [(set AllRegs:$dst, (int_evm_gas))],
+                         0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
 //let Predicates = [HasEIP615] in {
@@ -135,10 +211,16 @@ defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 
 //}
 
-defm CREATE : Inst_3_1<"CREATE", [], 0xf0, 32000>;
+let mayStore = 1, hasSideEffects = 1 in {
+defm CREATE : Inst_3_1<"CREATE",
+                       [(set AllRegs:$dst, (int_evm_create
+                                            AllRegs:$src1, AllRegs:$src2, AllRegs:$src3))],
+                       0xf0, 32000>;
+}
 
 let isCall = 1 in {
-//defm CALL   : Inst_7_1<"CALL", [], 0xf1, ??>; // We should compute the cost of CALL separately.
+// We should compute the cost of CALL separately.
+//defm CALL   : Inst_7_1<"CALL", [], 0xf1, ??>;
 //defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
 }
 
@@ -152,12 +234,28 @@ let isCall = 1 in {
 //defm STATICCALL : Inst_7_1<"STATICCALL", [], 0xfa, 40>;
 }
 
-defm CREATE2    : Inst_3_1<"CREATE2", [], 0xfb, 32000>;
+let hasSideEffects = 1 in {
+let mayStore = 1 in {
+defm CREATE2    : Inst_3_1<"CREATE2",
+                           [(set AllRegs:$dst,
+                             (int_evm_create2
+                              AllRegs:$src1, AllRegs:$src2, AllRegs:$src3))],
+                           0xfb, 32000>;
 // defm TXEXEGAS // TODO
-defm REVERT     : Inst_2_1<"REVERT", [], 0xfd, 0>;
+
+defm REVERT     : Inst_2_1<"REVERT",
+                           [(set AllRegs:$dst, (int_evm_revert AllRegs:$src1, AllRegs:$src2))],
+                           0xfd, 0>;
+}
+}
+
 defm INVALID    : Inst_0_0<"INVALID", [], 0xfe, 0>;
 
-defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT", [], 0xff, 5000>;
+let mayStore = 1, hasSideEffects = 1 in {
+defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
+                             [(int_evm_selfdestruct AllRegs:$src)],
+                             0xff, 5000>;
+}
 
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions
