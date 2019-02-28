@@ -42,19 +42,22 @@ defm EXP    : Inst_2_1<"EXP",    [], 0x0a, 10>;
 defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
 
 // Comparison instructions ////////////////////////////////////////////////////
+let isCompare = 1 in {
 defm LT  : ComparisonInst<SETULT, "LT", 0x10, 3>;
 defm GT  : ComparisonInst<SETUGT, "GT", 0x11, 3>;
 defm SLT : ComparisonInst<SETLT, "SLT", 0x12, 3>;
 defm SGT : ComparisonInst<SETGT, "SGT", 0x13, 3>;
 defm EQ  : ComparisonInst<SETEQ, "SEQ", 0x14, 3>;
-
+}
 // Bitwise instructions ///////////////////////////////////////////////////////
 defm AND : BinaryInst<and, "AND", 0x16, 3>;
 defm OR  : BinaryInst<or,  "OR",  0x17, 3>;
 defm XOR : BinaryInst<xor, "XOR", 0x18, 3>;
 
 // LLVM does not generate "NOT" nodes.
-defm NOT  :  Inst_1_1<"NOT" , [], 0x19, 3>;
+let isCompare = 1 in {
+defm NOT  :  Inst_1_1<"NOT" , [(set AllRegs:$dst, (setcc AllRegs:$src, 0, SETEQ))], 0x19, 3>;
+}
 defm BYTE :  Inst_2_1<"BYTE", [], 0x20, 3>;
 
 defm SHA3      : Inst_2_1<"SHA3",      [], 0x21, 30>;
@@ -155,8 +158,16 @@ defm INVALID    : Inst_0_0<"INVALID", [], 0xfe, 0>;
 defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT", [], 0xff, 5000>;
 
 //===----------------------------------------------------------------------===//
-// Assembler Pseudo Instructions (User-Level ISA, Version 2.2, Chapter 20)
+// Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//
+
+
+//===----------------------------------------------------------------------===//
+// Patterns
+//===----------------------------------------------------------------------===//
+
+
+
 
 
 //===----------------------------------------------------------------------===//
