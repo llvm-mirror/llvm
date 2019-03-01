@@ -84,7 +84,7 @@ defm SMOD   : Inst_2_1<"SMOD",   [], 0x07, 5>;
 defm ADDMOD : Inst_2_1<"ADDMOD", [], 0x08, 5>;
 defm MULMOD : Inst_2_1<"MULMOD", [], 0x09, 5>;
 defm EXP    : Inst_2_1<"EXP",
-                       [(set AllRegs:$dst, (int_evm_exp AllRegs:$src1, AllRegs:$src2))],
+                       [(set GPR:$dst, (int_evm_exp GPR:$src1, GPR:$src2))],
                        0x0a, 10>;
 defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
 
@@ -103,51 +103,51 @@ defm XOR : BinaryInst<xor, "XOR", 0x18, 3>;
 
 // LLVM does not generate "NOT" nodes.
 let isCompare = 1 in {
-defm NOT  :  Inst_1_1<"NOT" , [(set AllRegs:$dst, (setcc AllRegs:$src, 0, SETEQ))], 0x19, 3>;
+defm NOT  :  Inst_1_1<"NOT" , [(set GPR:$dst, (setcc GPR:$src, 0, SETEQ))], 0x19, 3>;
 }
 defm BYTE :  Inst_2_1<"BYTE", [], 0x20, 3>;
 
 let mayLoad = 1, mayStore = 0 in {
 defm SHA3      : Inst_2_1<"SHA3",
-                          [(set AllRegs:$dst, (int_evm_sha3 AllRegs:$src1, AllRegs:$src2))],
+                          [(set GPR:$dst, (int_evm_sha3 GPR:$src1, GPR:$src2))],
                           0x21, 30>;
 }
 
 defm ADDRESS   : Inst_0_1<"ADDRESS",
-                          [(set AllRegs:$dst, (int_evm_address))],
+                          [(set GPR:$dst, (int_evm_address))],
                           0x30, 2>;
 defm BALANCE   : Inst_1_1<"BALANCE",
-                          [(set AllRegs:$dst, (int_evm_balance AllRegs:$src))],
+                          [(set GPR:$dst, (int_evm_balance GPR:$src))],
                           0x31, 400>;
 defm ORIGIN    : Inst_0_1<"ORIGIN",
-                          [(set AllRegs:$dst, (int_evm_origin))],
+                          [(set GPR:$dst, (int_evm_origin))],
                           0x32, 2>;
 defm CALLER    : Inst_0_1<"CALLER",
-                          [(set AllRegs:$dst, (int_evm_caller))],
+                          [(set GPR:$dst, (int_evm_caller))],
                           0x33, 2>;
 defm CALLVALUE : Inst_0_1<"CALLVALUE",
-                          [(set AllRegs:$dst, (int_evm_callvalue))],
+                          [(set GPR:$dst, (int_evm_callvalue))],
                           0x34, 2>;
 
 let hasSideEffects = 1 in {
 defm CALLDATALOAD : Inst_1_1<"CALLDATALOAD",
-                             [(set AllRegs:$dst, (int_evm_calldataload AllRegs:$src))],
+                             [(set GPR:$dst, (int_evm_calldataload GPR:$src))],
                              0x35, 3>;
 }
 
 defm CALLDATASIZE : Inst_0_1<"CALLDATASIZE",
-                             [(set AllRegs:$dst, (int_evm_calldatasize))],
+                             [(set GPR:$dst, (int_evm_calldatasize))],
                              0x36, 2>;
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm CALLDATACOPY : Inst_3_0<"CALLDATACOPY",
                              [(int_evm_calldatacopy
-                               AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                               GPR:$src1, GPR:$src2, GPR:$src3)],
                              0x37, 3>;
 }
 
 defm CODESIZE     : Inst_0_1<"CODESIZE",
-                             [(set AllRegs:$dst, (int_evm_codesize))],
+                             [(set GPR:$dst, (int_evm_codesize))],
                              0x38, 2>;
 
 let hasSideEffects = 1 in {
@@ -155,23 +155,23 @@ let hasSideEffects = 1 in {
 let mayStore = 1 in {
 defm CODECOPY     : Inst_3_0<"CODECOPY",
                              [(int_evm_codecopy
-                               AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                               GPR:$src1, GPR:$src2, GPR:$src3)],
                              0x39, 3>;
 }
 defm GASPRICE     : Inst_0_1<"GASPRICE",
-                             [(set AllRegs:$dst, (int_evm_gasprice))],
+                             [(set GPR:$dst, (int_evm_gasprice))],
                              0x3a, 2>;
 defm EXTCODESIZE  : Inst_1_1<"EXTCODESIZE",
-                             [(set AllRegs:$dst, (int_evm_extcodesize AllRegs:$src))],
+                             [(set GPR:$dst, (int_evm_extcodesize GPR:$src))],
                              0x3b, 700>;
 }
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm EXTCODECOPY : RSInst<(outs),
-                          (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$src3, AllRegs:$src4),
+                          (ins GPR:$src1, GPR:$src2, GPR:$src3, GPR:$src4),
                           (outs), (ins),
-                          [(int_evm_extcodecopy AllRegs:$src1, AllRegs:$src2,
-                                                AllRegs:$src3, AllRegs:$src4)],
+                          [(int_evm_extcodecopy GPR:$src1, GPR:$src2,
+                                                GPR:$src3, GPR:$src4)],
                           "EXTCODECOPY \t$src1, $src2, $src3, $src4",
                           "EXTCODECOPY", 0x3c, 700>;  // TODO: verify
 }
@@ -179,35 +179,35 @@ defm EXTCODECOPY : RSInst<(outs),
 //let Predicates = [HasEIP211] in {
 let hasSideEffects = 1 in {
 defm RETURNDATASIZE : Inst_0_1<"RETURNDATASIZE",
-                               [(set AllRegs:$dst, (int_evm_returndatasize))],
+                               [(set GPR:$dst, (int_evm_returndatasize))],
                                0x3d, 2>;
 
 let mayStore = 1 in {
 defm RETURNDATACOPY : Inst_3_0<"RETURNDATACOPY",
                                [(int_evm_returndatacopy
-                                 AllRegs:$src1, AllRegs:$src2, AllRegs:$src3)],
+                                 GPR:$src1, GPR:$src2, GPR:$src3)],
                                0x3e, 3>;
 }
 }
 //}
 
 defm BLOCKHASH  : Inst_1_1<"BLOCKHASH",
-                           [(set AllRegs:$dst, (int_evm_blockhash AllRegs:$src))],
+                           [(set GPR:$dst, (int_evm_blockhash GPR:$src))],
                            0x40, 20>;
 defm COINBASE   : Inst_0_1<"COINBASE",
-                           [(set AllRegs:$dst, (int_evm_coinbase))],
+                           [(set GPR:$dst, (int_evm_coinbase))],
                            0x41, 2>;
 defm TIMESTAMP  : Inst_0_1<"TIMESTAMP",
-                           [(set AllRegs:$dst, (int_evm_timestamp))],
+                           [(set GPR:$dst, (int_evm_timestamp))],
                            0x42, 2>;
 defm NUMBER     : Inst_0_1<"NUMBER",
-                           [(set AllRegs:$dst, (int_evm_number))],
+                           [(set GPR:$dst, (int_evm_number))],
                            0x43, 2>;
 defm DIFFICULTY : Inst_0_1<"DIFFICULTY",
-                           [(set AllRegs:$dst, (int_evm_difficulty))],
+                           [(set GPR:$dst, (int_evm_difficulty))],
                            0x44, 2>;
 defm GASLIMIT   : Inst_0_1<"GASLIMIT",
-                           [(set AllRegs:$dst, (int_evm_gaslimit))],
+                           [(set GPR:$dst, (int_evm_gaslimit))],
                            0x45, 2>;
 
 
@@ -222,11 +222,11 @@ defm MSTORE : Inst_2_0<"MSTORE", [], 0x52, 3>;
 }
 
 defm SLOAD  : Inst_1_1<"SLOAD",
-                       [(set AllRegs:$dst, (int_evm_sload AllRegs:$src))],
+                       [(set GPR:$dst, (int_evm_sload GPR:$src))],
                        0x54, 200>;
 
 defm SSTORE : Inst_2_0<"SSTORE",
-                       [(int_evm_sstore AllRegs:$src1, AllRegs:$src2)],
+                       [(int_evm_sstore GPR:$src1, GPR:$src2)],
                        0x55, 200000>;
 }
 
@@ -236,14 +236,14 @@ defm JUMPI    : Inst_2_0<"JUMPI",    [], 0x57, 10>;
 }
 
 defm PC       : Inst_0_1<"PC",
-                         [(set AllRegs:$dst, (int_evm_getpc))],
+                         [(set GPR:$dst, (int_evm_getpc))],
                          0x58, 2>;
 
 defm MSIZE    : Inst_0_1<"MSIZE",
-                         [(set AllRegs:$dst, (int_evm_msize))],
+                         [(set GPR:$dst, (int_evm_msize))],
                          0x59, 2>;
 defm GAS      : Inst_0_1<"GAS",
-                         [(set AllRegs:$dst, (int_evm_gas))],
+                         [(set GPR:$dst, (int_evm_gas))],
                          0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
@@ -258,8 +258,8 @@ defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm CREATE : Inst_3_1<"CREATE",
-                       [(set AllRegs:$dst, (int_evm_create
-                                            AllRegs:$src1, AllRegs:$src2, AllRegs:$src3))],
+                       [(set GPR:$dst, (int_evm_create
+                                            GPR:$src1, GPR:$src2, GPR:$src3))],
                        0xf0, 32000>;
 }
 
@@ -282,14 +282,14 @@ let isCall = 1 in {
 let hasSideEffects = 1 in {
 let mayStore = 1 in {
 defm CREATE2    : Inst_3_1<"CREATE2",
-                           [(set AllRegs:$dst,
+                           [(set GPR:$dst,
                              (int_evm_create2
-                              AllRegs:$src1, AllRegs:$src2, AllRegs:$src3))],
+                              GPR:$src1, GPR:$src2, GPR:$src3))],
                            0xfb, 32000>;
 // defm TXEXEGAS // TODO
 
 defm REVERT     : Inst_2_1<"REVERT",
-                           [(set AllRegs:$dst, (int_evm_revert AllRegs:$src1, AllRegs:$src2))],
+                           [(set GPR:$dst, (int_evm_revert GPR:$src1, GPR:$src2))],
                            0xfd, 0>;
 }
 }
@@ -298,7 +298,7 @@ defm INVALID    : Inst_0_0<"INVALID", [], 0xfe, 0>;
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
-                             [(int_evm_selfdestruct AllRegs:$src)],
+                             [(int_evm_selfdestruct GPR:$src)],
                              0xff, 5000>;
 }
 

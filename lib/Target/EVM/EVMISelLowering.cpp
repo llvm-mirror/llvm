@@ -42,6 +42,9 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
                                          const EVMSubtarget &STI)
     : TargetLowering(TM), Subtarget(STI) {
 
+  // Legal register classes:
+  addRegisterClass(MVT::i256, &EVM::GPRRegClass);
+
   llvm_unreachable("unimplemented.");
 }
 

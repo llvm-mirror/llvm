@@ -15,8 +15,6 @@ class EVMReg<string n> : Register<n> {
   let Namespace = "EVM";
 }
 
-class EVMRegClass<list<ValueType> regTypes, int alignment, dag regList>
-     : RegisterClass<"EVM", regTypes, alignment, regList>;
 
 //===----------------------------------------------------------------------===//
 // Registers
@@ -34,10 +32,7 @@ def SP : EVMReg<"%SP">;
 def INTREG : EVMReg<"%intreg">;
 def GPR256 : EVMReg<"%intreg">;
 
-//def GPR256 : Operand<i256>;
-
-// The register classes.
-def AllRegs : EVMRegClass<[i256], 32, (add FP, SP, INTREG, GPR256)>;
+def GPR : RegisterClass<"EVM", [i256], 32, (add FP, SP, INTREG, GPR256)>;
 
 // The value stack "register". This is an opaque entity which serves to order
 // uses and defs that must remain in LIFO order.

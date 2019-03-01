@@ -65,7 +65,7 @@ def ADDR : Operand<i256> {
 
 // delta = 0, alpha = 1
 multiclass Inst_0_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs AllRegs:$dst), (ins), (outs), (ins), pattern,
+    : RSInst<(outs GPR:$dst), (ins), (outs), (ins), pattern,
              !strconcat(name, "\t$dst"), name,
              inst, cost>;
 
@@ -76,7 +76,7 @@ multiclass Inst_0_0<string name, list<dag> pattern, bits<8> inst, int cost>
 
 // delta = 1, alpha = 0
 multiclass Inst_1_0<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins AllRegs:$src),     // register based
+    : RSInst<(outs), (ins GPR:$src),     // register based
              (outs), (ins),                 // stack based
              pattern,
              !strconcat(name, "\t$src"),    // reg asm
@@ -86,7 +86,7 @@ multiclass Inst_1_0<string name, list<dag> pattern, bits<8> inst, int cost>
 
 // delta = 1, alpha = 1
 multiclass Inst_1_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs AllRegs:$dst), (ins AllRegs:$src),     // register based
+    : RSInst<(outs GPR:$dst), (ins GPR:$src),     // register based
              (outs), (ins),                             // stack based
              pattern,
              !strconcat(name, "\t$dst = $src"),          // reg asm
@@ -94,11 +94,11 @@ multiclass Inst_1_1<string name, list<dag> pattern, bits<8> inst, int cost>
              inst, cost>;
 
 multiclass UnaryInst<SDNode node, string name, bits<8> inst, int cost>
-    : Inst_1_1<name, [(set AllRegs:$dst, (node AllRegs:$src))], inst, cost>;
+    : Inst_1_1<name, [(set GPR:$dst, (node GPR:$src))], inst, cost>;
 
 // delta = 2, alpha = 0
 multiclass Inst_2_0<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins AllRegs:$src1, AllRegs:$src2),   //register based
+    : RSInst<(outs), (ins GPR:$src1, GPR:$src2),   //register based
              (outs), (ins),                            // stack based
              pattern,
              !strconcat(name, "\t$src1, $src2"),       // reg asm
@@ -108,7 +108,7 @@ multiclass Inst_2_0<string name, list<dag> pattern, bits<8> inst, int cost>
 
 // delta = 2, alpha = 1
 multiclass Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs AllRegs:$dst), (ins AllRegs:$src1, AllRegs:$src2),   //register based
+    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2),   //register based
              (outs), (ins),                                        // stack based
              pattern,
              !strconcat(name, "\t$dst = $src1, $src2"),               // reg asm
@@ -116,21 +116,21 @@ multiclass Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
              inst, cost>;
 
 multiclass BinaryInst<SDNode node, string name, bits<8> inst, int cost>
-    : Inst_2_1<name, [(set AllRegs:$dst, (node AllRegs:$src1, AllRegs:$src2))], inst, cost>;
+    : Inst_2_1<name, [(set GPR:$dst, (node GPR:$src1, GPR:$src2))], inst, cost>;
 
 multiclass ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
-    : Inst_2_1<name, [(set AllRegs:$dst, (setcc AllRegs:$src1, AllRegs:$src2, cond))], inst, cost>;
+    : Inst_2_1<name, [(set GPR:$dst, (setcc GPR:$src1, GPR:$src2, cond))], inst, cost>;
 
 // delta = 3, alpha = 0
 multiclass Inst_3_0<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$src3),
+    : RSInst<(outs), (ins GPR:$src1, GPR:$src2, GPR:$src3),
              (outs), (ins), pattern,
              !strconcat(name, " \t$src1, $src2, $src3"),
              name, inst, cost>;
 
 // delta = 3, alpha = 1
 multiclass Inst_3_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs AllRegs:$dst), (ins AllRegs:$src1, AllRegs:$src2, AllRegs:$src3),
+    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2, GPR:$src3),
              (outs), (ins), pattern,
              !strconcat(name, " \t$dst = $src1, $src2, $src3"),
              name, inst, cost>;
