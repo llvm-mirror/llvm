@@ -18,8 +18,29 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLowering.h"
 
+
+
+
 namespace llvm {
 class EVMSubtarget;
+
+namespace EVMISD {
+enum NodeType : unsigned {
+  FIRST_NUMBER = ISD::BUILTIN_OP_END,
+  CALL,
+  RETURN,
+  MOD,
+  SMOD,
+  ADDMOD,
+  MULMOD,
+  EXP,
+  SIGNEXTEND,
+  BYTE,
+  JUMP,
+  JUMPI,
+  SWAP,
+};
+}
 
 class EVMTargetLowering : public TargetLowering {
   const EVMSubtarget &Subtarget;

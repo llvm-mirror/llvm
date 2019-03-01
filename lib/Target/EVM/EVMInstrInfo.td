@@ -20,7 +20,52 @@ include "EVMInstrFormats.td"
 //===----------------------------------------------------------------------===//
 // Operand and SDNode transformation definitions.
 //===----------------------------------------------------------------------===//
+def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 
+def SDT_EVMArithBinary :
+SDTypeProfile<1, 2, [SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>]>;
+
+def SDT_EVMArithTernary :
+SDTypeProfile<1, 3,
+              [SDTCisInt<0>, SDTCisSameAs<0, 1>,
+               SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>]>;
+
+def SDT_EVMTwoOpnd :
+SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
+
+def EVMCall :
+SDNode<"EVMISD::CALL", SDT_EVMCall,
+       [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
+
+def EVMReturn :
+SDNode<"EVMISD::RETURN", SDTNone, [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
+def EVMMod :
+SDNode<"EVMISD::MOD", SDT_EVMArithBinary, []>;
+
+def EVMSmod :
+SDNode<"EVMISD::SMOD", SDT_EVMArithBinary, []>;
+
+def EVMAddMod :
+SDNode<"EVMISD::ADDMOD", SDT_EVMArithTernary, []>;
+
+def EVMExp:
+SDNode<"EVMISD::EXP", SDT_EVMArithBinary, []>;
+
+def EVMSignextend :
+SDNode<"EVMISD::SIGNEXTEND", SDT_EVMArithBinary, []>;
+
+def EVMByte :
+SDNode<"EVMISD::BYTE", SDT_EVMArithBinary, []>;
+
+def EVMJump :
+SDNode<"EVMISD::JUMP", SDTNone, []>;
+
+def EVMJumpi :
+SDNode<"EVMISD::JUMPI", SDTNone, []>;
+
+def EVMSwap :
+SDNode<"EVMISD::SWAP", SDT_EVMTwoOpnd, []>;
 
 //===----------------------------------------------------------------------===//
 // Instructions
@@ -220,7 +265,7 @@ defm CREATE : Inst_3_1<"CREATE",
 
 let isCall = 1 in {
 // We should compute the cost of CALL separately.
-//defm CALL   : Inst_7_1<"CALL", [], 0xf1, ??>;
+//defm CALL   : Inst_7_1<"CALL", [], 0xf1, 0>;
 //defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
 }
 
