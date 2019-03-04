@@ -45,7 +45,64 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   // Legal register classes:
   addRegisterClass(MVT::i256, &EVM::GPRRegClass);
 
-  llvm_unreachable("unimplemented.");
+  // Compute derived properties from the register classes.
+  computeRegisterProperties(Subtarget.getRegisterInfo());
+
+  setBooleanContents(ZeroOrOneBooleanContent);
+  setBooleanVectorContents(ZeroOrOneBooleanContent);
+  setSchedulingPreference(Sched::RegPressure);
+  setStackPointerRegisterToSaveRestore(EVM::SP);
+
+  setOperationAction(ISD::BR_CC, MVT::i64, Custom);
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  setOperationAction(ISD::BRIND, MVT::Other, Expand);
+  setOperationAction(ISD::BRCOND, MVT::Other, Expand);
+
+  // TODO: set type legalization actions
+  for (auto VT : { MVT::i1, MVT::i8, MVT::i16, MVT::i32,
+                   MVT::i64, MVT::i128 }) {
+    setOperationAction(ISD::SDIVREM, VT, Expand);
+    setOperationAction(ISD::UDIVREM, VT, Expand);
+    setOperationAction(ISD::SREM, VT, Expand);
+    setOperationAction(ISD::UREM, VT, Expand);
+    setOperationAction(ISD::MULHU, VT, Expand);
+    setOperationAction(ISD::MULHS, VT, Expand);
+    setOperationAction(ISD::UMUL_LOHI, VT, Expand);
+    setOperationAction(ISD::SMUL_LOHI, VT, Expand);
+    setOperationAction(ISD::ROTR, VT, Expand);
+    setOperationAction(ISD::ROTL, VT, Expand);
+    setOperationAction(ISD::SHL_PARTS, VT, Expand);
+    setOperationAction(ISD::SRL_PARTS, VT, Expand);
+    setOperationAction(ISD::SRA_PARTS, VT, Expand);
+    setOperationAction(ISD::CTPOP, VT, Expand);
+
+    setOperationAction(ISD::SETCC, VT, Expand);
+    setOperationAction(ISD::SELECT, VT, Expand);
+
+    // have to do custom for SELECT_CC
+    setOperationAction(ISD::SELECT_CC, VT, Custom);
+
+    setOperationAction(ISD::CTTZ, VT, Expand);
+    setOperationAction(ISD::CTLZ, VT, Expand);
+    setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
+    setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
+
+
+  }
+
+  for (MVT VT : MVT::integer_valuetypes()) {
+    for (auto N : {ISD::EXTLOAD, ISD::SEXTLOAD, ISD::ZEXTLOAD}) {
+      setLoadExtAction(N, VT, MVT::i1, Expand);
+      setLoadExtAction(N, VT, MVT::i8, Expand);
+      setLoadExtAction(N, VT, MVT::i16, Expand);
+      setLoadExtAction(N, VT, MVT::i32, Expand);
+      setLoadExtAction(N, VT, MVT::i64, Expand);
+      setLoadExtAction(N, VT, MVT::i128, Expand);
+    }
+  }
+
+
+  llvm_unreachable("unfinished implementation.");
 }
 
 EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,

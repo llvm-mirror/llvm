@@ -28,6 +28,10 @@ namespace EVMISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   CALL,
+  DELEGATECALL,
+  STATICCALL,
+  CALLNODE,
+  CREATE,
   RETURN,
   MOD,
   SMOD,
@@ -39,6 +43,7 @@ enum NodeType : unsigned {
   JUMP,
   JUMPI,
   SWAP,
+  SELFDESTRUCT,
 };
 }
 
