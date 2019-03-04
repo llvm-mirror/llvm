@@ -17,5 +17,6 @@ Target &getTheEVMTarget() {
 }
 
 extern "C" void LLVMInitializeEVMTargetInfo() {
-  llvm_unreachable("unimplemented.");
+  llvm::RegisterTarget<llvm::Triple::evm, /*HasJIT=*/false>
+    X(llvm::getTheEVMTarget(), "evm", "Ethereum Virtual Machine", "EVM");
 }
