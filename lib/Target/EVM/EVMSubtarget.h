@@ -45,8 +45,7 @@ class EVMSubtarget : public EVMGenSubtargetInfo {
 
   /// Initializes using the passed in CPU and feature strings so that we can
   /// use initializer lists for subtarget initialization.
-  EVMSubtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS,
-                                                  bool Is64Bit);
+  EVMSubtarget &initializeSubtargetDependencies(StringRef CPU, StringRef FS);
 
 public:
   // Initializes the data members to match that of the specified triple.
@@ -60,7 +59,12 @@ public:
   const EVMFrameLowering *getFrameLowering() const override {
     return &FrameLowering;
   }
+
   const EVMInstrInfo *getInstrInfo() const override { return &InstrInfo; }
+
+  const EVMRegisterInfo *getRegisterInfo() const override {
+    return &InstrInfo.getRegisterInfo();
+  }
   const EVMTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }

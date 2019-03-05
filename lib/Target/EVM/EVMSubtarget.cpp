@@ -26,14 +26,14 @@ using namespace llvm;
 void EVMSubtarget::anchor() {}
 
 EVMSubtarget &EVMSubtarget::initializeSubtargetDependencies(StringRef CPU,
-                                                            StringRef FS,
-                                                            bool Is64Bit) {
+                                                            StringRef FS) {
   // Determine default and user-specified characteristics
   return *this;
 }
 
 EVMSubtarget::EVMSubtarget(const Triple &TT, const std::string &CPU,
-                               const std::string &FS, const TargetMachine &TM)
+                           const std::string &FS, const TargetMachine &TM)
     : EVMGenSubtargetInfo(TT, CPU, FS),
-      FrameLowering(initializeSubtargetDependencies(CPU, FS, TT.isArch64Bit())),
-      InstrInfo(), TLInfo(TM, *this) {}
+      FrameLowering(initializeSubtargetDependencies(CPU, FS)),
+      InstrInfo(), TLInfo(TM, *this) {
+}

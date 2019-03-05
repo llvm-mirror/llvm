@@ -24,10 +24,9 @@ class TargetRegisterClass;
 class Triple;
 
 class EVMRegisterInfo final : public EVMGenRegisterInfo {
-  const Triple &TT;
 
 public:
-  explicit EVMRegisterInfo(const Triple &TT);
+  explicit EVMRegisterInfo();
 
   // Code Generation virtual methods.
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF) const override;

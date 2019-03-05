@@ -32,8 +32,8 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "EVMGenRegisterInfo.inc"
 
-EVMRegisterInfo::EVMRegisterInfo(const Triple &TT)
-    : EVMGenRegisterInfo(0), TT(TT) {}
+EVMRegisterInfo::EVMRegisterInfo()
+    : EVMGenRegisterInfo(0) {}
 
 const MCPhysReg *
 EVMRegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {

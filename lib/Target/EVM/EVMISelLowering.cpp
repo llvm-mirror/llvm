@@ -46,7 +46,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::i256, &EVM::GPRRegClass);
 
   // Compute derived properties from the register classes.
-  computeRegisterProperties(Subtarget.getRegisterInfo());
+  //computeRegisterProperties(Subtarget.getRegisterInfo());
 
   setBooleanContents(ZeroOrOneBooleanContent);
   setBooleanVectorContents(ZeroOrOneBooleanContent);
@@ -102,7 +102,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   }
 
 
-  llvm_unreachable("unfinished implementation.");
+  //llvm_unreachable("unfinished implementation.");
 }
 
 EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
@@ -207,11 +207,6 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   llvm_unreachable("unimplemented.");
 }
 
-bool EVMTargetLowering::CanLowerReturn(
-    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
-    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context) const {
-  llvm_unreachable("unimplemented.");
-}
 
 SDValue
 EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,

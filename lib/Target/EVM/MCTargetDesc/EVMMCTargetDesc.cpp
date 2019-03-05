@@ -33,11 +33,15 @@
 using namespace llvm;
 
 static MCInstrInfo *createEVMMCInstrInfo() {
-  llvm_unreachable("unimplemented.");
+  MCInstrInfo *X = new MCInstrInfo();
+  InitEVMMCInstrInfo(X);
+  return X;
 }
 
 static MCRegisterInfo *createEVMMCRegisterInfo(const Triple &TT) {
-  llvm_unreachable("unimplemented.");
+  MCRegisterInfo *X = new MCRegisterInfo();
+  InitEVMMCRegisterInfo(X, EVM::SP);
+  return X;
 }
 
 static MCSubtargetInfo *createEVMMCSubtargetInfo(const Triple &TT,

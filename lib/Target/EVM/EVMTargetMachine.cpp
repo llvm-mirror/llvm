@@ -30,7 +30,7 @@ extern "C" void LLVMInitializeEVMTarget() {
 
 static std::string computeDataLayout(const Triple &TT) {
   // TODO: modify this.
-  return "E-m:e-p:256:256-i:256:256-n:256:256-S256";
+  return "E-m:e-p:256:256-i:256:256-n256-S0";
 }
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
@@ -81,7 +81,7 @@ void EVMPassConfig::addIRPasses() {
 }
 
 bool EVMPassConfig::addInstSelector() {
-  addPass(createEVMISelDag(getEVMTargetMachine()));
+  //addPass(createEVMISelDag(getEVMTargetMachine()));
 
   return false;
 }
