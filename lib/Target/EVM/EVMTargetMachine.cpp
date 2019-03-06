@@ -81,7 +81,7 @@ void EVMPassConfig::addIRPasses() {
 }
 
 bool EVMPassConfig::addInstSelector() {
-  //addPass(createEVMISelDag(getEVMTargetMachine()));
+  addPass(createEVMISelDag(getEVMTargetMachine()));
 
   return false;
 }

@@ -1,0 +1,31 @@
+//- EVMISD.def - EVM ISD Nodes ---------------------------*- C++ -*-//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+///
+/// \file
+/// This file describes the various EVM ISD node types.
+///
+//===----------------------------------------------------------------------===//
+
+NODE(CALL)
+NODE(DELEGATECALL)
+NODE(STATICCALL)
+NODE(CALLNODE)
+NODE(CREATE)
+NODE(RETURN)
+NODE(MOD)
+NODE(SMOD)
+NODE(ADDMOD)
+NODE(MULMOD)
+NODE(EXP)
+NODE(SIGNEXTEND)
+NODE(BYTE)
+NODE(JUMP)
+NODE(JUMPI)
+NODE(SWAP)
+NODE(SELFDESTRUCT)
+

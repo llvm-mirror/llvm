@@ -27,23 +27,9 @@ class EVMSubtarget;
 namespace EVMISD {
 enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
-  CALL,
-  DELEGATECALL,
-  STATICCALL,
-  CALLNODE,
-  CREATE,
-  RETURN,
-  MOD,
-  SMOD,
-  ADDMOD,
-  MULMOD,
-  EXP,
-  SIGNEXTEND,
-  BYTE,
-  JUMP,
-  JUMPI,
-  SWAP,
-  SELFDESTRUCT,
+#define NODE(N) N,
+#include "EVMISD.def"
+#undef NODE
 };
 }
 
@@ -53,6 +39,13 @@ class EVMTargetLowering : public TargetLowering {
 public:
   explicit EVMTargetLowering(const TargetMachine &TM,
                                const EVMSubtarget &STI);
+
+  bool CanLowerReturn(
+         CallingConv::ID /*CallConv*/, MachineFunction & /*MF*/, bool /*IsVarArg*/,
+         const SmallVectorImpl<ISD::OutputArg> &Outs,
+         LLVMContext & /*Context*/) const override {
+    return Outs.size() <= 1;
+  }
 
   bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
                           MachineFunction &MF,
@@ -71,8 +64,6 @@ public:
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
-
-  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;

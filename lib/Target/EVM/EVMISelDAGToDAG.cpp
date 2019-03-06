@@ -57,7 +57,7 @@ void EVMDAGToDAGISel::PostprocessISelDAG() {
 }
 
 void EVMDAGToDAGISel::Select(SDNode *Node) {
-  llvm_unreachable("unimplemented.");
+  SelectCode(Node);
 }
 
 // This pass converts a legalized DAG into a EVM-specific DAG, ready

@@ -46,7 +46,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::i256, &EVM::GPRRegClass);
 
   // Compute derived properties from the register classes.
-  //computeRegisterProperties(Subtarget.getRegisterInfo());
+  computeRegisterProperties(Subtarget.getRegisterInfo());
 
   setBooleanContents(ZeroOrOneBooleanContent);
   setBooleanVectorContents(ZeroOrOneBooleanContent);
@@ -92,12 +92,13 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 
   for (MVT VT : MVT::integer_valuetypes()) {
     for (auto N : {ISD::EXTLOAD, ISD::SEXTLOAD, ISD::ZEXTLOAD}) {
-      setLoadExtAction(N, VT, MVT::i1, Expand);
+      setLoadExtAction(N, VT, MVT::i1, Promote);
       setLoadExtAction(N, VT, MVT::i8, Expand);
       setLoadExtAction(N, VT, MVT::i16, Expand);
       setLoadExtAction(N, VT, MVT::i32, Expand);
       setLoadExtAction(N, VT, MVT::i64, Expand);
       setLoadExtAction(N, VT, MVT::i128, Expand);
+      setLoadExtAction(N, VT, MVT::i256, Expand);
     }
   }
 
@@ -160,13 +161,6 @@ void EVMTargetLowering::ReplaceNodeResults(SDNode *N,
   llvm_unreachable("unimplemented.");
 }
 
-SDValue EVMTargetLowering::PerformDAGCombine(SDNode *N,
-                                             DAGCombinerInfo &DCI) const {
-
-  llvm_unreachable("unimplemented.");
-  return SDValue();
-}
-
 
 MachineBasicBlock *
 EVMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
@@ -186,7 +180,20 @@ SDValue EVMTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
-  llvm_unreachable("unimplemented.");
+
+  MachineFunction &MF = DAG.getMachineFunction();
+  auto *MFI = MF.getInfo<EVMMachineFunctionInfo>();
+
+  /*
+  for (const ISD::InputArg &In : Ins) {
+    InVals.push_back(In.Used ? DAG.getNode(EVMISD::, DL, In.VT,
+                                           DAG.getTargetConstant(InVals.size(),
+                                                                 DL, MVT::i32))
+                             : DAG.getUNDEF(In.VT));
+  }
+  */
+
+  return Chain;
 }
 
 /// IsEligibleForTailCallOptimization - Check whether the call is eligible
@@ -195,8 +202,6 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 bool EVMTargetLowering::IsEligibleForTailCallOptimization(
   CCState &CCInfo, CallLoweringInfo &CLI, MachineFunction &MF,
   const SmallVector<CCValAssign, 16> &ArgLocs) const {
-
-  llvm_unreachable("unimplemented.");
   return false;
 }
 
@@ -204,7 +209,63 @@ bool EVMTargetLowering::IsEligibleForTailCallOptimization(
 // and output parameter nodes.
 SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                      SmallVectorImpl<SDValue> &InVals) const {
-  llvm_unreachable("unimplemented.");
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc DL = CLI.DL;
+  SDValue Chain = CLI.Chain;
+  SDValue Callee = CLI.Callee;
+  MachineFunction &MF = DAG.getMachineFunction();
+  auto Layout = MF.getDataLayout();
+
+  CallingConv::ID CallConv = CLI.CallConv;
+
+
+
+  bool IsVarArg = CLI.IsVarArg;
+  if (IsVarArg) { llvm_unreachable("unimplemented."); }
+
+  bool IsTailCall = CLI.IsTailCall;
+  if (IsTailCall) { llvm_unreachable("unimplemented."); }
+
+  switch (CallConv) {
+  default:
+    report_fatal_error("Unsupported calling convention");
+  case CallingConv::Fast:
+  case CallingConv::C:
+    break;
+  }
+
+  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
+  if (Ins.size() > 1) {
+    llvm_unreachable("unimplemented.");
+  }
+
+  // Analyze operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+
+  // Compute the operands for the CALLn node.
+  SmallVector<SDValue, 16> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+
+  SmallVector<EVT, 8> InTys;
+  for (const auto &In : Ins) {
+    InTys.push_back(In.VT);
+  }
+
+  InTys.push_back(MVT::Other);
+  SDVTList InTyList = DAG.getVTList(InTys);
+  SDValue Res =
+      DAG.getNode(EVMISD::CALL, DL, InTyList, Ops);
+
+  if (Ins.empty()) {
+    Chain = Res;
+  } else {
+    InVals.push_back(Res);
+    Chain = Res.getValue(1);
+  }
+
+  return Chain;
 }
 
 
@@ -214,11 +275,23 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<ISD::OutputArg> &Outs,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &DL, SelectionDAG &DAG) const {
-  llvm_unreachable("unimplemented.");
+  SmallVector<SDValue, 4> RetOps(1, Chain);
+  RetOps.append(OutVals.begin(), OutVals.end());
+  Chain = DAG.getNode(EVMISD::RETURN, DL, MVT::Other, RetOps);
+
+  return Chain;
 }
 
 const char *EVMTargetLowering::getTargetNodeName(unsigned Opcode) const {
-  llvm_unreachable("unimplemented.");
+  switch (static_cast<EVMISD::NodeType>(Opcode)) {
+  case EVMISD::FIRST_NUMBER:
+    break;
+#define NODE(N)                                                  \
+  case EVMISD::N:                                                   \
+    return "EVMISD::" #N;
+#include "EVMISD.def"
+#undef NODE
+  }
   return nullptr;
 }
 
