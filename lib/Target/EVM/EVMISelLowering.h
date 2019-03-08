@@ -65,6 +65,8 @@ public:
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 
+  SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
+
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;
 
@@ -78,6 +80,9 @@ public:
 
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override;
+
+  SDValue getEVMCmp(SDValue LHS, SDValue RHS, ISD::CondCode CC, SDValue &AVRcc,
+                    SelectionDAG &DAG, SDLoc dl) const;
 
   bool shouldInsertFencesForAtomic(const Instruction *I) const override {
     return isa<LoadInst>(I) || isa<StoreInst>(I);

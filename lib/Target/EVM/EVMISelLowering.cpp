@@ -53,7 +53,8 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setSchedulingPreference(Sched::RegPressure);
   setStackPointerRegisterToSaveRestore(EVM::SP);
 
-  setOperationAction(ISD::BR_CC, MVT::i64, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i256, Custom);
+
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   setOperationAction(ISD::BRIND, MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
@@ -93,12 +94,20 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   for (MVT VT : MVT::integer_valuetypes()) {
     for (auto N : {ISD::EXTLOAD, ISD::SEXTLOAD, ISD::ZEXTLOAD}) {
       setLoadExtAction(N, VT, MVT::i1, Promote);
-      setLoadExtAction(N, VT, MVT::i8, Expand);
-      setLoadExtAction(N, VT, MVT::i16, Expand);
-      setLoadExtAction(N, VT, MVT::i32, Expand);
-      setLoadExtAction(N, VT, MVT::i64, Expand);
-      setLoadExtAction(N, VT, MVT::i128, Expand);
-      setLoadExtAction(N, VT, MVT::i256, Expand);
+      /*
+      if (VT != MVT::i8)
+        setLoadExtAction(N, VT, MVT::i8, Expand);
+      if (VT != MVT::i16)
+        setLoadExtAction(N, VT, MVT::i16, Expand);
+      if (VT != MVT::i32)
+        setLoadExtAction(N, VT, MVT::i32, Expand);
+      if (VT != MVT::i64)
+        setLoadExtAction(N, VT, MVT::i64, Expand);
+      if (VT != MVT::i128)
+        setLoadExtAction(N, VT, MVT::i128, Expand);
+      if (VT != MVT::i256)
+        setLoadExtAction(N, VT, MVT::i256, Expand);
+      */
     }
   }
 
@@ -108,7 +117,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 
 EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
                                             EVT VT) const {
-  llvm_unreachable("unimplemented.");
+  return MVT::i256;
 }
 
 bool EVMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
@@ -126,32 +135,79 @@ bool EVMTargetLowering::isLegalAddressingMode(const DataLayout &DL,
 }
 
 bool EVMTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 bool EVMTargetLowering::isLegalAddImmediate(int64_t Imm) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 bool EVMTargetLowering::isTruncateFree(Type *SrcTy, Type *DstTy) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 bool EVMTargetLowering::isTruncateFree(EVT SrcVT, EVT DstVT) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 bool EVMTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 bool EVMTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
   llvm_unreachable("unimplemented.");
 }
 
+SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  SDLoc DL(Op);
+
+  assert(LHS.getValueType() == MVT::i256 && "LHS of BR_CC must be i256.");
+  assert(RHS.getValueType() == MVT::i256 && "RHS of BR_CC must be i256.");
+
+  SDValue Cmp;
+  switch (CC) {
+    default:
+      llvm_unreachable("unimplemented condition code.");
+      break;
+    case ISD::SETLE:
+    case ISD::SETGE:
+    case ISD::SETULE:
+    case ISD::SETUGE:
+      llvm_unreachable("unimplemented for LE/GE operations.");
+      break;
+    case ISD::SETGT:
+      Cmp = DAG.getNode(EVMISD::SGT, DL, MVT::Glue, LHS, RHS);
+      break;
+    case ISD::SETLT:
+      Cmp = DAG.getNode(EVMISD::SLT, DL, MVT::Glue, LHS, RHS);
+      break;
+    case ISD::SETUGT:
+      Cmp = DAG.getNode(EVMISD::GT, DL, MVT::Glue, LHS, RHS);
+      break;
+    case ISD::SETULT:
+      Cmp = DAG.getNode(EVMISD::LT, DL, MVT::Glue, LHS, RHS);
+      break;
+  }
+
+  SDValue TargetCC;
+  return DAG.getNode(EVMISD::JUMPIF, DL, MVT::Other, Chain,
+                     Dest, Cmp);
+
+}
+
 SDValue EVMTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
-  llvm_unreachable("unimplemented.");
+  switch (Op.getOpcode()) {
+  default:
+    llvm_unreachable("unimplemented lowering operation,");
+  case ISD::BR_CC:
+    return LowerBR_CC(Op, DAG);
+  }
 }
 
 
@@ -175,6 +231,8 @@ static SDValue convertLocVTToValVT(SelectionDAG &DAG, SDValue Val,
   llvm_unreachable("unimplemented.");
 }
 
+#include "EVMGenCallingConv.inc"
+
 // Transform physical registers into virtual registers.
 SDValue EVMTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
@@ -182,16 +240,33 @@ SDValue EVMTargetLowering::LowerFormalArguments(
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
   MachineFunction &MF = DAG.getMachineFunction();
-  auto *MFI = MF.getInfo<EVMMachineFunctionInfo>();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  
+  // Assign locations to all of the incoming arguments.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeFormalArguments(Ins, CC_EVM);
 
-  /*
-  for (const ISD::InputArg &In : Ins) {
-    InVals.push_back(In.Used ? DAG.getNode(EVMISD::, DL, In.VT,
-                                           DAG.getTargetConstant(InVals.size(),
-                                                                 DL, MVT::i32))
-                             : DAG.getUNDEF(In.VT));
+  // For now, arguments are on the stack.
+  for (CCValAssign &VA : ArgLocs) {
+    // sanity check
+    assert(VA.isMemLoc());
+
+    MVT LocVT = VA.getLocVT();
+    // The stack pointer offset is relative to the caller stack frame.
+    int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / 8,
+                                   VA.getLocMemOffset(), true);
+    
+    // Create load nodes to retrieve arguments from the stack
+    SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
+    SDValue ArgValue = DAG.getLoad(
+        LocVT, DL, Chain, FIN,
+        MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
+
+    //ArgValue = UnpackFromArgumentSlot(ArgValue, VA, Ins[i].ArgVT, DL, DAG);
+
+    InVals.push_back(ArgValue);
   }
-  */
 
   return Chain;
 }
@@ -210,17 +285,22 @@ bool EVMTargetLowering::IsEligibleForTailCallOptimization(
 SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                      SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
+  auto &Outs = CLI.Outs;
   SDLoc DL = CLI.DL;
   SDValue Chain = CLI.Chain;
   SDValue Callee = CLI.Callee;
   MachineFunction &MF = DAG.getMachineFunction();
   auto Layout = MF.getDataLayout();
+  bool IsVarArg = CLI.IsVarArg;
 
   CallingConv::ID CallConv = CLI.CallConv;
 
+  // Analyze operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(Outs, CC_EVM);
 
 
-  bool IsVarArg = CLI.IsVarArg;
   if (IsVarArg) { llvm_unreachable("unimplemented."); }
 
   bool IsTailCall = CLI.IsTailCall;
@@ -238,10 +318,6 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (Ins.size() > 1) {
     llvm_unreachable("unimplemented.");
   }
-
-  // Analyze operands of the call, assigning locations to each operand.
-  SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
 
   // Compute the operands for the CALLn node.
   SmallVector<SDValue, 16> Ops;
@@ -276,7 +352,7 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &DL, SelectionDAG &DAG) const {
   SmallVector<SDValue, 4> RetOps(1, Chain);
-  RetOps.append(OutVals.begin(), OutVals.end());
+  //RetOps.append(OutVals.begin(), OutVals.end());
   Chain = DAG.getNode(EVMISD::RETURN, DL, MVT::Other, RetOps);
 
   return Chain;

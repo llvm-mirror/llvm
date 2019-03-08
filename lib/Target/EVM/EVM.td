@@ -39,6 +39,7 @@ def : Proc<"eip615", [EIP211, EIP615]>;
 
 include "EVMRegisterInfo.td"
 include "EVMInstrInfo.td"
+include "EVMCallingConv.td"
 
 //===----------------------------------------------------------------------===//
 // EVM processors supported.

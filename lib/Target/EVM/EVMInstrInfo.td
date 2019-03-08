@@ -230,7 +230,7 @@ defm SSTORE : Inst_2_0<"SSTORE",
                        0x55, 200000>;
 }
 
-let isBranch = 1 in {
+let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 defm JUMP     : Inst_1_0<"JUMP",     [], 0x56, 8>;
 defm JUMPI    : Inst_2_0<"JUMPI",    [], 0x57, 10>;
 }
@@ -270,7 +270,7 @@ let isCall = 1 in {
 }
 
 let isReturn = 1 in {
-defm RETURN : Inst_2_0<"RETURN", [], 0xf3, 0>;
+defm RETURN : Inst_0_0<"RETURN", [(EVMReturn)], 0xf3, 0>;
 }
 
 let isCall = 1 in {
