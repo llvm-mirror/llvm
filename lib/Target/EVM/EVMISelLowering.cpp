@@ -81,7 +81,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SELECT, VT, Expand);
 
     // have to do custom for SELECT_CC
-    setOperationAction(ISD::SELECT_CC, VT, Custom);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
 
     setOperationAction(ISD::CTTZ, VT, Expand);
     setOperationAction(ISD::CTLZ, VT, Expand);
@@ -158,6 +158,37 @@ bool EVMTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
   llvm_unreachable("unimplemented.");
 }
 
+static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
+  switch (CC) {
+    default:
+      llvm_unreachable("unimplemented condition code.");
+      break;
+    case ISD::SETLE:
+      return EVMISD::SGT;
+    case ISD::SETGE:
+      return EVMISD::SLT;
+    case ISD::SETULE:
+      return EVMISD::GT;
+    case ISD::SETUGE:
+      return EVMISD::LT;
+  }
+}
+
+static void NegateCC(SDValue &LHS, SDValue &RHS, ISD::CondCode &CC) {
+  switch (CC) {
+    default:
+      llvm_unreachable("unimplemented condition code for negating op.");
+      break;
+    case ISD::SETULT:
+    case ISD::SETULE:
+    case ISD::SETLT:
+    case ISD::SETLE:
+      CC = ISD::getSetCCSwappedOperands(CC);
+      std::swap(LHS, RHS);
+      break;
+  }
+}
+
 SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -169,7 +200,12 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   assert(LHS.getValueType() == MVT::i256 && "LHS of BR_CC must be i256.");
   assert(RHS.getValueType() == MVT::i256 && "RHS of BR_CC must be i256.");
 
-  SDValue Cmp;
+  if (CC == ISD::SETLE  || CC == ISD::SETGE ||
+      CC == ISD::SETULE || CC == ISD::SETUGE) {
+    NegateCC(LHS, RHS, CC);
+  }
+
+  EVMISD::NodeType op;
   switch (CC) {
     default:
       llvm_unreachable("unimplemented condition code.");
@@ -178,26 +214,30 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
     case ISD::SETGE:
     case ISD::SETULE:
     case ISD::SETUGE:
-      llvm_unreachable("unimplemented for LE/GE operations.");
+      assert(false && "invalid condition code.");
       break;
     case ISD::SETGT:
-      Cmp = DAG.getNode(EVMISD::SGT, DL, MVT::Glue, LHS, RHS);
+      op = EVMISD::SGT;
       break;
     case ISD::SETLT:
-      Cmp = DAG.getNode(EVMISD::SLT, DL, MVT::Glue, LHS, RHS);
+      op = EVMISD::SLT;
       break;
     case ISD::SETUGT:
-      Cmp = DAG.getNode(EVMISD::GT, DL, MVT::Glue, LHS, RHS);
+      op = EVMISD::GT;
       break;
     case ISD::SETULT:
-      Cmp = DAG.getNode(EVMISD::LT, DL, MVT::Glue, LHS, RHS);
+      op = EVMISD::LT;
+      break;
+    case ISD::SETEQ:
+      op = EVMISD::EQ;
       break;
   }
 
-  SDValue TargetCC;
-  return DAG.getNode(EVMISD::JUMPIF, DL, MVT::Other, Chain,
-                     Dest, Cmp);
+  SDValue Cmp = DAG.getNode(op, DL, MVT::i256, LHS, RHS);
 
+  SDValue TargetCC;
+  return DAG.getNode(EVMISD::JUMPI, DL, MVT::Other, Chain,
+                     Cmp, Dest);
 }
 
 SDValue EVMTargetLowering::LowerOperation(SDValue Op,
@@ -206,6 +246,7 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unimplemented lowering operation,");
   case ISD::BR_CC:
+    // TODO: this can be used to expand.
     return LowerBR_CC(Op, DAG);
   }
 }

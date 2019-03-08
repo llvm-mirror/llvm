@@ -23,15 +23,17 @@ include "EVMInstrFormats.td"
 def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 
 def SDT_EVMArithBinary :
-SDTypeProfile<1, 2, [SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>]>;
+SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>]>;
 
 def SDT_EVMArithTernary :
 SDTypeProfile<1, 3,
-              [SDTCisInt<0>, SDTCisSameAs<0, 1>,
-               SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>]>;
+              [SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>]>;
 
 def SDT_EVMTwoOpnd :
 SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
+
+def SDT_EVMCondJump :
+SDTypeProfile<0, 2, [SDTCisVT<1, OtherVT>]>;
 
 def EVMCall :
 SDNode<"EVMISD::CALL", SDT_EVMCall,
@@ -59,13 +61,36 @@ def EVMByte :
 SDNode<"EVMISD::BYTE", SDT_EVMArithBinary, []>;
 
 def EVMJump :
-SDNode<"EVMISD::JUMP", SDTNone, []>;
+SDNode<"EVMISD::JUMP", SDTNone, [SDNPHasChain]>;
 
 def EVMJumpi :
-SDNode<"EVMISD::JUMPI", SDTNone, []>;
+SDNode<"EVMISD::JUMPI", SDT_EVMCondJump,
+       [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
+
+def EVMJumpif :
+SDNode<"EVMISD::JUMPIF", SDT_EVMCondJump,
+       [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
 
 def EVMSwap :
 SDNode<"EVMISD::SWAP", SDT_EVMTwoOpnd, []>;
+
+def EVMSlt:
+SDNode<"EVMISD::SLT", SDT_EVMArithBinary, [SDNPHasChain]>;
+
+def EVMSgt:
+SDNode<"EVMISD::SGT", SDT_EVMArithBinary, []>;
+
+def EVMLt:
+SDNode<"EVMISD::LT", SDT_EVMArithBinary, []>;
+
+def EVMG:
+SDNode<"EVMISD::GT", SDT_EVMArithBinary, []>;
+
+def EVMEq:
+SDNode<"EVMISD::EQ", SDT_EVMArithBinary, []>;
+
+def EVMIszero:
+SDNode<"EVMISD::ISZERO", SDT_EVMArithBinary, []>;
 
 //===----------------------------------------------------------------------===//
 // Instructions
@@ -90,11 +115,14 @@ defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
 
 // Comparison instructions ////////////////////////////////////////////////////
 let isCompare = 1 in {
-defm LT  : ComparisonInst<SETULT, "LT", 0x10, 3>;
-defm GT  : ComparisonInst<SETUGT, "GT", 0x11, 3>;
-defm SLT : ComparisonInst<SETLT, "SLT", 0x12, 3>;
-defm SGT : ComparisonInst<SETGT, "SGT", 0x13, 3>;
-defm EQ  : ComparisonInst<SETEQ, "SEQ", 0x14, 3>;
+defm LT     : ComparisonInst<SETULT, "LT",    0x10, 3>;
+defm GT     : ComparisonInst<SETUGT, "GT",    0x11, 3>;
+defm SLT    : ComparisonInst<SETLT, "SLT",    0x12, 3>;
+defm SGT    : ComparisonInst<SETGT, "SGT",    0x13, 3>;
+defm EQ     : ComparisonInst<SETEQ, "SEQ",    0x14, 3>;
+defm ISZERO : Inst_1_1<"ISZERO",
+                       [(set GPR:$dst, (setcc GPR:$src, 0, SETEQ))],
+                       0x15, 3>;
 }
 // Bitwise instructions ///////////////////////////////////////////////////////
 defm AND : BinaryInst<and, "AND", 0x16, 3>;
@@ -230,9 +258,17 @@ defm SSTORE : Inst_2_0<"SSTORE",
                        0x55, 200000>;
 }
 
+
 let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
-defm JUMP     : Inst_1_0<"JUMP",     [], 0x56, 8>;
-defm JUMPI    : Inst_2_0<"JUMPI",    [], 0x57, 10>;
+defm JUMP : RSInst<(outs), (ins brtarget:$dst),
+                   (outs), (ins),
+                   [(br bb:$dst)],
+                   "JUMP\t$dst", "JUMP", 0x56, 8>;
+
+defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
+                   (outs), (ins),
+                   [(EVMJumpi GPR:$src, bb:$dst)],
+                   "JUMPI\t$dst", "JUMPI", 0x57, 10>;
 }
 
 defm PC       : Inst_0_1<"PC",
@@ -311,9 +347,20 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 // Patterns
 //===----------------------------------------------------------------------===//
 
+// direct match brconds
+def : Pat<(brcond (setne GPR:$lhs, 0), bb:$dst),
+          (JUMPI_r (ISZERO_r (EQ_r GPR:$lhs, 0)), bb:$dst)>;
+def : Pat<(brcond (seteq GPR:$lhs, 0), bb:$dst),
+          (JUMPI_r (EQ_r GPR:$lhs, 0), bb:$dst)>;
 
-
-
+def : Pat<(brcond (setlt GPR:$lhs, GPR:$rhs), bb:$dst),
+          (JUMPI_r (SLT_r GPR:$rhs, GPR:$lhs), bb:$dst)>;
+def : Pat<(brcond (setult GPR:$lhs, GPR:$rhs), bb:$dst),
+          (JUMPI_r (LT_r GPR:$rhs, GPR:$lhs), bb:$dst)>;
+def : Pat<(brcond (setgt GPR:$lhs, GPR:$rhs), bb:$dst),
+          (JUMPI_r (SGT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
+def : Pat<(brcond (setugt GPR:$lhs, GPR:$rhs), bb:$dst),
+          (JUMPI_r (GT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns

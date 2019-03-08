@@ -59,6 +59,11 @@ def ADDR : Operand<i256> {
   let PrintMethod = "printAddressOperand";
 }
 
+def brtarget : Operand<OtherVT> {
+  // TODO: implement target print
+  let PrintMethod = "printBrTargetOperand";
+}
+
 // Alpha: number of additional items placed on the stack. (return value)
 // Delta: items removed from stack. (arguments)
 // i : int256, 0 : none
@@ -82,7 +87,6 @@ multiclass Inst_1_0<string name, list<dag> pattern, bits<8> inst, int cost>
              !strconcat(name, "\t$src"),    // reg asm
              name,                          // stack asm
              inst, cost>;
-
 
 // delta = 1, alpha = 1
 multiclass Inst_1_1<string name, list<dag> pattern, bits<8> inst, int cost>
