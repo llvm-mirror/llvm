@@ -174,22 +174,19 @@ static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
   }
 }
 
-static void NegateCC(SDValue &LHS, SDValue &RHS, ISD::CondCode &CC) {
-  switch (CC) {
-    default:
-      llvm_unreachable("unimplemented condition code for negating op.");
-      break;
-    case ISD::SETULT:
-    case ISD::SETULE:
-    case ISD::SETLT:
-    case ISD::SETLE:
-      CC = ISD::getSetCCSwappedOperands(CC);
-      std::swap(LHS, RHS);
-      break;
-  }
-}
 
 SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  SDLoc DL(Op);
+
+  return DAG.getNode(EVMISD::BRCC, DL, Op.getValueType(), Chain, LHS, RHS,
+                     DAG.getConstant(CC, DL, LHS.getValueType()), Dest);
+
+/*
   SDValue Chain = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
   SDValue LHS = Op.getOperand(2);
@@ -238,7 +235,23 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue TargetCC;
   return DAG.getNode(EVMISD::JUMPI, DL, MVT::Other, Chain,
                      Cmp, Dest);
+*/
 }
+SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue TrueV = Op.getOperand(2);
+  SDValue FalseV = Op.getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+  SDLoc DL(Op);
+
+  SDValue TargetCC = DAG.getConstant(CC, DL, LHS.getValueType());
+  SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Glue);
+  SDValue Ops[] = {LHS, RHS, TargetCC, TrueV, FalseV};
+
+  return DAG.getNode(EVMISD::SELECTCC, DL, VTs, Ops);
+}
+
 
 SDValue EVMTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
@@ -248,6 +261,8 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
   case ISD::BR_CC:
     // TODO: this can be used to expand.
     return LowerBR_CC(Op, DAG);
+  case ISD::SELECT_CC:
+    return LowerSELECT_CC(Op, DAG);
   }
 }
 
