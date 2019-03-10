@@ -20,6 +20,8 @@ include "EVMInstrFormats.td"
 //===----------------------------------------------------------------------===//
 // Operand and SDNode transformation definitions.
 //===----------------------------------------------------------------------===//
+
+// SDNode properties
 def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 
 def SDT_EVMArithBinary :
@@ -37,6 +39,15 @@ SDTypeProfile<0, 2, [SDTCisVT<1, OtherVT>]>;
 
 def SDT_EVMBrcc :
 SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
+
+def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
+                                    SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
+
+
+
+// custom SDNodes
+def EVMSelectcc:
+SDNode<"EVMISD::SELECTCC", SDT_EVMSelectCC, [SDNPInGlue]>;
 
 def EVMBrcc :
 SDNode<"EVMISD::BRCC", SDT_EVMBrcc, [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
@@ -289,7 +300,11 @@ defm GAS      : Inst_0_1<"GAS",
                          0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
-//let Predicates = [HasEIP615] in {
+
+let mayLoad = 1 in {
+defm PUSH32 : Inst_0_1<"PUSH32", [], 0x7f, 3>;
+}
+
 
 let isBranch = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
@@ -348,6 +363,12 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 // Assembler Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
+def PseudoSelectcc :
+EVMPseudo<(outs GPR:$dst),
+          (ins GPR:$src, GPR:$src2, i256imm:$cc),
+          "# Pseudo-SelectCC",
+          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
+
 
 //===----------------------------------------------------------------------===//
 // Patterns
@@ -374,43 +395,37 @@ def EVM_CC_LT  : PatLeaf<(i256 imm),
 def EVM_CC_LE  : PatLeaf<(i256 imm),
                          [{return (N->getZExtValue() == ISD::SETULE);}]>;
 
-// direct match brconds
-def : Pat<(brcond (setne GPR:$lhs, 0), bb:$dst),
-          (JUMPI_r (ISZERO_r (EQ_r GPR:$lhs, 0)), bb:$dst)>;
-def : Pat<(brcond (seteq GPR:$lhs, 0), bb:$dst),
-          (JUMPI_r (EQ_r GPR:$lhs, 0), bb:$dst)>;
-
-def : Pat<(brcond (setlt GPR:$lhs, GPR:$rhs), bb:$dst),
-          (JUMPI_r (SLT_r GPR:$rhs, GPR:$lhs), bb:$dst)>;
-def : Pat<(brcond (setult GPR:$lhs, GPR:$rhs), bb:$dst),
-          (JUMPI_r (LT_r GPR:$rhs, GPR:$lhs), bb:$dst)>;
-def : Pat<(brcond (setgt GPR:$lhs, GPR:$rhs), bb:$dst),
-          (JUMPI_r (SGT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
-def : Pat<(brcond (setugt GPR:$lhs, GPR:$rhs), bb:$dst),
-          (JUMPI_r (GT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
-
+// matching BRCC
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, bb:$BrDst),
           (JUMPI_r (SLT_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, bb:$BrDst),
-          (JUMPI_r (NOT_r (SGT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+          (JUMPI_r (ISZERO_r (SGT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, bb:$BrDst),
           (JUMPI_r (LT_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, bb:$BrDst),
-          (JUMPI_r (NOT_r (GT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+          (JUMPI_r (ISZERO_r (GT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, bb:$BrDst),
           (JUMPI_r (SGT_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, bb:$BrDst),
-          (JUMPI_r (NOT_r (SLT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+          (JUMPI_r (ISZERO_r (SLT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, bb:$BrDst),
           (JUMPI_r (GT_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, bb:$BrDst),
-          (JUMPI_r (NOT_r (LT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+          (JUMPI_r (ISZERO_r (LT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
           (JUMPI_r (EQ_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
-          (JUMPI_r (NOT_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
+          (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
+
+
+// matching loads/stores
+def : Pat<(store i256:$val, AddrImm:$mem), (MSTORE_r i256:$val, AddrImm:$mem)>;
+
+
+// custom matching frameindex.
+def : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns

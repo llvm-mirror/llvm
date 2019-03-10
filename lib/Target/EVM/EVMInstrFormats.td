@@ -49,10 +49,24 @@ multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
     def _s : EVMInst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
 }
 
-def I256IMM : Operand<i256> {
+
+class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
+    : EVMInst<outs, ins, pattern, "false", asmstr, 0>
+{
+  let usesCustomInserter = 1;
+  let isCodeGenOnly = 1;
+}
+
+
+def I256Imm : Operand<i256> {
   // TODO: implement Imm256 print
   let PrintMethod = "printImm256Operand";
 }
+
+// The memory size of EVM is 1024 elements with 256 bit each.
+def AddrImm :
+PatLeaf<(i256 imm),
+        [{ return isUInt<10>(N->getZExtValue()); }]>;
 
 def ADDR : Operand<i256> {
   // TODO: implement address print
