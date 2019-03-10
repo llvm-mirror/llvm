@@ -245,6 +245,7 @@ SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
   SDLoc DL(Op);
 
+  // we are going to pattern match out the i64 type.
   SDValue TargetCC = DAG.getConstant(CC, DL, LHS.getValueType());
   SDVTList VTs = DAG.getVTList(Op.getValueType(), MVT::Glue);
   SDValue Ops[] = {LHS, RHS, TargetCC, TrueV, FalseV};

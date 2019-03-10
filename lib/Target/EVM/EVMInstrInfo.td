@@ -35,6 +35,12 @@ SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
 def SDT_EVMCondJump :
 SDTypeProfile<0, 2, [SDTCisVT<1, OtherVT>]>;
 
+def SDT_EVMBrcc :
+SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
+
+def EVMBrcc :
+SDNode<"EVMISD::BRCC", SDT_EVMBrcc, [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
+
 def EVMCall :
 SDNode<"EVMISD::CALL", SDT_EVMCall,
        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
@@ -347,6 +353,27 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 // Patterns
 //===----------------------------------------------------------------------===//
 
+def EVM_CC_EQ  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETEQ);}]>;
+def EVM_CC_NE  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETNE);}]>;
+def EVM_CC_SGE : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETGE);}]>;
+def EVM_CC_SGT : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETGT);}]>;
+def EVM_CC_GT  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETUGT);}]>;
+def EVM_CC_GE  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETUGE);}]>;
+def EVM_CC_SLE : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETLE);}]>;
+def EVM_CC_SLT : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETLT);}]>;
+def EVM_CC_LT  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETULT);}]>;
+def EVM_CC_LE  : PatLeaf<(i256 imm),
+                         [{return (N->getZExtValue() == ISD::SETULE);}]>;
+
 // direct match brconds
 def : Pat<(brcond (setne GPR:$lhs, 0), bb:$dst),
           (JUMPI_r (ISZERO_r (EQ_r GPR:$lhs, 0)), bb:$dst)>;
@@ -361,6 +388,29 @@ def : Pat<(brcond (setgt GPR:$lhs, GPR:$rhs), bb:$dst),
           (JUMPI_r (SGT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
 def : Pat<(brcond (setugt GPR:$lhs, GPR:$rhs), bb:$dst),
           (JUMPI_r (GT_r GPR:$lhs, GPR:$rhs), bb:$dst)>;
+
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, bb:$BrDst),
+          (JUMPI_r (SLT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, bb:$BrDst),
+          (JUMPI_r (NOT_r (SGT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, bb:$BrDst),
+          (JUMPI_r (LT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, bb:$BrDst),
+          (JUMPI_r (NOT_r (GT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, bb:$BrDst),
+          (JUMPI_r (SGT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, bb:$BrDst),
+          (JUMPI_r (NOT_r (SLT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, bb:$BrDst),
+          (JUMPI_r (GT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, bb:$BrDst),
+          (JUMPI_r (NOT_r (LT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
+          (JUMPI_r (EQ_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
+          (JUMPI_r (NOT_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns
