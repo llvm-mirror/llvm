@@ -65,8 +65,7 @@ def I256Imm : Operand<i256> {
 
 // The memory size of EVM is 1024 elements with 256 bit each.
 def AddrImm :
-PatLeaf<(i256 imm),
-        [{ return isUInt<10>(N->getZExtValue()); }]>;
+PatLeaf<(i256 imm), [{ return isUInt<10>(N->getZExtValue()); }]>;
 
 def ADDR : Operand<i256> {
   // TODO: implement address print

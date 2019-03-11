@@ -256,16 +256,21 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
                            0x45, 2>;
 
 
-let hasSideEffects = 1 in {
-let mayLoad = 1 in {
-defm MLOAD  : Inst_1_1<"MLOAD",  [], 0x51, 3>;
+
+let mayLoad = 1, canFoldAsLoad = 1 in {
+defm MLOAD  : Inst_1_1<"MLOAD",
+                       [(set GPR:$dst, (load GPR:$src))],
+                       0x51, 3>;
 }
 
 let mayStore = 1 in {
-defm MSTORE : Inst_2_0<"MSTORE", [], 0x52, 3>;
-//defm MSTORE8 : ??
+defm MSTORE : Inst_2_0<"MSTORE",
+                       [(store GPR:$src1, GPR:$src2)], 0x52, 3>;
+
+defm MSTORE8 : Inst_2_0<"MSTORE8", [], 0x53, 3>;
 }
 
+let hasSideEffects = 1 in {
 defm SLOAD  : Inst_1_1<"SLOAD",
                        [(set GPR:$dst, (int_evm_sload GPR:$src))],
                        0x54, 200>;
@@ -300,13 +305,13 @@ defm GAS      : Inst_0_1<"GAS",
                          0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
+defm PUSH32 :
+  RSInst<(outs GPR:$dst), (ins I256Imm:$src), (outs), (ins),
+          [(set GPR:$dst, imm:$src)],
+          "PUSH32_r \t$dst, $src", "PUSH32_i",
+          0x7f, 3>;
 
-let mayLoad = 1 in {
-defm PUSH32 : Inst_0_1<"PUSH32", [], 0x7f, 3>;
-}
-
-
-let isBranch = 1 in {
+let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 //defm JUMPIF : Inst_2_0<"JUMPIF", [], 0xb1, 10>; // TODO: argument type is 4 bytes.
 }
@@ -418,11 +423,6 @@ def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
           (JUMPI_r (EQ_r i256:$dst, i256:$src), bb:$BrDst)>;
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
           (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
-
-
-// matching loads/stores
-def : Pat<(store i256:$val, AddrImm:$mem), (MSTORE_r i256:$val, AddrImm:$mem)>;
-
 
 // custom matching frameindex.
 def : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
