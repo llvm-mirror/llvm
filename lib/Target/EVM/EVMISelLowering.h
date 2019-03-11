@@ -115,6 +115,9 @@ private:
   bool IsEligibleForTailCallOptimization(CCState &CCInfo,
     CallLoweringInfo &CLI, MachineFunction &MF,
     const SmallVector<CCValAssign, 16> &ArgLocs) const;
+
+  MachineBasicBlock *
+  insertSELECTCC(MachineInstr &MI, MachineBasicBlock *BB) const;
 };
 }
 

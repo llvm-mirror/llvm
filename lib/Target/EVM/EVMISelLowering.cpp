@@ -274,11 +274,150 @@ void EVMTargetLowering::ReplaceNodeResults(SDNode *N,
   llvm_unreachable("unimplemented.");
 }
 
+MachineBasicBlock *
+EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
+                                  MachineBasicBlock *MBB) const {
+  const EVMInstrInfo &TII = (const EVMInstrInfo &)*MI.getParent()
+                                ->getParent()
+                                ->getSubtarget()
+                                .getInstrInfo();
+  DebugLoc dl = MI.getDebugLoc();
+
+  // To "insert" a SELECT instruction, we insert the diamond
+  // control-flow pattern. The incoming instruction knows the
+  // destination vreg to set, the condition code register to branch
+  // on, the true/false values to select between, and a branch opcode
+  // to use.
+
+  MachineFunction *MF = MBB->getParent();
+  const BasicBlock *LLVM_BB = MBB->getBasicBlock();
+  MachineBasicBlock *FallThrough = MBB->getFallThrough();
+
+  // If the current basic block falls through to another basic block,
+  // we must insert an unconditional branch to the fallthrough destination
+  // if we are to insert basic blocks at the prior fallthrough point.
+  if (FallThrough != nullptr) {
+    BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(FallThrough);
+  }
+
+  MachineBasicBlock *trueMBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *falseMBB = MF->CreateMachineBasicBlock(LLVM_BB);
+
+  MachineFunction::iterator I;
+  for (I = MF->begin(); I != MF->end() && &(*I) != MBB; ++I);
+  if (I != MF->end()) ++I;
+  MF->insert(I, trueMBB);
+  MF->insert(I, falseMBB);
+
+  // Transfer remaining instructions and all successors of the current
+  // block to the block which will contain the Phi node for the
+  // select.
+  trueMBB->splice(trueMBB->begin(), MBB,
+                  std::next(MachineBasicBlock::iterator(MI)), MBB->end());
+  trueMBB->transferSuccessorsAndUpdatePHIs(MBB);
+
+    unsigned LHS = MI.getOperand(0).getReg();
+    unsigned RHS = MI.getOperand(1).getReg();
+    //unsigned TrueV = MI.getOperand(2);
+    //unsigned FalseV = MI.getOperand(3);
+
+  // construct conditional jump
+  {
+    MachineFunction *F = MBB->getParent();
+    MachineRegisterInfo &RegInfo = F->getRegInfo();
+    const TargetRegisterClass *RC = getRegClassFor(MVT::i256);
+    unsigned rvreg = RegInfo.createVirtualRegister(RC);
+
+    int CC = MI.getOperand(3).getImm();
+    switch (CC) {
+      default:
+        llvm_unreachable("unimplemented.");
+      case ISD::SETEQ:
+        BuildMI(MBB, dl, TII.get(EVM::EQ_r), rvreg).addReg(LHS).addReg(RHS);
+        break;
+      case ISD::SETNE:
+        {
+          unsigned reg = RegInfo.createVirtualRegister(RC);
+          BuildMI(MBB, dl, TII.get(EVM::EQ_r), reg).addReg(LHS).addReg(RHS);
+          BuildMI(MBB, dl, TII.get(EVM::ISZERO_r), rvreg).addReg(reg);
+        }
+        break;
+      case ISD::SETLT:
+        BuildMI(MBB, dl, TII.get(EVM::SLT_r), rvreg).addReg(LHS).addReg(RHS);
+        break;
+      case ISD::SETLE:
+        {
+          unsigned reg = RegInfo.createVirtualRegister(RC);
+          BuildMI(MBB, dl, TII.get(EVM::SGT_r), reg).addReg(LHS).addReg(RHS);
+          BuildMI(MBB, dl, TII.get(EVM::ISZERO_r), rvreg).addReg(reg);
+        }
+        break;
+      case ISD::SETGT:
+        BuildMI(MBB, dl, TII.get(EVM::SGT_r), rvreg).addReg(LHS).addReg(RHS);
+        break;
+      case ISD::SETGE:
+        {
+          unsigned reg = RegInfo.createVirtualRegister(RC);
+          BuildMI(MBB, dl, TII.get(EVM::SLT_r), reg).addReg(LHS).addReg(RHS);
+          BuildMI(MBB, dl, TII.get(EVM::ISZERO_r), rvreg).addReg(reg);
+        }
+        break;
+      case ISD::SETULT:
+        BuildMI(MBB, dl, TII.get(EVM::LT_r), rvreg).addReg(LHS).addReg(RHS);
+        break;
+      case ISD::SETULE:
+        {
+          unsigned reg = RegInfo.createVirtualRegister(RC);
+          BuildMI(MBB, dl, TII.get(EVM::GT_r), reg).addReg(LHS).addReg(RHS);
+          BuildMI(MBB, dl, TII.get(EVM::ISZERO_r), rvreg).addReg(reg);
+        }
+        break;
+      case ISD::SETUGT:
+        BuildMI(MBB, dl, TII.get(EVM::GT_r), rvreg).addReg(LHS).addReg(RHS);
+        break;
+      case ISD::SETUGE:
+        {
+          unsigned reg = RegInfo.createVirtualRegister(RC);
+          BuildMI(MBB, dl, TII.get(EVM::LT_r), reg).addReg(LHS).addReg(RHS);
+          BuildMI(MBB, dl, TII.get(EVM::ISZERO_r), rvreg).addReg(reg);
+        }
+        break;
+    }
+
+    BuildMI(MBB, dl, TII.get(EVM::JUMPI_r), rvreg).addMBB(trueMBB);
+  }
+
+
+  BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(falseMBB);
+  MBB->addSuccessor(falseMBB);
+  MBB->addSuccessor(trueMBB);
+
+  // Unconditionally flow back to the true block
+  BuildMI(falseMBB, dl, TII.get(EVM::JUMP_r)).addMBB(trueMBB);
+  falseMBB->addSuccessor(trueMBB);
+
+  // Set up the Phi node to determine where we came from
+  BuildMI(*trueMBB, trueMBB->begin(), dl, TII.get(EVM::PHI), MI.getOperand(0).getReg())
+    .addReg(MI.getOperand(1).getReg())
+    .addMBB(MBB)
+    .addReg(MI.getOperand(2).getReg())
+    .addMBB(falseMBB) ;
+
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
+  return trueMBB;
+}
 
 MachineBasicBlock *
 EVMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
-                                               MachineBasicBlock *BB) const {
-  llvm_unreachable("unimplemented.");
+                                               MachineBasicBlock *MBB) const {
+  int Opc = MI.getOpcode();
+
+  switch (Opc) {
+    case EVMISD::SELECTCC :
+      return insertSELECTCC(MI, MBB);
+    default:
+      llvm_unreachable("unimplemented.");
+  }
 }
 
 // Convert Val to a ValVT. Should not be called for CCValAssign::Indirect
