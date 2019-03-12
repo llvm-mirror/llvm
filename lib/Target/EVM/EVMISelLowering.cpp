@@ -53,11 +53,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setSchedulingPreference(Sched::RegPressure);
   setStackPointerRegisterToSaveRestore(EVM::SP);
 
-  setOperationAction(ISD::BR_CC, MVT::i256, Custom);
 
-  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
-  setOperationAction(ISD::BRIND, MVT::Other, Expand);
-  setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
   // TODO: set type legalization actions
   for (auto VT : { MVT::i1, MVT::i8, MVT::i16, MVT::i32,
@@ -87,32 +83,19 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::CTLZ, VT, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
-
-
   }
 
+  setOperationAction(ISD::BR_CC, MVT::i256, Custom);
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  setOperationAction(ISD::BRIND, MVT::Other, Expand);
+  setOperationAction(ISD::BRCOND, MVT::Other, Expand);
+
+  // Load extented operations for i1 types must be promoted
   for (MVT VT : MVT::integer_valuetypes()) {
-    for (auto N : {ISD::EXTLOAD, ISD::SEXTLOAD, ISD::ZEXTLOAD}) {
-      setLoadExtAction(N, VT, MVT::i1, Promote);
-      /*
-      if (VT != MVT::i8)
-        setLoadExtAction(N, VT, MVT::i8, Expand);
-      if (VT != MVT::i16)
-        setLoadExtAction(N, VT, MVT::i16, Expand);
-      if (VT != MVT::i32)
-        setLoadExtAction(N, VT, MVT::i32, Expand);
-      if (VT != MVT::i64)
-        setLoadExtAction(N, VT, MVT::i64, Expand);
-      if (VT != MVT::i128)
-        setLoadExtAction(N, VT, MVT::i128, Expand);
-      if (VT != MVT::i256)
-        setLoadExtAction(N, VT, MVT::i256, Expand);
-      */
-    }
+    setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1,  Promote);
+    setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1,  Promote);
+    setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1,  Promote);
   }
-
-
-  //llvm_unreachable("unfinished implementation.");
 }
 
 EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,

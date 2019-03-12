@@ -59,6 +59,31 @@ void EVMDAGToDAGISel::PostprocessISelDAG() {
 }
 
 void EVMDAGToDAGISel::Select(SDNode *Node) {
+  unsigned Opcode = Node->getOpcode();
+
+  // If we have a custom node, we already have selected!
+  if (Node->isMachineOpcode()) {
+    LLVM_DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << '\n');
+    return;
+  }
+
+  switch (Opcode) {
+
+  case ISD::FrameIndex: {
+    int FI = cast<FrameIndexSDNode>(Node)->getIndex();
+    EVT VT = Node->getValueType(0);
+    SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
+    unsigned Opc = EVM::FRAMEINDEX;
+    if (Node->hasOneUse()) {
+      CurDAG->SelectNodeTo(Node, Opc, VT, TFI);
+      return;
+    }
+    ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
+    return;
+  }
+  }
+
+
   SelectCode(Node);
 }
 

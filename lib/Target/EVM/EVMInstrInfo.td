@@ -257,7 +257,7 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
 
 
 
-let mayLoad = 1, canFoldAsLoad = 1 in {
+let mayLoad = 1 in {
 defm MLOAD  : Inst_1_1<"MLOAD",
                        [(set GPR:$dst, (load GPR:$src))],
                        0x51, 3>;
@@ -285,7 +285,7 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    (outs), (ins),
                    [(br bb:$dst)],
-                   "JUMP\t$dst", "JUMP", 0x56, 8>;
+                   "JUMP_r\t$dst", "JUMP", 0x56, 8>;
 
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    (outs), (ins),
@@ -363,21 +363,11 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
                              [(int_evm_selfdestruct GPR:$src)],
                              0xff, 5000>;
 }
-
-//===----------------------------------------------------------------------===//
-// Assembler Pseudo Instructions
-//===----------------------------------------------------------------------===//
-
-def PseudoSelectcc :
-EVMPseudo<(outs GPR:$dst),
-          (ins GPR:$src, GPR:$src2, i256imm:$cc),
-          "# Pseudo-SelectCC",
-          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
-
-
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
+// custom matching frameindex.
+def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 
 def EVM_CC_EQ  : PatLeaf<(i256 imm),
                          [{return (N->getZExtValue() == ISD::SETEQ);}]>;
@@ -424,13 +414,21 @@ def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
           (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
-// custom matching frameindex.
-def : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns
 //===----------------------------------------------------------------------===//
+let usesCustomInserter = 1 in {
+def PseudoSelectcc :
+EVMPseudo<(outs GPR:$dst),
+          (ins GPR:$src, GPR:$src2, i256imm:$cc),
+          "# Pseudo-SelectCC $cc | $dst, $src, $src2",
+          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
+}
 
+def FRAMEINDEX:
+EVMPseudo<(outs GPR:$dst), (ins GPR:$frmidx),
+          "FI $dst, $frmidx", []>;
 
 //===----------------------------------------------------------------------===//
 // Standard extensions

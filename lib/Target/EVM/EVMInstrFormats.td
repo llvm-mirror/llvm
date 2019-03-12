@@ -46,14 +46,13 @@ multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
   let isCodeGenOnly = 1 in
     def _r : EVMInst<outs_r, ins_r, pattern_r, "false", asmstr_r, inst, cost>;
   let BaseName = NAME in
-    def _s : EVMInst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
+    def "" : EVMInst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
 }
 
 
 class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
     : EVMInst<outs, ins, pattern, "false", asmstr, 0>
 {
-  let usesCustomInserter = 1;
   let isCodeGenOnly = 1;
 }
 
@@ -67,9 +66,8 @@ def I256Imm : Operand<i256> {
 def AddrImm :
 PatLeaf<(i256 imm), [{ return isUInt<10>(N->getZExtValue()); }]>;
 
-def ADDR : Operand<i256> {
-  // TODO: implement address print
-  let PrintMethod = "printAddressOperand";
+def EVMaddr : Operand<i256> {
+  let MIOperandInfo = (ops i256imm, i256imm);
 }
 
 def brtarget : Operand<OtherVT> {
