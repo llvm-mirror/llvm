@@ -11,6 +11,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
+NODE(CALLSEQ_START)
+NODE(CALLSEQ_END)
 NODE(CALL)
 NODE(DELEGATECALL)
 NODE(STATICCALL)

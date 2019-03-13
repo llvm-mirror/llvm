@@ -44,6 +44,8 @@ def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                     SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
 
 
+def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
+def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
 
 // custom SDNodes
 def EVMSelectcc:
@@ -108,6 +110,11 @@ SDNode<"EVMISD::EQ", SDT_EVMArithBinary, []>;
 
 def EVMIszero:
 SDNode<"EVMISD::ISZERO", SDT_EVMArithBinary, []>;
+
+def EVMCallseq_start : SDNode<"EVMISD::CALLSEQ_START", SDT_EVMCallSeqStart,
+                              [SDNPHasChain, SDNPOutGlue]>;
+def EVMCallseq_end : SDNode<"EVMISD::CALLSEQ_END", SDT_EVMCallSeqEnd,
+                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
 //===----------------------------------------------------------------------===//
 // Instructions
@@ -366,6 +373,16 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
+
+let Defs = [SP], Uses = [SP] in {
+def ADJCALLSTACKDOWN : EVMPseudo<(outs), (ins i256imm:$amt, i256imm:$amt2),
+                               "# ADJCALLSTACKDOWN $amt, $amt2",
+                               [(EVMCallseq_start timm:$amt, timm:$amt2)]>;
+def ADJCALLSTACKUP : EVMPseudo<(outs), (ins i256imm:$amt1, i256imm:$amt2),
+                            "# ADJCALLSTACKUP $amt1, $amt2",
+                            [(EVMCallseq_end timm:$amt1, timm:$amt2)]>;
+}
+
 // custom matching frameindex.
 def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 
@@ -425,10 +442,6 @@ EVMPseudo<(outs GPR:$dst),
           "# Pseudo-SelectCC $cc | $dst, $src, $src2",
           [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
 }
-
-def FRAMEINDEX:
-EVMPseudo<(outs GPR:$dst), (ins GPR:$frmidx),
-          "FI $dst, $frmidx", []>;
 
 //===----------------------------------------------------------------------===//
 // Standard extensions

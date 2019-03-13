@@ -29,7 +29,7 @@
 using namespace llvm;
 
 EVMInstrInfo::EVMInstrInfo()
-    : EVMGenInstrInfo(), RI() {
+    : EVMGenInstrInfo(EVM::ADJCALLSTACKDOWN, EVM::ADJCALLSTACKUP), RI() {
 }
 
 
