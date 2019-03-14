@@ -67,7 +67,7 @@ def AddrImm :
 PatLeaf<(i256 imm), [{ return isUInt<10>(N->getZExtValue()); }]>;
 
 def EVMaddr : Operand<i256> {
-  let MIOperandInfo = (ops i256imm, i256imm);
+  let PrintMethod = "printAddrOperand";
 }
 
 def brtarget : Operand<OtherVT> {

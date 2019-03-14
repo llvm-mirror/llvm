@@ -432,17 +432,18 @@ SDValue EVMTargetLowering::LowerFormalArguments(
     assert(VA.isMemLoc());
 
     MVT LocVT = VA.getLocVT();
+    int index = VA.getLocMemOffset() / (LocVT.getSizeInBits() / 8);
+    /*
     // The stack pointer offset is relative to the caller stack frame.
     int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / 8,
                                    VA.getLocMemOffset(), true);
-    
+
     // Create load nodes to retrieve arguments from the stack
     SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
-    SDValue ArgValue = DAG.getLoad(
-        LocVT, DL, Chain, FIN,
-        MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
+    */
+    SDValue indexSD = DAG.getConstant(index, DL, MVT::i256);
 
-    //ArgValue = UnpackFromArgumentSlot(ArgValue, VA, Ins[i].ArgVT, DL, DAG);
+    SDValue ArgValue = DAG.getNode(EVMISD::ARGUMENT, DL, VA.getValVT(), indexSD);
 
     InVals.push_back(ArgValue);
   }

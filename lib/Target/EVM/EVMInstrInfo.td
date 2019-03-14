@@ -16,11 +16,6 @@ include "EVMInstrFormats.td"
 // EVM specific DAG Nodes.
 //===----------------------------------------------------------------------===//
 
-
-//===----------------------------------------------------------------------===//
-// Operand and SDNode transformation definitions.
-//===----------------------------------------------------------------------===//
-
 // SDNode properties
 def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 
@@ -43,13 +38,21 @@ SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
 def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                     SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
 
+def SDT_EVMArgument : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
+def SDT_EVMMove : SDTypeProfile<0, 2, [SDTCisVT<0, i256>, SDTCisSameAs<0, 1>]>;
 
 def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
 def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
 
 // custom SDNodes
-def EVMSelectcc:
+def EVMSelectcc :
 SDNode<"EVMISD::SELECTCC", SDT_EVMSelectCC, [SDNPInGlue]>;
+
+def EVMArgument : // custom lowered node
+SDNode<"EVMISD::ARGUMENT", SDT_EVMArgument>;
+
+def EVMMove :
+SDNode<"EVMISD::MOVE", SDT_EVMMove>;
 
 def EVMBrcc :
 SDNode<"EVMISD::BRCC", SDT_EVMBrcc, [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
@@ -115,6 +118,9 @@ def EVMCallseq_start : SDNode<"EVMISD::CALLSEQ_START", SDT_EVMCallSeqStart,
                               [SDNPHasChain, SDNPOutGlue]>;
 def EVMCallseq_end : SDNode<"EVMISD::CALLSEQ_END", SDT_EVMCallSeqEnd,
                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
+// custom matching frameindex.
+def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 
 //===----------------------------------------------------------------------===//
 // Instructions
@@ -265,9 +271,10 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
 
 
 let mayLoad = 1 in {
-defm MLOAD  : Inst_1_1<"MLOAD",
-                       [(set GPR:$dst, (load GPR:$src))],
-                       0x51, 3>;
+defm MLOAD : RSInst<(outs GPR:$dst), (ins EVMaddr:$src),
+                    (outs), (ins),
+                    [(set GPR:$dst, (load fiAddr:$src))],
+                   "MLOAD_r\t$dst, $src", "MLOAD", 0x51, 3>;
 }
 
 let mayStore = 1 in {
@@ -371,20 +378,29 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
                              0xff, 5000>;
 }
 //===----------------------------------------------------------------------===//
-// Patterns
+// Pseudo-instructions and codegen patterns
 //===----------------------------------------------------------------------===//
+let usesCustomInserter = 1 in {
+def PseudoSelectcc :
+EVMPseudo<(outs GPR:$dst),
+          (ins GPR:$src, GPR:$src2, i256imm:$cc),
+          "SelectCC\t$cc | $dst, $src, $src2",
+          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
+
+}
 
 let Defs = [SP], Uses = [SP] in {
 def ADJCALLSTACKDOWN : EVMPseudo<(outs), (ins i256imm:$amt, i256imm:$amt2),
-                               "# ADJCALLSTACKDOWN $amt, $amt2",
+                               "# ADJCALLSTACKDOWN\t$amt, $amt2",
                                [(EVMCallseq_start timm:$amt, timm:$amt2)]>;
 def ADJCALLSTACKUP : EVMPseudo<(outs), (ins i256imm:$amt1, i256imm:$amt2),
-                            "# ADJCALLSTACKUP $amt1, $amt2",
+                            "# ADJCALLSTACKUP\t$amt1, $amt2",
                             [(EVMCallseq_end timm:$amt1, timm:$amt2)]>;
 }
 
-// custom matching frameindex.
-def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
+//===----------------------------------------------------------------------===//
+// Patterns
+//===----------------------------------------------------------------------===//
 
 def EVM_CC_EQ  : PatLeaf<(i256 imm),
                          [{return (N->getZExtValue() == ISD::SETEQ);}]>;
@@ -431,17 +447,6 @@ def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
           (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
-
-//===----------------------------------------------------------------------===//
-// Pseudo-instructions and codegen patterns
-//===----------------------------------------------------------------------===//
-let usesCustomInserter = 1 in {
-def PseudoSelectcc :
-EVMPseudo<(outs GPR:$dst),
-          (ins GPR:$src, GPR:$src2, i256imm:$cc),
-          "# Pseudo-SelectCC $cc | $dst, $src, $src2",
-          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
-}
 
 //===----------------------------------------------------------------------===//
 // Standard extensions

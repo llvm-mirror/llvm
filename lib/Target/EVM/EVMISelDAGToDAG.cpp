@@ -68,19 +68,54 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
   }
 
   switch (Opcode) {
+    case EVMISD::ARGUMENT:
+      // do not select argument.
+      return;
+    case ISD::LOAD: {
+      const LoadSDNode *LD = cast<LoadSDNode>(Node);
 
-  case ISD::FrameIndex: {
-    int FI = cast<FrameIndexSDNode>(Node)->getIndex();
-    EVT VT = Node->getValueType(0);
-    SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
-    unsigned Opc = EVM::FRAMEINDEX;
-    if (Node->hasOneUse()) {
-      CurDAG->SelectNodeTo(Node, Opc, VT, TFI);
+      // select loading from call arguments.
+      if (LD->getBasePtr()->getOpcode() != ISD::FrameIndex) {
+        break;
+      }
+
+      const SDValue fi = LD->getBasePtr();
+      SDValue Chain = LD->getChain();
+
+      SDValue move = CurDAG->getNode(EVMISD::MOVE,
+                     SDLoc(Node), LD->getValueType(0), LD->getBasePtr());
+
+      LLVM_DEBUG(dbgs() << "  Selecting node to: "; move->dump(CurDAG););
+      ReplaceNode(Node, move.getNode());
       return;
     }
-    ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
-    return;
-  }
+    case ISD::STORE: {
+      const StoreSDNode *ST = cast<StoreSDNode>(Node);
+
+      if (ST->getBasePtr()->getOpcode() != ISD::FrameIndex) {
+        break;
+      }
+      SDValue BasePtr = ST->getBasePtr();
+      SDValue Chain = ST->getChain();
+
+      SDValue move = CurDAG->getNode(EVMISD::MOVE,
+                     SDLoc(Node), MVT::Other, ST->getBasePtr(), ST->getValue());
+
+      //SDValue set = CurDAG->getCopyToReg(Chain, DL, ST->getBasePtr(), ST->getValue()
+
+
+      LLVM_DEBUG(dbgs() << "  Selecting node to: "; move->dump(CurDAG););
+      ReplaceNode(Node, move.getNode());
+      return;
+    }
+    case ISD::FrameIndex: {
+      int FI = cast<FrameIndexSDNode>(Node)->getIndex();
+      EVT VT = Node->getValueType(0);
+      SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
+      unsigned Opc = ISD::TargetFrameIndex;
+      ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
+      return;
+    }
   }
 
 

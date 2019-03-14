@@ -11,8 +11,10 @@
 ///
 //===----------------------------------------------------------------------===//
 
+NODE(MOVE)
 NODE(CALLSEQ_START)
 NODE(CALLSEQ_END)
+NODE(ARGUMENT)
 NODE(CALL)
 NODE(DELEGATECALL)
 NODE(STATICCALL)
