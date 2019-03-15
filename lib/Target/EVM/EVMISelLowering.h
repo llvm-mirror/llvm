@@ -43,9 +43,7 @@ public:
   bool CanLowerReturn(
          CallingConv::ID /*CallConv*/, MachineFunction & /*MF*/, bool /*IsVarArg*/,
          const SmallVectorImpl<ISD::OutputArg> &Outs,
-         LLVMContext & /*Context*/) const override {
-    return Outs.size() <= 1;
-  }
+         LLVMContext & /*Context*/) const override;
 
   bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
                           MachineFunction &MF,
@@ -70,6 +68,7 @@ public:
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSEXTLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
 
   // This method returns the name of a target specific DAG node.
   const char *getTargetNodeName(unsigned Opcode) const override;

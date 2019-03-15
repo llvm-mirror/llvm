@@ -90,6 +90,13 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BRIND, MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
+  // we don't have trunc stores.
+  setTruncStoreAction(MVT::i256, MVT::i8,   Legal);
+  setTruncStoreAction(MVT::i256, MVT::i16,  Legal);
+  setTruncStoreAction(MVT::i256, MVT::i32,  Legal);
+  setTruncStoreAction(MVT::i256, MVT::i64,  Legal);
+  setTruncStoreAction(MVT::i256, MVT::i128, Legal);
+
   // Load extented operations for i1 types must be promoted
   for (MVT VT : MVT::integer_valuetypes()) {
     setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1,  Promote);
@@ -101,6 +108,11 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   for (MVT VT : MVT::integer_valuetypes()) {
     // Disable for now.
     //setLoadExtAction(ISD::SEXTLOAD, MVT::i256, VT, Custom);
+    /*
+    setLoadExtAction(ISD::SEXTLOAD, MVT::i256, VT, Legal);
+    setLoadExtAction(ISD::ZEXTLOAD, MVT::i256, VT, Expand);
+    setLoadExtAction(ISD::EXTLOAD,  MVT::i256, VT, Expand);
+    */
   }
 }
 
@@ -175,57 +187,8 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(EVMISD::BRCC, DL, Op.getValueType(), Chain, LHS, RHS,
                      DAG.getConstant(CC, DL, LHS.getValueType()), Dest);
 
-/*
-  SDValue Chain = Op.getOperand(0);
-  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
-  SDValue LHS = Op.getOperand(2);
-  SDValue RHS = Op.getOperand(3);
-  SDValue Dest = Op.getOperand(4);
-  SDLoc DL(Op);
-
-  assert(LHS.getValueType() == MVT::i256 && "LHS of BR_CC must be i256.");
-  assert(RHS.getValueType() == MVT::i256 && "RHS of BR_CC must be i256.");
-
-  if (CC == ISD::SETLE  || CC == ISD::SETGE ||
-      CC == ISD::SETULE || CC == ISD::SETUGE) {
-    NegateCC(LHS, RHS, CC);
-  }
-
-  EVMISD::NodeType op;
-  switch (CC) {
-    default:
-      llvm_unreachable("unimplemented condition code.");
-      break;
-    case ISD::SETLE:
-    case ISD::SETGE:
-    case ISD::SETULE:
-    case ISD::SETUGE:
-      assert(false && "invalid condition code.");
-      break;
-    case ISD::SETGT:
-      op = EVMISD::SGT;
-      break;
-    case ISD::SETLT:
-      op = EVMISD::SLT;
-      break;
-    case ISD::SETUGT:
-      op = EVMISD::GT;
-      break;
-    case ISD::SETULT:
-      op = EVMISD::LT;
-      break;
-    case ISD::SETEQ:
-      op = EVMISD::EQ;
-      break;
-  }
-
-  SDValue Cmp = DAG.getNode(op, DL, MVT::i256, LHS, RHS);
-
-  SDValue TargetCC;
-  return DAG.getNode(EVMISD::JUMPI, DL, MVT::Other, Chain,
-                     Cmp, Dest);
-*/
 }
+
 SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
@@ -556,6 +519,13 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   return Chain;
 }
 
+bool EVMTargetLowering::CanLowerReturn(
+    CallingConv::ID /*CallConv*/, MachineFunction & /*MF*/, bool /*IsVarArg*/,
+    const SmallVectorImpl<ISD::OutputArg> &Outs,
+    LLVMContext & /*Context*/) const {
+  // We can't currently handle returning tuples.
+  return Outs.size() <= 1;
+}
 
 SDValue
 EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
@@ -564,9 +534,8 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &DL, SelectionDAG &DAG) const {
   SmallVector<SDValue, 4> RetOps(1, Chain);
-  //RetOps.append(OutVals.begin(), OutVals.end());
+  RetOps.append(OutVals.begin(), OutVals.end());
   Chain = DAG.getNode(EVMISD::RETURN, DL, MVT::Other, RetOps);
-
   return Chain;
 }
 

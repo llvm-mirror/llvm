@@ -40,13 +40,13 @@ class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
 }
 
 // Both Register and Stack based instructions
-multiclass RSInst<dag outs_r, dag ins_r, dag outs_s, dag ins_s,
+multiclass RSInst<dag outs_r, dag ins_r,
                 list<dag> pattern_r, string asmstr_r, string asmstr_s,
                 bits<8> inst, int cost> {
   let isCodeGenOnly = 1 in
     def _r : EVMInst<outs_r, ins_r, pattern_r, "false", asmstr_r, inst, cost>;
   let BaseName = NAME in
-    def "" : EVMInst<outs_s, ins_s, [], "true", asmstr_s, inst, cost>;
+    def "" : EVMInst<(outs), (ins), [], "true", asmstr_s, inst, cost>;
 }
 
 
@@ -81,19 +81,18 @@ def brtarget : Operand<OtherVT> {
 
 // delta = 0, alpha = 1
 multiclass Inst_0_1<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs GPR:$dst), (ins), (outs), (ins), pattern,
+    : RSInst<(outs GPR:$dst), (ins), pattern,
              !strconcat(name, "\t$dst"), name,
              inst, cost>;
 
 
 // delta = 0, alpha = 0
 multiclass Inst_0_0<string name, list<dag> pattern, bits<8> inst, int cost>
-    : RSInst<(outs), (ins), (outs), (ins), pattern, name, name, inst, cost>;
+    : RSInst<(outs), (ins), pattern, name, name, inst, cost>;
 
 // delta = 1, alpha = 0
 multiclass Inst_1_0<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs), (ins GPR:$src),     // register based
-             (outs), (ins),                 // stack based
              pattern,
              !strconcat(name, "\t$src"),    // reg asm
              name,                          // stack asm
@@ -102,7 +101,6 @@ multiclass Inst_1_0<string name, list<dag> pattern, bits<8> inst, int cost>
 // delta = 1, alpha = 1
 multiclass Inst_1_1<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs GPR:$dst), (ins GPR:$src),     // register based
-             (outs), (ins),                             // stack based
              pattern,
              !strconcat(name, "\t$dst = $src"),          // reg asm
              name,                                      // stack asm
@@ -114,7 +112,6 @@ multiclass UnaryInst<SDNode node, string name, bits<8> inst, int cost>
 // delta = 2, alpha = 0
 multiclass Inst_2_0<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs), (ins GPR:$src1, GPR:$src2),   //register based
-             (outs), (ins),                            // stack based
              pattern,
              !strconcat(name, "\t$src1, $src2"),       // reg asm
              name,                                     // stack asm
@@ -124,7 +121,6 @@ multiclass Inst_2_0<string name, list<dag> pattern, bits<8> inst, int cost>
 // delta = 2, alpha = 1
 multiclass Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2),   //register based
-             (outs), (ins),                                        // stack based
              pattern,
              !strconcat(name, "\t$dst = $src1, $src2"),               // reg asm
              name,                                                 // stack asm
@@ -139,14 +135,14 @@ multiclass ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
 // delta = 3, alpha = 0
 multiclass Inst_3_0<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs), (ins GPR:$src1, GPR:$src2, GPR:$src3),
-             (outs), (ins), pattern,
+             pattern,
              !strconcat(name, " \t$src1, $src2, $src3"),
              name, inst, cost>;
 
 // delta = 3, alpha = 1
 multiclass Inst_3_1<string name, list<dag> pattern, bits<8> inst, int cost>
     : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2, GPR:$src3),
-             (outs), (ins), pattern,
+             pattern,
              !strconcat(name, " \t$dst = $src1, $src2, $src3"),
              name, inst, cost>;
 

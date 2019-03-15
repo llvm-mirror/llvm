@@ -70,7 +70,7 @@ void EVMDAGToDAGISel::SelectSEXT(SDNode *Node) {
   SDValue sext = CurDAG->getNode(EVM::SIGNEXTEND_r,
       SDLoc(Node), MVT::Other, Src, Node->getOperand(1));
 
-  LLVM_DEBUG(dbgs() << "  Selecting node to: "; sext.dump(CurDAG););
+  LLVM_DEBUG(dbgs() << "  Selecting SEXT node to: "; sext.dump(CurDAG););
   ReplaceNode(Node, sext.getNode());
   return;
 }
@@ -91,6 +91,7 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
     case EVMISD::ARGUMENT:
       // do not select argument.
       return;
+      /*
     case ISD::LOAD: {
       const LoadSDNode *LD = cast<LoadSDNode>(Node);
 
@@ -105,7 +106,7 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
       SDValue move = CurDAG->getNode(EVM::MLOAD_r,
                      SDLoc(Node), LD->getValueType(0), LD->getBasePtr());
 
-      LLVM_DEBUG(dbgs() << "  Selecting node to: "; move->dump(CurDAG););
+      LLVM_DEBUG(dbgs() << "  Selecting ISD::LOAD node to: "; move->dump(CurDAG););
       ReplaceNode(Node, move.getNode());
       return;
     }
@@ -124,18 +125,11 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
       //SDValue set = CurDAG->getCopyToReg(Chain, DL, ST->getBasePtr(), ST->getValue()
 
 
-      LLVM_DEBUG(dbgs() << "  Selecting node to: "; move->dump(CurDAG););
+      LLVM_DEBUG(dbgs() << "  Selecting ISD::STORE node to: "; move->dump(CurDAG););
       ReplaceNode(Node, move.getNode());
       return;
     }
-    case ISD::FrameIndex: {
-      int FI = cast<FrameIndexSDNode>(Node)->getIndex();
-      EVT VT = Node->getValueType(0);
-      SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
-      unsigned Opc = ISD::TargetFrameIndex;
-      ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
-      return;
-    }
+    */
   }
 
 

@@ -18,6 +18,7 @@ include "EVMInstrFormats.td"
 
 // SDNode properties
 def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+def SDT_EVMReturn : SDTypeProfile<0, -1, []>;
 
 def SDT_EVMArithBinary :
 SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>]>;
@@ -68,7 +69,7 @@ SDNode<"EVMISD::CALL", SDT_EVMCall,
        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
 
 def EVMReturn :
-SDNode<"EVMISD::RETURN", SDTNone, [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+SDNode<"EVMISD::RETURN", SDT_EVMReturn, [SDNPHasChain]>;
 
 def EVMMod :
 SDNode<"EVMISD::MOD", SDT_EVMArithBinary, []>;
@@ -152,7 +153,7 @@ defm EXP    : Inst_2_1<"EXP",
                        0x0a, 10>;
 
 defm SIGNEXTEND :
-  RSInst<(outs GPR:$dst), (ins GPR:$src, I256Imm:$sft), (outs), (ins),
+  RSInst<(outs GPR:$dst), (ins GPR:$src, I256Imm:$sft),
          [(set GPR:$dst, (EVMSignextend GPR:$src, imm:$sft))],
          "SIGNEXTEND\t$dst, $src, $sft", "SIGNEXTEND", 0xb0, 5>;
 
@@ -240,7 +241,6 @@ defm EXTCODESIZE  : Inst_1_1<"EXTCODESIZE",
 let mayStore = 1, hasSideEffects = 1 in {
 defm EXTCODECOPY : RSInst<(outs),
                           (ins GPR:$src1, GPR:$src2, GPR:$src3, GPR:$src4),
-                          (outs), (ins),
                           [(int_evm_extcodecopy GPR:$src1, GPR:$src2,
                                                 GPR:$src3, GPR:$src4)],
                           "EXTCODECOPY \t$src1, $src2, $src3, $src4",
@@ -285,7 +285,6 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
 
 let mayLoad = 1 in {
 defm MLOAD : RSInst<(outs GPR:$dst), (ins EVMaddr:$src),
-                    (outs), (ins),
                     [(set GPR:$dst, (load fiAddr:$src))],
                    "MLOAD_r\t$dst, $src", "MLOAD", 0x51, 3>;
 }
@@ -310,12 +309,10 @@ defm SSTORE : Inst_2_0<"SSTORE",
 
 let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 defm JUMP : RSInst<(outs), (ins brtarget:$dst),
-                   (outs), (ins),
                    [(br bb:$dst)],
                    "JUMP_r\t$dst", "JUMP", 0x56, 8>;
 
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
-                   (outs), (ins),
                    [(EVMJumpi GPR:$src, bb:$dst)],
                    "JUMPI\t$dst", "JUMPI", 0x57, 10>;
 }
@@ -333,7 +330,7 @@ defm GAS      : Inst_0_1<"GAS",
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
 defm PUSH32 :
-  RSInst<(outs GPR:$dst), (ins I256Imm:$src), (outs), (ins),
+  RSInst<(outs GPR:$dst), (ins I256Imm:$src),
           [(set GPR:$dst, imm:$src)],
           "PUSH32_r \t$dst, $src", "PUSH32_i",
           0x7f, 3>;
@@ -347,8 +344,8 @@ defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm CREATE : Inst_3_1<"CREATE",
-                       [(set GPR:$dst, (int_evm_create
-                                            GPR:$src1, GPR:$src2, GPR:$src3))],
+                       [(set GPR:$dst,
+                        (int_evm_create GPR:$src1, GPR:$src2, GPR:$src3))],
                        0xf0, 32000>;
 }
 
@@ -359,7 +356,9 @@ let isCall = 1 in {
 }
 
 let isReturn = 1 in {
-defm RETURN : Inst_0_0<"RETURN", [(EVMReturn)], 0xf3, 0>;
+defm RETURN : RSInst<(outs), (ins GPR:$val),
+                     [(EVMReturn GPR:$val)],
+                     "RETURN\t$val", "RETURN", 0xf3, 0>;
 }
 
 let isCall = 1 in {
@@ -468,6 +467,11 @@ def : Pat<(i256 (srl i256:$lhs, i256:$rhs)),
 def : Pat<(i256 (sra i256:$lhs, i256:$rhs)),
           (i256 (SDIV_r i256:$lhs, i256:$rhs))>;
 
+// copied from other backends.
+def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{
+  auto FI = cast<FrameIndexSDNode>(N);
+  return CurDAG->getTargetFrameIndex(FI->getIndex(), MVT::i256);
+}]>;
 //===----------------------------------------------------------------------===//
 // Standard extensions
 //===----------------------------------------------------------------------===//
