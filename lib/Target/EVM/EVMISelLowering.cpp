@@ -82,7 +82,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::CTTZ, VT, Expand);
     setOperationAction(ISD::CTLZ, VT, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
-    setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
+    setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Custom);
   }
 
   setOperationAction(ISD::BR_CC, MVT::i256, Custom);
@@ -95,6 +95,12 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1,  Promote);
     setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1,  Promote);
     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1,  Promote);
+  }
+
+  // customize exts
+  for (MVT VT : MVT::integer_valuetypes()) {
+    // Disable for now.
+    //setLoadExtAction(ISD::SEXTLOAD, MVT::i256, VT, Custom);
   }
 }
 
@@ -237,8 +243,30 @@ SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
 }
 
 
+SDValue EVMTargetLowering::LowerSEXTLOAD(SDValue Op, SelectionDAG &DAG) const {
+  const LoadSDNode *LD = cast<LoadSDNode>(Op.getNode());
+  assert(LD->getExtensionType() == ISD::SEXTLOAD);
+  SDLoc DL(Op);
+
+  SDValue Src = Op.getOperand(0);
+  int sizeInBytes = Src.getValueSizeInBits() / 8;
+  SDValue Bytes = DAG.getConstant(sizeInBytes, DL, Op.getValueType());
+  return DAG.getNode(EVMISD::SEXTLOAD, DL, Op.getValueType(), Src);
+}
+
+SDValue EVMTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Op0 = Op.getOperand(0);
+  SDLoc dl(Op);
+  assert(Op.getValueType() == MVT::i256 && "Unhandled target sign_extend_inreg.");
+
+  unsigned Width = cast<VTSDNode>(Op.getOperand(1))->getVT().getSizeInBits() / 8;
+
+  return DAG.getNode(EVMISD::SIGNEXTEND, dl, MVT::i256, Op0,
+                     DAG.getConstant(32 - Width, dl, MVT::i256));
+}
+
 SDValue EVMTargetLowering::LowerOperation(SDValue Op,
-                                            SelectionDAG &DAG) const {
+                                          SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default:
     llvm_unreachable("unimplemented lowering operation,");
@@ -247,6 +275,10 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
     return LowerSELECT_CC(Op, DAG);
+  case ISD::LOAD:
+    return LowerSEXTLOAD(Op, DAG);
+  case ISD::SIGN_EXTEND_INREG:
+    return LowerSIGN_EXTEND_INREG(Op, DAG);
   }
 }
 

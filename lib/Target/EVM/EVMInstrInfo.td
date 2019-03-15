@@ -35,6 +35,12 @@ SDTypeProfile<0, 2, [SDTCisVT<1, OtherVT>]>;
 def SDT_EVMBrcc :
 SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
 
+def SDT_EVMSignextend :
+SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
+
+def SDT_EVMSextload :
+SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
+
 def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                     SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
 
@@ -76,8 +82,11 @@ SDNode<"EVMISD::ADDMOD", SDT_EVMArithTernary, []>;
 def EVMExp:
 SDNode<"EVMISD::EXP", SDT_EVMArithBinary, []>;
 
-def EVMSignextend :
-SDNode<"EVMISD::SIGNEXTEND", SDT_EVMArithBinary, []>;
+def EVMSignextend:
+SDNode<"EVMISD::SIGNEXTEND", SDT_EVMSignextend, []>;
+
+def EVMSextload :
+SDNode<"EVMISD::SEXTLOAD", SDT_EVMSextload, []>;
 
 def EVMByte :
 SDNode<"EVMISD::BYTE", SDT_EVMArithBinary, []>;
@@ -141,7 +150,11 @@ defm MULMOD : Inst_2_1<"MULMOD", [], 0x09, 5>;
 defm EXP    : Inst_2_1<"EXP",
                        [(set GPR:$dst, (int_evm_exp GPR:$src1, GPR:$src2))],
                        0x0a, 10>;
-defm SIGNEXTEND : Inst_2_1<"SIGNEXTEND", [], 0x0b, 5>; // TODO: add DAG
+
+defm SIGNEXTEND :
+  RSInst<(outs GPR:$dst), (ins GPR:$src, I256Imm:$sft), (outs), (ins),
+         [(set GPR:$dst, (EVMSignextend GPR:$src, imm:$sft))],
+         "SIGNEXTEND\t$dst, $src, $sft", "SIGNEXTEND", 0xb0, 5>;
 
 // Comparison instructions ////////////////////////////////////////////////////
 let isCompare = 1 in {
@@ -447,6 +460,13 @@ def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
 def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
           (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
+// bitwise
+def : Pat<(i256 (shl i256:$lhs, i256:$rhs)),
+          (i256 (MUL_r i256:$lhs, i256:$rhs))>;
+def : Pat<(i256 (srl i256:$lhs, i256:$rhs)),
+          (i256 (DIV_r i256:$lhs, i256:$rhs))>;
+def : Pat<(i256 (sra i256:$lhs, i256:$rhs)),
+          (i256 (SDIV_r i256:$lhs, i256:$rhs))>;
 
 //===----------------------------------------------------------------------===//
 // Standard extensions
