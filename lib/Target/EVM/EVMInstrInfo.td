@@ -39,9 +39,6 @@ SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
 def SDT_EVMSignextend :
 SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
 
-def SDT_EVMSextload :
-SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
-
 def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                     SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
 
@@ -85,9 +82,6 @@ SDNode<"EVMISD::EXP", SDT_EVMArithBinary, []>;
 
 def EVMSignextend:
 SDNode<"EVMISD::SIGNEXTEND", SDT_EVMSignextend, []>;
-
-def EVMSextload :
-SDNode<"EVMISD::SEXTLOAD", SDT_EVMSextload, []>;
 
 def EVMByte :
 SDNode<"EVMISD::BYTE", SDT_EVMArithBinary, []>;
@@ -467,11 +461,20 @@ def : Pat<(i256 (srl i256:$lhs, i256:$rhs)),
 def : Pat<(i256 (sra i256:$lhs, i256:$rhs)),
           (i256 (SDIV_r i256:$lhs, i256:$rhs))>;
 
+// ext/trunc load/stores
+def : Pat<(truncstore i256:$lhs, i256:$rhs),
+          (MSTORE_r i256:$lhs, i256:$rhs)>;
+
+// FIXME
+def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;
+def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
+
 // copied from other backends.
 def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{
   auto FI = cast<FrameIndexSDNode>(N);
   return CurDAG->getTargetFrameIndex(FI->getIndex(), MVT::i256);
 }]>;
+
 //===----------------------------------------------------------------------===//
 // Standard extensions
 //===----------------------------------------------------------------------===//

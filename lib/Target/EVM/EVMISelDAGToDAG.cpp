@@ -61,21 +61,6 @@ void EVMDAGToDAGISel::PostprocessISelDAG() {
 
 }
 
-void EVMDAGToDAGISel::SelectSEXT(SDNode *Node) {
-  unsigned Opcode = Node->getOpcode();
-  assert(Opcode == EVMISD::SEXTLOAD);
-
-  SDValue Src = Node->getOperand(0);
-
-  SDValue sext = CurDAG->getNode(EVM::SIGNEXTEND_r,
-      SDLoc(Node), MVT::Other, Src, Node->getOperand(1));
-
-  LLVM_DEBUG(dbgs() << "  Selecting SEXT node to: "; sext.dump(CurDAG););
-  ReplaceNode(Node, sext.getNode());
-  return;
-}
-
-
 void EVMDAGToDAGISel::Select(SDNode *Node) {
   unsigned Opcode = Node->getOpcode();
 
@@ -86,52 +71,48 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
   }
 
   switch (Opcode) {
-    case EVMISD::SEXTLOAD:
-      return SelectSEXT(Node);
     case EVMISD::ARGUMENT:
       // do not select argument.
       return;
-      /*
     case ISD::LOAD: {
       const LoadSDNode *LD = cast<LoadSDNode>(Node);
 
-      // select loading from call arguments.
-      if (LD->getBasePtr()->getOpcode() != ISD::FrameIndex) {
-        break;
+      switch (LD->getExtensionType()) {
+        case ISD::SEXTLOAD: {
+            // MLOAD -> SIGNEXTEND
+            SDValue Src = LD->getBasePtr();
+            uint64_t bytesToShift = 32 - (LD->getMemoryVT().getSizeInBits() / 8);
+            SDValue shift =CurDAG->getConstant(bytesToShift, SDLoc(Node), MVT::i256);
+            SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
+                                    SDLoc(Node), MVT::i256, Src), 0);
+            MachineSDNode * signextend = CurDAG->getMachineNode(EVM::SIGNEXTEND_r,
+                        SDLoc(Node), MVT::i256, mload, shift);
+            ReplaceNode(Node, signextend);
+            return;
+        }
+        case ISD::ZEXTLOAD: {
+          // Load and then zsignextend.
+          //  MLOAD > SLL > SRL
+          SDValue Src = LD->getBasePtr();
+          uint64_t bytesToFill = 256 - LD->getMemoryVT().getSizeInBits();
+          SDValue multiplier =CurDAG->getConstant(1 << bytesToFill, SDLoc(Node), MVT::i256);
+          SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
+                                  SDLoc(Node), MVT::i256, Src), 0);
+          SDValue mul = SDValue(CurDAG->getMachineNode(EVM::MUL_r, SDLoc(Node),
+                                                       MVT::i256, mload, multiplier), 0);
+
+          MachineSDNode * div = CurDAG->getMachineNode(EVM::DIV_r, SDLoc(Node),
+                                                       MVT::i256, mul, multiplier);
+          ReplaceNode(Node, div);
+          return;
+        }
+        case ISD::EXTLOAD:
+        case ISD::NON_EXTLOAD:
+          break;
       }
-
-      const SDValue fi = LD->getBasePtr();
-      SDValue Chain = LD->getChain();
-
-      SDValue move = CurDAG->getNode(EVM::MLOAD_r,
-                     SDLoc(Node), LD->getValueType(0), LD->getBasePtr());
-
-      LLVM_DEBUG(dbgs() << "  Selecting ISD::LOAD node to: "; move->dump(CurDAG););
-      ReplaceNode(Node, move.getNode());
-      return;
+      break;
     }
-    case ISD::STORE: {
-      const StoreSDNode *ST = cast<StoreSDNode>(Node);
-
-      if (ST->getBasePtr()->getOpcode() != ISD::FrameIndex) {
-        break;
-      }
-      SDValue BasePtr = ST->getBasePtr();
-      SDValue Chain = ST->getChain();
-
-      SDValue move = CurDAG->getNode(EVM::MSTORE_r,
-                     SDLoc(Node), MVT::Other, ST->getBasePtr(), ST->getValue());
-
-      //SDValue set = CurDAG->getCopyToReg(Chain, DL, ST->getBasePtr(), ST->getValue()
-
-
-      LLVM_DEBUG(dbgs() << "  Selecting ISD::STORE node to: "; move->dump(CurDAG););
-      ReplaceNode(Node, move.getNode());
-      return;
-    }
-    */
   }
-
 
   SelectCode(Node);
 }

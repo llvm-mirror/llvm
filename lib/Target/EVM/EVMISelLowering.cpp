@@ -76,7 +76,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SETCC, VT, Expand);
     setOperationAction(ISD::SELECT, VT, Expand);
 
-    // have to do custom for SELECT_CC
     setOperationAction(ISD::SELECT_CC, VT, Expand);
 
     setOperationAction(ISD::CTTZ, VT, Expand);
@@ -90,6 +89,14 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BRIND, MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
+  setOperationAction(ISD::FrameIndex, MVT::i256, Custom);
+
+  // extends
+  setOperationAction(ISD::ANY_EXTEND,  MVT::i256, Expand);
+  setOperationAction(ISD::ZERO_EXTEND, MVT::i256, Expand);
+  setOperationAction(ISD::SIGN_EXTEND, MVT::i256, Custom);
+  
+
   // we don't have trunc stores.
   setTruncStoreAction(MVT::i256, MVT::i8,   Legal);
   setTruncStoreAction(MVT::i256, MVT::i16,  Legal);
@@ -102,17 +109,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1,  Promote);
     setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1,  Promote);
     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1,  Promote);
-  }
-
-  // customize exts
-  for (MVT VT : MVT::integer_valuetypes()) {
-    // Disable for now.
-    //setLoadExtAction(ISD::SEXTLOAD, MVT::i256, VT, Custom);
-    /*
-    setLoadExtAction(ISD::SEXTLOAD, MVT::i256, VT, Legal);
-    setLoadExtAction(ISD::ZEXTLOAD, MVT::i256, VT, Expand);
-    setLoadExtAction(ISD::EXTLOAD,  MVT::i256, VT, Expand);
-    */
   }
 }
 
@@ -152,11 +148,11 @@ bool EVMTargetLowering::isTruncateFree(EVT SrcVT, EVT DstVT) const {
 }
 
 bool EVMTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
-  return true;
+  return false;
 }
 
 bool EVMTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
@@ -173,6 +169,12 @@ static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
     case ISD::SETUGE:
       return EVMISD::LT;
   }
+}
+
+SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
+                                           SelectionDAG &DAG) const {
+    int FI = cast<FrameIndexSDNode>(Op)->getIndex();
+      return DAG.getTargetFrameIndex(FI, Op.getValueType());
 }
 
 
@@ -205,18 +207,6 @@ SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(EVMISD::SELECTCC, DL, VTs, Ops);
 }
 
-
-SDValue EVMTargetLowering::LowerSEXTLOAD(SDValue Op, SelectionDAG &DAG) const {
-  const LoadSDNode *LD = cast<LoadSDNode>(Op.getNode());
-  assert(LD->getExtensionType() == ISD::SEXTLOAD);
-  SDLoc DL(Op);
-
-  SDValue Src = Op.getOperand(0);
-  int sizeInBytes = Src.getValueSizeInBits() / 8;
-  SDValue Bytes = DAG.getConstant(sizeInBytes, DL, Op.getValueType());
-  return DAG.getNode(EVMISD::SEXTLOAD, DL, Op.getValueType(), Src);
-}
-
 SDValue EVMTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const {
   SDValue Op0 = Op.getOperand(0);
   SDLoc dl(Op);
@@ -238,10 +228,15 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
     return LowerSELECT_CC(Op, DAG);
-  case ISD::LOAD:
-    return LowerSEXTLOAD(Op, DAG);
+  case ISD::FrameIndex:
+    return LowerFrameIndex(Op, DAG);
   case ISD::SIGN_EXTEND_INREG:
     return LowerSIGN_EXTEND_INREG(Op, DAG);
+  case ISD::SIGN_EXTEND:
+    // TODO: `sext` can be efficiently supported.
+    // so dont need to expand.
+    // consider to use EVMISD::SIGNEXTEND since we need shift value.
+    llvm_unreachable("Needs implementation.");
   }
 }
 
