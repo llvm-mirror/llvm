@@ -47,6 +47,8 @@ public:
 
   bool SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset);
 
+  bool SelectLOAD(SDNode *Node);
+
   // custom selecting
   void SelectSEXT(SDNode *Node);
 
@@ -59,6 +61,45 @@ private:
 
 void EVMDAGToDAGISel::PostprocessISelDAG() {
 
+}
+
+bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
+  const LoadSDNode *LD = cast<LoadSDNode>(Node);
+
+  switch (LD->getExtensionType()) {
+    case ISD::SEXTLOAD: {
+      // MLOAD -> SIGNEXTEND
+      SDValue Src = LD->getBasePtr();
+      uint64_t bytesToShift = 32 - (LD->getMemoryVT().getSizeInBits() / 8);
+      SDValue shift =CurDAG->getConstant(bytesToShift, SDLoc(Node), MVT::i256);
+      SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
+                              SDLoc(Node), MVT::i256, Src), 0);
+      MachineSDNode * signextend = CurDAG->getMachineNode(EVM::SIGNEXTEND_r,
+                  SDLoc(Node), MVT::i256, mload, shift);
+      ReplaceNode(Node, signextend);
+      return true;
+    }
+    case ISD::ZEXTLOAD: {
+      // Load and then zsignextend.
+      //  MLOAD > SLL > SRL
+      SDValue Src = LD->getBasePtr();
+      uint64_t bytesToFill = 256 - LD->getMemoryVT().getSizeInBits();
+      SDValue multiplier =CurDAG->getConstant(1 << bytesToFill, SDLoc(Node), MVT::i256);
+      SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
+                              SDLoc(Node), MVT::i256, Src), 0);
+      SDValue mul = SDValue(CurDAG->getMachineNode(EVM::MUL_r, SDLoc(Node),
+                                                   MVT::i256, mload, multiplier), 0);
+
+      MachineSDNode * div = CurDAG->getMachineNode(EVM::DIV_r, SDLoc(Node),
+                                                   MVT::i256, mul, multiplier);
+      ReplaceNode(Node, div);
+      return true;
+    }
+    case ISD::EXTLOAD:
+    case ISD::NON_EXTLOAD:
+      break;
+  }
+  return false;
 }
 
 void EVMDAGToDAGISel::Select(SDNode *Node) {
@@ -75,41 +116,7 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
       // do not select argument.
       return;
     case ISD::LOAD: {
-      const LoadSDNode *LD = cast<LoadSDNode>(Node);
-
-      switch (LD->getExtensionType()) {
-        case ISD::SEXTLOAD: {
-            // MLOAD -> SIGNEXTEND
-            SDValue Src = LD->getBasePtr();
-            uint64_t bytesToShift = 32 - (LD->getMemoryVT().getSizeInBits() / 8);
-            SDValue shift =CurDAG->getConstant(bytesToShift, SDLoc(Node), MVT::i256);
-            SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
-                                    SDLoc(Node), MVT::i256, Src), 0);
-            MachineSDNode * signextend = CurDAG->getMachineNode(EVM::SIGNEXTEND_r,
-                        SDLoc(Node), MVT::i256, mload, shift);
-            ReplaceNode(Node, signextend);
-            return;
-        }
-        case ISD::ZEXTLOAD: {
-          // Load and then zsignextend.
-          //  MLOAD > SLL > SRL
-          SDValue Src = LD->getBasePtr();
-          uint64_t bytesToFill = 256 - LD->getMemoryVT().getSizeInBits();
-          SDValue multiplier =CurDAG->getConstant(1 << bytesToFill, SDLoc(Node), MVT::i256);
-          SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
-                                  SDLoc(Node), MVT::i256, Src), 0);
-          SDValue mul = SDValue(CurDAG->getMachineNode(EVM::MUL_r, SDLoc(Node),
-                                                       MVT::i256, mload, multiplier), 0);
-
-          MachineSDNode * div = CurDAG->getMachineNode(EVM::DIV_r, SDLoc(Node),
-                                                       MVT::i256, mul, multiplier);
-          ReplaceNode(Node, div);
-          return;
-        }
-        case ISD::EXTLOAD:
-        case ISD::NON_EXTLOAD:
-          break;
-      }
+      if (SelectLOAD(Node)) return;
       break;
     }
   }

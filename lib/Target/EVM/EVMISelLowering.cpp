@@ -539,7 +539,7 @@ const char *EVMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case EVMISD::FIRST_NUMBER:
     break;
 #define NODE(N)                                                  \
-  case EVMISD::N:                                                   \
+  case EVMISD::N:                                                \
     return "EVMISD::" #N;
 #include "EVMISD.def"
 #undef NODE
