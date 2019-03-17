@@ -138,10 +138,18 @@ defm DIV  : BinaryInst<udiv, "DIV",  0x04, 5>;
 defm SDIV : BinaryInst<sdiv, "SDIV", 0x05, 5>;
 
 // LLVM does not have those operators
-defm MOD    : Inst_2_1<"MOD",    [], 0x06, 5>;
-defm SMOD   : Inst_2_1<"SMOD",   [], 0x07, 5>;
-defm ADDMOD : Inst_2_1<"ADDMOD", [], 0x08, 5>;
-defm MULMOD : Inst_2_1<"MULMOD", [], 0x09, 5>;
+defm MOD    : Inst_2_1<"MOD",
+                       [(set GPR:$dst, (urem GPR:$src1, GPR:$src2))],
+                       0x06, 5>;
+defm SMOD   : Inst_2_1<"SMOD",
+                       [(set GPR:$dst, (srem GPR:$src1, GPR:$src2))],
+                       0x07, 5>;
+defm ADDMOD : Inst_3_1<"ADDMOD",
+                       [(set GPR:$dst, (urem (add GPR:$src1, GPR:$src2), GPR:$src3))],
+                       0x08, 5>;
+defm MULMOD : Inst_3_1<"MULMOD",
+                       [(set GPR:$dst, (urem (mul GPR:$src1, GPR:$src2), GPR:$src3))],
+                       0x09, 5>;
 defm EXP    : Inst_2_1<"EXP",
                        [(set GPR:$dst, (int_evm_exp GPR:$src1, GPR:$src2))],
                        0x0a, 10>;
@@ -278,8 +286,8 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
 
 
 let mayLoad = 1 in {
-defm MLOAD : RSInst<(outs GPR:$dst), (ins EVMaddr:$src),
-                    [(set GPR:$dst, (load fiAddr:$src))],
+defm MLOAD : RSInst<(outs GPR:$dst), (ins GPR:$src),
+                    [(set GPR:$dst, (load GPR:$src))],
                    "MLOAD_r\t$dst, $src", "MLOAD", 0x51, 3>;
 }
 
@@ -331,7 +339,12 @@ defm PUSH32 :
 
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
-//defm JUMPIF : Inst_2_0<"JUMPIF", [], 0xb1, 10>; // TODO: argument type is 4 bytes.
+/*
+defm JUMPIF : // TODO: argument type is 4 bytes.
+    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2),
+             pattern,
+             "JUMPIF\t$dst, $src1, $src2", "JUMPIF", 0xb1, 10>;
+*/
 }
 
 //}
