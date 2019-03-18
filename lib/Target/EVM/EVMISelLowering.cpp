@@ -57,7 +57,38 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 
   // TODO: set type legalization actions
   for (auto VT : { MVT::i1, MVT::i8, MVT::i16, MVT::i32,
-                   MVT::i64, MVT::i128 }) {
+                   MVT::i64, MVT::i128, MVT::i256 }) {
+    setOperationAction(ISD::SMIN, VT, Expand);
+    setOperationAction(ISD::SMAX, VT, Expand);
+    setOperationAction(ISD::UMIN, VT, Expand);
+    setOperationAction(ISD::UMAX, VT, Expand);
+    setOperationAction(ISD::ABS,  VT, Expand);
+
+    // we don't have shifting operations.
+    setOperationAction(ISD::SHL,  VT, Expand);
+    setOperationAction(ISD::SRA,  VT, Expand);
+    setOperationAction(ISD::SRL,  VT, Expand);
+
+    // we don't have complex operations.
+    setOperationAction(ISD::ADDC, VT, Expand);
+    setOperationAction(ISD::SUBC, VT, Expand);
+    setOperationAction(ISD::ADDE, VT, Expand);
+    setOperationAction(ISD::SUBE, VT, Expand);
+    setOperationAction(ISD::ADDCARRY, VT, Expand);
+    setOperationAction(ISD::SUBCARRY, VT, Expand);
+    setOperationAction(ISD::SADDO, VT, Expand);
+    setOperationAction(ISD::UADDO, VT, Expand);
+    setOperationAction(ISD::SSUBO, VT, Expand);
+    setOperationAction(ISD::USUBO, VT, Expand);
+    setOperationAction(ISD::SMULO, VT, Expand);
+    setOperationAction(ISD::UMULO, VT, Expand);
+    setOperationAction(ISD::SADDSAT, VT, Expand);
+    setOperationAction(ISD::UADDSAT, VT, Expand);
+    setOperationAction(ISD::SSUBSAT, VT, Expand);
+    setOperationAction(ISD::USUBSAT, VT, Expand);
+    setOperationAction(ISD::SMULFIX, VT, Expand);
+    setOperationAction(ISD::UMULFIX, VT, Expand);
+
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::UDIVREM, VT, Expand);
     setOperationAction(ISD::MULHU, VT, Expand);
@@ -74,26 +105,33 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SETCC, VT, Expand);
     setOperationAction(ISD::SELECT, VT, Expand);
 
-    setOperationAction(ISD::SELECT_CC, VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Custom);
 
+    setOperationAction(ISD::BSWAP, VT, Expand);
+    setOperationAction(ISD::BITREVERSE, VT, Expand);
     setOperationAction(ISD::CTTZ, VT, Expand);
     setOperationAction(ISD::CTLZ, VT, Expand);
+    setOperationAction(ISD::CTPOP, VT, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Custom);
   }
 
   setOperationAction(ISD::BR_CC, MVT::i256, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
-  setOperationAction(ISD::BRIND, MVT::Other, Expand);
+  //setOperationAction(ISD::BRIND, MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
   setOperationAction(ISD::FrameIndex, MVT::i256, Custom);
+
+  // FIXME: DYNAMIC_STACKALLOC
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i256, Custom);
+  setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
+  setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
 
   // extends
   setOperationAction(ISD::ANY_EXTEND,  MVT::i256, Expand);
   setOperationAction(ISD::ZERO_EXTEND, MVT::i256, Expand);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i256, Custom);
-  
 
   // we don't have trunc stores.
   setTruncStoreAction(MVT::i256, MVT::i8,   Legal);
@@ -421,17 +459,16 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
     MVT LocVT = VA.getLocVT();
     int index = VA.getLocMemOffset() / (LocVT.getSizeInBits() / 8);
-    /*
+ 
     // The stack pointer offset is relative to the caller stack frame.
     int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / 8,
                                    VA.getLocMemOffset(), true);
 
     // Create load nodes to retrieve arguments from the stack
     SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
-    */
-    SDValue indexSD = DAG.getConstant(index, DL, MVT::i256);
 
-    SDValue ArgValue = DAG.getNode(EVMISD::ARGUMENT, DL, VA.getValVT(), indexSD);
+    SDValue ArgValue = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
+                                   MachinePointerInfo::getFixedStack(MF, FI));
 
     InVals.push_back(ArgValue);
   }

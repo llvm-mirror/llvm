@@ -112,12 +112,21 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
   }
 
   switch (Opcode) {
-    case EVMISD::ARGUMENT:
-      // do not select argument.
-      return;
     case ISD::LOAD: {
       if (SelectLOAD(Node)) return;
       break;
+    }
+    case ISD::FrameIndex: {
+      int FI = cast<FrameIndexSDNode>(Node)->getIndex();
+      EVT VT = Node->getValueType(0);
+      SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
+      unsigned Opc = EVM::MLOAD_r;
+      if (Node->hasOneUse()) {
+        CurDAG->SelectNodeTo(Node, Opc, VT, TFI);
+        return;
+      }
+      ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
+      return;
     }
   }
 
