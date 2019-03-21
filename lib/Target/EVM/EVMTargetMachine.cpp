@@ -72,6 +72,8 @@ public:
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
 
+  FunctionPass *createTargetRegisterAllocator(bool) override;
+
 };
 }
 
@@ -85,13 +87,15 @@ void EVMPassConfig::addIRPasses() {
 }
 
 bool EVMPassConfig::addInstSelector() {
+  TargetPassConfig::addInstSelector();
   addPass(createEVMISelDag(getEVMTargetMachine()));
 
   return false;
 }
 
 void EVMPassConfig::addPreEmitPass() {
-
+  TargetPassConfig::addPreEmitPass();
+  addPass(createEVMAddJumpdest());
 }
 
 void EVMPassConfig::addPreRegAlloc() {
@@ -99,5 +103,9 @@ void EVMPassConfig::addPreRegAlloc() {
 }
 
 void EVMPassConfig::addPostRegAlloc() {
-  addPass(createEVMAddJumpdest());
 }
+
+FunctionPass *EVMPassConfig::createTargetRegisterAllocator(bool) {
+  return nullptr; // No reg alloc
+}
+

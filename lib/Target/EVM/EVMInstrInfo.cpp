@@ -32,4 +32,26 @@ EVMInstrInfo::EVMInstrInfo()
     : EVMGenInstrInfo(EVM::ADJCALLSTACKDOWN, EVM::ADJCALLSTACKUP), RI() {
 }
 
+void EVMInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
+                                       MachineBasicBlock::iterator I,
+                                       unsigned SrcReg, bool IsKill, int FI,
+                                       const TargetRegisterClass *RC,
+                                       const TargetRegisterInfo *TRI) const {
+  // Load the frame index and then store it using the FI offset.
+  // MSTORE (ADD (MLOAD 0) FI) REG
+  // fr = MLOAD 0
+  // fo = ADD fr FI
+  // ch = MSTORE fo SrcReg
 
+
+}
+void EVMInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                        MachineBasicBlock::iterator MI, unsigned DestReg,
+                        int FrameIndex, const TargetRegisterClass *RC,
+                        const TargetRegisterInfo *TRI) const {
+  // fr = MLOAD 0
+  // fo = ADD fr FI
+  // rg = MLOAD fo 
+
+
+}

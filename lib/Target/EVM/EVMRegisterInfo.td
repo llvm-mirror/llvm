@@ -29,10 +29,9 @@ def SP : EVMReg<"%SP">;
 // one register, so we define a few for the integer / floating point register
 // classes since we otherwise don't need a physical register in those classes.
 // These are also used a "types" in the generated assembly matcher.
-def INTREG : EVMReg<"%intreg">;
 def GPR256 : EVMReg<"%intreg">;
 
-def GPR : RegisterClass<"EVM", [i256], 32, (add INTREG, GPR256)>;
+def GPR : RegisterClass<"EVM", [i256], 32, (add GPR256)>;
 def GPR8bit : RegisterClass<"EVM", [i256], 8, (add FP, SP)>;
 
 // The value stack "register". This is an opaque entity which serves to order
