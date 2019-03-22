@@ -33,8 +33,10 @@ bool LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
 
 FunctionPass *createEVMISelDag(EVMTargetMachine &TM);
 FunctionPass *createEVMAddJumpdest();
+FunctionPass *createEVMStackification();
 
 void initializeEVMAddJumpdestPass(PassRegistry &);
+void initializeEVMStackificationPass(PassRegistry &);
 
 }
 

@@ -23,6 +23,7 @@ add_llvm_target(EVMCodeGen
   EVMTargetMachine.cpp
   EVMTargetObjectFile.cpp
   EVMAddJumpdest.cpp
+  EVMStackification.cpp
   )
 
 add_subdirectory(InstPrinter)

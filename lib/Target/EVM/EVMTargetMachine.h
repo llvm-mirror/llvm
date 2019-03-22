@@ -39,6 +39,9 @@ public:
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
+
+  // Since we disabled register allocation, enable vreg for PEI.
+  bool usesPhysRegsForPEI() const override { return false; }
 };
 }
 

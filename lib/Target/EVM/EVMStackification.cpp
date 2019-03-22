@@ -54,6 +54,8 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  llvm_unreachable("Stackification not yet implemented.");
+
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   bool Changed = false;

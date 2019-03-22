@@ -95,7 +95,9 @@ bool EVMPassConfig::addInstSelector() {
 
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
+
   addPass(createEVMAddJumpdest());
+  addPass(createEVMStackification());
 }
 
 void EVMPassConfig::addPreRegAlloc() {
@@ -103,8 +105,22 @@ void EVMPassConfig::addPreRegAlloc() {
 }
 
 void EVMPassConfig::addPostRegAlloc() {
+  // copied from WebAssembly backed.
+
+  // These functions all require the NoVRegs property.
+  disablePass(&MachineCopyPropagationID);
+  disablePass(&PostRAMachineSinkingID);
+  disablePass(&PostRASchedulerID);
+  disablePass(&FuncletLayoutID);
+  disablePass(&StackMapLivenessID);
+  disablePass(&LiveDebugValuesID);
+  disablePass(&PatchableFunctionID);
+  disablePass(&ShrinkWrapID);
+
+  TargetPassConfig::addPostRegAlloc();
 }
 
+// Disable register allocation.
 FunctionPass *EVMPassConfig::createTargetRegisterAllocator(bool) {
   return nullptr; // No reg alloc
 }

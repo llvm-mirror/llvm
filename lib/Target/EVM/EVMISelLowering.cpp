@@ -210,7 +210,7 @@ static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
 SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
                                            SelectionDAG &DAG) const {
     int FI = cast<FrameIndexSDNode>(Op)->getIndex();
-      return DAG.getTargetFrameIndex(FI, Op.getValueType());
+    return DAG.getTargetFrameIndex(FI, Op.getValueType());
 }
 
 
