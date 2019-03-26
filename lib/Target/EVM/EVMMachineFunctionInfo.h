@@ -15,6 +15,7 @@
 
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 namespace llvm {
 
@@ -31,6 +32,14 @@ private:
   /// of 32-bit GPRs via the stack.
   int MoveF64FrameIndex = -1;
 
+  /// A mapping from CodeGen vreg index to a boolean value indicating whether
+  /// the given register is considered to be "stackified", meaning it has been
+  /// determined or made to meet the stack requirements:
+  ///   - single use (per path)
+  ///   - single def (per path)
+  ///   - defined and used in LIFO order with other stack registers
+  BitVector VRegStackified;
+
 public:
   //  EVMMachineFunctionInfo() = default;
 
@@ -42,10 +51,25 @@ public:
   unsigned getVarArgsSaveSize() const { return VarArgsSaveSize; }
   void setVarArgsSaveSize(int Size) { VarArgsSaveSize = Size; }
 
+  void stackifyVReg(unsigned VReg) {
+    assert(MF.getRegInfo().getUniqueVRegDef(VReg));
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    if (I >= VRegStackified.size())
+      VRegStackified.resize(I + 1);
+    VRegStackified.set(I);
+  }
+
   int getMoveF64FrameIndex() {
     if (MoveF64FrameIndex == -1)
       MoveF64FrameIndex = MF.getFrameInfo().CreateStackObject(8, 8, false);
     return MoveF64FrameIndex;
+  }
+
+  bool isVRegStackified(unsigned VReg) const {
+    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    if (I >= VRegStackified.size())
+      return false;
+    return VRegStackified.test(I);
   }
 };
 

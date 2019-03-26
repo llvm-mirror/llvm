@@ -96,7 +96,8 @@ bool EVMPassConfig::addInstSelector() {
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
-  addPass(createEVMAddJumpdest());
+  //addPass(createEVMAddJumpdest());
+  addPass(createEVMReplacePhysRegs());
   addPass(createEVMStackification());
 }
 

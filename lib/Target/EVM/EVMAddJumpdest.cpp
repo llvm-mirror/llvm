@@ -31,9 +31,12 @@ public:
 
   StringRef getPassName() const override { return "EVM Add Jumpdest"; }
 
+  /*
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
+    FunctionPass::getAnalysisUsage(AU);
   }
+  */
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
@@ -53,6 +56,7 @@ bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  return false;
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   bool Changed = false;

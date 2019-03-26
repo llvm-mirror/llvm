@@ -32,11 +32,16 @@ bool LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
                                          MCOperand &MCOp, const AsmPrinter &AP);
 
 FunctionPass *createEVMISelDag(EVMTargetMachine &TM);
+
 FunctionPass *createEVMAddJumpdest();
 FunctionPass *createEVMStackification();
+FunctionPass *createEVMReplacePhysRegs();
+FunctionPass *createEVMVRegToMem();
 
 void initializeEVMAddJumpdestPass(PassRegistry &);
 void initializeEVMStackificationPass(PassRegistry &);
+void initializeEVMReplacePhysRegsPass(PassRegistry &);
+void initializeEVMVRegToMemPass(PassRegistry &);
 
 }
 
