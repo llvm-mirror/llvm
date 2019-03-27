@@ -31,7 +31,8 @@ static cl::opt<bool>
 
 void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot, const MCSubtargetInfo &STI) {
-  llvm_unreachable("unimplemented.");
+  printInstruction(MI, OS);
+  printAnnotation(OS, Annot);
 }
 
 void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {
@@ -41,6 +42,14 @@ void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {
 void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                     const MCSubtargetInfo &STI, raw_ostream &O,
                                     const char *Modifier) {
-  llvm_unreachable("unimpleted");
+  assert((Modifier == 0 || Modifier[0] == 0) && "No modifiers supported");
+  const MCOperand &Op = MI->getOperand(OpNo);
+
+  if (Op.isReg()) {
+    // should print `pass`
+
+  } else if (Op.isImm()) {
+    // should have `PUSH IMM` printed before instruction?
+  }
 }
 
