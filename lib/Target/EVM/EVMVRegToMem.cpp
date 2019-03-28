@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -69,11 +70,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   });
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
   bool Changed = false;
 
   DenseMap<unsigned, unsigned> Reg2Mem;
-  unsigned index = 0;
+  unsigned index = 1;
 
   // first, find all the virtual registers.
   for (const MachineBasicBlock & MBB : MF) {
@@ -92,45 +94,97 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
+  unsigned increment_size = Reg2Mem.size();
+
   LLVM_DEBUG({
-      dbgs() << "Total Number of virtual register definintion: " << Reg2Mem.size();
+      dbgs() << "Total Number of virtual register definintion: "
+             << increment_size << '\n';
   });
 
   // at the beginning of the function, increment memory allocator pointer.
-  // TODO
-  MachineBasicBlock &EntryMBB = MF.front();
-  // insert into the front of BB.0:
-  // r1 = (MLOAD_r LOC_mem)
-  // r2 = ADD_r INC_imm, r1
-  // MSTORE_r LOC_mem r2
+  {
+    MachineBasicBlock &EntryMBB = MF.front();
+    MachineInstr &MI = EntryMBB.front();
+    // insert into the front of BB.0:
+    // r1 = (MLOAD_r LOC_mem)
+    // r2 = ADD_r INC_imm, r1
+    // MSTORE_r LOC_mem r2
+    const TargetRegisterClass *RC = MRI.getRegClass(MVT::i256);
+    unsigned NewReg1 = MRI.createVirtualRegister(RC);
+    unsigned NewReg2 = MRI.createVirtualRegister(RC);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
+      .addImm(0x200);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::ADD_r), NewReg2)
+      .addImm(increment_size * 32).addReg(NewReg1);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
+      .addImm(0x200).addReg(NewReg2);
+  }
 
 
   // at the end of the function, decrement memory allocator pointer.
   // r1 = (MLOAD_r LOC_mem)
   // r2 = SUB_r r1, INC_imm
   // MSTORE_r LOC_mem r2
+  const TargetRegisterClass *RC = MRI.getRegClass(MVT::i256);
+  {
+    MachineBasicBlock &ExitMBB = MF.back();
+    MachineInstr &MI = ExitMBB.back();
+    unsigned NewReg3 = MRI.createVirtualRegister(RC);
+    unsigned NewReg4 = MRI.createVirtualRegister(RC);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::MLOAD_r), NewReg3).addImm(0x200);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::SUB_r), NewReg4)
+      .addReg(NewReg3).addImm(increment_size * 32);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::MSTORE_r)).addImm(0x200).addReg(NewReg4);
+  }
+
 
   // second: replace those instructions with acess to memory.
-  for (const MachineBasicBlock & MBB : MF) {
-    for (const MachineInstr & MI : MBB) {
-      for (const MachineOperand &MO : MI.explicit_operands()) {
-        if ( !MO.isReg() ) continue;
+  for (MachineFunction::iterator MBB = MF.begin(), BB_E = MF.end(); MBB != BB_E; ++MBB) {
+    for (MachineBasicBlock::iterator MI = MBB->begin(), E = MBB->end(); MI != E; ++MI) {
+      for (MachineInstr::mop_iterator MO = MI->explicit_operands().begin(),
+                                    MI_E = MI->explicit_operands().end();
+                                     MO != MI_E; ++MO) {
+        if ( !MO->isReg() ) continue;
 
-        unsigned reg = MO.getReg();
+        unsigned reg = MO->getReg();
         assert(Reg2Mem.find(reg) != Reg2Mem.end());
         unsigned index = Reg2Mem[reg];
 
         Changed = true;
 
-        if (MO.isDef()) {
+        if (MO->isDef()) {
           // insert after instruction:
+          // r1 = MLOAD_r 0x200
+          // r2 = SUB_r r1, (index * 32)
           // MSTORE_r vreg, (index * 32)
+          auto InsertPt = std::next(MI);
+          unsigned NewReg1 = MRI.createVirtualRegister(RC);
+          unsigned NewReg2 = MRI.createVirtualRegister(RC);
+          BuildMI(*MBB, InsertPt, MI->getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
+                 .addImm(0x200);
+          BuildMI(*MBB, InsertPt, MI->getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
+                 .addReg(NewReg1).addImm(index * 32);
+          BuildMI(*MBB, InsertPt, MI->getDebugLoc(), TII.get(EVM::MSTORE_r))
+                 .addReg(reg).addImm(index * 32);
 
         } else {
-          assert(MO.isUse());
+          assert(MO->isUse());
           // insert before instruction:
+          // r1 = MLOAD_r 0x200
+          // r2 = SUB_r r1, (index * 32)
           // new_vreg = MLOAD_r (index *32)
-
+          unsigned NewReg1 = MRI.createVirtualRegister(RC);
+          unsigned NewReg2 = MRI.createVirtualRegister(RC);
+          BuildMI(*MBB, MI, MI->getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
+                 .addImm(0x200);
+          BuildMI(*MBB, MI, MI->getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
+                 .addReg(NewReg1).addImm(index * 32);
+          BuildMI(*MBB, MI, MI->getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
+                 .addReg(NewReg1).addImm(index * 32);
+          MO->setReg(NewReg2);
         }
       }
     }
