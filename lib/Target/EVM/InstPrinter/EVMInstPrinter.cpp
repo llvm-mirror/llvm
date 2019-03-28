@@ -24,6 +24,9 @@ using namespace llvm;
 
 #define DEBUG_TYPE "evm-asm-printer"
 
+// Include the auto-generated portion of the assembly writer.
+#include "EVMGenAsmWriter.inc"
+
 static cl::opt<bool>
     NoAliases("evm-no-aliases",
               cl::desc("Disable the emission of assembler pseudo instructions"),
@@ -31,8 +34,8 @@ static cl::opt<bool>
 
 void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot, const MCSubtargetInfo &STI) {
-  printInstruction(MI, OS);
-  printAnnotation(OS, Annot);
+  printInstruction(MI, STI, O);
+  printAnnotation(O, Annot);
 }
 
 void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {

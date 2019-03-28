@@ -9,6 +9,12 @@
 /// \file
 /// This file implements a pass that moves virtual register access to memory
 /// locations.
+/// After this pass, there should not be any virtual registers that are:
+/// 1. created in a basic block i, and 
+/// 2. used in basic block j, where i != j
+
+/// It removes all the cross-basic block dependencies of vregs and converts
+/// them to loads and stores of the memory. (like reversing mem2reg).
 ///
 //===----------------------------------------------------------------------===//
 
@@ -92,9 +98,17 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
   // at the beginning of the function, increment memory allocator pointer.
   // TODO
+  MachineBasicBlock &EntryMBB = MF.front();
+  // insert into the front of BB.0:
+  // r1 = (MLOAD_r LOC_mem)
+  // r2 = ADD_r INC_imm, r1
+  // MSTORE_r LOC_mem r2
+
 
   // at the end of the function, decrement memory allocator pointer.
-  // TODO
+  // r1 = (MLOAD_r LOC_mem)
+  // r2 = SUB_r r1, INC_imm
+  // MSTORE_r LOC_mem r2
 
   // second: replace those instructions with acess to memory.
   for (const MachineBasicBlock & MBB : MF) {
@@ -110,13 +124,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         if (MO.isDef()) {
           // insert after instruction:
-          // PUSH (index * 32)
-          // MSTORE
+          // MSTORE_r vreg, (index * 32)
 
         } else {
           assert(MO.isUse());
-          // PUSH (index *32) # offset
-          // MLOAD
+          // insert before instruction:
+          // new_vreg = MLOAD_r (index *32)
 
         }
       }

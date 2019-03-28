@@ -59,7 +59,7 @@ class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
 
 def I256Imm : Operand<i256> {
   // TODO: implement Imm256 print
-  let PrintMethod = "printImm256Operand";
+  //let PrintMethod = "printImm256Operand";
 }
 
 // The memory size of EVM is 1024 elements with 256 bit each.
@@ -72,7 +72,7 @@ def EVMaddr : Operand<i256> {
 
 def brtarget : Operand<OtherVT> {
   // TODO: implement target print
-  let PrintMethod = "printBrTargetOperand";
+  //let PrintMethod = "printBrTargetOperand";
 }
 
 // Alpha: number of additional items placed on the stack. (return value)
