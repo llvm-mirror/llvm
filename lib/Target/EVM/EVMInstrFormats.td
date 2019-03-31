@@ -32,7 +32,6 @@ class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
   let Namespace      = "EVM";
   let AsmString      = asmstr;
   let Pattern        = pattern;
-  let Defs           = [REG_ARGS];
 
   let mayLoad        = 0;
   let mayStore       = 0;

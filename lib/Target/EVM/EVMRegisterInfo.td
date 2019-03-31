@@ -38,8 +38,3 @@ def GPR8bit : RegisterClass<"EVM", [i256], 8, (add FP, SP)>;
 // uses and defs that must remain in LIFO order.
 def REG_STACK : EVMReg<"Stack_Reg">;
 
-// The incoming arguments "register". This is an opaque entity which serves to
-// order the ARGUMENT instructions that are emulating live-in registers and
-// must not be scheduled below other instructions.
-def REG_ARGS : EVMReg<"Arg_Reg">;
-

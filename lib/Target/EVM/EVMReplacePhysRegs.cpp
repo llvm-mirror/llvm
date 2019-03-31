@@ -68,7 +68,6 @@ bool EVMReplacePhysRegs::runOnMachineFunction(MachineFunction &MF) {
   });
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
   bool Changed = false;
 
   assert(!mustPreserveAnalysisID(LiveIntervalsID) &&
@@ -81,13 +80,12 @@ bool EVMReplacePhysRegs::runOnMachineFunction(MachineFunction &MF) {
        PReg < EVM::NUM_TARGET_REGS; ++PReg) {
 
     // Replace explicit uses of the physical register with a virtual register.
-    const TargetRegisterClass *RC = TRI.getMinimalPhysRegClass(PReg);
     unsigned VReg = EVM::NoRegister;
     for (auto I = MRI.reg_begin(PReg), E = MRI.reg_end(); I != E;) {
       MachineOperand &MO = *I++;
       if (!MO.isImplicit()) {
         if (VReg == EVM::NoRegister)
-          VReg = MRI.createVirtualRegister(RC);
+          VReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
         MO.setReg(VReg);
         if (MO.getParent()->isDebugValue())
           MO.setIsDebug();
