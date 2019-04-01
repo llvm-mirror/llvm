@@ -26,6 +26,7 @@ add_llvm_target(EVMCodeGen
   EVMVRegToMem.cpp
   EVMReplacePhysRegs.cpp
   EVMStackification.cpp
+  EVMConvertRegToStack.cpp
   )
 
 add_subdirectory(InstPrinter)

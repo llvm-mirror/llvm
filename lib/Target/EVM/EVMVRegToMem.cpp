@@ -12,7 +12,8 @@
 /// After this pass, there should not be any virtual registers that are:
 /// 1. created in a basic block i, and 
 /// 2. used in basic block j, where i != j
-
+/// 3. For each def, there is at monst 1 use.
+///
 /// It removes all the cross-basic block dependencies of vregs and converts
 /// them to loads and stores of the memory. (like reversing mem2reg).
 ///
@@ -142,7 +143,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
 
-      for (MachineOperand &MO : reverse(MI.explicit_uses())) {
+      for (MachineOperand &MO : MI.explicit_uses()) {
         if (!MO.isReg()) continue;
 
         unsigned reg = MO.getReg();
@@ -212,6 +213,21 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
+
+#ifndef NDEBUG
+  // Assert that no use of vregs are across basic block.
+  for (const MachineBasicBlock &MBB : MF) {
+    for (const MachineInstr &MI : MBB) {
+      if (MI.isDebugInstr() || MI.isLabel())
+        continue;
+      for (const MachineOperand &MO : MI.defs()) {
+        // find all uses.
+        // TODO
+
+      }
+    }
+  }
+#endif
 
   return Changed;
 }

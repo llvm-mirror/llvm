@@ -27,7 +27,9 @@ extern "C" void LLVMInitializeEVMTarget() {
   RegisterTargetMachine<EVMTargetMachine> Y(getTheEVMTarget());
   auto PR = PassRegistry::getPassRegistry();
 
-  initializeEVMAddJumpdestPass(*PR);
+  //initializeEVMAddJumpdestPass(*PR);
+  initializeEVMReplacePhysRegsPass(*PR);
+  initializeEVMVRegToMemPass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT) {
@@ -96,11 +98,11 @@ bool EVMPassConfig::addInstSelector() {
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
-  addPass(createEVMAddJumpdest());
+  //addPass(createEVMAddJumpdest());
   addPass(createEVMReplacePhysRegs());
 
   if (getOptLevel() != CodeGenOpt::None) {
-    addPass(createEVMStackification());
+    //addPass(createEVMStackification());
   }
 
   addPass(createEVMVRegToMem());

@@ -31,23 +31,22 @@ public:
 
   StringRef getPassName() const override { return "EVM Add Jumpdest"; }
 
-  /*
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     FunctionPass::getAnalysisUsage(AU);
   }
-  */
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
 } // end anonymous namespace
 
 char EVMAddJumpdest::ID = 0;
-INITIALIZE_PASS(EVMAddJumpdest, DEBUG_TYPE,
-                "Adding Jumpdest instructions for EVM", false, false)
+//INITIALIZE_PASS(EVMAddJumpdest, DEBUG_TYPE,
+//                "Adding Jumpdest instructions for EVM", false, false)
 
 FunctionPass *llvm::createEVMAddJumpdest() {
-  return new EVMAddJumpdest();
+  //return new EVMAddJumpdest();
+  return NULL;
 }
 
 bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
@@ -61,6 +60,7 @@ bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
 
   bool Changed = false;
 
+  // FIXME: JUMPDEST takes one byte of space
   for (MachineBasicBlock & MBB : MF) {
     bool isJmpTarget = false;
     if (MBB.hasAddressTaken()) {
@@ -75,9 +75,14 @@ bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
     }
 
     if (isJmpTarget) {
-      // construct a JUMPDEST instruction
+      // construct a JUMPDEST instructionj
+      // TODO: fix the location so it does not move at all.
       BuildMI(MBB, MBB.begin(), MBB.findDebugLoc(MBB.begin()),
-              TII.get(EVM::JUMPDEST));
+              TII.get(EVM::JUMPDEST_r));
+      LLVM_DEBUG({
+          dbgs() << "Inserting JUMPDEST at the beginning of BB: "
+          << MBB.getNumber() << '\n';
+          });
       Changed = true;
     }
   }
