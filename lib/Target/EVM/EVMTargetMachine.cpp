@@ -29,6 +29,7 @@ extern "C" void LLVMInitializeEVMTarget() {
 
   //initializeEVMAddJumpdestPass(*PR);
   initializeEVMReplacePhysRegsPass(*PR);
+  initializeEVMConvertRegToStackPass(*PR);
   initializeEVMVRegToMemPass(*PR);
 }
 
@@ -98,7 +99,6 @@ bool EVMPassConfig::addInstSelector() {
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
-  //addPass(createEVMAddJumpdest());
   //addPass(createEVMReplacePhysRegs());
 
   if (getOptLevel() != CodeGenOpt::None) {
@@ -107,6 +107,7 @@ void EVMPassConfig::addPreEmitPass() {
 
   addPass(createEVMVRegToMem());
   addPass(createEVMConvertRegToStack());
+  addPass(createEVMAddJumpdest());
 }
 
 void EVMPassConfig::addPreRegAlloc() {

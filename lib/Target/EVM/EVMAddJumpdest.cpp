@@ -5,20 +5,18 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-///
-/// \file
-///
-//===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVM.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
-#include "EVMRegisterInfo.h"
-#include "EVMTargetMachine.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "evm-add-jumpdest"
@@ -29,11 +27,14 @@ public:
   static char ID; // Pass identification, replacement for typeid
   EVMAddJumpdest() : MachineFunctionPass(ID) {}
 
-  StringRef getPassName() const override { return "EVM Add Jumpdest"; }
+private:
+  StringRef getPassName() const override {
+    return "EVM add Jumpdest";
+  }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
-    FunctionPass::getAnalysisUsage(AU);
+    MachineFunctionPass::getAnalysisUsage(AU);
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
@@ -41,12 +42,12 @@ public:
 } // end anonymous namespace
 
 char EVMAddJumpdest::ID = 0;
-//INITIALIZE_PASS(EVMAddJumpdest, DEBUG_TYPE,
-//                "Adding Jumpdest instructions for EVM", false, false)
+INITIALIZE_PASS(EVMAddJumpdest, DEBUG_TYPE,
+                "Replace virtual registers accesses with memory locations",
+                false, false)
 
 FunctionPass *llvm::createEVMAddJumpdest() {
-  //return new EVMAddJumpdest();
-  return NULL;
+  return new EVMAddJumpdest();
 }
 
 bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
@@ -55,34 +56,33 @@ bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
-  return false;
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   bool Changed = false;
 
-  // FIXME: JUMPDEST takes one byte of space
-  for (MachineBasicBlock & MBB : MF) {
-    bool isJmpTarget = false;
-    if (MBB.hasAddressTaken()) {
-      isJmpTarget = true;
-    }
+  for (const MachineBasicBlock & MBB : MF) {
+    for (const MachineInstr & MI : MBB) {
+      if (!MI.isBranch()) continue;
 
-    for (MachineBasicBlock *Pred : MBB.predecessors()) {
-      MachineBasicBlock * fallthrough = Pred->getFallThrough();
-      if (fallthrough != &MBB) {
-        isJmpTarget = true;
+      // the operand is the target MBB.
+      const MachineOperand & MO = MI.getOperand(0);
+      assert(MO.isMBB() && "Branch instruction should have only MBB operand.");
+
+      MachineBasicBlock * tMBB = MO.getMBB();
+
+      // if the first instruction in MBB is already JUMPDEST, skip.
+      const MachineInstr &tMI = *(tMBB->begin());
+      if (tMBB->begin() != tMBB->end() &&
+          tMBB->begin()->getOpcode() == EVM::JUMPDEST) {
+        continue;
       }
-    }
 
-    if (isJmpTarget) {
-      // construct a JUMPDEST instructionj
-      // TODO: fix the location so it does not move at all.
-      BuildMI(MBB, MBB.begin(), MBB.findDebugLoc(MBB.begin()),
-              TII.get(EVM::JUMPDEST_r));
+      BuildMI(*tMBB, tMBB->begin(), tMBB->findDebugLoc(tMBB->begin()),
+              TII.get(EVM::JUMPDEST));
       LLVM_DEBUG({
           dbgs() << "Inserting JUMPDEST at the beginning of BB: "
-          << MBB.getNumber() << '\n';
-          });
+          << tMBB->getNumber() << '\n';
+      });
       Changed = true;
     }
   }
