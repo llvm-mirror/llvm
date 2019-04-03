@@ -12,6 +12,14 @@
 
 include "EVMInstrFormats.td"
 
+def getStackOpcode : InstrMapping {
+  let FilterClass = "StackRel";
+  let RowFields = ["BaseName"];
+  let ColFields = ["StackBased"];
+  let KeyCol = ["false"];
+  let ValueCols = [["true"]];
+}
+
 //===----------------------------------------------------------------------===//
 // EVM specific DAG Nodes.
 //===----------------------------------------------------------------------===//
@@ -131,8 +139,10 @@ def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 //===----------------------------------------------------------------------===//
 
 // Arithmetic instructions ////////////////////////////////////////////////////
+let isCommutable = 1 in {
 defm ADD  : BinaryInst<add,  "ADD",  0x01, 3>;
 defm MUL  : BinaryInst<mul,  "MUL",  0x02, 5>;
+}
 defm SUB  : BinaryInst<sub,  "SUB",  0x03, 3>;
 defm DIV  : BinaryInst<udiv, "DIV",  0x04, 5>;
 defm SDIV : BinaryInst<sdiv, "SDIV", 0x05, 5>;
@@ -171,9 +181,11 @@ defm ISZERO : Inst_1_1<"ISZERO",
                        0x15, 3>;
 }
 // Bitwise instructions ///////////////////////////////////////////////////////
+let isCommutable = 1 in {
 defm AND : BinaryInst<and, "AND", 0x16, 3>;
 defm OR  : BinaryInst<or,  "OR",  0x17, 3>;
 defm XOR : BinaryInst<xor, "XOR", 0x18, 3>;
+}
 
 // LLVM does not generate "NOT" nodes.
 let isCompare = 1 in {
@@ -331,11 +343,17 @@ defm GAS      : Inst_0_1<"GAS",
                          0x5a, 2>;
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
-defm PUSH32 :
-  RSInst<(outs GPR:$dst), (ins I256Imm:$src),
-          [(set GPR:$dst, imm:$src)],
-          "PUSH32_r \t$dst, $src", "PUSH32_i",
-          0x7f, 3>;
+let BaseName = "PUSH32" in {
+
+let isCodeGenOnly = 1 in {
+def PUSH32_r :
+  EVMInst<(outs GPR:$dst), (ins I256Imm:$src), [(set GPR:$dst, imm:$src)],
+          "false", "PUSH32_r \t$src", 0x7f, 3>;
+}
+
+def PUSH32 :
+  EVMInst<(outs), (ins I256Imm:$src), [], "true", "PUSH32 \t$src", 0x7f, 3>;
+}
 
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;

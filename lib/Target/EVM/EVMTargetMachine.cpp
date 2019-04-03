@@ -99,13 +99,14 @@ void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
   //addPass(createEVMAddJumpdest());
-  addPass(createEVMReplacePhysRegs());
+  //addPass(createEVMReplacePhysRegs());
 
   if (getOptLevel() != CodeGenOpt::None) {
     //addPass(createEVMStackification());
   }
 
   addPass(createEVMVRegToMem());
+  addPass(createEVMConvertRegToStack());
 }
 
 void EVMPassConfig::addPreRegAlloc() {

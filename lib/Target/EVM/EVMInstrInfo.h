@@ -42,5 +42,11 @@ public:
 private:
   const EVMRegisterInfo RI;
 };
+
+namespace EVM {
+  LLVM_READONLY
+  int getStackOpcode(uint16_t Opcode);
+};
+
 }
 #endif

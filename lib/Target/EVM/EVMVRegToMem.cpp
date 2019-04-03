@@ -81,10 +81,27 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   // first, find all the virtual register defs.
   for (const MachineBasicBlock & MBB : MF) {
     for (const MachineInstr & MI : MBB) {
-      for (const MachineOperand &MO : MI.defs()) {
+      for (const MachineOperand &MO : MI.explicit_uses()) {
+
         // only cares about registers.
         if ( !MO.isReg() || MO.isImplicit() ) continue;
-        unsigned reg = TRI.virtReg2Index(MO.getReg());
+
+        unsigned r = MO.getReg();
+        if (TargetRegisterInfo::isPhysicalRegister(r)) continue;
+        unsigned reg = TRI.virtReg2Index(r);
+
+        if (Reg2Mem.find(reg) != Reg2Mem.end()) {
+          // we've visited this register.
+          continue;
+        }
+
+        // take a look at its def
+        MachineInstr *Def = MRI.getVRegDef(MO.getReg());
+        LLVM_DEBUG({
+            dbgs() << "Find def for vreg: " << reg << ": ";
+            if (Def != NULL) Def->dump();
+            else dbgs() << "NULL\n";
+        });
 
         LLVM_DEBUG({dbgs() << "Find vreg index def: " << reg <<
                            ", assigning location: " << index << "\n"; });
@@ -102,42 +119,6 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
              << increment_size << '\n';
   });
 
-  // at the beginning of the function, increment memory allocator pointer.
-  {
-    MachineBasicBlock &EntryMBB = MF.front();
-    MachineInstr &MI = EntryMBB.front();
-    // insert into the front of BB.0:
-    // r1 = (MLOAD_r LOC_mem)
-    // r2 = ADD_r INC_imm, r1
-    // MSTORE_r LOC_mem r2
-    unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-    unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
-      .addImm(0x200);
-    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::ADD_r), NewReg2)
-      .addImm(increment_size * 32).addReg(NewReg1);
-    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
-      .addImm(0x200).addReg(NewReg2);
-  }
-
-
-  // at the end of the function, decrement memory allocator pointer.
-  // r1 = (MLOAD_r LOC_mem)
-  // r2 = SUB_r r1, INC_imm
-  // MSTORE_r LOC_mem r2
-  {
-    MachineBasicBlock &ExitMBB = MF.back();
-    MachineInstr &MI = ExitMBB.back();
-    unsigned NewReg3 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-    unsigned NewReg4 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
-        TII.get(EVM::MLOAD_r), NewReg3).addImm(0x200);
-    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
-        TII.get(EVM::SUB_r), NewReg4)
-      .addReg(NewReg3).addImm(increment_size * 32);
-    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
-        TII.get(EVM::MSTORE_r)).addImm(0x200).addReg(NewReg4);
-  }
 
   for (MachineBasicBlock & MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
@@ -150,7 +131,8 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         // FIXME: should not have non-virtual registers here.
         if (!TRI.isVirtualRegister(reg)) {
           LLVM_DEBUG({ dbgs() << "skipping non-virt reg MO: "; MO.dump(); });
-          llvm_unreachable("should not have non-vitural registers.");
+          //llvm_unreachable("should not have non-vitural registers.");
+          continue;
         }
         unsigned regindex = TRI.virtReg2Index(MO.getReg());
 
@@ -177,8 +159,8 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
                .addReg(NewReg2);
         MO.setReg(NewVReg);
 
-        LLVM_DEBUG({ dbgs() << " replace use with: " << TRI.virtReg2Index(NewVReg) << "\n"; });
-
+        LLVM_DEBUG({ dbgs() << " replacing use with: " << TRI.virtReg2Index(NewVReg)
+                    << ", load from: " << memindex << ".\n"; });
 
         Changed = true;
       }
@@ -193,7 +175,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         unsigned memindex = Reg2Mem[regindex];
 
-        LLVM_DEBUG({ dbgs() << "found regindex def: " << regindex << "\n"; });
+        LLVM_DEBUG({ dbgs() << "found regindex def: " << regindex; });
         // 1. insert after instruction:
         // r1 = MLOAD_r 0x200
         // r2 = SUB_r r1, (index * 32)
@@ -209,9 +191,51 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
                .addReg(MO.getReg()).addReg(NewReg2);
 
+        LLVM_DEBUG({ dbgs() << ", storing def to location: " << TRI.virtReg2Index(NewReg2)
+                            << ", store to: " << memindex << ".\n"; });
+
         Changed = true;
       }
     }
+  }
+
+  // at the beginning of the function, increment memory allocator pointer.
+  {
+    MachineBasicBlock &EntryMBB = MF.front();
+    MachineInstr &MI = EntryMBB.front();
+    // insert into the front of BB.0:
+    // r1 = (MLOAD_r LOC_mem)
+    // r2 = ADD_r INC_imm, r1
+    // MSTORE_r LOC_mem r2
+    unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
+    unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
+      .addImm(0x200);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::ADD_r), NewReg2)
+      .addImm(increment_size * 32).addReg(NewReg1);
+    BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
+      .addImm(0x200).addReg(NewReg2);
+    LLVM_DEBUG({ dbgs() << "Increment AP at entry: " << increment_size << ".\n"; });
+  }
+
+
+  // at the end of the function, decrement memory allocator pointer.
+  // r1 = (MLOAD_r LOC_mem)
+  // r2 = SUB_r r1, INC_imm
+  // MSTORE_r LOC_mem r2
+  {
+    MachineBasicBlock &ExitMBB = MF.back();
+    MachineInstr &MI = ExitMBB.back();
+    unsigned NewReg3 = MRI.createVirtualRegister(&EVM::GPRRegClass);
+    unsigned NewReg4 = MRI.createVirtualRegister(&EVM::GPRRegClass);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::MLOAD_r), NewReg3).addImm(0x200);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::SUB_r), NewReg4)
+      .addReg(NewReg3).addImm(increment_size * 32);
+    BuildMI(ExitMBB, MI, ExitMBB.findPrevDebugLoc(MF.back().end()),
+        TII.get(EVM::MSTORE_r)).addImm(0x200).addReg(NewReg4);
+    LLVM_DEBUG({ dbgs() << "decrement AP at exit: " << increment_size << ".\n"; });
   }
 
 #ifndef NDEBUG

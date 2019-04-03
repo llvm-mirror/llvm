@@ -8,8 +8,10 @@
 ///
 /// \file
 /// This file implements the actual transformation from register based
-/// instructions to stack based instruction.
-/// It has a prerequiste pass, virtual register to mem.
+/// instructions to stack based instruction. It considers the order of the
+/// instructions in a basicblock is correct, and it does not change the order.
+/// Some stack manipulation instructions are inserted into the code.
+/// It has a prerequiste pass: EVMVRegToMem.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -71,44 +73,56 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   for (MachineBasicBlock & MBB : MF) {
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
+    for (MachineBasicBlock::instr_iterator I = MBB.instr_begin(), E = MBB.instr_end(); I != E;) {
       MachineInstr &MI = *I++;
 
       for (MachineOperand &MO : reverse(MI.explicit_uses())) {
         // Immediate value: insert `PUSH32 Imm` before instruction.
         if (MO.isImm()) {
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
+          LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
           continue;
         }
 
         // register value:
         if (MO.isReg()) {
+          if (TargetRegisterInfo::isPhysicalRegister(MO.getReg())) {
+            continue;
+          }
+
           assert(MRI.hasOneUse(MO.getReg()) && "registers should have only one use.");
-          assert(MRI.hasOneDef(MO.getReg()) && "registers should have only one def.");
+          //assert(MRI.hasOneDef(MO.getReg()) && "registers should have only one def.");
 
-          auto *DefMBB = MRI.getUniqueVRegDef(MO.getReg())->getParent();
-          assert(DefMBB == &MBB && "register def and use should be in the same basicblock.");
+          //auto *DefMBB = MRI.getUniqueVRegDef(MO.getReg())->getParent();
+          //assert(DefMBB == &MBB && "register def and use should be in the same basicblock.");
 
-          // TODO
+          // TODO: the register operand should already be on the stack.
         }
       }
 
       // now def and uses are handled. should convert the instruction.
       {
         auto RegOpcode = MI.getOpcode();
-        //auto StackOpcode = EVM::getStackOpcode(RegOpcode);
-        //assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
-        //MI.setDesc(TII.get(StackOpcode));
+        auto StackOpcode = llvm::EVM::getStackOpcode(RegOpcode);
+        assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 
         // Remove register operands.
-        for (unsigned i = 0; i < MI.getNumOperands(); ++i) {
+        for (unsigned i = 0; i < MI.getNumOperands();) {
           auto &MO = MI.getOperand(i);
           if ( MO.isReg() || MO.isImm() ) {
             MI.RemoveOperand(i);
+          } else if (MO.isMBB()) {
+            // this is special case for jumps.
+            ++i;
           }
         }
-      }
 
+        MI.setDesc(TII.get(StackOpcode));
+
+        LLVM_DEBUG({
+            dbgs() << "********** Generating new instruction:"; MI.dump();
+        });
+      }
     }
   }
 

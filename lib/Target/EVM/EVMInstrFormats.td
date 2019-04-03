@@ -10,14 +10,6 @@
 //def HasEIP615 : Predicate<"!Subtarget->hasEIP615()">;
 
 class StackRel;
-def getStackOpcode : InstrMapping {
-  let FilterClass = "StackRel";
-  let RowFields = ["BaseName"];
-  let ColFields = ["StackBased"];
-  let KeyCol = ["false"];
-  let ValueCols = [["true"]];
-}
-
 // Our register-based instructions
 class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
            string asmstr = "", bits<8> inst, int cost = -1>
@@ -42,7 +34,7 @@ class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
 multiclass RSInst<dag outs_r, dag ins_r,
                 list<dag> pattern_r, string asmstr_r, string asmstr_s,
                 bits<8> inst, int cost> {
-  let isCodeGenOnly = 1 in
+  let isCodeGenOnly = 1, BaseName = NAME in
     def _r : EVMInst<outs_r, ins_r, pattern_r, "false", asmstr_r, inst, cost>;
   let BaseName = NAME in
     def "" : EVMInst<(outs), (ins), [], "true", asmstr_s, inst, cost>;
