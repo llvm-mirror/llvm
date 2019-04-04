@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "EVM.h"
+#include "EVMMCInstLower.h"
 #include "InstPrinter/EVMInstPrinter.h"
 #include "EVMTargetMachine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -62,11 +63,29 @@ void EVMAsmPrinter::EmitToStreamer(MCStreamer &S, const MCInst &Inst) {
 }
 
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
+  EVMMCInstLower MCInstLowering(OutContext, *this);
+  MCInst TmpInst;
+  MCInstLowering.Lower(MI, TmpInst);
+  EmitToStreamer(*OutStreamer, TmpInst);
 }
 
 bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                                      unsigned AsmVariant,
-                                      const char *ExtraCode, raw_ostream &OS) {
+                       unsigned AsmVariant, const char *ExtraCode,
+                       raw_ostream &OS) {
+  const MachineOperand &MO = MI->getOperand(OpNo);
+
+  switch (MO.getType()) {
+  case MachineOperand::MO_Register:
+    break;
+  case MachineOperand::MO_Immediate:
+    OS << MO.getImm();
+    break;
+  case MachineOperand::MO_MachineBasicBlock:
+    OS << *MO.getMBB()->getSymbol();
+    break;
+  default:
+    llvm_unreachable("Not implemented yet!");
+  }
   return true;
 }
 

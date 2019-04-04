@@ -22,11 +22,12 @@ add_llvm_target(EVMCodeGen
   EVMSubtarget.cpp
   EVMTargetMachine.cpp
   EVMTargetObjectFile.cpp
-  EVMAddJumpdest.cpp
   EVMVRegToMem.cpp
   EVMReplacePhysRegs.cpp
   EVMStackification.cpp
   EVMConvertRegToStack.cpp
+  EVMAddJumpdest.cpp
+  EVMshrinkpush.cpp
   )
 
 add_subdirectory(InstPrinter)

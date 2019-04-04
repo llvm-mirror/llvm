@@ -88,13 +88,14 @@ void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
         }
       case MachineOperand::MO_MachineBasicBlock:
         {
-          MI->print(errs());
-          llvm_unreachable("MachineBasicBlock operand should have been rewritten");
+          MCOp = MCOperand::createExpr(
+              MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), Ctx));
+          break;
         }
       case MachineOperand::MO_Register:
         {
-          MI->print(errs());
-          llvm_unreachable("unimplemented.");
+          MCOp = MCOperand::createReg(MO.getReg());
+          break;
         }
       case MachineOperand::MO_Immediate:
         {
