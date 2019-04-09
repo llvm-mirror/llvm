@@ -38,21 +38,27 @@ void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   printAnnotation(O, Annot);
 }
 
-void EVMInstPrinter::printRegName(raw_ostream &O, unsigned RegNo) const {
-  llvm_unreachable("unimplemented.");
+void EVMInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
+  OS << StringRef(getRegisterName(RegNo)).lower();
 }
 
 void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                     const MCSubtargetInfo &STI, raw_ostream &O,
                                     const char *Modifier) {
   assert((Modifier == 0 || Modifier[0] == 0) && "No modifiers supported");
+
+  if (MI->getNumOperands() == 0) return;
+
   const MCOperand &Op = MI->getOperand(OpNo);
 
   if (Op.isReg()) {
-    // should print `pass`
+    printRegName(O, Op.getReg());
+    return;
 
   } else if (Op.isImm()) {
-    // should have `PUSH IMM` printed before instruction?
+    O << Op.getImm();
+    return;
   }
+  llvm_unreachable("unimplemented.");
 }
 

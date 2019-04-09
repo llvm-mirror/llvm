@@ -48,7 +48,7 @@ public:
                              unsigned AsmVariant, const char *ExtraCode,
                              raw_ostream &OS) override;
 
-  void EmitToStreamer(MCStreamer &S, const MCInst &Inst);
+  //void EmitToStreamer(MCStreamer &S, const MCInst &Inst);
   bool emitPseudoExpansionLowering(MCStreamer &OutStreamer,
                                    const MachineInstr *MI);
 
@@ -57,9 +57,6 @@ public:
     return LowerEVMMachineOperandToMCOperand(MO, MCOp, *this);
   }
 };
-}
-
-void EVMAsmPrinter::EmitToStreamer(MCStreamer &S, const MCInst &Inst) {
 }
 
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {

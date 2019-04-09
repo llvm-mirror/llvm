@@ -25,17 +25,9 @@
 
 using namespace llvm;
 
-// Defines llvm::EVM::getStackOpcode to convert register instructions to
-// stack instructions
 #define GET_INSTRINFO_ENUM 1
 #define GET_INSTRMAP_INFO 1
 #include "EVMGenInstrInfo.inc"
-
-
-static MCOperand lowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym,
-                                    const AsmPrinter &AP) {
-  llvm_unreachable("unimplemented.");
-}
 
 bool llvm::LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
                                              MCOperand &MCOp,
@@ -46,30 +38,6 @@ bool llvm::LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
 void llvm::LowerEVMMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                         const AsmPrinter &AP) {
   llvm_unreachable("unimplemented.");
-}
-
-static void removeRegisterOperands(const MachineInstr *MI, MCInst &OutMI) {
-  // Copied from WASM backend.
-  // Remove all uses of stackified registers to bring the instruction format
-  // into its final stack form used thruout MC, and transition opcodes to
-  // their _S variant.
-  // TODO: handle inline asm as WASM backend stated.
-  if (MI->isDebugInstr() || MI->isLabel() || MI->isInlineAsm())
-    return;
-
-  // Transform to _S instruction.
-  auto RegOpcode = OutMI.getOpcode();
-  auto StackOpcode = 0;//llvm::EVM::getStackOpcode(RegOpcode);
-  assert(StackOpcode != -1 && "Failed to stackify instruction");
-  OutMI.setOpcode(StackOpcode);
-
-  // Remove register operands.
-  for (auto I = OutMI.getNumOperands(); I; --I) {
-    auto &MO = OutMI.getOperand(I - 1);
-    if (MO.isReg()) {
-      OutMI.erase(&MO);
-    }
-  }
 }
 
 void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
@@ -104,14 +72,13 @@ void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
         }
       case MachineOperand::MO_FPImmediate:
         {
-
+          MI->print(errs());
+          llvm_unreachable("unknown operand type");
           break;
         }
     }
     OutMI.addOperand(MCOp);
   }
-
-  removeRegisterOperands(MI, OutMI);
 }
 
 
