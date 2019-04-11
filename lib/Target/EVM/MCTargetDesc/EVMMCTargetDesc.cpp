@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "EVMTargetStreamer.h"
 #include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVM.h"
 #include "InstPrinter/EVMInstPrinter.h"
@@ -82,6 +83,15 @@ static MCInstrAnalysis *createEVMInstrAnalysis(const MCInstrInfo *Info) {
   return new EVMMCInstrAnalysis(Info);
 }
 
+
+EVMTargetStreamer::EVMTargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
+EVMTargetStreamer::~EVMTargetStreamer() = default;
+
+static MCTargetStreamer *
+createObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  return new EVMTargetStreamer(S);
+}
+
 extern "C" void LLVMInitializeEVMTargetMC() {
   Target *T = &getTheEVMTarget();
   // Register the MC asm info.
@@ -117,5 +127,8 @@ extern "C" void LLVMInitializeEVMTargetMC() {
                                         createEVMMCCodeEmitter);
   TargetRegistry::RegisterMCAsmBackend(getTheEVMTarget(),
                                        createEVMAsmBackend);
+
+  TargetRegistry::RegisterObjectTargetStreamer(getTheEVMTarget(),
+      createObjectTargetStreamer);
 
 }

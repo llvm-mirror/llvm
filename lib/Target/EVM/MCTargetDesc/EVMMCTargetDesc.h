@@ -15,6 +15,8 @@
 
 #include "llvm/Config/config.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 
 #include <memory>
 
@@ -32,6 +34,7 @@ class Target;
 class Triple;
 class raw_ostream;
 class raw_pwrite_stream;
+class MCTargetStreamer;
 
 Target &getTheEVMTarget();
 
@@ -47,6 +50,9 @@ MCAsmBackend *createEVMAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                   const MCTargetOptions &Options);
 
 std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI);
+
+MCTargetStreamer *
+createEVMObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI);
 }
 
 // Defines symbolic names for EVM registers.  This defines a mapping from
