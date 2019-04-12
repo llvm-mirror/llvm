@@ -19,6 +19,12 @@ public:
   ~EVMTargetStreamer() override;
 };
 
+class EVMJsonTargetStreamer : public MCTargetStreamer {
+public:
+  EVMJsonTargetStreamer(MCStreamer &S);
+  ~EVMJsonTargetStreamer() override;
+};
+
 } // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_EVM_EVMTARGETSTREAMER_H

@@ -89,6 +89,14 @@ EVMTargetStreamer::~EVMTargetStreamer() = default;
 
 static MCTargetStreamer *
 createObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  //return new EVMJsonTargetStreamer(S);
+  return new EVMTargetStreamer(S);
+}
+
+static MCTargetStreamer *
+createAsmTargetStreamer(MCStreamer &S, formatted_raw_ostream &OS,
+                        MCInstPrinter * /*InstPrint*/,
+                        bool /*isVerboseAsm*/) {
   return new EVMTargetStreamer(S);
 }
 
@@ -106,9 +114,6 @@ extern "C" void LLVMInitializeEVMTargetMC() {
   // Register the MC subtarget info.
   TargetRegistry::RegisterMCSubtargetInfo(*T, createEVMMCSubtargetInfo);
 
-  // Register the object streamer
-  TargetRegistry::RegisterELFStreamer(*T, createEVMMCStreamer);
-
   // Register the MCInstPrinter.
   TargetRegistry::RegisterMCInstPrinter(*T, createEVMMCInstPrinter);
 
@@ -123,11 +128,10 @@ extern "C" void LLVMInitializeEVMTargetMC() {
   TargetRegistry::RegisterMCAsmBackend(getTheEVMTarget(),
                                        createEVMAsmBackend);
 
-  TargetRegistry::RegisterMCCodeEmitter(getTheEVMTarget(),
-                                        createEVMMCCodeEmitter);
-  TargetRegistry::RegisterMCAsmBackend(getTheEVMTarget(),
-                                       createEVMAsmBackend);
+  // Register the asm target streamer.
+  TargetRegistry::RegisterAsmTargetStreamer(*T, createAsmTargetStreamer);
 
+  // Register the object target streamer.
   TargetRegistry::RegisterObjectTargetStreamer(getTheEVMTarget(),
       createObjectTargetStreamer);
 

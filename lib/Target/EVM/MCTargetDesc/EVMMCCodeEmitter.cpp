@@ -48,7 +48,7 @@ public:
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
 
-  // getMachineOpValue - Return binary encoding of operand. If the machin
+  // getMachineOpValue - Return binary encoding of operand. If the machine
   // operand requires relocation, record the relocation and return zero.
   unsigned getMachineOpValue(const MCInst &MI, const MCOperand &MO,
                              SmallVectorImpl<MCFixup> &Fixups,
@@ -66,6 +66,7 @@ private:
   uint64_t computeAvailableFeatures(const FeatureBitset &FB) const;
   void verifyInstructionPredicates(const MCInst &MI,
                                    uint64_t AvailableFeatures) const;
+  void encodeImmediate(const MCOperand& opnd, unsigned size) const;
 };
 
 } // end anonymous namespace
@@ -83,10 +84,34 @@ unsigned EVMMCCodeEmitter::getMachineOpValue(const MCInst &MI,
   llvm_unreachable("unimplemented.");
 }
 
+static bool is_PUSH(uint64_t binary) {
+  if (binary >= 0x60 && binary <= 0x7F) {
+    assert(binary == 0x7F && "Other push instructions not implemented.");
+    return true;
+  }
+
+  return false;
+}
+
+void EVMMCCodeEmitter::encodeImmediate(const MCOperand& opnd,
+                                       unsigned size) const {
+  llvm_unreachable("unimplemented");
+}
+
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                          SmallVectorImpl<MCFixup> &Fixups,
                                          const MCSubtargetInfo &STI) const {
-  llvm_unreachable("unimplemented.");
+  uint64_t Start = OS.tell();
+
+  uint64_t Binary = getBinaryCodeForInstr(MI, Fixups, STI);
+  OS << uint8_t(Binary);
+
+  // emit trailing immediate value for push.
+  if (is_PUSH(Binary)) {
+    unsigned push_size = Binary - 0x60 + 1;
+    encodeImmediate(MI.getOperand(0), push_size);
+  }
+
 }
 
 // Encode EVM Memory Operand
