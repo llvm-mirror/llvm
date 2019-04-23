@@ -85,12 +85,9 @@ static MCInstrAnalysis *createEVMInstrAnalysis(const MCInstrInfo *Info) {
 
 
 EVMTargetStreamer::EVMTargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
-EVMTargetStreamer::~EVMTargetStreamer() = default;
 
-static MCTargetStreamer *
-createObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
-  //return new EVMJsonTargetStreamer(S);
-  return new EVMTargetStreamer(S);
+static MCTargetStreamer *createNullTargetStreamer(MCStreamer &S) {
+  return new EVMTargetNullStreamer(S);
 }
 
 static MCTargetStreamer *
@@ -131,8 +128,7 @@ extern "C" void LLVMInitializeEVMTargetMC() {
   // Register the asm target streamer.
   TargetRegistry::RegisterAsmTargetStreamer(*T, createAsmTargetStreamer);
 
-  // Register the object target streamer.
-  TargetRegistry::RegisterObjectTargetStreamer(getTheEVMTarget(),
-      createObjectTargetStreamer);
+  // Register the null target streamer.
+  TargetRegistry::RegisterNullTargetStreamer(*T, createNullTargetStreamer);
 
 }
