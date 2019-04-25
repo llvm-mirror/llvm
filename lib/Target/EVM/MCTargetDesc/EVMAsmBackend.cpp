@@ -57,7 +57,7 @@ public:
 } // end anonymous namespace
 
 bool EVMAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
-  llvm_unreachable("unimplemented.");
+  return true;
 }
 
 void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
@@ -65,7 +65,7 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                                MutableArrayRef<char> Data, uint64_t Value,
                                bool IsResolved,
                                const MCSubtargetInfo *STI) const {
-  llvm_unreachable("unimplemented.");
+  // TODO
 }
 
 std::unique_ptr<MCObjectTargetWriter>

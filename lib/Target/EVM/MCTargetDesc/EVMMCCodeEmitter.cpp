@@ -95,7 +95,8 @@ static bool is_PUSH(uint64_t binary) {
 
 void EVMMCCodeEmitter::encodeImmediate(const MCOperand& opnd,
                                        unsigned size) const {
-  llvm_unreachable("unimplemented");
+
+  //llvm_unreachable("unimplemented");
 }
 
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
@@ -109,7 +110,7 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   // emit trailing immediate value for push.
   if (is_PUSH(Binary)) {
     unsigned push_size = Binary - 0x60 + 1;
-    encodeImmediate(MI.getOperand(0), push_size);
+    //encodeImmediate(MI.getOperand(0), push_size);
   }
 
 }

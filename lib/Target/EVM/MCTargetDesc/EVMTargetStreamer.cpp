@@ -22,12 +22,11 @@
 #include "llvm/Support/FormattedStream.h"
 using namespace llvm;
 
+// The basic target streamer.
 EVMTargetStreamer::EVMTargetStreamer(MCStreamer &S)
     : MCTargetStreamer(S) {}
-
 
 EVMTargetAsmStreamer::EVMTargetAsmStreamer(
     MCStreamer &S, formatted_raw_ostream &OS)
     : EVMTargetStreamer(S), OS(OS) {}
-
 
