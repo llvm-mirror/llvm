@@ -76,6 +76,20 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::instr_iterator I = MBB.instr_begin(), E = MBB.instr_end(); I != E;) {
       MachineInstr &MI = *I++;
 
+      // special case for handling cases like: %3:gpr = PUSH32_r 1
+      if (MI.getOpcode() == EVM::PUSH32_r) {
+        assert(MI.getNumOperands() == 2 && "PUSH32_r's number of operands must be 2.");
+
+        auto &MO = MI.getOperand(1);
+        assert(MO.isImm() && "PUSH32_r's use operand must be immediate.");
+
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
+        // delete this instruction.
+        MI.eraseFromParent();
+
+        continue;
+      }
+
       for (MachineOperand &MO : reverse(MI.explicit_uses())) {
         // Immediate value: insert `PUSH32 Imm` before instruction.
         if (MO.isImm()) {
@@ -86,6 +100,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
         // register value:
         if (MO.isReg()) {
+          // TODO: at this moment we only have FP as physical register. Need special handling.
           if (TargetRegisterInfo::isPhysicalRegister(MO.getReg())) {
             continue;
           }
@@ -106,6 +121,8 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         auto StackOpcode = llvm::EVM::getStackOpcode(RegOpcode);
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 
+        MI.setDesc(TII.get(StackOpcode));
+
         // Remove register operands.
         for (unsigned i = 0; i < MI.getNumOperands();) {
           auto &MO = MI.getOperand(i);
@@ -117,7 +134,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           }
         }
 
-        MI.setDesc(TII.get(StackOpcode));
 
         LLVM_DEBUG({
             dbgs() << "********** Generating new instruction:"; MI.dump();

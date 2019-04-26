@@ -67,6 +67,7 @@ void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
         }
       case MachineOperand::MO_Immediate:
         {
+          // TODO: support 256 bit data type.
           MCOp = MCOperand::createImm(MO.getImm());
           break;
         }
