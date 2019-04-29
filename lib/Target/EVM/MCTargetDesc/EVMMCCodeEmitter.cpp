@@ -66,7 +66,7 @@ private:
   uint64_t computeAvailableFeatures(const FeatureBitset &FB) const;
   void verifyInstructionPredicates(const MCInst &MI,
                                    uint64_t AvailableFeatures) const;
-  void encodeImmediate(const MCOperand& opnd, unsigned size) const;
+  void encodeImmediate(raw_ostream &OS, const MCOperand& opnd, unsigned size) const;
 };
 
 } // end anonymous namespace
@@ -93,10 +93,23 @@ static bool is_PUSH(uint64_t binary) {
   return false;
 }
 
-void EVMMCCodeEmitter::encodeImmediate(const MCOperand& opnd,
+void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
+                                       const MCOperand& opnd,
                                        unsigned size) const {
+  // TODO: support 256 bit. At this moment, the MCOperand only supports
+  // up to 64bit.
+  if (size != 32) {
+    // this is a reminder check for implementing proper encoding.
+    llvm_unreachable("unimplemented encoding size for push.");
+  }
 
-  //llvm_unreachable("unimplemented");
+  // ugly padding the top bits for now. We will have to properly support
+  // 256 bit operands and remove this.
+  uint8_t byte = opnd.getImm() >= 0? 0x00 : 0xff;
+  OS << uint64_t(byte);
+  OS << uint64_t(byte);
+  OS << uint64_t(byte);
+  OS << opnd.getImm();
 }
 
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
@@ -110,7 +123,7 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   // emit trailing immediate value for push.
   if (is_PUSH(Binary)) {
     unsigned push_size = Binary - 0x60 + 1;
-    //encodeImmediate(MI.getOperand(0), push_size);
+    encodeImmediate(OS, MI.getOperand(0), push_size);
   }
 
 }
