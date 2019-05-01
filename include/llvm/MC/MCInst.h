@@ -27,6 +27,7 @@ namespace llvm {
 class MCExpr;
 class MCInst;
 class MCInstPrinter;
+class ConstantInt;
 class raw_ostream;
 
 /// Instances of this class represent operands of the MCInst class.
@@ -36,6 +37,7 @@ class MCOperand {
     kInvalid,     ///< Uninitialized.
     kRegister,    ///< Register operand.
     kImmediate,   ///< Immediate operand.
+    kCImmediate,  ///< Arbitrary size immediate operand.
     kFPImmediate, ///< Floating-point immediate operand.
     kExpr,        ///< Relocatable immediate operand.
     kInst         ///< Sub-instruction operand.
@@ -48,6 +50,7 @@ class MCOperand {
     double FPImmVal;
     const MCExpr *ExprVal;
     const MCInst *InstVal;
+    const ConstantInt *CI;   // For kCImmediate.
   };
 
 public:
@@ -56,6 +59,7 @@ public:
   bool isValid() const { return Kind != kInvalid; }
   bool isReg() const { return Kind == kRegister; }
   bool isImm() const { return Kind == kImmediate; }
+  bool isCImm() const { return Kind == kCImmediate; }
   bool isFPImm() const { return Kind == kFPImmediate; }
   bool isExpr() const { return Kind == kExpr; }
   bool isInst() const { return Kind == kInst; }
@@ -77,9 +81,19 @@ public:
     return ImmVal;
   }
 
+  const ConstantInt *getCImm() const {
+    assert(isCImm() && "This is not an ConstantInt");
+    return CI;
+  }
+
   void setImm(int64_t Val) {
     assert(isImm() && "This is not an immediate");
     ImmVal = Val;
+  }
+
+  void setCImm(const ConstantInt * CI_) {
+    assert(isCImm() && "This is not a constant immediate");
+    CI = CI_;
   }
 
   double getFPImm() const {
@@ -116,6 +130,13 @@ public:
     MCOperand Op;
     Op.Kind = kRegister;
     Op.RegVal = Reg;
+    return Op;
+  }
+
+  static MCOperand createCImm(const ConstantInt *CI_) {
+    MCOperand Op;
+    Op.Kind = kCImmediate;
+    Op.CI = CI_;
     return Op;
   }
 
