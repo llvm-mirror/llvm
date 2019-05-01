@@ -140,6 +140,13 @@ public:
     return Op;
   }
 
+  static MCOperand createCImm(const ConstantInt *CI_) {
+    MCOperand Op;
+    Op.Kind = kCImmediate;
+    Op.CI = CI_;
+    return Op;
+  }
+
   static MCOperand createImm(int64_t Val) {
     MCOperand Op;
     Op.Kind = kImmediate;
