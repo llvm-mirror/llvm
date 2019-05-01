@@ -77,6 +77,9 @@ bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   case MachineOperand::MO_Immediate:
     OS << MO.getImm();
     break;
+  case MachineOperand::MO_CImmediate:
+    OS << MO.getCImm();
+    break;
   case MachineOperand::MO_MachineBasicBlock:
     OS << *MO.getMBB()->getSymbol();
     break;
