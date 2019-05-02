@@ -350,10 +350,42 @@ def PUSH32_r :
   EVMInst<(outs GPR:$dst), (ins I256Imm:$src), [(set GPR:$dst, imm:$src)],
           "false", "PUSH32_r \t$src", 0x7f, 3>;
 }
-
 def PUSH32 :
   EVMInst<(outs), (ins I256Imm:$src), [], "true", "PUSH32 \t$src", 0x7f, 3>;
 }
+
+defm PUSH1 : PUSHInst<0x60, 3>;
+defm PUSH2 : PUSHInst<0x61, 3>;
+defm PUSH3 : PUSHInst<0x62, 3>;
+defm PUSH4 : PUSHInst<0x63, 3>;
+defm PUSH5 : PUSHInst<0x64, 3>;
+defm PUSH6 : PUSHInst<0x65, 3>;
+defm PUSH7 : PUSHInst<0x66, 3>;
+defm PUSH8 : PUSHInst<0x67, 3>;
+defm PUSH9 : PUSHInst<0x68, 3>;
+defm PUSH10: PUSHInst<0x69, 3>;
+defm PUSH11: PUSHInst<0x6a, 3>;
+defm PUSH12: PUSHInst<0x6b, 3>;
+defm PUSH13: PUSHInst<0x6c, 3>;
+defm PUSH14: PUSHInst<0x6d, 3>;
+defm PUSH15: PUSHInst<0x6e, 3>;
+defm PUSH16: PUSHInst<0x6f, 3>;
+defm PUSH17: PUSHInst<0x70, 3>;
+defm PUSH18: PUSHInst<0x71, 3>;
+defm PUSH19: PUSHInst<0x72, 3>;
+defm PUSH20: PUSHInst<0x73, 3>;
+defm PUSH21: PUSHInst<0x74, 3>;
+defm PUSH22: PUSHInst<0x75, 3>;
+defm PUSH23: PUSHInst<0x76, 3>;
+defm PUSH24: PUSHInst<0x77, 3>;
+defm PUSH25: PUSHInst<0x78, 3>;
+defm PUSH26: PUSHInst<0x79, 3>;
+defm PUSH27: PUSHInst<0x7a, 3>;
+defm PUSH28: PUSHInst<0x7b, 3>;
+defm PUSH29: PUSHInst<0x7c, 3>;
+defm PUSH30: PUSHInst<0x7d, 3>;
+defm PUSH31: PUSHInst<0x7e, 3>;
+
 
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;

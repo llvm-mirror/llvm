@@ -66,7 +66,7 @@ private:
   uint64_t computeAvailableFeatures(const FeatureBitset &FB) const;
   void verifyInstructionPredicates(const MCInst &MI,
                                    uint64_t AvailableFeatures) const;
-  void encodeImmediate(raw_ostream &OS, const MCOperand& opnd, unsigned size) const;
+  void encodeImmediate(raw_ostream &OS, const MCOperand& opnd, unsigned push_size) const;
 };
 
 } // end anonymous namespace
@@ -86,7 +86,7 @@ unsigned EVMMCCodeEmitter::getMachineOpValue(const MCInst &MI,
 
 static bool is_PUSH(uint64_t binary) {
   if (binary >= 0x60 && binary <= 0x7F) {
-    assert(binary == 0x7F && "Other push instructions not implemented.");
+    //assert(binary == 0x7F && "Other push instructions not implemented.");
     return true;
   }
 
@@ -95,24 +95,33 @@ static bool is_PUSH(uint64_t binary) {
 
 void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
                                        const MCOperand& opnd,
-                                       unsigned size) const {
+                                       unsigned push_size) const {
   // TODO: support 256 bit. At this moment, the MCOperand only supports
   // up to 64bit.
-  if (size != 32) {
+  if (push_size > 8 && push_size != 32) {
     // this is a reminder check for implementing proper encoding.
     llvm_unreachable("unimplemented encoding size for push.");
   }
 
   // ugly padding the top bits for now. We will have to properly support
   // 256 bit operands and remove this.
-  uint64_t imm = opnd.getImm();
+  int64_t imm = opnd.getImm();
 
+  assert((push_size < 9 || push_size == 32) && "unimplemented push size");
+
+  for (int i = push_size - 1; i >= 0; --i) {
+    char byte = (uint64_t)(0x00FF) & (imm >> (push_size * 8));
+    support::endian::write<char>(OS, byte, support::big);
+  }
+
+  /*
   for (int i = 0; i < 32 - sizeof(uint64_t); ++i) {
     char padding = imm >= 0 ? 0x00 : 0xFF;
     support::endian::write<char>(OS, padding, support::big);
   }
 
   support::endian::write<uint64_t>(OS, imm, support::big);
+  */
 }
 
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,

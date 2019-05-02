@@ -27,7 +27,7 @@ add_llvm_target(EVMCodeGen
   EVMStackification.cpp
   EVMConvertRegToStack.cpp
   EVMAddJumpdest.cpp
-  EVMshrinkpush.cpp
+  EVMshrinkPush.cpp
   )
 
 add_subdirectory(InstPrinter)

@@ -9,6 +9,11 @@
 //def HasEIP211 : Predicate<"!Subtarget->hasEIP211()">;
 //def HasEIP615 : Predicate<"!Subtarget->hasEIP615()">;
 
+def I256Imm : Operand<i256> {
+  // TODO: implement Imm256 print
+  //let PrintMethod = "printImm256Operand";
+}
+
 class StackRel;
 // Our register-based instructions
 class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
@@ -40,6 +45,14 @@ multiclass RSInst<dag outs_r, dag ins_r,
     def "" : EVMInst<(outs), (ins), [], "true", asmstr_s, inst, cost>;
 }
 
+multiclass PUSHInst<bits<8> inst, int cost> {
+  let isCodeGenOnly = 1, BaseName = NAME in
+    def _r : EVMInst<(outs GPR:$dst), (ins I256Imm:$src), [],
+                     "false", NAME#" \t$src", inst, cost>;
+  let BaseName = NAME in
+    def "" : EVMInst<(outs), (ins I256Imm:$src), [], "true",
+                     NAME#" \t$src", inst, cost>;
+}
 
 class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
     : EVMInst<outs, ins, pattern, "false", asmstr, 0>
@@ -47,11 +60,6 @@ class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
   let isCodeGenOnly = 1;
 }
 
-
-def I256Imm : Operand<i256> {
-  // TODO: implement Imm256 print
-  //let PrintMethod = "printImm256Operand";
-}
 
 // The memory size of EVM is 1024 elements with 256 bit each.
 def AddrImm :
