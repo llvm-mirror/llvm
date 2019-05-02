@@ -105,11 +105,14 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
 
   // ugly padding the top bits for now. We will have to properly support
   // 256 bit operands and remove this.
-  uint8_t byte = opnd.getImm() >= 0? 0x00 : 0xff;
-  OS << uint64_t(byte);
-  OS << uint64_t(byte);
-  OS << uint64_t(byte);
-  OS << opnd.getImm();
+  uint64_t imm = opnd.getImm();
+
+  for (int i = 0; i < 32 - sizeof(uint64_t); ++i) {
+    char padding = imm >= 0 ? 0x00 : 0xFF;
+    support::endian::write<char>(OS, padding, support::big);
+  }
+
+  support::endian::write<uint64_t>(OS, imm, support::big);
 }
 
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
@@ -118,7 +121,7 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   uint64_t Start = OS.tell();
 
   uint64_t Binary = getBinaryCodeForInstr(MI, Fixups, STI);
-  OS << uint8_t(Binary);
+  support::endian::write<char>(OS, Binary, support::big);
 
   // emit trailing immediate value for push.
   if (is_PUSH(Binary)) {
