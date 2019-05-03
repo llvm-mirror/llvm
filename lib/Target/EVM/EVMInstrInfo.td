@@ -167,7 +167,7 @@ defm EXP    : Inst_2_1<"EXP",
 defm SIGNEXTEND :
   RSInst<(outs GPR:$dst), (ins GPR:$src, I256Imm:$sft),
          [(set GPR:$dst, (EVMSignextend GPR:$src, imm:$sft))],
-         "SIGNEXTEND\t$dst, $src, $sft", "SIGNEXTEND", 0xb0, 5>;
+         "SIGNEXTEND\t$dst, $src, $sft", "SIGNEXTEND", 0x0b, 5>;
 
 // Comparison instructions ////////////////////////////////////////////////////
 let isCompare = 1 in {
