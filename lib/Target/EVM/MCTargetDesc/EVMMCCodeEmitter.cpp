@@ -12,6 +12,7 @@
 
 #include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
@@ -96,8 +97,6 @@ static bool is_PUSH(uint64_t binary) {
 void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
                                        const MCOperand& opnd,
                                        unsigned push_size) const {
-  // TODO: support 256 bit. At this moment, the MCOperand only supports
-  // up to 64bit.
   if (push_size > 8 && push_size != 32) {
     // this is a reminder check for implementing proper encoding.
     llvm_unreachable("unimplemented encoding size for push.");
@@ -105,23 +104,30 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
 
   // ugly padding the top bits for now. We will have to properly support
   // 256 bit operands and remove this.
-  int64_t imm = opnd.getImm();
+  if (opnd.isImm()) {
+    int64_t imm = opnd.getImm();
 
-  assert((push_size < 9 || push_size == 32) && "unimplemented push size");
+    assert(push_size < 9 && "unimplemented push size");
 
-  for (int i = push_size - 1; i >= 0; --i) {
-    char byte = (uint64_t)(0x00FF) & (imm >> (i * 8));
-    support::endian::write<char>(OS, byte, support::big);
+    for (int i = push_size - 1; i >= 0; --i) {
+      char byte = (uint64_t)(0x00FF) & (imm >> (i * 8));
+      support::endian::write<char>(OS, byte, support::big);
+    }
+  } else if (opnd.isCImm()) {
+    assert(push_size > 8 && "unimplemented push size ofr CImmediate type");
+    //if it is a CImmediate type, it is a value more than 64bit.
+    const ConstantInt* ci = opnd.getCImm();
+    const APInt& apint = ci->getValue();
+    unsigned byteWidth = (apint.getBitWidth() + 7) / 8;
+
+    for (int i = byteWidth - 1; i >= 0; --i) {
+      APInt apbyte = apint.ashr(i * 8).trunc(sizeof(char));
+      char byte = apbyte.getZExtValue();
+      support::endian::write<char>(OS, byte, support::big);
+    }
+  } else {
+    llvm_unreachable("MCOperand immediate should only be of imm or cimm type");
   }
-
-  /*
-  for (int i = 0; i < 32 - sizeof(uint64_t); ++i) {
-    char padding = imm >= 0 ? 0x00 : 0xFF;
-    support::endian::write<char>(OS, padding, support::big);
-  }
-
-  support::endian::write<uint64_t>(OS, imm, support::big);
-  */
 }
 
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,

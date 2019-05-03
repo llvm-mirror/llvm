@@ -99,9 +99,7 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
     for (MachineInstr & MI : MBB) {
       unsigned opcode = MI.getOpcode();
       if (opcode == EVM::PUSH32) {
-        LLVM_DEBUG({
-            dbgs() << "Converting: "; MI.dump(); dbgs();
-        });
+        LLVM_DEBUG(dbgs() << "Converting: "; MI.dump(););
 
         auto MO = MI.getOperand(0);
         assert((MO.isImm() || MO.isCImm()) && "Illegal PUSH32 instruction.");
@@ -117,15 +115,17 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
             BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::PUSH1)).addImm(s);
             BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::SIGNEXTEND));
           }
-        } else {
-          llvm_unreachable("CImm case is unimplemented.");
+          Changed = true;
+        } else if (MO.isCImm()) {
+          const ConstantInt* ci = MO.getCImm();
+          unsigned byteWidth = ci->getBitWidth();
+          assert(byteWidth <= 256 && "> 256bit constant immediates unsupported");
+          // for now, constants with bit width > 64 will all use PUSH32.
+          // This is an optimization opportunity.
+          LLVM_DEBUG(dbgs() << " (Keeping the width due to size)");
         }
 
-        LLVM_DEBUG({
-            dbgs() << " to: "; MI.dump(); dbgs() << "\n";
-        });
-
-        Changed = true;
+        LLVM_DEBUG( dbgs() << "\tto: "; MI.dump(); );
       }
     }
   }
