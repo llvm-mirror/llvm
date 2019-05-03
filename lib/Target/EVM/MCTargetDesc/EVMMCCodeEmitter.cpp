@@ -110,7 +110,7 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
   assert((push_size < 9 || push_size == 32) && "unimplemented push size");
 
   for (int i = push_size - 1; i >= 0; --i) {
-    char byte = (uint64_t)(0x00FF) & (imm >> (push_size * 8));
+    char byte = (uint64_t)(0x00FF) & (imm >> (i * 8));
     support::endian::write<char>(OS, byte, support::big);
   }
 
