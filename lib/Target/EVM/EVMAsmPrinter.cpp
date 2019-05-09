@@ -41,6 +41,8 @@ public:
 
   void EmitInstruction(const MachineInstr *MI) override;
 
+  void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &OS);
+
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        unsigned AsmVariant, const char *ExtraCode,
                        raw_ostream &OS) override;
@@ -66,9 +68,8 @@ void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   EmitToStreamer(*OutStreamer, TmpInst);
 }
 
-bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                       unsigned AsmVariant, const char *ExtraCode,
-                       raw_ostream &OS) {
+void EVMAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
+                                 raw_ostream &OS) {
   const MachineOperand &MO = MI->getOperand(OpNo);
 
   switch (MO.getType()) {
@@ -86,6 +87,12 @@ bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   default:
     llvm_unreachable("Not implemented yet!");
   }
+}
+
+bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       unsigned AsmVariant, const char *ExtraCode,
+                       raw_ostream &OS) {
+  printOperand(MI, OpNo, OS);
   return true;
 }
 

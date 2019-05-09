@@ -64,9 +64,7 @@ static MCInstPrinter *createEVMMCInstPrinter(const Triple &T,
                                              const MCAsmInfo &MAI,
                                              const MCInstrInfo &MII,
                                              const MCRegisterInfo &MRI) {
-  if (SyntaxVariant == 0)
-    return new EVMInstPrinter(MAI, MII, MRI);
-  return nullptr;
+  return new EVMInstPrinter(MAI, MII, MRI);
 }
 
 namespace {

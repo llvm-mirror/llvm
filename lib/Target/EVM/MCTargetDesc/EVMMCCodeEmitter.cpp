@@ -87,12 +87,18 @@ unsigned EVMMCCodeEmitter::getMachineOpValue(const MCInst &MI,
 
 static bool is_PUSH(uint64_t binary) {
   if (binary >= 0x60 && binary <= 0x7F) {
-    //assert(binary == 0x7F && "Other push instructions not implemented.");
     return true;
   }
-
   return false;
 }
+
+static bool is_JUMP(uint64_t binary) {
+  if (binary == 0x56 || binary == 0x57) {
+    return true;
+  }
+  return false;
+}
+
 
 void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
                                        const MCOperand& opnd,
@@ -140,8 +146,13 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
 
   // emit trailing immediate value for push.
   if (is_PUSH(Binary)) {
+    assert(MI.getNumOperands() == 1);
     unsigned push_size = Binary - 0x60 + 1;
     encodeImmediate(OS, MI.getOperand(0), push_size);
+  } else if (is_JUMP(Binary)) {
+    assert(MI.getNumOperands() == 1);
+    // TODO: encode fixup.
+    OS << MI.getOperand(0);
   }
 
 }

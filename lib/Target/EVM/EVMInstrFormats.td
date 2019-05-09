@@ -70,8 +70,7 @@ def EVMaddr : Operand<i256> {
 }
 
 def brtarget : Operand<OtherVT> {
-  // TODO: implement target print
-  //let PrintMethod = "printBrTargetOperand";
+  let PrintMethod = "printBrTargetOperand";
 }
 
 // Alpha: number of additional items placed on the stack. (return value)

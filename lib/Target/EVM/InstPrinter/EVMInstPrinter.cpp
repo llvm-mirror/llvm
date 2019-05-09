@@ -32,9 +32,28 @@ static cl::opt<bool>
               cl::desc("Disable the emission of assembler pseudo instructions"),
               cl::init(false), cl::Hidden);
 
+static void printExpr(const MCExpr *Expr, raw_ostream &O) {
+  O << *Expr;
+}
+
 void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                  StringRef Annot, const MCSubtargetInfo &STI) {
-  printInstruction(MI, STI, O);
+  switch (MI->getOpcode()) {
+    default: {
+      printInstruction(MI, STI, O);
+      break;
+    }
+    // handling for JUMP.
+    // Pre-EIP615 requires us to separate the JUMP(I) operand.
+    case EVM::JUMP:
+    case EVM::JUMPI: {
+      printInstruction(MI, STI, O);
+      O << " \t";
+      printExpr(MI->getOperand(0).getExpr(), O);
+      break;
+    }
+  }
+
   printAnnotation(O, Annot);
 }
 
@@ -43,8 +62,8 @@ void EVMInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 }
 
 void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
-                                    const MCSubtargetInfo &STI, raw_ostream &O,
-                                    const char *Modifier) {
+                                  const MCSubtargetInfo &STI, raw_ostream &O,
+                                  const char *Modifier) {
   assert((Modifier == 0 || Modifier[0] == 0) && "No modifiers supported");
 
   if (MI->getNumOperands() == 0) return;
@@ -52,13 +71,29 @@ void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Op = MI->getOperand(OpNo);
 
   if (Op.isReg()) {
+    llvm_unreachable("Should not have registers");
     printRegName(O, Op.getReg());
     return;
-
   } else if (Op.isImm()) {
     O << Op.getImm();
     return;
+  } else if (Op.isExpr()) {
+    printExpr(Op.getExpr(), O);
   }
   llvm_unreachable("unimplemented.");
 }
 
+void EVMInstPrinter::printBrTargetOperand(const MCInst *MI, unsigned OpNo,
+                                          const MCSubtargetInfo &STI,
+                                          raw_ostream&OS) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (Op.isImm()) {
+    llvm_unreachable("unimplemented imm type");
+  } else if (Op.isCImm()) {
+    llvm_unreachable("unimplemented cimm type");
+  } else if (Op.isExpr()) {
+    llvm_unreachable("unimplemented expr type");
+  } else {
+    OS << Op;
+  }
+}

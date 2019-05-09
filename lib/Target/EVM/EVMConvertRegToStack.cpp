@@ -106,10 +106,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           }
 
           assert(MRI.hasOneUse(MO.getReg()) && "registers should have only one use.");
-          //assert(MRI.hasOneDef(MO.getReg()) && "registers should have only one def.");
-
-          //auto *DefMBB = MRI.getUniqueVRegDef(MO.getReg())->getParent();
-          //assert(DefMBB == &MBB && "register def and use should be in the same basicblock.");
 
           // TODO: the register operand should already be on the stack.
         }
