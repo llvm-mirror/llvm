@@ -446,7 +446,7 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  
+
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
@@ -458,10 +458,10 @@ SDValue EVMTargetLowering::LowerFormalArguments(
     assert(VA.isMemLoc());
 
     MVT LocVT = VA.getLocVT();
-    int index = VA.getLocMemOffset() / (LocVT.getSizeInBits() / 8);
- 
+    int index = VA.getLocMemOffset() / (LocVT.getSizeInBits() / sizeof(char));
+
     // The stack pointer offset is relative to the caller stack frame.
-    int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / 8,
+    int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / sizeof(char),
                                    VA.getLocMemOffset(), true);
 
     // Create load nodes to retrieve arguments from the stack

@@ -43,6 +43,7 @@ void EVMFrameLowering::adjustReg(MachineBasicBlock &MBB,
 
 void EVMFrameLowering::emitPrologue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
+  // TODO: emit a JUMPDEST?
 }
 
 void EVMFrameLowering::emitEpilogue(MachineFunction &MF,
@@ -52,11 +53,6 @@ void EVMFrameLowering::emitEpilogue(MachineFunction &MF,
 int EVMFrameLowering::getFrameIndexReference(const MachineFunction &MF,
                                                int FI,
                                                unsigned &FrameReg) const {
-}
-
-void EVMFrameLowering::determineCalleeSaves(MachineFunction &MF,
-                                              BitVector &SavedRegs,
-                                              RegScavenger *RS) const {
 }
 
 void EVMFrameLowering::processFunctionBeforeFrameFinalized(
