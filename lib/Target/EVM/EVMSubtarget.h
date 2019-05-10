@@ -65,12 +65,22 @@ public:
   const EVMRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo.getRegisterInfo();
   }
+
   const EVMTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
+
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
+
+  // Memory layout
+  const unsigned getFreeMemoryPointer() const { return 64; }
+  const unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
+  const unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
+  const unsigned getIdentityContractAddress() const { return 4; }
+
+  // Constants
 };
 } // End llvm namespace
 

@@ -10,7 +10,7 @@
 /// This file implements a pass that moves virtual register access to memory
 /// locations.
 /// After this pass, there should not be any virtual registers that are:
-/// 1. created in a basic block i, and 
+/// 1. created in a basic block i, and
 /// 2. used in basic block j, where i != j
 /// 3. For each def, there is at monst 1 use.
 ///
@@ -71,6 +71,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   });
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  const EVMSubtarget &ST = MF.getSubtarget<EVMSubtarget>();
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
   bool Changed = false;
@@ -119,14 +120,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
              << increment_size << '\n';
   });
 
-
   for (MachineBasicBlock & MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
 
       for (MachineOperand &MO : MI.explicit_uses()) {
         if (!MO.isReg()) continue;
-
         unsigned reg = MO.getReg();
         // FIXME: should not have non-virtual registers here.
         if (!TRI.isVirtualRegister(reg)) {
@@ -145,20 +144,19 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG({ dbgs() << "found regindex use: " << regindex << ","; });
 
         // insert before instruction:
-        // r1 = MLOAD_r 0x200
+        // r1 = MLOAD_r FreeMemoryPointer
         // r2 = SUB_r r1, (index * 32)
         // new_vreg = MLOAD_r r2
         unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
         unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
         unsigned NewVReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
-               .addImm(0x200);
+               .addImm(ST->getFreeMemoryPointer());
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
                .addReg(NewReg1).addImm(memindex * 32);
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewVReg)
                .addReg(NewReg2);
         MO.setReg(NewVReg);
-
         LLVM_DEBUG({ dbgs() << " replacing use with: " << TRI.virtReg2Index(NewVReg)
                     << ", load from: " << memindex << ".\n"; });
 
@@ -177,7 +175,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         LLVM_DEBUG({ dbgs() << "found regindex def: " << regindex; });
         // 1. insert after instruction:
-        // r1 = MLOAD_r 0x200
+        // r1 = MLOAD_r FreeMemoryPointer
         // r2 = SUB_r r1, (index * 32)
         // MSTORE_r vreg, r2
         // 2. vreg should be dead from now on.
@@ -185,7 +183,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
         unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
         BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
-               .addImm(0x200);
+               .addImm(ST->getFreeMemoryPointer());
         BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
                .addReg(NewReg1).addImm(memindex * 32);
         BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
