@@ -79,6 +79,9 @@ public:
   const unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
   const unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
   const unsigned getIdentityContractAddress() const { return 4; }
+  
+  // TODO: make sure this will not collide with out values.
+  const unsigned getFramePointerLocation() const { return 32; }
 
   // Constants
 };

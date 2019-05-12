@@ -5,7 +5,6 @@ define i256 @add(i256 %a, i256 %b) nounwind {
   %1 = add i256 %a, %b
 ; CHECK: ADD
   ret i256 %1
-; CHECK: JUMP
 }
 
 define i256 @sub(i256 %a, i256 %b) nounwind {
@@ -13,6 +12,6 @@ define i256 @sub(i256 %a, i256 %b) nounwind {
   %1 = sub i256 %a, %b
 ; CHECK: SUB
   ret i256 %1
-; CHECK: JUMP
 }
+
 

@@ -565,6 +565,7 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SDLoc &DL, SelectionDAG &DAG) const {
   SmallVector<SDValue, 4> RetOps(1, Chain);
   RetOps.append(OutVals.begin(), OutVals.end());
+  // TODO: change it to JUMP related.
   Chain = DAG.getNode(EVMISD::RETURN, DL, MVT::Other, RetOps);
   return Chain;
 }
@@ -584,21 +585,21 @@ const char *EVMTargetLowering::getTargetNodeName(unsigned Opcode) const {
 
 std::pair<unsigned, const TargetRegisterClass *>
 EVMTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
-                                                  StringRef Constraint,
-                                                  MVT VT) const {
+                                                StringRef Constraint,
+                                                MVT VT) const {
   llvm_unreachable("unimplemented.");
 }
 
 Instruction *EVMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
-                                                   Instruction *Inst,
-                                                   AtomicOrdering Ord) const {
+                                                 Instruction *Inst,
+                                                 AtomicOrdering Ord) const {
   llvm_unreachable("unimplemented.");
   return nullptr;
 }
 
 Instruction *EVMTargetLowering::emitTrailingFence(IRBuilder<> &Builder,
-                                                    Instruction *Inst,
-                                                    AtomicOrdering Ord) const {
+                                                  Instruction *Inst,
+                                                  AtomicOrdering Ord) const {
   llvm_unreachable("unimplemented.");
   return nullptr;
 }
