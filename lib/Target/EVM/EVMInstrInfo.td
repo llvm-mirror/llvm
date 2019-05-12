@@ -74,7 +74,8 @@ SDNode<"EVMISD::CALL", SDT_EVMCall,
        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
 
 def EVMReturn :
-SDNode<"EVMISD::RETURN", SDT_EVMReturn, [SDNPHasChain]>;
+SDNode<"EVMISD::RETURN", SDT_EVMReturn,
+       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def EVMMod :
 SDNode<"EVMISD::MOD", SDT_EVMArithBinary, []>;
@@ -328,7 +329,7 @@ defm JUMP : RSInst<(outs), (ins brtarget:$dst),
 
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],
-                   "JUMPI \t$src, $dst", "JUMPI", 0x57, 10>;
+                   "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
 }
 
 defm PC       : Inst_0_1<"PC",
@@ -412,10 +413,10 @@ let isCall = 1 in {
 //defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
 }
 
-let isReturn = 1 in {
+let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
 defm RETURN : RSInst<(outs), (ins GPR:$val),
                      [(EVMReturn GPR:$val)],
-                     "RETURN\t$val", "RETURN", 0xf3, 0>;
+                     "RETURN_r\t$val", "RETURN", 0xf3, 0>;
 }
 
 let isCall = 1 in {
@@ -453,19 +454,28 @@ let usesCustomInserter = 1 in {
 def PseudoSelectcc :
 EVMPseudo<(outs GPR:$dst),
           (ins GPR:$src, GPR:$src2, i256imm:$cc),
-          "SelectCC\t$cc | $dst, $src, $src2",
           [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
 
 }
 
 let Defs = [SP], Uses = [SP] in {
 def ADJCALLSTACKDOWN : EVMPseudo<(outs), (ins i256imm:$amt, i256imm:$amt2),
-                               "# ADJCALLSTACKDOWN\t$amt, $amt2",
                                [(EVMCallseq_start timm:$amt, timm:$amt2)]>;
 def ADJCALLSTACKUP : EVMPseudo<(outs), (ins i256imm:$amt1, i256imm:$amt2),
-                            "# ADJCALLSTACKUP\t$amt1, $amt2",
                             [(EVMCallseq_end timm:$amt1, timm:$amt2)]>;
 }
+
+let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
+def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
+def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
+def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
+def pJUMPSUB : EVMPseudo<(outs), (ins), []>;
+def pJUMPSUBV: EVMPseudo<(outs), (ins), []>;
+def pRETURN  : EVMPseudo<(outs), (ins), []>;
+}
+
+def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
+def pPUTLOCAL : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
 
 //===----------------------------------------------------------------------===//
 // Patterns

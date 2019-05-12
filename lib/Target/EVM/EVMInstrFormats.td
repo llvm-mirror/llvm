@@ -54,9 +54,10 @@ multiclass PUSHInst<bits<8> inst, int cost> {
                      NAME#" \t$src", inst, cost>;
 }
 
-class EVMPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
-    : EVMInst<outs, ins, pattern, "false", asmstr, 0>
+class EVMPseudo<dag outs, dag ins, list<dag> pattern>
+    : EVMInst<outs, ins, pattern, "false", "", 0>
 {
+  let isPseudo = 1;
   let isCodeGenOnly = 1;
 }
 
