@@ -1,9 +1,8 @@
 //===- COFFImportFile.cpp - COFF short import file implementation ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -496,7 +495,7 @@ NewArchiveMember ObjectFactory::createWeakExternal(StringRef Sym,
 
   // COFF Header
   coff_file_header Header{
-      u16(0),
+      u16(Machine),
       u16(NumberOfSections),
       u32(0),
       u32(sizeof(Header) + (NumberOfSections * sizeof(coff_section))),

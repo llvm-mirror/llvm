@@ -1,9 +1,8 @@
 //===- ValueEnumerator.cpp - Number values and types for bitcode writer ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -415,10 +414,8 @@ ValueEnumerator::ValueEnumerator(const Module &M,
           EnumerateMetadata(&F, MD->getMetadata());
         }
         EnumerateType(I.getType());
-        if (const CallInst *CI = dyn_cast<CallInst>(&I))
-          EnumerateAttributes(CI->getAttributes());
-        else if (const InvokeInst *II = dyn_cast<InvokeInst>(&I))
-          EnumerateAttributes(II->getAttributes());
+        if (const auto *Call = dyn_cast<CallBase>(&I))
+          EnumerateAttributes(Call->getAttributes());
 
         // Enumerate metadata attached with this instruction.
         MDs.clear();

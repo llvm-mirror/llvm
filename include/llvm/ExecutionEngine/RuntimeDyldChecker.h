@@ -1,16 +1,18 @@
 //===---- RuntimeDyldChecker.h - RuntimeDyld tester framework -----*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_EXECUTIONENGINE_RUNTIMEDYLDCHECKER_H
 #define LLVM_EXECUTIONENGINE_RUNTIMEDYLDCHECKER_H
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/Support/Endian.h"
 
 #include <cstdint>
 #include <memory>
@@ -58,7 +60,8 @@ class raw_ostream;
 ///
 /// ident_expr = 'decode_operand' '(' symbol ',' operand-index ')'
 ///            | 'next_pc'        '(' symbol ')'
-///            | 'stub_addr' '(' file-name ',' section-name ',' symbol ')'
+///            | 'stub_addr' '(' stub-container-name ',' symbol ')'
+///            | 'got_addr' '(' stub-container-name ',' symbol ')'
 ///            | symbol
 ///
 /// binary_expr = expr '+' expr
@@ -70,15 +73,30 @@ class raw_ostream;
 ///
 class RuntimeDyldChecker {
 public:
-  RuntimeDyldChecker(RuntimeDyld &RTDyld, MCDisassembler *Disassembler,
-                     MCInstPrinter *InstPrinter, raw_ostream &ErrStream);
+  struct MemoryRegionInfo {
+    StringRef Content;
+    JITTargetAddress TargetAddress;
+  };
+
+  using IsSymbolValidFunction = std::function<bool(StringRef Symbol)>;
+  using GetSymbolInfoFunction =
+      std::function<Expected<MemoryRegionInfo>(StringRef SymbolName)>;
+  using GetSectionInfoFunction = std::function<Expected<MemoryRegionInfo>(
+      StringRef FileName, StringRef SectionName)>;
+  using GetStubInfoFunction = std::function<Expected<MemoryRegionInfo>(
+      StringRef StubContainer, StringRef TargetName)>;
+  using GetGOTInfoFunction = std::function<Expected<MemoryRegionInfo>(
+      StringRef GOTContainer, StringRef TargetName)>;
+
+  RuntimeDyldChecker(IsSymbolValidFunction IsSymbolValid,
+                     GetSymbolInfoFunction GetSymbolInfo,
+                     GetSectionInfoFunction GetSectionInfo,
+                     GetStubInfoFunction GetStubInfo,
+                     GetGOTInfoFunction GetGOTInfo,
+                     support::endianness Endianness,
+                     MCDisassembler *Disassembler, MCInstPrinter *InstPrinter,
+                     raw_ostream &ErrStream);
   ~RuntimeDyldChecker();
-
-  // Get the associated RTDyld instance.
-  RuntimeDyld& getRTDyld();
-
-  // Get the associated RTDyld instance.
-  const RuntimeDyld& getRTDyld() const;
 
   /// Check a single expression against the attached RuntimeDyld
   ///        instance.
@@ -100,7 +118,7 @@ public:
                                                   bool LocalAddress);
 
   /// If there is a section at the given local address, return its load
-  ///        address, otherwise return none.
+  /// address, otherwise return none.
   Optional<uint64_t> getSectionLoadAddress(void *LocalAddress) const;
 
 private:

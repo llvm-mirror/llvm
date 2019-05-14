@@ -1,9 +1,8 @@
 //===- llvm/Analysis/LoopInfo.h - Natural Loop Calculator -------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -471,7 +470,7 @@ public:
 
   public:
     LocRange() {}
-    LocRange(DebugLoc Start) : Start(std::move(Start)), End(std::move(Start)) {}
+    LocRange(DebugLoc Start) : Start(Start), End(Start) {}
     LocRange(DebugLoc Start, DebugLoc End)
         : Start(std::move(Start)), End(std::move(End)) {}
 
@@ -521,6 +520,11 @@ public:
   /// variable.
   ///
   PHINode *getCanonicalInductionVariable() const;
+
+  /// Obtain the unique incoming and back edge. Return false if they are
+  /// non-unique or the loop is dead; otherwise, return true.
+  bool getIncomingAndBackEdge(BasicBlock *&Incoming,
+                              BasicBlock *&Backedge) const;
 
   /// Return true if the Loop is in LCSSA form.
   bool isLCSSAForm(DominatorTree &DT) const;
@@ -1014,6 +1018,26 @@ MDNode *findOptionMDForLoop(const Loop *TheLoop, StringRef Name);
 /// that this is not a sufficient condition: not every distinct and empty NDNode
 /// is representing an access group.
 bool isValidAsAccessGroup(MDNode *AccGroup);
+
+/// Create a new LoopID after the loop has been transformed.
+///
+/// This can be used when no follow-up loop attributes are defined
+/// (llvm::makeFollowupLoopID returning None) to stop transformations to be
+/// applied again.
+///
+/// @param Context        The LLVMContext in which to create the new LoopID.
+/// @param OrigLoopID     The original LoopID; can be nullptr if the original
+///                       loop has no LoopID.
+/// @param RemovePrefixes Remove all loop attributes that have these prefixes.
+///                       Use to remove metadata of the transformation that has
+///                       been applied.
+/// @param AddAttrs       Add these loop attributes to the new LoopID.
+///
+/// @return A new LoopID that can be applied using Loop::setLoopID().
+llvm::MDNode *
+makePostTransformationMetadata(llvm::LLVMContext &Context, MDNode *OrigLoopID,
+                               llvm::ArrayRef<llvm::StringRef> RemovePrefixes,
+                               llvm::ArrayRef<llvm::MDNode *> AddAttrs);
 
 } // End llvm namespace
 

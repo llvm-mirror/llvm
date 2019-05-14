@@ -1,9 +1,8 @@
 //===- DWARFContext.cpp ---------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -37,7 +36,7 @@
 #include "llvm/Object/Decompressor.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Object/RelocVisitor.h"
+#include "llvm/Object/RelocationResolver.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Error.h"
@@ -269,11 +268,11 @@ static void dumpAddrSection(raw_ostream &OS, DWARFDataExtractor &AddrData,
 }
 
 // Dump the .debug_rnglists or .debug_rnglists.dwo section (DWARF v5).
-static void
-dumpRnglistsSection(raw_ostream &OS, DWARFDataExtractor &rnglistData,
-                    llvm::function_ref<Optional<SectionedAddress>(uint32_t)>
-                        LookupPooledAddress,
-                    DIDumpOptions DumpOpts) {
+static void dumpRnglistsSection(
+    raw_ostream &OS, DWARFDataExtractor &rnglistData,
+    llvm::function_ref<Optional<object::SectionedAddress>(uint32_t)>
+        LookupPooledAddress,
+    DIDumpOptions DumpOpts) {
   uint32_t Offset = 0;
   while (rnglistData.isValidOffset(Offset)) {
     llvm::DWARFDebugRnglistTable Rnglists;
@@ -926,6 +925,9 @@ DWARFContext::DIEsForAddress DWARFContext::getDIEsForAddress(uint64_t Address) {
     DWARFDie DIE = Worklist.back();
     Worklist.pop_back();
 
+    if (!DIE.isValid())
+      continue;
+
     if (DIE.getTag() == DW_TAG_lexical_block &&
         DIE.addressRangeContainsAddress(Address)) {
       Result.BlockDIE = DIE;
@@ -939,6 +941,8 @@ DWARFContext::DIEsForAddress DWARFContext::getDIEsForAddress(uint64_t Address) {
   return Result;
 }
 
+/// TODO: change input parameter from "uint64_t Address"
+///       into "SectionedAddress Address"
 static bool getFunctionNameAndStartLineForAddress(DWARFCompileUnit *CU,
                                                   uint64_t Address,
                                                   FunctionNameKind Kind,
@@ -967,36 +971,37 @@ static bool getFunctionNameAndStartLineForAddress(DWARFCompileUnit *CU,
   return FoundResult;
 }
 
-DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
+DILineInfo DWARFContext::getLineInfoForAddress(object::SectionedAddress Address,
                                                DILineInfoSpecifier Spec) {
   DILineInfo Result;
 
-  DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
+  DWARFCompileUnit *CU = getCompileUnitForAddress(Address.Address);
   if (!CU)
     return Result;
-  getFunctionNameAndStartLineForAddress(CU, Address, Spec.FNKind,
-                                        Result.FunctionName,
-                                        Result.StartLine);
+
+  getFunctionNameAndStartLineForAddress(CU, Address.Address, Spec.FNKind,
+                                        Result.FunctionName, Result.StartLine);
   if (Spec.FLIKind != FileLineInfoKind::None) {
-    if (const DWARFLineTable *LineTable = getLineTableForUnit(CU))
-      LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
-                                           Spec.FLIKind, Result);
+    if (const DWARFLineTable *LineTable = getLineTableForUnit(CU)) {
+      LineTable->getFileLineInfoForAddress(
+          {Address.Address, Address.SectionIndex}, CU->getCompilationDir(),
+          Spec.FLIKind, Result);
+    }
   }
   return Result;
 }
 
-DILineInfoTable
-DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
-                                         DILineInfoSpecifier Spec) {
+DILineInfoTable DWARFContext::getLineInfoForAddressRange(
+    object::SectionedAddress Address, uint64_t Size, DILineInfoSpecifier Spec) {
   DILineInfoTable  Lines;
-  DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
+  DWARFCompileUnit *CU = getCompileUnitForAddress(Address.Address);
   if (!CU)
     return Lines;
 
   std::string FunctionName = "<invalid>";
   uint32_t StartLine = 0;
-  getFunctionNameAndStartLineForAddress(CU, Address, Spec.FNKind, FunctionName,
-                                        StartLine);
+  getFunctionNameAndStartLineForAddress(CU, Address.Address, Spec.FNKind,
+                                        FunctionName, StartLine);
 
   // If the Specifier says we don't need FileLineInfo, just
   // return the top-most function at the starting address.
@@ -1004,7 +1009,7 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
     DILineInfo Result;
     Result.FunctionName = FunctionName;
     Result.StartLine = StartLine;
-    Lines.push_back(std::make_pair(Address, Result));
+    Lines.push_back(std::make_pair(Address.Address, Result));
     return Lines;
   }
 
@@ -1012,8 +1017,10 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
 
   // Get the index of row we're looking for in the line table.
   std::vector<uint32_t> RowVector;
-  if (!LineTable->lookupAddressRange(Address, Size, RowVector))
+  if (!LineTable->lookupAddressRange({Address.Address, Address.SectionIndex},
+                                     Size, RowVector)) {
     return Lines;
+  }
 
   for (uint32_t RowIndex : RowVector) {
     // Take file number and line/column from the row.
@@ -1025,33 +1032,33 @@ DWARFContext::getLineInfoForAddressRange(uint64_t Address, uint64_t Size,
     Result.Line = Row.Line;
     Result.Column = Row.Column;
     Result.StartLine = StartLine;
-    Lines.push_back(std::make_pair(Row.Address, Result));
+    Lines.push_back(std::make_pair(Row.Address.Address, Result));
   }
 
   return Lines;
 }
 
 DIInliningInfo
-DWARFContext::getInliningInfoForAddress(uint64_t Address,
+DWARFContext::getInliningInfoForAddress(object::SectionedAddress Address,
                                         DILineInfoSpecifier Spec) {
   DIInliningInfo InliningInfo;
 
-  DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
+  DWARFCompileUnit *CU = getCompileUnitForAddress(Address.Address);
   if (!CU)
     return InliningInfo;
 
   const DWARFLineTable *LineTable = nullptr;
   SmallVector<DWARFDie, 4> InlinedChain;
-  CU->getInlinedChainForAddress(Address, InlinedChain);
+  CU->getInlinedChainForAddress(Address.Address, InlinedChain);
   if (InlinedChain.size() == 0) {
     // If there is no DIE for address (e.g. it is in unavailable .dwo file),
     // try to at least get file/line info from symbol table.
     if (Spec.FLIKind != FileLineInfoKind::None) {
       DILineInfo Frame;
       LineTable = getLineTableForUnit(CU);
-      if (LineTable &&
-          LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
-                                               Spec.FLIKind, Frame))
+      if (LineTable && LineTable->getFileLineInfoForAddress(
+                           {Address.Address, Address.SectionIndex},
+                           CU->getCompilationDir(), Spec.FLIKind, Frame))
         InliningInfo.addFrame(Frame);
     }
     return InliningInfo;
@@ -1073,8 +1080,9 @@ DWARFContext::getInliningInfoForAddress(uint64_t Address,
         LineTable = getLineTableForUnit(CU);
         // For the topmost routine, get file/line info from line table.
         if (LineTable)
-          LineTable->getFileLineInfoForAddress(Address, CU->getCompilationDir(),
-                                               Spec.FLIKind, Frame);
+          LineTable->getFileLineInfoForAddress(
+              {Address.Address, Address.SectionIndex}, CU->getCompilationDir(),
+              Spec.FLIKind, Frame);
       } else {
         // Otherwise, use call file, call line and call column from
         // previous DIE in inlined chain.
@@ -1495,6 +1503,9 @@ public:
 
       // Symbol to [address, section index] cache mapping.
       std::map<SymbolRef, SymInfo> AddrCache;
+      bool (*Supports)(uint64_t);
+      RelocationResolver Resolver;
+      std::tie(Supports, Resolver) = getRelocationResolver(Obj);
       for (const RelocationRef &Reloc : Section.relocations()) {
         // FIXME: it's not clear how to correctly handle scattered
         // relocations.
@@ -1509,9 +1520,15 @@ public:
           continue;
         }
 
-        object::RelocVisitor V(Obj);
-        uint64_t Val = V.visit(Reloc.getType(), Reloc, SymInfoOrErr->Address);
-        if (V.error()) {
+        // Check if Resolver can handle this relocation type early so as not to
+        // handle invalid cases in DWARFDataExtractor.
+        //
+        // TODO Don't store Resolver in every RelocAddrEntry.
+        if (Supports && Supports(Reloc.getType())) {
+          Map->try_emplace(Reloc.getOffset(),
+                           RelocAddrEntry{SymInfoOrErr->SectionIndex, Reloc,
+                                          Resolver, SymInfoOrErr->Address});
+        } else {
           SmallString<32> Type;
           Reloc.getTypeName(Type);
           ErrorPolicy EP = HandleError(
@@ -1519,10 +1536,7 @@ public:
                           errorCodeToError(object_error::parse_failed)));
           if (EP == ErrorPolicy::Halt)
             return;
-          continue;
         }
-        RelocAddrEntry Rel = {SymInfoOrErr->SectionIndex, Val};
-        Map->insert({Reloc.getOffset(), Rel});
       }
     }
 

@@ -1,9 +1,8 @@
 //===-- ARM.td - Describe the ARM Target Machine -----------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -495,6 +494,8 @@ def ProcA73     : SubtargetFeature<"a73", "ARMProcFamily", "CortexA73",
                                    "Cortex-A73 ARM processors", []>;
 def ProcA75     : SubtargetFeature<"a75", "ARMProcFamily", "CortexA75",
                                    "Cortex-A75 ARM processors", []>;
+def ProcA76     : SubtargetFeature<"a76", "ARMProcFamily", "CortexA76",
+                                   "Cortex-A76 ARM processors", []>;
 
 def ProcKrait   : SubtargetFeature<"krait", "ARMProcFamily", "Krait",
                                    "Qualcomm Krait processors", []>;
@@ -1010,6 +1011,16 @@ def : ProcessorModel<"cortex-m33", CortexM3Model,       [ARMv8mMainline,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureHasNoBranchPredictor]>;
 
+def : ProcessorModel<"cortex-m35p", CortexM3Model,      [ARMv8mMainline,
+                                                         FeatureDSP,
+                                                         FeatureFPARMv8,
+                                                         FeatureD16,
+                                                         FeatureVFPOnlySP,
+                                                         FeaturePrefLoopAlign32,
+                                                         FeatureHasSlowFPVMLx,
+                                                         FeatureHasNoBranchPredictor]>;
+
+
 def : ProcNoItin<"cortex-a32",                           [ARMv8a,
                                                          FeatureHWDivThumb,
                                                          FeatureHWDivARM,
@@ -1060,6 +1071,22 @@ def : ProcNoItin<"cortex-a75",                          [ARMv82a, ProcA75,
                                                          FeatureHWDivARM,
                                                          FeatureDotProd]>;
 
+def : ProcNoItin<"cortex-a76",                          [ARMv82a, ProcA76,
+                                                         FeatureHWDivThumb,
+                                                         FeatureHWDivARM,
+                                                         FeatureCrypto,
+                                                         FeatureCRC,
+                                                         FeatureFullFP16,
+                                                         FeatureDotProd]>;
+
+def : ProcNoItin<"cortex-a76ae",                        [ARMv82a, ProcA76,
+                                                         FeatureHWDivThumb,
+                                                         FeatureHWDivARM,
+                                                         FeatureCrypto,
+                                                         FeatureCRC,
+                                                         FeatureFullFP16,
+                                                         FeatureDotProd]>;
+
 def : ProcessorModel<"cyclone",     SwiftModel,         [ARMv8a, ProcSwift,
                                                          FeatureHasRetAddrStack,
                                                          FeatureNEONForFP,
@@ -1079,6 +1106,9 @@ def : ProcNoItin<"exynos-m1",                           [ARMv8a, ProcExynos]>;
 def : ProcNoItin<"exynos-m2",                           [ARMv8a, ProcExynos]>;
 def : ProcNoItin<"exynos-m3",                           [ARMv8a, ProcExynos]>;
 def : ProcNoItin<"exynos-m4",                           [ARMv82a, ProcExynos,
+                                                         FeatureFullFP16,
+                                                         FeatureDotProd]>;
+def : ProcNoItin<"exynos-m5",                           [ARMv82a, ProcExynos,
                                                          FeatureFullFP16,
                                                          FeatureDotProd]>;
 

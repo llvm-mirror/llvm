@@ -1,9 +1,8 @@
 //===- P9InstrResources.td - P9 Instruction Resource Defs  -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -85,7 +84,7 @@ def : InstRW<[P9_ALUE_2C, P9_ALUO_2C, IP_EXECE_1C, IP_EXECO_1C,
 )>;
 
 // Restricted Dispatch ALU operation for 3 cycles. The operation runs on a
-// slingle slice. However, since it is Restricted it requires all 3 dispatches
+// single slice. However, since it is Restricted it requires all 3 dispatches
 // (DISP) for that superslice.
 def : InstRW<[P9_ALU_3C, IP_EXEC_1C, DISP_1C, DISP_1C, DISP_1C],
       (instrs
@@ -171,7 +170,7 @@ def : InstRW<[P9_ALU_2C, IP_EXEC_1C, DISP_1C, DISP_1C],
 )>;
 
 // Restricted Dispatch ALU operation for 2 cycles. The operation runs on a
-//  slingle slice. However, since it is Restricted it requires all 3 dispatches
+//  single slice. However, since it is Restricted it requires all 3 dispatches
 //  (DISP) for that superslice.
 def : InstRW<[P9_ALU_2C, IP_EXEC_1C, DISP_1C, DISP_1C, DISP_1C],
       (instrs
@@ -400,7 +399,7 @@ def : InstRW<[P9_DPE_7C, P9_DPO_7C, IP_EXECE_1C, IP_EXECO_1C,
 //  dispatch units for the superslice.
 def : InstRW<[P9_DP_5C, IP_EXEC_1C, DISP_1C, DISP_1C, DISP_1C],
       (instrs
-    (instregex "MADD(HD|HDU|LD)$"),
+    (instregex "MADD(HD|HDU|LD|LD8)$"),
     (instregex "MUL(HD|HW|LD|LI|LI8|LW)(U)?$")
 )>;
 
@@ -1406,6 +1405,7 @@ def : InstRW<[],
   MBAR,
   MSYNC,
   SLBSYNC,
+  SLBFEEo,
   NAP,
   STOP,
   TRAP,

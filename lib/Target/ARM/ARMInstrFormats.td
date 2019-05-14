@@ -1,9 +1,8 @@
 //===-- ARMInstrFormats.td - ARM Instruction Formats -------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -1556,6 +1555,8 @@ class AHI5<bits<4> opcod1, bits<2> opcod2, dag oops, dag iops,
 
   // Loads & stores operate on both NEON and VFP pipelines.
   let D = VFPNeonDomain;
+
+  let isUnpredicable = 1; // FP16 instructions cannot in general be conditional
 }
 
 // VFP Load / store multiple pseudo instructions.
@@ -1903,6 +1904,8 @@ class AHuI<bits<5> opcod1, bits<2> opcod2, bits<4> opcod3, bits<2> opcod4,
   let Inst{11-8}  = 0b1001;   // Half precision
   let Inst{7-6}   = opcod4;
   let Inst{4}     = opcod5;
+
+  let isUnpredicable = 1; // FP16 instructions cannot in general be conditional
 }
 
 // Half precision, unary, non-predicated
@@ -1931,6 +1934,8 @@ class AHuInp<bits<5> opcod1, bits<2> opcod2, bits<4> opcod3, bits<2> opcod4,
   let Inst{11-8}  = 0b1001;   // Half precision
   let Inst{7-6}   = opcod4;
   let Inst{4}     = opcod5;
+
+  let isUnpredicable = 1; // FP16 instructions cannot in general be conditional
 }
 
 // Half precision, binary
@@ -1957,6 +1962,8 @@ class AHbI<bits<5> opcod1, bits<2> opcod2, bit op6, bit op4, dag oops, dag iops,
   let Inst{11-8}  = 0b1001;   // Half precision
   let Inst{6}     = op6;
   let Inst{4}     = op4;
+
+  let isUnpredicable = 1; // FP16 instructions cannot in general be conditional
 }
 
 // Half precision, binary, not predicated
@@ -1986,6 +1993,8 @@ class AHbInp<bits<5> opcod1, bits<2> opcod2, bit opcod3, dag oops, dag iops,
   let Inst{11-8}  = 0b1001;   // Half precision
   let Inst{6}     = opcod3;
   let Inst{4}     = 0;
+
+  let isUnpredicable = 1; // FP16 instructions cannot in general be conditional
 }
 
 // VFP conversion instructions

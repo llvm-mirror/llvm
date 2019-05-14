@@ -1,9 +1,8 @@
 //===-- AMDGPU.h - MachineFunction passes hw codegen --------------*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 /// \file
 //===----------------------------------------------------------------------===//
@@ -51,9 +50,8 @@ FunctionPass *createSIFixControlFlowLiveIntervalsPass();
 FunctionPass *createSIOptimizeExecMaskingPreRAPass();
 FunctionPass *createSIFixSGPRCopiesPass();
 FunctionPass *createSIMemoryLegalizerPass();
-FunctionPass *createSIDebuggerInsertNopsPass();
 FunctionPass *createSIInsertWaitcntsPass();
-FunctionPass *createSIFixWWMLivenessPass();
+FunctionPass *createSIPreAllocateWWMRegsPass();
 FunctionPass *createSIFormMemoryClausesPass();
 FunctionPass *createAMDGPUSimplifyLibCallsPass(const TargetOptions &);
 FunctionPass *createAMDGPUUseNativeCallsPass();
@@ -150,8 +148,8 @@ extern char &SIInsertSkipsPassID;
 void initializeSIOptimizeExecMaskingPass(PassRegistry &);
 extern char &SIOptimizeExecMaskingID;
 
-void initializeSIFixWWMLivenessPass(PassRegistry &);
-extern char &SIFixWWMLivenessID;
+void initializeSIPreAllocateWWMRegsPass(PassRegistry &);
+extern char &SIPreAllocateWWMRegsID;
 
 void initializeAMDGPUSimplifyLibCallsPass(PassRegistry &);
 extern char &AMDGPUSimplifyLibCallsID;
@@ -197,9 +195,6 @@ extern char &SIAnnotateControlFlowPassID;
 void initializeSIMemoryLegalizerPass(PassRegistry&);
 extern char &SIMemoryLegalizerID;
 
-void initializeSIDebuggerInsertNopsPass(PassRegistry&);
-extern char &SIDebuggerInsertNopsID;
-
 void initializeSIModeRegisterPass(PassRegistry&);
 extern char &SIModeRegisterID;
 
@@ -226,6 +221,12 @@ ModulePass *createAMDGPUOpenCLEnqueuedBlockLoweringPass();
 void initializeAMDGPUOpenCLEnqueuedBlockLoweringPass(PassRegistry &);
 extern char &AMDGPUOpenCLEnqueuedBlockLoweringID;
 
+void initializeGCNRegBankReassignPass(PassRegistry &);
+extern char &GCNRegBankReassignID;
+
+void initializeGCNNSAReassignPass(PassRegistry &);
+extern char &GCNNSAReassignID;
+
 Target &getTheAMDGPUTarget();
 Target &getTheGCNTarget();
 
@@ -250,21 +251,23 @@ enum TargetIndex {
 namespace AMDGPUAS {
   enum : unsigned {
     // The maximum value for flat, generic, local, private, constant and region.
-    MAX_AMDGPU_ADDRESS = 6,
+    MAX_AMDGPU_ADDRESS = 7,
 
     FLAT_ADDRESS = 0,     ///< Address space for flat memory.
     GLOBAL_ADDRESS = 1,   ///< Address space for global memory (RAT0, VTX0).
-    REGION_ADDRESS = 2,   ///< Address space for region memory.
+    REGION_ADDRESS = 2,   ///< Address space for region memory. (GDS)
 
-    CONSTANT_ADDRESS = 4, ///< Address space for constant memory (VTX2)
+    CONSTANT_ADDRESS = 4, ///< Address space for constant memory (VTX2).
     LOCAL_ADDRESS = 3,    ///< Address space for local memory.
     PRIVATE_ADDRESS = 5,  ///< Address space for private memory.
 
-    CONSTANT_ADDRESS_32BIT = 6, ///< Address space for 32-bit constant memory
+    CONSTANT_ADDRESS_32BIT = 6, ///< Address space for 32-bit constant memory.
 
-    /// Address space for direct addressible parameter memory (CONST0)
+    BUFFER_FAT_POINTER = 7, ///< Address space for 160-bit buffer fat pointers.
+
+    /// Address space for direct addressible parameter memory (CONST0).
     PARAM_D_ADDRESS = 6,
-    /// Address space for indirect addressible parameter memory (VTX1)
+    /// Address space for indirect addressible parameter memory (VTX1).
     PARAM_I_ADDRESS = 7,
 
     // Do not re-order the CONSTANT_BUFFER_* enums.  Several places depend on

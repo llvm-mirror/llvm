@@ -1,9 +1,8 @@
 //===-- ConstantFolding.cpp - Fold instructions into constants ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1000,7 +999,9 @@ Constant *ConstantFoldInstOperandsImpl(const Value *InstOrCE, unsigned Opcode,
                                        const TargetLibraryInfo *TLI) {
   Type *DestTy = InstOrCE->getType();
 
-  // Handle easy binops first.
+  if (Instruction::isUnaryOp(Opcode))
+    return ConstantFoldUnaryOpOperand(Opcode, Ops[0], DL);
+
   if (Instruction::isBinaryOp(Opcode))
     return ConstantFoldBinaryOpOperands(Opcode, Ops[0], Ops[1], DL);
 
@@ -1025,9 +1026,9 @@ Constant *ConstantFoldInstOperandsImpl(const Value *InstOrCE, unsigned Opcode,
   case Instruction::FCmp: llvm_unreachable("Invalid for compares");
   case Instruction::Call:
     if (auto *F = dyn_cast<Function>(Ops.back())) {
-      ImmutableCallSite CS(cast<CallInst>(InstOrCE));
-      if (canConstantFoldCallTo(CS, F))
-        return ConstantFoldCall(CS, F, Ops.slice(0, Ops.size() - 1), TLI);
+      const auto *Call = cast<CallBase>(InstOrCE);
+      if (canConstantFoldCallTo(Call, F))
+        return ConstantFoldCall(Call, F, Ops.slice(0, Ops.size() - 1), TLI);
     }
     return nullptr;
   case Instruction::Select:
@@ -1263,6 +1264,13 @@ Constant *llvm::ConstantFoldCompareInstOperands(unsigned Predicate,
   return ConstantExpr::getCompare(Predicate, Ops0, Ops1);
 }
 
+Constant *llvm::ConstantFoldUnaryOpOperand(unsigned Opcode, Constant *Op,
+                                           const DataLayout &DL) {
+  assert(Instruction::isUnaryOp(Opcode));
+
+  return ConstantExpr::get(Opcode, Op);
+}
+
 Constant *llvm::ConstantFoldBinaryOpOperands(unsigned Opcode, Constant *LHS,
                                              Constant *RHS,
                                              const DataLayout &DL) {
@@ -1367,8 +1375,8 @@ llvm::ConstantFoldLoadThroughGEPIndices(Constant *C,
 //  Constant Folding for Calls
 //
 
-bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
-  if (CS.isNoBuiltin() || CS.isStrictFP())
+bool llvm::canConstantFoldCallTo(const CallBase *Call, const Function *F) {
+  if (Call->isNoBuiltin() || Call->isStrictFP())
     return false;
   switch (F->getIntrinsicID()) {
   case Intrinsic::fabs:
@@ -1518,14 +1526,12 @@ bool llvm::canConstantFoldCallTo(ImmutableCallSite CS, const Function *F) {
 namespace {
 
 Constant *GetConstantFoldFPValue(double V, Type *Ty) {
-  if (Ty->isHalfTy()) {
+  if (Ty->isHalfTy() || Ty->isFloatTy()) {
     APFloat APF(V);
     bool unused;
-    APF.convert(APFloat::IEEEhalf(), APFloat::rmNearestTiesToEven, &unused);
+    APF.convert(Ty->getFltSemantics(), APFloat::rmNearestTiesToEven, &unused);
     return ConstantFP::get(Ty->getContext(), APF);
   }
-  if (Ty->isFloatTy())
-    return ConstantFP::get(Ty->getContext(), APFloat((float)V));
   if (Ty->isDoubleTy())
     return ConstantFP::get(Ty->getContext(), APFloat(V));
   llvm_unreachable("Can only constant fold half/float/double");
@@ -1644,7 +1650,7 @@ static bool getConstIntOrUndef(Value *Op, const APInt *&C) {
 Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
                                  ArrayRef<Constant *> Operands,
                                  const TargetLibraryInfo *TLI,
-                                 ImmutableCallSite CS) {
+                                 const CallBase *Call) {
   if (Operands.size() == 1) {
     if (IntrinsicID == Intrinsic::is_constant) {
       // We know we have a "Constant" argument. But we want to only
@@ -1672,9 +1678,10 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
       if (IntrinsicID == Intrinsic::launder_invariant_group ||
           IntrinsicID == Intrinsic::strip_invariant_group) {
         // If instruction is not yet put in a basic block (e.g. when cloning
-        // a function during inlining), CS caller may not be available.
-        // So check CS's BB first before querying CS.getCaller.
-        const Function *Caller = CS.getParent() ? CS.getCaller() : nullptr;
+        // a function during inlining), Call's caller may not be available.
+        // So check Call's BB first before querying Call->getCaller.
+        const Function *Caller =
+            Call->getParent() ? Call->getCaller() : nullptr;
         if (Caller &&
             !NullPointerIsDefined(
                 Caller, Operands[0]->getType()->getPointerAddressSpace())) {
@@ -2216,7 +2223,7 @@ Constant *ConstantFoldVectorCall(StringRef Name, unsigned IntrinsicID,
                                  VectorType *VTy, ArrayRef<Constant *> Operands,
                                  const DataLayout &DL,
                                  const TargetLibraryInfo *TLI,
-                                 ImmutableCallSite CS) {
+                                 const CallBase *Call) {
   SmallVector<Constant *, 4> Result(VTy->getNumElements());
   SmallVector<Constant *, 4> Lane(Operands.size());
   Type *Ty = VTy->getElementType();
@@ -2279,7 +2286,8 @@ Constant *ConstantFoldVectorCall(StringRef Name, unsigned IntrinsicID,
     }
 
     // Use the regular scalar folding to simplify this column.
-    Constant *Folded = ConstantFoldScalarCall(Name, IntrinsicID, Ty, Lane, TLI, CS);
+    Constant *Folded =
+        ConstantFoldScalarCall(Name, IntrinsicID, Ty, Lane, TLI, Call);
     if (!Folded)
       return nullptr;
     Result[I] = Folded;
@@ -2290,11 +2298,10 @@ Constant *ConstantFoldVectorCall(StringRef Name, unsigned IntrinsicID,
 
 } // end anonymous namespace
 
-Constant *
-llvm::ConstantFoldCall(ImmutableCallSite CS, Function *F,
-                       ArrayRef<Constant *> Operands,
-                       const TargetLibraryInfo *TLI) {
-  if (CS.isNoBuiltin() || CS.isStrictFP())
+Constant *llvm::ConstantFoldCall(const CallBase *Call, Function *F,
+                                 ArrayRef<Constant *> Operands,
+                                 const TargetLibraryInfo *TLI) {
+  if (Call->isNoBuiltin() || Call->isStrictFP())
     return nullptr;
   if (!F->hasName())
     return nullptr;
@@ -2304,17 +2311,19 @@ llvm::ConstantFoldCall(ImmutableCallSite CS, Function *F,
 
   if (auto *VTy = dyn_cast<VectorType>(Ty))
     return ConstantFoldVectorCall(Name, F->getIntrinsicID(), VTy, Operands,
-                                  F->getParent()->getDataLayout(), TLI, CS);
+                                  F->getParent()->getDataLayout(), TLI, Call);
 
-  return ConstantFoldScalarCall(Name, F->getIntrinsicID(), Ty, Operands, TLI, CS);
+  return ConstantFoldScalarCall(Name, F->getIntrinsicID(), Ty, Operands, TLI,
+                                Call);
 }
 
-bool llvm::isMathLibCallNoop(CallSite CS, const TargetLibraryInfo *TLI) {
+bool llvm::isMathLibCallNoop(const CallBase *Call,
+                             const TargetLibraryInfo *TLI) {
   // FIXME: Refactor this code; this duplicates logic in LibCallsShrinkWrap
   // (and to some extent ConstantFoldScalarCall).
-  if (CS.isNoBuiltin() || CS.isStrictFP())
+  if (Call->isNoBuiltin() || Call->isStrictFP())
     return false;
-  Function *F = CS.getCalledFunction();
+  Function *F = Call->getCalledFunction();
   if (!F)
     return false;
 
@@ -2322,8 +2331,8 @@ bool llvm::isMathLibCallNoop(CallSite CS, const TargetLibraryInfo *TLI) {
   if (!TLI || !TLI->getLibFunc(*F, Func))
     return false;
 
-  if (CS.getNumArgOperands() == 1) {
-    if (ConstantFP *OpC = dyn_cast<ConstantFP>(CS.getArgOperand(0))) {
+  if (Call->getNumArgOperands() == 1) {
+    if (ConstantFP *OpC = dyn_cast<ConstantFP>(Call->getArgOperand(0))) {
       const APFloat &Op = OpC->getValueAPF();
       switch (Func) {
       case LibFunc_logl:
@@ -2421,9 +2430,9 @@ bool llvm::isMathLibCallNoop(CallSite CS, const TargetLibraryInfo *TLI) {
     }
   }
 
-  if (CS.getNumArgOperands() == 2) {
-    ConstantFP *Op0C = dyn_cast<ConstantFP>(CS.getArgOperand(0));
-    ConstantFP *Op1C = dyn_cast<ConstantFP>(CS.getArgOperand(1));
+  if (Call->getNumArgOperands() == 2) {
+    ConstantFP *Op0C = dyn_cast<ConstantFP>(Call->getArgOperand(0));
+    ConstantFP *Op1C = dyn_cast<ConstantFP>(Call->getArgOperand(1));
     if (Op0C && Op1C) {
       const APFloat &Op0 = Op0C->getValueAPF();
       const APFloat &Op1 = Op1C->getValueAPF();

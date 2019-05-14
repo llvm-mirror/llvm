@@ -1,9 +1,8 @@
 //===-- ARMInstrThumb.td - Thumb support for ARM -----------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -181,6 +180,19 @@ def t_addrmode_pc : MemOperand {
 def t_addrmode_rr_asm_operand : AsmOperandClass { let Name = "MemThumbRR"; }
 def t_addrmode_rr : MemOperand,
                     ComplexPattern<i32, 2, "SelectThumbAddrModeRR", []> {
+  let EncoderMethod = "getThumbAddrModeRegRegOpValue";
+  let PrintMethod = "printThumbAddrModeRROperand";
+  let DecoderMethod = "DecodeThumbAddrModeRR";
+  let ParserMatchClass = t_addrmode_rr_asm_operand;
+  let MIOperandInfo = (ops tGPR:$base, tGPR:$offsreg);
+}
+
+// t_addrmode_rr_sext := reg + reg
+//
+// This is similar to t_addrmode_rr, but uses different heuristics for
+// ldrsb/ldrsh.
+def t_addrmode_rr_sext : MemOperand,
+                    ComplexPattern<i32, 2, "SelectThumbAddrModeRRSext", []> {
   let EncoderMethod = "getThumbAddrModeRegRegOpValue";
   let PrintMethod = "printThumbAddrModeRROperand";
   let DecoderMethod = "DecodeThumbAddrModeRR";
@@ -732,17 +744,17 @@ defm tLDRH : thumb_ld_rr_ri_enc<0b101, 0b1000, t_addrmode_rr,
 
 let AddedComplexity = 10 in
 def tLDRSB :                    // A8.6.80
-  T1pILdStEncode<0b011, (outs tGPR:$Rt), (ins t_addrmode_rr:$addr),
+  T1pILdStEncode<0b011, (outs tGPR:$Rt), (ins t_addrmode_rr_sext:$addr),
                  AddrModeT1_1, IIC_iLoad_bh_r,
                  "ldrsb", "\t$Rt, $addr",
-                 [(set tGPR:$Rt, (sextloadi8 t_addrmode_rr:$addr))]>;
+                 [(set tGPR:$Rt, (sextloadi8 t_addrmode_rr_sext:$addr))]>;
 
 let AddedComplexity = 10 in
 def tLDRSH :                    // A8.6.84
-  T1pILdStEncode<0b111, (outs tGPR:$Rt), (ins t_addrmode_rr:$addr),
+  T1pILdStEncode<0b111, (outs tGPR:$Rt), (ins t_addrmode_rr_sext:$addr),
                  AddrModeT1_2, IIC_iLoad_bh_r,
                  "ldrsh", "\t$Rt, $addr",
-                 [(set tGPR:$Rt, (sextloadi16 t_addrmode_rr:$addr))]>;
+                 [(set tGPR:$Rt, (sextloadi16 t_addrmode_rr_sext:$addr))]>;
 
 
 def tSTRspi : T1pIs<(outs), (ins tGPR:$Rt, t_addrmode_sp:$addr), IIC_iStore_i,
@@ -799,8 +811,8 @@ def tLDMIA_UPD :
                  "$Rn = $wb", IIC_iLoad_mu>,
     PseudoInstExpansion<(tLDMIA tGPR:$Rn, pred:$p, reglist:$regs)> {
   let Size = 2;
-  let OutOperandList = (outs GPR:$wb);
-  let InOperandList = (ins GPR:$Rn, pred:$p, reglist:$regs, variable_ops);
+  let OutOperandList = (outs tGPR:$wb);
+  let InOperandList = (ins tGPR:$Rn, pred:$p, reglist:$regs, variable_ops);
   let Pattern = [];
   let isCodeGenOnly = 1;
   let isPseudo = 1;
@@ -809,7 +821,7 @@ def tLDMIA_UPD :
 
 // There is no non-writeback version of STM for Thumb.
 let mayStore = 1, hasExtraSrcRegAllocReq = 1 in
-def tSTMIA_UPD : Thumb1I<(outs GPR:$wb),
+def tSTMIA_UPD : Thumb1I<(outs tGPR:$wb),
                          (ins tGPR:$Rn, pred:$p, reglist:$regs, variable_ops),
                          AddrModeNone, 2, IIC_iStore_mu,
                          "stm${p}\t$Rn!, $regs", "$Rn = $wb", []>,
@@ -1499,12 +1511,13 @@ def tInt_eh_sjlj_setjmp : ThumbXI<(outs),(ins tGPR:$src, tGPR:$val),
 // FIXME: Non-IOS version(s)
 let isBarrier = 1, hasSideEffects = 1, isTerminator = 1, isCodeGenOnly = 1,
     Defs = [ R7, LR, SP ] in
-def tInt_eh_sjlj_longjmp : XI<(outs), (ins GPR:$src, GPR:$scratch),
+def tInt_eh_sjlj_longjmp : XI<(outs), (ins tGPR:$src, tGPR:$scratch),
                               AddrModeNone, 0, IndexModeNone,
                               Pseudo, NoItinerary, "", "",
-                              [(ARMeh_sjlj_longjmp GPR:$src, GPR:$scratch)]>,
+                              [(ARMeh_sjlj_longjmp tGPR:$src, tGPR:$scratch)]>,
                              Requires<[IsThumb,IsNotWindows]>;
 
+// (Windows is Thumb2-only)
 let isBarrier = 1, hasSideEffects = 1, isTerminator = 1, isCodeGenOnly = 1,
     Defs = [ R11, LR, SP ] in
 def tInt_WIN_eh_sjlj_longjmp
@@ -1599,16 +1612,16 @@ def : T1Pat<(extloadi16 t_addrmode_rr:$addr),  (tLDRHr t_addrmode_rr:$addr)>;
 // and expand it just after ISel.
 let usesCustomInserter = 1, mayLoad =1,
     Constraints = "$Rn = $Rn_wb,@earlyclobber $Rn_wb" in
- def tLDR_postidx: tPseudoInst<(outs rGPR:$Rt, rGPR:$Rn_wb),
-                               (ins rGPR:$Rn, pred:$p),
+ def tLDR_postidx: tPseudoInst<(outs tGPR:$Rt, tGPR:$Rn_wb),
+                               (ins tGPR:$Rn, pred:$p),
                                4, IIC_iStore_ru,
                                []>;
 
 // post-inc STR -> STM r0!, {r1}. The layout of this (because it doesn't def
 // multiple registers) is the same in ISel as MachineInstr, so there's no need
 // for a pseudo.
-def : T1Pat<(post_store rGPR:$Rt, rGPR:$Rn, 4),
-            (tSTMIA_UPD rGPR:$Rn, rGPR:$Rt)>;
+def : T1Pat<(post_store tGPR:$Rt, tGPR:$Rn, 4),
+            (tSTMIA_UPD tGPR:$Rn, tGPR:$Rt)>;
 
 // If it's impossible to use [r,r] address mode for sextload, select to
 // ldr{b|h} + sxt{b|h} instead.
@@ -1677,9 +1690,9 @@ def : T1Pat<(i32 imm256_510:$src),
 // be expanded into two instructions late to allow if-conversion and
 // scheduling.
 let isReMaterializable = 1 in
-def tLDRpci_pic : PseudoInst<(outs GPR:$dst), (ins i32imm:$addr, pclabel:$cp),
+def tLDRpci_pic : PseudoInst<(outs tGPR:$dst), (ins i32imm:$addr, pclabel:$cp),
                              NoItinerary,
-               [(set GPR:$dst, (ARMpic_add (load (ARMWrapper tconstpool:$addr)),
+               [(set tGPR:$dst, (ARMpic_add (load (ARMWrapper tconstpool:$addr)),
                                            imm:$cp))]>,
                Requires<[IsThumb, IsThumb1Only]>;
 

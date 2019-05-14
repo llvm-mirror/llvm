@@ -46,9 +46,10 @@
 
 ; Next check that we emit an error when trying to LTO link this module
 ; containing an llvm.type.checked.load (with a split LTO Unit) with one
-; that does not have a split LTO Unit.
+; that does not have a split LTO Unit. Use -thinlto-distributed-indexes
+; to ensure it is being caught in the thin link.
 ; RUN: opt -thinlto-bc -o %t2.o %S/Inputs/empty.ll
-; RUN: not llvm-lto2 run %t.o %t2.o -save-temps -pass-remarks=. \
+; RUN: not llvm-lto2 run %t.o %t2.o -thinlto-distributed-indexes \
 ; RUN:   -verify-machineinstrs=0 \
 ; RUN:   -o %t3 \
 ; RUN:   -r=%t.o,test,px \
@@ -63,7 +64,7 @@
 ; RUN:   -r=%t.o,_ZN1C1fEi, \
 ; RUN:   -r=%t.o,_ZTV1B,px \
 ; RUN:   -r=%t.o,_ZTV1C,px 2>&1 | FileCheck %s --check-prefix=ERROR
-; ERROR: LLVM ERROR: inconsistent LTO Unit splitting with llvm.type.test or llvm.type.checked.load
+; ERROR: failed: inconsistent LTO Unit splitting (recompile with -fsplit-lto-unit)
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-grtev4-linux-gnu"

@@ -1,9 +1,8 @@
 //===- opt.cpp - The LLVM Modular Optimizer -------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -34,6 +33,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/LegacyPassNameParser.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
@@ -173,17 +173,8 @@ static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
 static cl::opt<bool>
-UnitAtATime("funit-at-a-time",
-            cl::desc("Enable IPO. This corresponds to gcc's -funit-at-a-time"),
-            cl::init(true));
-
-static cl::opt<bool>
 DisableLoopUnrolling("disable-loop-unrolling",
                      cl::desc("Disable loop unrolling in all relevant passes"),
-                     cl::init(false));
-static cl::opt<bool>
-DisableLoopVectorization("disable-loop-vectorization",
-                     cl::desc("Disable the loop vectorization pass"),
                      cl::init(false));
 
 static cl::opt<bool>
@@ -275,6 +266,41 @@ static cl::opt<std::string>
                     cl::desc("YAML output filename for pass remarks"),
                     cl::value_desc("filename"));
 
+static cl::opt<std::string>
+    RemarksPasses("pass-remarks-filter",
+                  cl::desc("Only record optimization remarks from passes whose "
+                           "names match the given regular expression"),
+                  cl::value_desc("regex"));
+
+cl::opt<PGOKind>
+    PGOKindFlag("pgo-kind", cl::init(NoPGO), cl::Hidden,
+                cl::desc("The kind of profile guided optimization"),
+                cl::values(clEnumValN(NoPGO, "nopgo", "Do not use PGO."),
+                           clEnumValN(InstrGen, "pgo-instr-gen-pipeline",
+                                      "Instrument the IR to generate profile."),
+                           clEnumValN(InstrUse, "pgo-instr-use-pipeline",
+                                      "Use instrumented profile to guide PGO."),
+                           clEnumValN(SampleUse, "pgo-sample-use-pipeline",
+                                      "Use sampled profile to guide PGO.")));
+cl::opt<std::string> ProfileFile("profile-file",
+                                 cl::desc("Path to the profile."), cl::Hidden);
+
+cl::opt<CSPGOKind> CSPGOKindFlag(
+    "cspgo-kind", cl::init(NoCSPGO), cl::Hidden,
+    cl::desc("The kind of context sensitive profile guided optimization"),
+    cl::values(
+        clEnumValN(NoCSPGO, "nocspgo", "Do not use CSPGO."),
+        clEnumValN(
+            CSInstrGen, "cspgo-instr-gen-pipeline",
+            "Instrument (context sensitive) the IR to generate profile."),
+        clEnumValN(
+            CSInstrUse, "cspgo-instr-use-pipeline",
+            "Use instrumented (context sensitive) profile to guide PGO.")));
+cl::opt<std::string> CSProfileGenFile(
+    "cs-profilegen-file",
+    cl::desc("Path to the instrumented context sensitive profile."),
+    cl::Hidden);
+
 class OptCustomPassManager : public legacy::PassManager {
   DebugifyStatsMap DIStatsMap;
 
@@ -348,15 +374,16 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   } else {
     Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
-  Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
                                DisableLoopUnrolling : OptLevel == 0;
 
-  // This is final, unless there is a #pragma vectorize enable
-  if (DisableLoopVectorization)
-    Builder.LoopVectorize = false;
-  // If option wasn't forced via cmd line (-vectorize-loops, -loop-vectorize)
-  else if (!Builder.LoopVectorize)
+  // Check if vectorization is explicitly disabled via -vectorize-loops=false.
+  // The flag enables vectorization in the LoopVectorize pass, it is on by
+  // default, and if it was disabled, leave it disabled here.
+  // Another flag that exists: -loop-vectorize, controls adding the pass to the
+  // pass manager. If set, the pass is added, and there is no additional check
+  // here for it.
+  if (Builder.LoopVectorize)
     Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
 
   // When #pragma vectorize is on for SLP, do the same as above
@@ -368,6 +395,32 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
 
   if (Coroutines)
     addCoroutinePassesToExtensionPoints(Builder);
+
+  switch (PGOKindFlag) {
+  case InstrGen:
+    Builder.EnablePGOInstrGen = true;
+    Builder.PGOInstrGen = ProfileFile;
+    break;
+  case InstrUse:
+    Builder.PGOInstrUse = ProfileFile;
+    break;
+  case SampleUse:
+    Builder.PGOSampleUse = ProfileFile;
+    break;
+  default:
+    break;
+  }
+
+  switch (CSPGOKindFlag) {
+  case CSInstrGen:
+    Builder.EnablePGOCSInstrGen = true;
+    break;
+  case CSInstrUse:
+    Builder.EnablePGOCSInstrUse = true;
+    break;
+  default:
+    break;
+  }
 
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
@@ -509,8 +562,14 @@ int main(int argc, char **argv) {
       errs() << EC.message() << '\n';
       return 1;
     }
-    Context.setDiagnosticsOutputFile(
-        llvm::make_unique<yaml::Output>(OptRemarkFile->os()));
+    Context.setRemarkStreamer(llvm::make_unique<RemarkStreamer>(
+        RemarksFilename, OptRemarkFile->os()));
+
+    if (!RemarksPasses.empty())
+      if (Error E = Context.getRemarkStreamer()->setFilter(RemarksPasses)) {
+        errs() << E << '\n';
+        return 1;
+      }
   }
 
   // Load the input module...
@@ -585,6 +644,11 @@ int main(int argc, char **argv) {
     CPUStr = getCPUStr();
     FeaturesStr = getFeaturesStr();
     Machine = GetTargetMachine(ModuleTriple, CPUStr, FeaturesStr, Options);
+  } else if (ModuleTriple.getArchName() != "unknown" &&
+             ModuleTriple.getArchName() != "") {
+    errs() << argv[0] << ": unrecognized architecture '"
+           << ModuleTriple.getArchName() << "' provided.\n";
+    return 1;
   }
 
   std::unique_ptr<TargetMachine> TM(Machine);

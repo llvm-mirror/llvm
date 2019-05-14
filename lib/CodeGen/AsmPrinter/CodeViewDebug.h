@@ -1,9 +1,8 @@
 //===- llvm/lib/CodeGen/AsmPrinter/CodeViewDebug.h --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -148,6 +147,7 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
     SmallVector<LexicalBlock *, 1> ChildBlocks;
 
     std::vector<std::pair<MCSymbol *, MDNode *>> Annotations;
+    std::vector<std::tuple<MCSymbol *, MCSymbol *, DIType *>> HeapAllocSites;
 
     const MCSymbol *Begin = nullptr;
     const MCSymbol *End = nullptr;
@@ -223,7 +223,7 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   codeview::TypeIndex getFuncIdForSubprogram(const DISubprogram *SP);
 
   void calculateRanges(LocalVariable &Var,
-                       const DbgValueHistoryMap::InstrRanges &Ranges);
+                       const DbgValueHistoryMap::Entries &Entries);
 
   static void collectInlineSiteChildren(SmallVectorImpl<unsigned> &Children,
                                         const FunctionInfo &FI,

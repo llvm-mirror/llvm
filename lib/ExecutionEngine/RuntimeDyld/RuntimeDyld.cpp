@@ -1,9 +1,8 @@
 //===-- RuntimeDyld.cpp - Run-time dynamic linker for MC-JIT ----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -13,7 +12,6 @@
 
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "RuntimeDyldCOFF.h"
-#include "RuntimeDyldCheckerImpl.h"
 #include "RuntimeDyldELF.h"
 #include "RuntimeDyldImpl.h"
 #include "RuntimeDyldMachO.h"
@@ -376,10 +374,55 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
       else
         return IOrErr.takeError();
 
-    // If there is an attached checker, notify it about the stubs for this
-    // section so that they can be verified.
-    if (Checker)
-      Checker->registerStubMap(Obj.getFileName(), SectionID, Stubs);
+    // If there is a NotifyStubEmitted callback set, call it to register any
+    // stubs created for this section.
+    if (NotifyStubEmitted) {
+      StringRef FileName = Obj.getFileName();
+      StringRef SectionName = Sections[SectionID].getName();
+      for (auto &KV : Stubs) {
+
+        auto &VR = KV.first;
+        uint64_t StubAddr = KV.second;
+
+        // If this is a named stub, just call NotifyStubEmitted.
+        if (VR.SymbolName) {
+          NotifyStubEmitted(FileName, SectionName, VR.SymbolName, SectionID,
+                            StubAddr);
+          continue;
+        }
+
+        // Otherwise we will have to try a reverse lookup on the globla symbol table.
+        for (auto &GSTMapEntry : GlobalSymbolTable) {
+          StringRef SymbolName = GSTMapEntry.first();
+          auto &GSTEntry = GSTMapEntry.second;
+          if (GSTEntry.getSectionID() == VR.SectionID &&
+              GSTEntry.getOffset() == VR.Offset) {
+            NotifyStubEmitted(FileName, SectionName, SymbolName, SectionID,
+                              StubAddr);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Process remaining sections
+  if (ProcessAllSections) {
+    LLVM_DEBUG(dbgs() << "Process remaining sections:\n");
+    for (section_iterator SI = Obj.section_begin(), SE = Obj.section_end();
+         SI != SE; ++SI) {
+
+      /* Ignore already loaded sections */
+      if (LocalSections.find(*SI) != LocalSections.end())
+        continue;
+
+      bool IsCode = SI->isText();
+      if (auto SectionIDOrErr =
+              findOrEmitSection(Obj, *SI, IsCode, LocalSections))
+        LLVM_DEBUG(dbgs() << "\tSectionID: " << (*SectionIDOrErr) << "\n");
+      else
+        return SectionIDOrErr.takeError();
+    }
   }
 
   // Give the subclasses a chance to tie-up any loose ends.
@@ -703,9 +746,6 @@ Error RuntimeDyldImpl::emitCommonSymbols(const ObjectFile &Obj,
     Addr += Size;
   }
 
-  if (Checker)
-    Checker->registerSection(Obj.getFileName(), SectionID);
-
   return Error::success();
 }
 
@@ -724,6 +764,11 @@ RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
   bool IsZeroInit = isZeroInit(Section);
   bool IsReadOnly = isReadOnlyData(Section);
   uint64_t DataSize = Section.getSize();
+
+  // An alignment of 0 (at least with ELF) is identical to an alignment of 1,
+  // while being more "polite".  Other formats do not support 0-aligned sections
+  // anyway, so we should guarantee that the alignment is always at least 1.
+  Alignment = std::max(1u, Alignment);
 
   StringRef Name;
   if (auto EC = Section.getName(Name))
@@ -816,9 +861,6 @@ RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
   // Debug info sections are linked as if their load address was zero
   if (!IsRequired)
     Sections.back().setLoadAddress(0);
-
-  if (Checker)
-    Checker->registerSection(Obj.getFileName(), SectionID);
 
   return SectionID;
 }
@@ -1202,42 +1244,43 @@ RuntimeDyld::RuntimeDyld(RuntimeDyld::MemoryManager &MemMgr,
   // permissions are applied.
   Dyld = nullptr;
   ProcessAllSections = false;
-  Checker = nullptr;
 }
 
 RuntimeDyld::~RuntimeDyld() {}
 
 static std::unique_ptr<RuntimeDyldCOFF>
-createRuntimeDyldCOFF(Triple::ArchType Arch, RuntimeDyld::MemoryManager &MM,
-                      JITSymbolResolver &Resolver, bool ProcessAllSections,
-                      RuntimeDyldCheckerImpl *Checker) {
+createRuntimeDyldCOFF(
+                     Triple::ArchType Arch, RuntimeDyld::MemoryManager &MM,
+                     JITSymbolResolver &Resolver, bool ProcessAllSections,
+                     RuntimeDyld::NotifyStubEmittedFunction NotifyStubEmitted) {
   std::unique_ptr<RuntimeDyldCOFF> Dyld =
     RuntimeDyldCOFF::create(Arch, MM, Resolver);
   Dyld->setProcessAllSections(ProcessAllSections);
-  Dyld->setRuntimeDyldChecker(Checker);
+  Dyld->setNotifyStubEmitted(std::move(NotifyStubEmitted));
   return Dyld;
 }
 
 static std::unique_ptr<RuntimeDyldELF>
 createRuntimeDyldELF(Triple::ArchType Arch, RuntimeDyld::MemoryManager &MM,
                      JITSymbolResolver &Resolver, bool ProcessAllSections,
-                     RuntimeDyldCheckerImpl *Checker) {
+                     RuntimeDyld::NotifyStubEmittedFunction NotifyStubEmitted) {
   std::unique_ptr<RuntimeDyldELF> Dyld =
       RuntimeDyldELF::create(Arch, MM, Resolver);
   Dyld->setProcessAllSections(ProcessAllSections);
-  Dyld->setRuntimeDyldChecker(Checker);
+  Dyld->setNotifyStubEmitted(std::move(NotifyStubEmitted));
   return Dyld;
 }
 
 static std::unique_ptr<RuntimeDyldMachO>
-createRuntimeDyldMachO(Triple::ArchType Arch, RuntimeDyld::MemoryManager &MM,
-                       JITSymbolResolver &Resolver,
-                       bool ProcessAllSections,
-                       RuntimeDyldCheckerImpl *Checker) {
+createRuntimeDyldMachO(
+                     Triple::ArchType Arch, RuntimeDyld::MemoryManager &MM,
+                     JITSymbolResolver &Resolver,
+                     bool ProcessAllSections,
+                     RuntimeDyld::NotifyStubEmittedFunction NotifyStubEmitted) {
   std::unique_ptr<RuntimeDyldMachO> Dyld =
     RuntimeDyldMachO::create(Arch, MM, Resolver);
   Dyld->setProcessAllSections(ProcessAllSections);
-  Dyld->setRuntimeDyldChecker(Checker);
+  Dyld->setNotifyStubEmitted(std::move(NotifyStubEmitted));
   return Dyld;
 }
 
@@ -1247,15 +1290,16 @@ RuntimeDyld::loadObject(const ObjectFile &Obj) {
     if (Obj.isELF())
       Dyld =
           createRuntimeDyldELF(static_cast<Triple::ArchType>(Obj.getArch()),
-                               MemMgr, Resolver, ProcessAllSections, Checker);
+                               MemMgr, Resolver, ProcessAllSections,
+                               std::move(NotifyStubEmitted));
     else if (Obj.isMachO())
       Dyld = createRuntimeDyldMachO(
                static_cast<Triple::ArchType>(Obj.getArch()), MemMgr, Resolver,
-               ProcessAllSections, Checker);
+               ProcessAllSections, std::move(NotifyStubEmitted));
     else if (Obj.isCOFF())
       Dyld = createRuntimeDyldCOFF(
                static_cast<Triple::ArchType>(Obj.getArch()), MemMgr, Resolver,
-               ProcessAllSections, Checker);
+               ProcessAllSections, std::move(NotifyStubEmitted));
     else
       report_fatal_error("Incompatible object format!");
   }
@@ -1272,6 +1316,11 @@ void *RuntimeDyld::getSymbolLocalAddress(StringRef Name) const {
   if (!Dyld)
     return nullptr;
   return Dyld->getSymbolLocalAddress(Name);
+}
+
+unsigned RuntimeDyld::getSymbolSectionID(StringRef Name) const {
+  assert(Dyld && "No RuntimeDyld instance attached");
+  return Dyld->getSymbolSectionID(Name);
 }
 
 JITEvaluatedSymbol RuntimeDyld::getSymbol(StringRef Name) const {
@@ -1310,6 +1359,16 @@ void RuntimeDyld::finalizeWithMemoryManagerLocking() {
     MemMgr.finalizeMemory();
     MemMgr.FinalizationLocked = false;
   }
+}
+
+StringRef RuntimeDyld::getSectionContent(unsigned SectionID) const {
+  assert(Dyld && "No Dyld instance attached");
+  return Dyld->getSectionContent(SectionID);
+}
+
+uint64_t RuntimeDyld::getSectionLoadAddress(unsigned SectionID) const {
+  assert(Dyld && "No Dyld instance attached");
+  return Dyld->getSectionLoadAddress(SectionID);
 }
 
 void RuntimeDyld::registerEHFrames() {

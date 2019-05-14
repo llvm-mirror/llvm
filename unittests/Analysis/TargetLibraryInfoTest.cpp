@@ -1,9 +1,8 @@
 //===--- TargetLibraryInfoTest.cpp - TLI/LibFunc unit tests ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -68,7 +67,7 @@ TEST_F(TargetLibraryInfoTest, InvalidProto) {
   for (unsigned FI = 0; FI != LibFunc::NumLibFuncs; ++FI) {
     LibFunc LF = (LibFunc)FI;
     auto *F = cast<Function>(
-        M->getOrInsertFunction(TLI.getName(LF), InvalidFTy));
+        M->getOrInsertFunction(TLI.getName(LF), InvalidFTy).getCallee());
     EXPECT_FALSE(isLibFunc(F, LF));
   }
 }
@@ -494,6 +493,11 @@ TEST_F(TargetLibraryInfoTest, ValidProto) {
       "declare i32 @fiprintf(%struct*, i8*, ...)\n"
       "declare i32 @iprintf(i8*, ...)\n"
       "declare i32 @siprintf(i8*, i8*, ...)\n"
+
+      // __small_printf variants have the same prototype as the non-'i' versions.
+      "declare i32 @__small_fprintf(%struct*, i8*, ...)\n"
+      "declare i32 @__small_printf(i8*, ...)\n"
+      "declare i32 @__small_sprintf(i8*, i8*, ...)\n"
 
       "declare i32 @htonl(i32)\n"
       "declare i16 @htons(i16)\n"

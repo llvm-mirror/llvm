@@ -1,9 +1,8 @@
 //===-- X86DisassemblerDecoder.cpp - Disassembler decoder -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -377,8 +376,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
       if (byte == 0xf3 && (nextByte == 0x88 || nextByte == 0x89 ||
                            nextByte == 0xc6 || nextByte == 0xc7)) {
         insn->xAcquireRelease = true;
-        if (nextByte != 0x90) // PAUSE instruction support
-          break;
+        break;
       }
       if (isREX(insn, nextByte)) {
         uint8_t nnextByte;
@@ -1846,6 +1844,9 @@ static int readOperands(struct InternalInstruction* insn) {
     case ENCODING_Rv:
       if (readOpcodeRegister(insn, 0))
         return -1;
+      break;
+    case ENCODING_CC:
+      insn->immediates[1] = insn->opcode & 0xf;
       break;
     case ENCODING_FP:
       break;

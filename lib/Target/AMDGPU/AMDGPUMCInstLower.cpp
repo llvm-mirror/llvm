@@ -1,9 +1,8 @@
 //===- AMDGPUMCInstLower.cpp - Lower AMDGPU MachineInstr to an MCInst -----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,8 +100,13 @@ const MCExpr *AMDGPUMCInstLower::getLongBranchBlockExpr(
     = MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), Ctx);
   const MCExpr *SrcBBSym = MCSymbolRefExpr::create(SrcBB.getSymbol(), Ctx);
 
-  assert(SrcBB.front().getOpcode() == AMDGPU::S_GETPC_B64 &&
-         ST.getInstrInfo()->get(AMDGPU::S_GETPC_B64).Size == 4);
+  // FIXME: The first half of this assert should be removed. This should
+  // probably be PC relative instead of using the source block symbol, and
+  // therefore the indirect branch expansion should use a bundle.
+  assert(
+      skipDebugInstructionsForward(SrcBB.begin(), SrcBB.end())->getOpcode() ==
+          AMDGPU::S_GETPC_B64 &&
+      ST.getInstrInfo()->get(AMDGPU::S_GETPC_B64).Size == 4);
 
   // s_getpc_b64 returns the address of next instruction.
   const MCConstantExpr *One = MCConstantExpr::create(4, Ctx);

@@ -1,9 +1,8 @@
 //===- ELF.h - ELF object file implementation -------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -80,9 +79,7 @@ public:
   using Elf_Relr_Range = typename ELFT::RelrRange;
   using Elf_Phdr_Range = typename ELFT::PhdrRange;
 
-  const uint8_t *base() const {
-    return reinterpret_cast<const uint8_t *>(Buf.data());
-  }
+  const uint8_t *base() const { return Buf.bytes_begin(); }
 
   size_t getBufSize() const { return Buf.size(); }
 
@@ -115,8 +112,8 @@ public:
                              SmallVectorImpl<char> &Result) const;
   uint32_t getRelativeRelocationType() const;
 
-  const char *getDynamicTagAsString(unsigned Arch, uint64_t Type) const;
-  const char *getDynamicTagAsString(uint64_t Type) const;
+  std::string getDynamicTagAsString(unsigned Arch, uint64_t Type) const;
+  std::string getDynamicTagAsString(uint64_t Type) const;
 
   /// Get the symbol for a given relocation.
   Expected<const Elf_Sym *> getRelocationSymbol(const Elf_Rel *Rel,

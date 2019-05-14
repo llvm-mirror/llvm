@@ -16,10 +16,11 @@ action("version_script") {
     "--version-list",
     "--extra",
     rebase_path(sources[0], root_build_dir),
-    rebase_path("$crt_current_out_dir/libclang_rt.hwasan-$crt_current_target.a",
-                root_build_dir),
     rebase_path(
-        "$crt_current_out_dir/libclang_rt.hwasan_cxx-$crt_current_target.a",
+        "$crt_current_out_dir/libclang_rt.hwasan$crt_current_target_suffix.a",
+        root_build_dir),
+    rebase_path(
+        "$crt_current_out_dir/libclang_rt.hwasan_cxx$crt_current_target_suffix.a",
         root_build_dir),
     "-o",
     rebase_path(outputs[0], root_build_dir),
@@ -36,16 +37,29 @@ source_set("sources") {
     "//compiler-rt/lib/ubsan:sources",
   ]
   sources = [
-    "hwasan.cc",
-    "hwasan_allocator.cc",
-    "hwasan_dynamic_shadow.cc",
-    "hwasan_interceptors.cc",
-    "hwasan_linux.cc",
-    "hwasan_memintrinsics.cc",
-    "hwasan_poisoning.cc",
-    "hwasan_report.cc",
-    "hwasan_thread.cc",
-    "hwasan_thread_list.cc",
+    "hwasan.cpp",
+    "hwasan.h",
+    "hwasan_allocator.cpp",
+    "hwasan_allocator.h",
+    "hwasan_dynamic_shadow.cpp",
+    "hwasan_dynamic_shadow.h",
+    "hwasan_flags.h",
+    "hwasan_interceptors.cpp",
+    "hwasan_interceptors_vfork.S",
+    "hwasan_interface_internal.h",
+    "hwasan_linux.cpp",
+    "hwasan_malloc_bisect.h",
+    "hwasan_mapping.h",
+    "hwasan_memintrinsics.cpp",
+    "hwasan_poisoning.cpp",
+    "hwasan_poisoning.h",
+    "hwasan_report.cpp",
+    "hwasan_report.h",
+    "hwasan_tag_mismatch_aarch64.S",
+    "hwasan_thread.cpp",
+    "hwasan_thread.h",
+    "hwasan_thread_list.cpp",
+    "hwasan_thread_list.h",
   ]
 }
 
@@ -56,15 +70,18 @@ source_set("cxx_sources") {
     "//compiler-rt/lib/ubsan:cxx_sources",
   ]
   sources = [
-    "hwasan_new_delete.cc",
+    "hwasan_new_delete.cpp",
   ]
 }
 
 static_library("hwasan") {
   output_dir = crt_current_out_dir
-  output_name = "clang_rt.hwasan-$crt_current_target"
+  output_name = "clang_rt.hwasan$crt_current_target_suffix"
   complete_static_lib = true
-  configs -= [ "//llvm/utils/gn/build:llvm_code" ]
+  configs -= [
+    "//llvm/utils/gn/build:llvm_code",
+    "//llvm/utils/gn/build:thin_archive",
+  ]
   configs += [ "//llvm/utils/gn/build:crt_code" ]
   deps = [
     ":sources",
@@ -73,9 +90,12 @@ static_library("hwasan") {
 
 static_library("hwasan_cxx") {
   output_dir = crt_current_out_dir
-  output_name = "clang_rt.hwasan_cxx-$crt_current_target"
+  output_name = "clang_rt.hwasan_cxx$crt_current_target_suffix"
   complete_static_lib = true
-  configs -= [ "//llvm/utils/gn/build:llvm_code" ]
+  configs -= [
+    "//llvm/utils/gn/build:llvm_code",
+    "//llvm/utils/gn/build:thin_archive",
+  ]
   configs += [ "//llvm/utils/gn/build:crt_code" ]
   deps = [
     ":cxx_sources",
@@ -84,7 +104,7 @@ static_library("hwasan_cxx") {
 
 shared_library("hwasan_shared") {
   output_dir = crt_current_out_dir
-  output_name = "clang_rt.hwasan-$crt_current_target"
+  output_name = "clang_rt.hwasan$crt_current_target_suffix"
   configs -= [ "//llvm/utils/gn/build:llvm_code" ]
   configs += [ "//llvm/utils/gn/build:crt_code" ]
   deps = [

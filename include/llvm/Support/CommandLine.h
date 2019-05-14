@@ -1,9 +1,8 @@
 //===- llvm/Support/CommandLine.h - Command line handler --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -159,23 +158,27 @@ enum OptionHidden {   // Control whether -help shows this option
 // AlwaysPrefix - Only allow the behavior enabled by the Prefix flag and reject
 // the Option=Value form.
 //
-// Grouping - With this option enabled, multiple letter options are allowed to
-// bunch together with only a single hyphen for the whole group.  This allows
-// emulation of the behavior that ls uses for example: ls -la === ls -l -a
-//
 
 enum FormattingFlags {
   NormalFormatting = 0x00, // Nothing special
   Positional = 0x01,       // Is a positional argument, no '-' required
   Prefix = 0x02,           // Can this option directly prefix its value?
-  AlwaysPrefix = 0x03,     // Can this option only directly prefix its value?
-  Grouping = 0x04          // Can this option group with other options?
+  AlwaysPrefix = 0x03      // Can this option only directly prefix its value?
 };
 
 enum MiscFlags {             // Miscellaneous flags to adjust argument
   CommaSeparated = 0x01,     // Should this cl::list split between commas?
   PositionalEatsArgs = 0x02, // Should this positional cl::list eat -args?
-  Sink = 0x04                // Should this cl::list eat all unknown options?
+  Sink = 0x04,               // Should this cl::list eat all unknown options?
+
+  // Grouping - Can this option group with other options?
+  // If this is enabled, multiple letter options are allowed to bunch together
+  // with only a single hyphen for the whole group.  This allows emulation
+  // of the behavior that ls uses for example: ls -la === ls -l -a
+  Grouping = 0x08,
+
+  // Default option
+  DefaultOption = 0x10
 };
 
 //===----------------------------------------------------------------------===//
@@ -269,8 +272,8 @@ class Option {
   // detail representing the non-value
   unsigned Value : 2;
   unsigned HiddenFlag : 2; // enum OptionHidden
-  unsigned Formatting : 3; // enum FormattingFlags
-  unsigned Misc : 3;
+  unsigned Formatting : 2; // enum FormattingFlags
+  unsigned Misc : 5;
   unsigned Position = 0;       // Position of last occurrence of the option
   unsigned AdditionalVals = 0; // Greater than 0 for multi-valued option.
 
@@ -306,6 +309,7 @@ public:
   bool hasArgStr() const { return !ArgStr.empty(); }
   bool isPositional() const { return getFormattingFlag() == cl::Positional; }
   bool isSink() const { return getMiscFlags() & cl::Sink; }
+  bool isDefaultOption() const { return getMiscFlags() & cl::DefaultOption; }
 
   bool isConsumeAfter() const {
     return getNumOccurrencesFlag() == cl::ConsumeAfter;
@@ -382,7 +386,7 @@ public:
   }
 
   inline int getNumOccurrences() const { return NumOccurrences; }
-  inline void reset() { NumOccurrences = 0; }
+  void reset();
 };
 
 //===----------------------------------------------------------------------===//
@@ -823,6 +827,8 @@ class basic_parser_impl { // non-template implementation of basic_parser<t>
 public:
   basic_parser_impl(Option &) {}
 
+  virtual ~basic_parser_impl() {}
+
   enum ValueExpected getValueExpectedFlagDefault() const {
     return ValueRequired;
   }
@@ -850,8 +856,6 @@ public:
   virtual void anchor();
 
 protected:
-  ~basic_parser_impl() = default;
-
   // A helper for basic_parser::printOptionDiff.
   void printOptionName(const Option &O, size_t GlobalWidth) const;
 };
@@ -865,15 +869,12 @@ public:
   using OptVal = OptionValue<DataType>;
 
   basic_parser(Option &O) : basic_parser_impl(O) {}
-
-protected:
-  ~basic_parser() = default;
 };
 
 //--------------------------------------------------
 // parser<bool>
 //
-template <> class parser<bool> final : public basic_parser<bool> {
+template <> class parser<bool> : public basic_parser<bool> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -900,8 +901,7 @@ extern template class basic_parser<bool>;
 
 //--------------------------------------------------
 // parser<boolOrDefault>
-template <>
-class parser<boolOrDefault> final : public basic_parser<boolOrDefault> {
+template <> class parser<boolOrDefault> : public basic_parser<boolOrDefault> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -927,7 +927,7 @@ extern template class basic_parser<boolOrDefault>;
 //--------------------------------------------------
 // parser<int>
 //
-template <> class parser<int> final : public basic_parser<int> {
+template <> class parser<int> : public basic_parser<int> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -949,7 +949,7 @@ extern template class basic_parser<int>;
 //--------------------------------------------------
 // parser<unsigned>
 //
-template <> class parser<unsigned> final : public basic_parser<unsigned> {
+template <> class parser<unsigned> : public basic_parser<unsigned> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -969,11 +969,33 @@ public:
 extern template class basic_parser<unsigned>;
 
 //--------------------------------------------------
+// parser<unsigned long>
+//
+template <>
+class parser<unsigned long> final : public basic_parser<unsigned long> {
+public:
+  parser(Option &O) : basic_parser(O) {}
+
+  // parse - Return true on error.
+  bool parse(Option &O, StringRef ArgName, StringRef Arg, unsigned long &Val);
+
+  // getValueName - Overload in subclass to provide a better default value.
+  StringRef getValueName() const override { return "ulong"; }
+
+  void printOptionDiff(const Option &O, unsigned long V, OptVal Default,
+                       size_t GlobalWidth) const;
+
+  // An out-of-line virtual method to provide a 'home' for this class.
+  void anchor() override;
+};
+
+extern template class basic_parser<unsigned long>;
+
+//--------------------------------------------------
 // parser<unsigned long long>
 //
 template <>
-class parser<unsigned long long> final
-    : public basic_parser<unsigned long long> {
+class parser<unsigned long long> : public basic_parser<unsigned long long> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -982,7 +1004,7 @@ public:
              unsigned long long &Val);
 
   // getValueName - Overload in subclass to provide a better default value.
-  StringRef getValueName() const override { return "uint"; }
+  StringRef getValueName() const override { return "ulong"; }
 
   void printOptionDiff(const Option &O, unsigned long long V, OptVal Default,
                        size_t GlobalWidth) const;
@@ -996,7 +1018,7 @@ extern template class basic_parser<unsigned long long>;
 //--------------------------------------------------
 // parser<double>
 //
-template <> class parser<double> final : public basic_parser<double> {
+template <> class parser<double> : public basic_parser<double> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -1018,7 +1040,7 @@ extern template class basic_parser<double>;
 //--------------------------------------------------
 // parser<float>
 //
-template <> class parser<float> final : public basic_parser<float> {
+template <> class parser<float> : public basic_parser<float> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -1040,7 +1062,7 @@ extern template class basic_parser<float>;
 //--------------------------------------------------
 // parser<std::string>
 //
-template <> class parser<std::string> final : public basic_parser<std::string> {
+template <> class parser<std::string> : public basic_parser<std::string> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -1065,7 +1087,7 @@ extern template class basic_parser<std::string>;
 //--------------------------------------------------
 // parser<char>
 //
-template <> class parser<char> final : public basic_parser<char> {
+template <> class parser<char> : public basic_parser<char> {
 public:
   parser(Option &O) : basic_parser(O) {}
 
@@ -1178,7 +1200,11 @@ template <> struct applicator<FormattingFlags> {
 };
 
 template <> struct applicator<MiscFlags> {
-  static void opt(MiscFlags MF, Option &O) { O.setMiscFlag(MF); }
+  static void opt(MiscFlags MF, Option &O) {
+    assert((MF != Grouping || O.ArgStr.size() == 1) &&
+           "cl::Grouping can only apply to single charater Options.");
+    O.setMiscFlag(MF);
+  }
 };
 
 // apply method - Apply modifiers to an option in a type safe way.
@@ -1398,6 +1424,8 @@ template <class DataType, class StorageClass> class list_storage {
 public:
   list_storage() = default;
 
+  void clear() {}
+
   bool setLocation(Option &O, StorageClass &L) {
     if (Location)
       return O.error("cl::location(x) specified more than once!");
@@ -1448,6 +1476,10 @@ public:
 
   reference operator[](size_type pos) { return Storage[pos]; }
   const_reference operator[](size_type pos) const { return Storage[pos]; }
+
+  void clear() {
+    Storage.clear();
+  }
 
   iterator erase(const_iterator pos) { return Storage.erase(pos); }
   iterator erase(const_iterator first, const_iterator last) {
@@ -1526,7 +1558,10 @@ class list : public Option, public list_storage<DataType, StorageClass> {
   void printOptionValue(size_t /*GlobalWidth*/, bool /*Force*/) const override {
   }
 
-  void setDefault() override {}
+  void setDefault() override {
+    Positions.clear();
+    list_storage<DataType, StorageClass>::clear();
+  }
 
   void done() {
     addArgument();
@@ -1732,7 +1767,10 @@ class alias : public Option {
       error("cl::alias must have argument name specified!");
     if (!AliasFor)
       error("cl::alias must have an cl::aliasopt(option) specified!");
+    if (!Subs.empty())
+      error("cl::alias must not have cl::sub(), aliased option's cl::sub() will be used!");
     Subs = AliasFor->Subs;
+    Category = AliasFor->Category;
     addArgument();
   }
 

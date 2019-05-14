@@ -130,6 +130,42 @@ define <4 x double> @combine_vpermil2pd256_as_shufpd(<4 x double> %a0, <4 x doub
   ret <4 x double> %res0
 }
 
+define <4 x double> @demandedelts_vpermil2pd256_as_shufpd(<4 x double> %a0, <4 x double> %a1, i64 %a2) {
+; X86-AVX-LABEL: demandedelts_vpermil2pd256_as_shufpd:
+; X86-AVX:       # %bb.0:
+; X86-AVX-NEXT:    movl $4, %eax
+; X86-AVX-NEXT:    vmovd %eax, %xmm2
+; X86-AVX-NEXT:    vmovq {{.*#+}} xmm3 = mem[0],zero
+; X86-AVX-NEXT:    vpunpcklqdq {{.*#+}} xmm2 = xmm3[0],xmm2[0]
+; X86-AVX-NEXT:    vinsertf128 $1, {{\.LCPI.*}}, %ymm2, %ymm2
+; X86-AVX-NEXT:    vpermil2pd $0, %ymm2, %ymm1, %ymm0, %ymm0
+; X86-AVX-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,1,2,3]
+; X86-AVX-NEXT:    retl
+;
+; X86-AVX2-LABEL: demandedelts_vpermil2pd256_as_shufpd:
+; X86-AVX2:       # %bb.0:
+; X86-AVX2-NEXT:    movl $4, %eax
+; X86-AVX2-NEXT:    vmovd %eax, %xmm2
+; X86-AVX2-NEXT:    vmovq {{.*#+}} xmm3 = mem[0],zero
+; X86-AVX2-NEXT:    vpunpcklqdq {{.*#+}} xmm2 = xmm3[0],xmm2[0]
+; X86-AVX2-NEXT:    vinserti128 $1, {{\.LCPI.*}}, %ymm2, %ymm2
+; X86-AVX2-NEXT:    vpermil2pd $0, %ymm2, %ymm1, %ymm0, %ymm0
+; X86-AVX2-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,1,2,3]
+; X86-AVX2-NEXT:    retl
+;
+; X64-LABEL: demandedelts_vpermil2pd256_as_shufpd:
+; X64:       # %bb.0:
+; X64-NEXT:    vmovapd {{.*#+}} xmm2 = <u,4,2,7>
+; X64-NEXT:    vblendpd {{.*#+}} ymm2 = ymm2[0,1],mem[2,3]
+; X64-NEXT:    vpermil2pd $0, %ymm2, %ymm1, %ymm0, %ymm0
+; X64-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,1,2,3]
+; X64-NEXT:    retq
+  %res0 = insertelement <4 x i64> <i64 0, i64 4, i64 2, i64 7>, i64 %a2, i32 0
+  %res1 = call <4 x double> @llvm.x86.xop.vpermil2pd.256(<4 x double> %a0, <4 x double> %a1, <4 x i64> %res0, i8 0)
+  %res2 = shufflevector <4 x double> %res1, <4 x double> undef, <4 x i32> <i32 1, i32 1, i32 2, i32 3>
+  ret <4 x double> %res2
+}
+
 define <16 x i8> @combine_vpperm_identity(<16 x i8> %a0, <16 x i8> %a1) {
 ; CHECK-LABEL: combine_vpperm_identity:
 ; CHECK:       # %bb.0:
@@ -219,23 +255,13 @@ define <4 x i32> @combine_vpperm_10zz32BA(<4 x i32> %a0, <4 x i32> %a1) {
   ret <4 x i32> %res3
 }
 
-; FIXME: Duplicated load in i686
 define void @buildvector_v4f32_0404(float %a, float %b, <4 x float>* %ptr) {
-; X86-AVX-LABEL: buildvector_v4f32_0404:
-; X86-AVX:       # %bb.0:
-; X86-AVX-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-AVX-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
-; X86-AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,1],mem[0],xmm0[3]
-; X86-AVX-NEXT:    vinsertps {{.*#+}} xmm0 = xmm0[0,1,2],mem[0]
-; X86-AVX-NEXT:    vmovaps %xmm0, (%eax)
-; X86-AVX-NEXT:    retl
-;
-; X86-AVX2-LABEL: buildvector_v4f32_0404:
-; X86-AVX2:       # %bb.0:
-; X86-AVX2-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-AVX2-NEXT:    vmovddup {{.*#+}} xmm0 = mem[0,0]
-; X86-AVX2-NEXT:    vmovapd %xmm0, (%eax)
-; X86-AVX2-NEXT:    retl
+; X86-LABEL: buildvector_v4f32_0404:
+; X86:       # %bb.0:
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    vmovddup {{.*#+}} xmm0 = mem[0,0]
+; X86-NEXT:    vmovaps %xmm0, (%eax)
+; X86-NEXT:    retl
 ;
 ; X64-AVX-LABEL: buildvector_v4f32_0404:
 ; X64-AVX:       # %bb.0:
@@ -247,7 +273,7 @@ define void @buildvector_v4f32_0404(float %a, float %b, <4 x float>* %ptr) {
 ; X64-AVX2:       # %bb.0:
 ; X64-AVX2-NEXT:    vunpcklps {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
 ; X64-AVX2-NEXT:    vmovddup {{.*#+}} xmm0 = xmm0[0,0]
-; X64-AVX2-NEXT:    vmovapd %xmm0, (%rdi)
+; X64-AVX2-NEXT:    vmovaps %xmm0, (%rdi)
 ; X64-AVX2-NEXT:    retq
   %v0 = insertelement <4 x float> undef, float %a, i32 0
   %v1 = insertelement <4 x float> %v0,   float %b, i32 1

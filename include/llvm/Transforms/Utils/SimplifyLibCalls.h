@@ -1,9 +1,8 @@
 //===- SimplifyLibCalls.h - Library call simplifier -------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,6 +28,8 @@ class TargetLibraryInfo;
 class BasicBlock;
 class Function;
 class OptimizationRemarkEmitter;
+class BlockFrequencyInfo;
+class ProfileSummaryInfo;
 
 /// This class implements simplifications for calls to fortified library
 /// functions (__st*cpy_chk, __memcpy_chk, __memmove_chk, __memset_chk), to,
@@ -75,6 +76,8 @@ private:
   const DataLayout &DL;
   const TargetLibraryInfo *TLI;
   OptimizationRemarkEmitter &ORE;
+  BlockFrequencyInfo *BFI;
+  ProfileSummaryInfo *PSI;
   bool UnsafeFPShrink;
   function_ref<void(Instruction *, Value *)> Replacer;
   function_ref<void(Instruction *)> Eraser;
@@ -102,6 +105,7 @@ public:
   LibCallSimplifier(
       const DataLayout &DL, const TargetLibraryInfo *TLI,
       OptimizationRemarkEmitter &ORE,
+      BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
       function_ref<void(Instruction *, Value *)> Replacer =
           &replaceAllUsesWithDefault,
       function_ref<void(Instruction *)> Eraser = &eraseFromParentDefault);
@@ -134,6 +138,8 @@ private:
   Value *optimizeStrStr(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemChr(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemCmp(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeBCmp(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeMemCmpBCmpCommon(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemCpy(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemMove(CallInst *CI, IRBuilder<> &B);
   Value *optimizeMemSet(CallInst *CI, IRBuilder<> &B);

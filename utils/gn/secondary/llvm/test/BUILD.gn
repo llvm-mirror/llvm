@@ -59,7 +59,6 @@ write_lit_config("lit_site_cfg") {
     "LLVM_LINK_LLVM_DYLIB=0",
     "LLVM_LIT_TOOLS_DIR=",  # Intentionally empty, matches cmake build.
     "LLVM_NATIVE_ARCH=$native_target",
-    "LLVM_TOOL_LTO_BUILD=1",  # The GN build always builds //llvm/tools/lto.
     "LLVM_USE_INTEL_JITEVENTS=0",
     "LLVM_USE_SANITIZER=",
     "PYTHON_EXECUTABLE=$python_path",
@@ -76,6 +75,7 @@ write_lit_config("lit_site_cfg") {
     "HAVE_OCAML_OUNIT=0",
     "OCAMLFIND=OCAMLFIND-NOTFOUND",
     "OCAMLFLAGS=",
+    "LLVM_BUILD_EXAMPLES=0",
   ]
 
   if (host_cpu == "x64") {
@@ -84,24 +84,28 @@ write_lit_config("lit_site_cfg") {
     assert(false, "unimplemented host_cpu " + host_cpu)
   }
 
+  if (host_os == "win") {
+    extra_values += [ "EXEEXT=.exe" ]
+  } else {
+    extra_values += [ "EXEEXT=" ]
+  }
+
   if (host_os == "mac") {
-    extra_values += [
-      "EXEEXT=",
-      "HOST_OS=Darwin",
-      "SHLIBEXT=.dylib",
-    ]
-  } else if (host_os == "linux") {
-    extra_values += [
-      "EXEEXT=",
-      "HOST_OS=Linux",
-      "SHLIBEXT=.so",
-    ]
+    extra_values += [ "SHLIBEXT=.dylib" ]
   } else if (host_os == "win") {
-    extra_values += [
-      "EXEEXT=.exe",
-      "HOST_OS=Windows",
-      "SHLIBEXT=.dll",
-    ]
+    extra_values += [ "SHLIBEXT=.dll" ]
+  } else {
+    extra_values += [ "SHLIBEXT=.so" ]
+  }
+
+  if (host_os == "freebsd") {
+    extra_values += [ "HOST_OS=FreeBSD" ]
+  } else if (host_os == "mac") {
+    extra_values += [ "HOST_OS=Darwin" ]
+  } else if (host_os == "linux") {
+    extra_values += [ "HOST_OS=Linux" ]
+  } else if (host_os == "win") {
+    extra_values += [ "HOST_OS=Windows" ]
   } else {
     assert(false, "unsupported host_os " + host_os)
   }
@@ -141,7 +145,7 @@ write_lit_config("lit_site_cfg") {
   if (llvm_enable_libxml2) {
     extra_values += [ "LLVM_LIBXML2_ENABLED=1" ]
   } else {
-    extra_values += [ "LLVM_LIBXML2_ENABLED=" ]  # Must be empty.
+    extra_values += [ "LLVM_LIBXML2_ENABLED=0" ]  # Must be 0.
   }
 
   if (llvm_enable_threads) {
@@ -202,6 +206,7 @@ group("test") {
     "//llvm/tools/llvm-exegesis",
     "//llvm/tools/llvm-extract",
     "//llvm/tools/llvm-isel-fuzzer",
+    "//llvm/tools/llvm-jitlink",
     "//llvm/tools/llvm-link",
     "//llvm/tools/llvm-lto",
     "//llvm/tools/llvm-lto2",
@@ -222,7 +227,7 @@ group("test") {
     "//llvm/tools/llvm-size",
     "//llvm/tools/llvm-split",
     "//llvm/tools/llvm-strings",
-    "//llvm/tools/llvm-symbolizer",
+    "//llvm/tools/llvm-symbolizer:symlinks",
     "//llvm/tools/llvm-undname",
     "//llvm/tools/llvm-xray",
     "//llvm/tools/lto",
@@ -236,6 +241,7 @@ group("test") {
     "//llvm/utils/FileCheck",
     "//llvm/utils/TableGen:llvm-tblgen",
     "//llvm/utils/count",
+    "//llvm/utils/llvm-lit",
     "//llvm/utils/not",
 
     # llvm-config wants libgtest_main.a to exist at runtime when run as in

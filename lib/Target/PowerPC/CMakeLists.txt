@@ -19,6 +19,7 @@ add_llvm_target(PowerPCCodeGen
   PPCAsmPrinter.cpp
   PPCBranchSelector.cpp
   PPCBranchCoalescing.cpp
+  PPCCallingConv.cpp
   PPCCCState.cpp
   PPCCTRLoops.cpp
   PPCHazardRecognizers.cpp
@@ -31,6 +32,7 @@ add_llvm_target(PowerPCCodeGen
   PPCLoopPreIncPrep.cpp
   PPCMCInstLower.cpp
   PPCMachineFunctionInfo.cpp
+  PPCMachineScheduler.cpp
   PPCMIPeephole.cpp
   PPCRegisterInfo.cpp
   PPCQPXLoadSplat.cpp

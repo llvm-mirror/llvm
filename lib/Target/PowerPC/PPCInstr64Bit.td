@@ -1,9 +1,8 @@
 //===-- PPCInstr64Bit.td - The PowerPC 64-bit Support ------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -773,13 +772,21 @@ def DIVDE : XOForm_1<31, 425, 0, (outs g8rc:$rT), (ins g8rc:$rA, g8rc:$rB),
 let Predicates = [IsISA3_0] in {
 def MADDHD : VAForm_1a<48, (outs g8rc :$RT), (ins g8rc:$RA, g8rc:$RB, g8rc:$RC),
                        "maddhd $RT, $RA, $RB, $RC", IIC_IntMulHD, []>, isPPC64;
-def MADDHDU : VAForm_1a<49, (outs g8rc :$RT), (ins g8rc:$RA, g8rc:$RB, g8rc:$RC),
+def MADDHDU : VAForm_1a<49, 
+                       (outs g8rc :$RT), (ins g8rc:$RA, g8rc:$RB, g8rc:$RC),
                        "maddhdu $RT, $RA, $RB, $RC", IIC_IntMulHD, []>, isPPC64;
-def MADDLD : VAForm_1a<51, (outs g8rc :$RT), (ins g8rc:$RA, g8rc:$RB, g8rc:$RC),
-                       "maddld $RT, $RA, $RB, $RC", IIC_IntMulHD, []>, isPPC64;
+def MADDLD : VAForm_1a<51, (outs gprc :$RT), (ins gprc:$RA, gprc:$RB, gprc:$RC),
+                       "maddld $RT, $RA, $RB, $RC", IIC_IntMulHD,
+                       [(set i32:$RT, (add_without_simm16 (mul_without_simm16 i32:$RA, i32:$RB), i32:$RC))]>,
+                       isPPC64;
 def SETB : XForm_44<31, 128, (outs gprc:$RT), (ins crrc:$BFA),
                        "setb $RT, $BFA", IIC_IntGeneral>, isPPC64;
 let Interpretation64Bit = 1, isCodeGenOnly = 1 in {
+  def MADDLD8 : VAForm_1a<51, 
+                       (outs g8rc :$RT), (ins g8rc:$RA, g8rc:$RB, g8rc:$RC),
+                       "maddld $RT, $RA, $RB, $RC", IIC_IntMulHD,
+                       [(set i64:$RT, (add_without_simm16 (mul_without_simm16 i64:$RA, i64:$RB), i64:$RC))]>,
+                       isPPC64;
   def SETB8 : XForm_44<31, 128, (outs g8rc:$RT), (ins crrc:$BFA),
                        "setb $RT, $BFA", IIC_IntGeneral>, isPPC64;
 }

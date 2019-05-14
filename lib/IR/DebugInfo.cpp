@@ -1,9 +1,8 @@
 //===- DebugInfo.cpp - Debug Information Helper Classes -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -900,6 +899,43 @@ LLVMMetadataRef LLVMDILocationGetScope(LLVMMetadataRef Location) {
   return wrap(unwrapDI<DILocation>(Location)->getScope());
 }
 
+LLVMMetadataRef LLVMDILocationGetInlinedAt(LLVMMetadataRef Location) {
+  return wrap(unwrapDI<DILocation>(Location)->getInlinedAt());
+}
+
+LLVMMetadataRef LLVMDIScopeGetFile(LLVMMetadataRef Scope) {
+  return wrap(unwrapDI<DIScope>(Scope)->getFile());
+}
+
+const char *LLVMDIFileGetDirectory(LLVMMetadataRef File, unsigned *Len) {
+  auto Dir = unwrapDI<DIFile>(File)->getDirectory();
+  *Len = Dir.size();
+  return Dir.data();
+}
+
+const char *LLVMDIFileGetFilename(LLVMMetadataRef File, unsigned *Len) {
+  auto Name = unwrapDI<DIFile>(File)->getFilename();
+  *Len = Name.size();
+  return Name.data();
+}
+
+const char *LLVMDIFileGetSource(LLVMMetadataRef File, unsigned *Len) {
+  if (auto Src = unwrapDI<DIFile>(File)->getSource()) {
+    *Len = Src->size();
+    return Src->data();
+  }
+  *Len = 0;
+  return "";
+}
+
+LLVMMetadataRef LLVMDIBuilderCreateEnumerator(LLVMDIBuilderRef Builder,
+                                              const char *Name, size_t NameLen,
+                                              int64_t Value,
+                                              LLVMBool IsUnsigned) {
+  return wrap(unwrap(Builder)->createEnumerator({Name, NameLen}, Value,
+                                                IsUnsigned != 0));
+}
+
 LLVMMetadataRef LLVMDIBuilderCreateEnumerationType(
   LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name,
   size_t NameLen, LLVMMetadataRef File, unsigned LineNumber,
@@ -1237,6 +1273,27 @@ LLVMMetadataRef LLVMDIBuilderCreateGlobalVariableExpression(
       nullptr, AlignInBits));
 }
 
+LLVMMetadataRef LLVMDIGlobalVariableExpressionGetVariable(LLVMMetadataRef GVE) {
+  return wrap(unwrapDI<DIGlobalVariableExpression>(GVE)->getVariable());
+}
+
+LLVMMetadataRef LLVMDIGlobalVariableExpressionGetExpression(
+    LLVMMetadataRef GVE) {
+  return wrap(unwrapDI<DIGlobalVariableExpression>(GVE)->getExpression());
+}
+
+LLVMMetadataRef LLVMDIVariableGetFile(LLVMMetadataRef Var) {
+  return wrap(unwrapDI<DIVariable>(Var)->getFile());
+}
+
+LLVMMetadataRef LLVMDIVariableGetScope(LLVMMetadataRef Var) {
+  return wrap(unwrapDI<DIVariable>(Var)->getScope());
+}
+
+unsigned LLVMDIVariableGetLine(LLVMMetadataRef Var) {
+  return unwrapDI<DIVariable>(Var)->getLine();
+}
+
 LLVMMetadataRef LLVMTemporaryMDNode(LLVMContextRef Ctx, LLVMMetadataRef *Data,
                                     size_t Count) {
   return wrap(
@@ -1346,6 +1403,21 @@ LLVMMetadataRef LLVMGetSubprogram(LLVMValueRef Func) {
 
 void LLVMSetSubprogram(LLVMValueRef Func, LLVMMetadataRef SP) {
   unwrap<Function>(Func)->setSubprogram(unwrap<DISubprogram>(SP));
+}
+
+unsigned LLVMDISubprogramGetLine(LLVMMetadataRef Subprogram) {
+  return unwrapDI<DISubprogram>(Subprogram)->getLine();
+}
+
+LLVMMetadataRef LLVMInstructionGetDebugLoc(LLVMValueRef Inst) {
+  return wrap(unwrap<Instruction>(Inst)->getDebugLoc().getAsMDNode());
+}
+
+void LLVMInstructionSetDebugLoc(LLVMValueRef Inst, LLVMMetadataRef Loc) {
+  if (Loc)
+    unwrap<Instruction>(Inst)->setDebugLoc(DebugLoc(unwrap<MDNode>(Loc)));
+  else
+    unwrap<Instruction>(Inst)->setDebugLoc(DebugLoc());
 }
 
 LLVMMetadataKind LLVMGetMetadataKind(LLVMMetadataRef Metadata) {

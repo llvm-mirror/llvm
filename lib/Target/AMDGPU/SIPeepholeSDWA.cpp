@@ -1,9 +1,8 @@
 //===- SIPeepholeSDWA.cpp - Peephole optimization for SDWA instructions ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -348,8 +347,8 @@ uint64_t SDWASrcOperand::getSrcMods(const SIInstrInfo *TII,
   if (Abs || Neg) {
     assert(!Sext &&
            "Float and integer src modifiers can't be set simulteniously");
-    Mods |= Abs ? SISrcMods::ABS : 0;
-    Mods ^= Neg ? SISrcMods::NEG : 0;
+    Mods |= Abs ? SISrcMods::ABS : 0u;
+    Mods ^= Neg ? SISrcMods::NEG : 0u;
   } else if (Sext) {
     Mods |= SISrcMods::SEXT;
   }
@@ -419,7 +418,9 @@ bool SDWASrcOperand::convertToSDWA(MachineInstr &MI, const SIInstrInfo *TII) {
     }
     assert(Src && Src->isReg());
 
-    if ((MI.getOpcode() == AMDGPU::V_MAC_F16_sdwa ||
+    if ((MI.getOpcode() == AMDGPU::V_FMAC_F16_sdwa ||
+         MI.getOpcode() == AMDGPU::V_FMAC_F32_sdwa ||
+         MI.getOpcode() == AMDGPU::V_MAC_F16_sdwa ||
          MI.getOpcode() == AMDGPU::V_MAC_F32_sdwa) &&
          !isSameReg(*Src, *getReplacedOperand())) {
       // In case of v_mac_f16/32_sdwa this pass can try to apply src operand to
@@ -461,7 +462,9 @@ MachineInstr *SDWADstOperand::potentialToConvert(const SIInstrInfo *TII) {
 bool SDWADstOperand::convertToSDWA(MachineInstr &MI, const SIInstrInfo *TII) {
   // Replace vdst operand in MI with target operand. Set dst_sel and dst_unused
 
-  if ((MI.getOpcode() == AMDGPU::V_MAC_F16_sdwa ||
+  if ((MI.getOpcode() == AMDGPU::V_FMAC_F16_sdwa ||
+       MI.getOpcode() == AMDGPU::V_FMAC_F32_sdwa ||
+       MI.getOpcode() == AMDGPU::V_MAC_F16_sdwa ||
        MI.getOpcode() == AMDGPU::V_MAC_F32_sdwa) &&
       getDstSel() != AMDGPU::SDWA::DWORD) {
     // v_mac_f16/32_sdwa allow dst_sel to be equal only to DWORD
@@ -965,8 +968,14 @@ bool SIPeepholeSDWA::isConvertibleToSDWA(MachineInstr &MI,
     return false;
   }
 
-  if (!ST.hasSDWAMac() && (Opc == AMDGPU::V_MAC_F16_e32 ||
+  if (!ST.hasSDWAMac() && (Opc == AMDGPU::V_FMAC_F16_e32 ||
+                           Opc == AMDGPU::V_FMAC_F32_e32 ||
+                           Opc == AMDGPU::V_MAC_F16_e32 ||
                            Opc == AMDGPU::V_MAC_F32_e32))
+    return false;
+
+  // Check if target supports this SDWA opcode
+  if (TII->pseudoToMCOpcode(Opc) == -1)
     return false;
 
   // FIXME: has SDWA but require handling of implicit VCC use
@@ -1039,7 +1048,9 @@ bool SIPeepholeSDWA::convertToSDWA(MachineInstr &MI,
     SDWAInst.add(*Src1);
   }
 
-  if (SDWAOpcode == AMDGPU::V_MAC_F16_sdwa ||
+  if (SDWAOpcode == AMDGPU::V_FMAC_F16_sdwa ||
+      SDWAOpcode == AMDGPU::V_FMAC_F32_sdwa ||
+      SDWAOpcode == AMDGPU::V_MAC_F16_sdwa ||
       SDWAOpcode == AMDGPU::V_MAC_F32_sdwa) {
     // v_mac_f16/32 has additional src2 operand tied to vdst
     MachineOperand *Src2 = TII->getNamedOperand(MI, AMDGPU::OpName::src2);

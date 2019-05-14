@@ -1,9 +1,8 @@
 //===-- ObjDumper.cpp - Base dumper class -----------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -17,6 +16,7 @@
 #include "llvm-readobj.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -36,7 +36,6 @@ static Expected<object::SectionRef>
 getSecNameOrIndexAsSecRef(const object::ObjectFile *Obj, StringRef SecName) {
   char *StrPtr;
   long SectionIndex = strtol(SecName.data(), &StrPtr, 10);
-  object::SectionRef Section;
   long SecIndex;
   if (Obj->isELF())
     SecIndex = 0;
@@ -56,8 +55,9 @@ getSecNameOrIndexAsSecRef(const object::ObjectFile *Obj, StringRef SecName) {
 
     SecIndex++;
   }
-  return make_error<StringError>("invalid section reference",
-                                 object::object_error::parse_failed);
+  return make_error<StringError>(
+      formatv("could not find section '{0}'", SecName),
+      object::object_error::parse_failed);
 }
 
 void ObjDumper::printSectionAsString(const object::ObjectFile *Obj,
@@ -117,7 +117,8 @@ void ObjDumper::printSectionAsHex(const object::ObjectFile *Obj,
     uint8_t i;
     uint8_t k;
 
-    W.startLine() << format_hex(SecPtr - SecContent, 10);
+    W.startLine() << format_hex(Section.getAddress() + (SecPtr - SecContent),
+                                10);
     W.startLine() << ' ';
     for (i = 0; TmpSecPtr < SecEnd && i < 4; ++i) {
       for (k = 0; TmpSecPtr < SecEnd && k < 4; k++, TmpSecPtr++) {
@@ -131,7 +132,7 @@ void ObjDumper::printSectionAsHex(const object::ObjectFile *Obj,
     // We are adding the (4 - i) last rows that are 8 characters each.
     // Then, the (4 - i) spaces that are in between the rows.
     // Least, if we cut in a middle of a row, we add the remaining characters,
-    // which is (8 - (k * 2))
+    // which is (8 - (k * 2)).
     if (i < 4)
       W.startLine() << format("%*c", (4 - i) * 8 + (4 - i) + (8 - (k * 2)),
                               ' ');

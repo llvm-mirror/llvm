@@ -761,6 +761,19 @@ define void @atomics(i32* %word) {
   ret void
 }
 
+define void @fp_atomics(float* %word) {
+; CHECK: %atomicrmw.xchg = atomicrmw xchg float* %word, float 1.000000e+00 monotonic
+  %atomicrmw.xchg = atomicrmw xchg float* %word, float 1.0 monotonic
+
+; CHECK: %atomicrmw.fadd = atomicrmw fadd float* %word, float 1.000000e+00 monotonic
+  %atomicrmw.fadd = atomicrmw fadd float* %word, float 1.0 monotonic
+
+; CHECK: %atomicrmw.fsub = atomicrmw fsub float* %word, float 1.000000e+00 monotonic
+  %atomicrmw.fsub = atomicrmw fsub float* %word, float 1.0 monotonic
+
+  ret void
+}
+
 ;; Fast Math Flags
 define void @fastmathflags_unop(float %op1) {
   %f.nnan = fneg nnan float %op1
@@ -1667,6 +1680,10 @@ define i8** @constexpr() {
   ; CHECK: ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
   ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
 }
+
+; immarg attribute
+declare void @llvm.test.immarg.intrinsic(i32 immarg)
+; CHECK: declare void @llvm.test.immarg.intrinsic(i32 immarg)
 
 ; CHECK: attributes #0 = { alignstack=4 }
 ; CHECK: attributes #1 = { alignstack=8 }

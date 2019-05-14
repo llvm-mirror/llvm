@@ -1,9 +1,8 @@
 //===-- PPCInstrAltivec.td - The PowerPC Altivec Extension -*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -822,7 +821,9 @@ def VCMPGTSWo : VCMPo<902, "vcmpgtsw. $vD, $vA, $vB", v4i32>;
 def VCMPGTUW  : VCMP <646, "vcmpgtuw $vD, $vA, $vB" , v4i32>;
 def VCMPGTUWo : VCMPo<646, "vcmpgtuw. $vD, $vA, $vB", v4i32>;
 
-let isCodeGenOnly = 1 in {
+let isCodeGenOnly = 1, isMoveImm = 1, isAsCheapAsAMove = 1,
+    isReMaterializable = 1 in {
+
 def V_SET0B : VXForm_setzero<1220, (outs vrrc:$vD), (ins),
                       "vxor $vD, $vD, $vD", IIC_VecFP,
                       [(set v16i8:$vD, (v16i8 immAllZerosV))]>;

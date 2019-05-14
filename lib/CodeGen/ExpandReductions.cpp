@@ -1,9 +1,8 @@
 //===--- ExpandReductions.cpp - Expand experimental reduction intrinsics --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -119,9 +118,11 @@ bool expandReductions(Function &F, const TargetTransformInfo *TTI) {
     }
     if (!TTI->shouldExpandReduction(II))
       continue;
+    FastMathFlags FMF =
+        isa<FPMathOperator>(II) ? II->getFastMathFlags() : FastMathFlags{};
     Value *Rdx =
         IsOrdered ? getOrderedReduction(Builder, Acc, Vec, getOpcode(ID), MRK)
-                  : getShuffleReduction(Builder, Vec, getOpcode(ID), MRK);
+                  : getShuffleReduction(Builder, Vec, getOpcode(ID), MRK, FMF);
     II->replaceAllUsesWith(Rdx);
     II->eraseFromParent();
     Changed = true;

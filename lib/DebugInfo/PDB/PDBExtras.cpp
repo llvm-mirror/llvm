@@ -1,9 +1,8 @@
 //===- PDBExtras.cpp - helper functions and classes for PDBs --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -193,6 +192,7 @@ raw_ostream &llvm::pdb::operator<<(raw_ostream &OS, const PDB_Lang &Lang) {
     CASE_OUTPUT_ENUM_CLASS_NAME(PDB_Lang, MSIL, OS)
     CASE_OUTPUT_ENUM_CLASS_NAME(PDB_Lang, HLSL, OS)
     CASE_OUTPUT_ENUM_CLASS_NAME(PDB_Lang, D, OS)
+    CASE_OUTPUT_ENUM_CLASS_NAME(PDB_Lang, Swift, OS)
   }
   return OS;
 }

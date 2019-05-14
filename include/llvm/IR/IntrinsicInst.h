@@ -1,9 +1,8 @@
 //===-- llvm/IntrinsicInst.h - Intrinsic Instruction Wrappers ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -264,6 +263,39 @@ namespace llvm {
     static bool classof(const Value *V) {
       return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
     }
+  };
+
+  /// This class represents a op.with.overflow intrinsic.
+  class WithOverflowInst : public IntrinsicInst {
+  public:
+    static bool classof(const IntrinsicInst *I) {
+      switch (I->getIntrinsicID()) {
+      case Intrinsic::uadd_with_overflow:
+      case Intrinsic::sadd_with_overflow:
+      case Intrinsic::usub_with_overflow:
+      case Intrinsic::ssub_with_overflow:
+      case Intrinsic::umul_with_overflow:
+      case Intrinsic::smul_with_overflow:
+        return true;
+      default:
+        return false;
+      }
+    }
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+
+    Value *getLHS() const { return const_cast<Value*>(getArgOperand(0)); }
+    Value *getRHS() const { return const_cast<Value*>(getArgOperand(1)); }
+
+    /// Returns the binary operation underlying the intrinsic.
+    Instruction::BinaryOps getBinaryOp() const;
+
+    /// Whether the intrinsic is signed or unsigned.
+    bool isSigned() const;
+
+    /// Returns one of OBO::NoSignedWrap or OBO::NoUnsignedWrap.
+    unsigned getNoWrapKind() const;
   };
 
   /// Common base class for all memory intrinsics. Simply provides

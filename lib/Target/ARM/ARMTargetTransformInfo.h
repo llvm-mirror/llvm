@@ -1,9 +1,8 @@
 //===- ARMTargetTransformInfo.h - ARM specific TTI --------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -94,6 +93,12 @@ public:
 
   bool enableInterleavedAccessVectorization() { return true; }
 
+  bool shouldFavorBackedgeIndex(const Loop *L) const {
+    if (L->getHeader()->getParent()->hasOptSize())
+      return false;
+    return ST->isMClass() && ST->isThumb2() && L->getNumBlocks() == 1;
+  }
+
   /// Floating-point computation using ARMv8 AArch32 Advanced
   /// SIMD instructions remains unchanged from ARMv7. Only AArch64 SIMD
   /// is IEEE-754 compliant, but it's not covered in this target.
@@ -142,6 +147,8 @@ public:
   unsigned getMaxInterleaveFactor(unsigned VF) {
     return ST->getMaxInterleaveFactor();
   }
+
+  int getMemcpyCost(const Instruction *I);
 
   int getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index, Type *SubTp);
 

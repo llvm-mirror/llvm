@@ -1,9 +1,8 @@
 //===- MIRPrinter.cpp - MIR serialization format printer ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -216,6 +215,11 @@ void MIRPrinter::print(const MachineFunction &MF) {
     convert(YamlMF, *ConstantPool);
   if (const auto *JumpTableInfo = MF.getJumpTableInfo())
     convert(MST, YamlMF.JumpTableInfo, *JumpTableInfo);
+
+  const TargetMachine &TM = MF.getTarget();
+  YamlMF.MachineFuncInfo =
+      std::unique_ptr<yaml::MachineFunctionInfo>(TM.convertFuncInfoToYAML(MF));
+
   raw_string_ostream StrOS(YamlMF.Body.Value.Value);
   bool IsNewlineNeeded = false;
   for (const auto &MBB : MF) {
@@ -352,7 +356,7 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   // Process fixed stack objects.
   unsigned ID = 0;
-  for (int I = MFI.getObjectIndexBegin(); I < 0; ++I) {
+  for (int I = MFI.getObjectIndexBegin(); I < 0; ++I, ++ID) {
     if (MFI.isDeadObjectIndex(I))
       continue;
 
@@ -369,12 +373,12 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
     YamlObject.IsAliased = MFI.isAliasedObjectIndex(I);
     YMF.FixedStackObjects.push_back(YamlObject);
     StackObjectOperandMapping.insert(
-        std::make_pair(I, FrameIndexOperand::createFixed(ID++)));
+        std::make_pair(I, FrameIndexOperand::createFixed(ID)));
   }
 
   // Process ordinary stack objects.
   ID = 0;
-  for (int I = 0, E = MFI.getObjectIndexEnd(); I < E; ++I) {
+  for (int I = 0, E = MFI.getObjectIndexEnd(); I < E; ++I, ++ID) {
     if (MFI.isDeadObjectIndex(I))
       continue;
 
@@ -395,7 +399,7 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
 
     YMF.StackObjects.push_back(YamlObject);
     StackObjectOperandMapping.insert(std::make_pair(
-        I, FrameIndexOperand::create(YamlObject.Name.Value, ID++)));
+        I, FrameIndexOperand::create(YamlObject.Name.Value, ID)));
   }
 
   for (const auto &CSInfo : MFI.getCalleeSavedInfo()) {

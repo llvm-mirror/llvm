@@ -1,9 +1,8 @@
 //===- CoverageMappingReader.cpp - Code coverage mapping reader -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -23,6 +22,7 @@
 #include "llvm/Object/Error.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Object/COFF.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -59,7 +59,7 @@ Error RawCoverageReader::readULEB128(uint64_t &Result) {
   if (Data.empty())
     return make_error<CoverageMapError>(coveragemap_error::truncated);
   unsigned N = 0;
-  Result = decodeULEB128(reinterpret_cast<const uint8_t *>(Data.data()), &N);
+  Result = decodeULEB128(Data.bytes_begin(), &N);
   if (N > Data.size())
     return make_error<CoverageMapError>(coveragemap_error::malformed);
   Data = Data.substr(N);
@@ -351,6 +351,13 @@ Error InstrProfSymtab::create(SectionRef &Section) {
   if (auto EC = Section.getContents(Data))
     return errorCodeToError(EC);
   Address = Section.getAddress();
+
+  // If this is a linked PE/COFF file, then we have to skip over the null byte
+  // that is allocated in the .lprfn$A section in the LLVM profiling runtime.
+  const ObjectFile *Obj = Section.getObject();
+  if (isa<COFFObjectFile>(Obj) && !Obj->isRelocatableObject())
+    Data = Data.drop_front(1);
+
   return Error::success();
 }
 
@@ -588,16 +595,14 @@ static Error loadTestingFormat(StringRef Data, InstrProfSymtab &ProfileNames,
   if (Data.empty())
     return make_error<CoverageMapError>(coveragemap_error::truncated);
   unsigned N = 0;
-  auto ProfileNamesSize =
-      decodeULEB128(reinterpret_cast<const uint8_t *>(Data.data()), &N);
+  uint64_t ProfileNamesSize = decodeULEB128(Data.bytes_begin(), &N);
   if (N > Data.size())
     return make_error<CoverageMapError>(coveragemap_error::malformed);
   Data = Data.substr(N);
   if (Data.empty())
     return make_error<CoverageMapError>(coveragemap_error::truncated);
   N = 0;
-  uint64_t Address =
-      decodeULEB128(reinterpret_cast<const uint8_t *>(Data.data()), &N);
+  uint64_t Address = decodeULEB128(Data.bytes_begin(), &N);
   if (N > Data.size())
     return make_error<CoverageMapError>(coveragemap_error::malformed);
   Data = Data.substr(N);
@@ -617,11 +622,20 @@ static Error loadTestingFormat(StringRef Data, InstrProfSymtab &ProfileNames,
 }
 
 static Expected<SectionRef> lookupSection(ObjectFile &OF, StringRef Name) {
+  // On COFF, the object file section name may end in "$M". This tells the
+  // linker to sort these sections between "$A" and "$Z". The linker removes the
+  // dollar and everything after it in the final binary. Do the same to match.
+  bool IsCOFF = isa<COFFObjectFile>(OF);
+  auto stripSuffix = [IsCOFF](StringRef N) {
+    return IsCOFF ? N.split('$').first : N;
+  };
+  Name = stripSuffix(Name);
+
   StringRef FoundName;
   for (const auto &Section : OF.sections()) {
     if (auto EC = Section.getName(FoundName))
       return errorCodeToError(EC);
-    if (FoundName == Name)
+    if (stripSuffix(FoundName) == Name)
       return Section;
   }
   return make_error<CoverageMapError>(coveragemap_error::no_data_found);

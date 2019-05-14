@@ -1,9 +1,8 @@
 //===- llvm-cvtres.cpp - Serialize .res files into .obj ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -25,6 +24,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -103,7 +103,7 @@ int main(int Argc, const char **Argv) {
   opt::InputArgList InputArgs = T.ParseArgs(ArgsArr, MAI, MAC);
 
   if (InputArgs.hasArg(OPT_HELP)) {
-    T.PrintHelp(outs(), "llvm-cvtres [options] file...", "Resource Converter", false);
+    T.PrintHelp(outs(), "llvm-cvtres [options] file...", "Resource Converter");
     return 0;
   }
 
@@ -183,7 +183,10 @@ int main(int Argc, const char **Argv) {
       outs() << "Number of resources: " << EntryNumber << "\n";
     }
 
-    error(Parser.parse(RF));
+    std::vector<std::string> Duplicates;
+    error(Parser.parse(RF, Duplicates));
+    for (const auto& DupeDiag : Duplicates)
+      reportError(DupeDiag);
   }
 
   if (Verbose) {

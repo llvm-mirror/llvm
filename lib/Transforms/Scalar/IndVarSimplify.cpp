@@ -1,9 +1,8 @@
 //===- IndVarSimplify.cpp - Induction Variable Elimination ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -218,7 +217,9 @@ bool IndVarSimplify::isValidRewrite(Value *FromVal, Value *ToVal) {
 /// Determine the insertion point for this user. By default, insert immediately
 /// before the user. SCEVExpander or LICM will hoist loop invariants out of the
 /// loop. For PHI nodes, there may be multiple uses, so compute the nearest
-/// common dominator for the incoming blocks.
+/// common dominator for the incoming blocks. A nullptr can be returned if no
+/// viable location is found: it may happen if User is a PHI and Def only comes
+/// to this PHI from unreachable blocks.
 static Instruction *getInsertPointForUses(Instruction *User, Value *Def,
                                           DominatorTree *DT, LoopInfo *LI) {
   PHINode *PHI = dyn_cast<PHINode>(User);
@@ -231,6 +232,10 @@ static Instruction *getInsertPointForUses(Instruction *User, Value *Def,
       continue;
 
     BasicBlock *InsertBB = PHI->getIncomingBlock(i);
+
+    if (!DT->isReachableFromEntry(InsertBB))
+      continue;
+
     if (!InsertPt) {
       InsertPt = InsertBB->getTerminator();
       continue;
@@ -238,7 +243,11 @@ static Instruction *getInsertPointForUses(Instruction *User, Value *Def,
     InsertBB = DT->findNearestCommonDominator(InsertPt->getParent(), InsertBB);
     InsertPt = InsertBB->getTerminator();
   }
-  assert(InsertPt && "Missing phi operand");
+
+  // If we have skipped all inputs, it means that Def only comes to Phi from
+  // unreachable blocks.
+  if (!InsertPt)
+    return nullptr;
 
   auto *DefI = dyn_cast<Instruction>(Def);
   if (!DefI)
@@ -1308,10 +1317,12 @@ WidenIV::WidenedRecTy WidenIV::getWideRecurrence(NarrowIVDefUse DU) {
 /// This IV user cannot be widen. Replace this use of the original narrow IV
 /// with a truncation of the new wide IV to isolate and eliminate the narrow IV.
 static void truncateIVUse(NarrowIVDefUse DU, DominatorTree *DT, LoopInfo *LI) {
+  auto *InsertPt = getInsertPointForUses(DU.NarrowUse, DU.NarrowDef, DT, LI);
+  if (!InsertPt)
+    return;
   LLVM_DEBUG(dbgs() << "INDVARS: Truncate IV " << *DU.WideDef << " for user "
                     << *DU.NarrowUse << "\n");
-  IRBuilder<> Builder(
-      getInsertPointForUses(DU.NarrowUse, DU.NarrowDef, DT, LI));
+  IRBuilder<> Builder(InsertPt);
   Value *Trunc = Builder.CreateTrunc(DU.WideDef, DU.NarrowDef->getType());
   DU.NarrowUse->replaceUsesOfWith(DU.NarrowDef, Trunc);
 }
@@ -1348,8 +1359,10 @@ bool WidenIV::widenLoopCompare(NarrowIVDefUse DU) {
   assert(CastWidth <= IVWidth && "Unexpected width while widening compare.");
 
   // Widen the compare instruction.
-  IRBuilder<> Builder(
-      getInsertPointForUses(DU.NarrowUse, DU.NarrowDef, DT, LI));
+  auto *InsertPt = getInsertPointForUses(DU.NarrowUse, DU.NarrowDef, DT, LI);
+  if (!InsertPt)
+    return false;
+  IRBuilder<> Builder(InsertPt);
   DU.NarrowUse->replaceUsesOfWith(DU.NarrowDef, DU.WideDef);
 
   // Widen the other operand of the compare, if necessary.
@@ -2289,7 +2302,8 @@ static Value *genLoopLimit(PHINode *IndVar, const SCEV *IVCount, Loop *L,
            "unit stride pointer IV must be i8*");
 
     IRBuilder<> Builder(L->getLoopPreheader()->getTerminator());
-    return Builder.CreateGEP(nullptr, GEPBase, GEPOffset, "lftr.limit");
+    return Builder.CreateGEP(GEPBase->getType()->getPointerElementType(),
+                             GEPBase, GEPOffset, "lftr.limit");
   } else {
     // In any other case, convert both IVInit and IVCount to integers before
     // comparing. This may result in SCEV expansion of pointers, but in practice

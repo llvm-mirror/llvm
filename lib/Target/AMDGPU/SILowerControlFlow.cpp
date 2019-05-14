@@ -1,9 +1,8 @@
 //===-- SILowerControlFlow.cpp - Use predicates for control flow ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -200,8 +199,8 @@ void SILowerControlFlow::emitIf(MachineInstr &MI) {
   MachineInstr *And =
     BuildMI(MBB, I, DL, TII->get(AMDGPU::S_AND_B64), Tmp)
     .addReg(CopyReg)
-    //.addReg(AMDGPU::EXEC)
-    .addReg(Cond.getReg());
+    .add(Cond);
+
   setImpSCCDefDead(*And, true);
 
   MachineInstr *Xor = nullptr;
@@ -240,7 +239,7 @@ void SILowerControlFlow::emitIf(MachineInstr &MI) {
   LIS->InsertMachineInstrInMaps(*SetExec);
   LIS->InsertMachineInstrInMaps(*NewBr);
 
-  LIS->removeRegUnit(*MCRegUnitIterator(AMDGPU::EXEC, TRI));
+  LIS->removeAllRegUnitsForPhysReg(AMDGPU::EXEC);
   MI.eraseFromParent();
 
   // FIXME: Is there a better way of adjusting the liveness? It shouldn't be
@@ -324,7 +323,7 @@ void SILowerControlFlow::emitElse(MachineInstr &MI) {
     LIS->createAndComputeVirtRegInterval(SaveReg);
 
   // Let this be recomputed.
-  LIS->removeRegUnit(*MCRegUnitIterator(AMDGPU::EXEC, TRI));
+  LIS->removeAllRegUnitsForPhysReg(AMDGPU::EXEC);
 }
 
 void SILowerControlFlow::emitIfBreak(MachineInstr &MI) {

@@ -1,9 +1,8 @@
 //===-- ARMInstPrinter.cpp - Convert ARM MCInst to assembly syntax --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -73,8 +72,20 @@ ARMInstPrinter::ARMInstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
                                const MCRegisterInfo &MRI)
     : MCInstPrinter(MAI, MII, MRI) {}
 
+bool ARMInstPrinter::applyTargetSpecificCLOption(StringRef Opt) {
+  if (Opt == "reg-names-std") {
+    DefaultAltIdx = ARM::NoRegAltName;
+    return true;
+  }
+  if (Opt == "reg-names-raw") {
+    DefaultAltIdx = ARM::RegNamesRaw;
+    return true;
+  }
+  return false;
+}
+
 void ARMInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
-  OS << markup("<reg:") << getRegisterName(RegNo) << markup(">");
+  OS << markup("<reg:") << getRegisterName(RegNo, DefaultAltIdx) << markup(">");
 }
 
 void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,

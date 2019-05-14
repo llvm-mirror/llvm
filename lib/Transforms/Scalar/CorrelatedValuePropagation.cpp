@@ -1,9 +1,8 @@
 //===- CorrelatedValuePropagation.cpp - Propagate CFG-derived info --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -16,6 +15,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LazyValueInfo.h"
@@ -27,7 +27,6 @@
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
@@ -65,7 +64,7 @@ STATISTIC(NumAShrs,     "Number of ashr converted to lshr");
 STATISTIC(NumSRems,     "Number of srem converted to urem");
 STATISTIC(NumOverflows, "Number of overflow checks removed");
 
-static cl::opt<bool> DontProcessAdds("cvp-dont-process-adds", cl::init(true));
+static cl::opt<bool> DontAddNoWrapFlags("cvp-dont-add-nowrap-flags", cl::init(true));
 
 namespace {
 
@@ -374,7 +373,7 @@ static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI,
       ++NumDeadCases;
       Changed = true;
       if (--SuccessorsCount[Succ] == 0)
-        DTU.deleteEdge(BB, Succ);
+        DTU.applyUpdatesPermissive({{DominatorTree::Delete, BB, Succ}});
       continue;
     }
     if (State == LazyValueInfo::True) {
@@ -400,55 +399,36 @@ static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI,
 }
 
 // See if we can prove that the given overflow intrinsic will not overflow.
-static bool willNotOverflow(IntrinsicInst *II, LazyValueInfo *LVI) {
-  using OBO = OverflowingBinaryOperator;
-  auto NoWrap = [&] (Instruction::BinaryOps BinOp, unsigned NoWrapKind) {
-    Value *RHS = II->getOperand(1);
-    ConstantRange RRange = LVI->getConstantRange(RHS, II->getParent(), II);
-    ConstantRange NWRegion = ConstantRange::makeGuaranteedNoWrapRegion(
-        BinOp, RRange, NoWrapKind);
-    // As an optimization, do not compute LRange if we do not need it.
-    if (NWRegion.isEmptySet())
-      return false;
-    Value *LHS = II->getOperand(0);
-    ConstantRange LRange = LVI->getConstantRange(LHS, II->getParent(), II);
-    return NWRegion.contains(LRange);
-  };
-  switch (II->getIntrinsicID()) {
-  default:
-    break;
-  case Intrinsic::uadd_with_overflow:
-    return NoWrap(Instruction::Add, OBO::NoUnsignedWrap);
-  case Intrinsic::sadd_with_overflow:
-    return NoWrap(Instruction::Add, OBO::NoSignedWrap);
-  case Intrinsic::usub_with_overflow:
-    return NoWrap(Instruction::Sub, OBO::NoUnsignedWrap);
-  case Intrinsic::ssub_with_overflow:
-    return NoWrap(Instruction::Sub, OBO::NoSignedWrap);
-  }
-  return false;
+static bool willNotOverflow(WithOverflowInst *WO, LazyValueInfo *LVI) {
+  Value *RHS = WO->getRHS();
+  ConstantRange RRange = LVI->getConstantRange(RHS, WO->getParent(), WO);
+  ConstantRange NWRegion = ConstantRange::makeGuaranteedNoWrapRegion(
+      WO->getBinaryOp(), RRange, WO->getNoWrapKind());
+  // As an optimization, do not compute LRange if we do not need it.
+  if (NWRegion.isEmptySet())
+    return false;
+  Value *LHS = WO->getLHS();
+  ConstantRange LRange = LVI->getConstantRange(LHS, WO->getParent(), WO);
+  return NWRegion.contains(LRange);
 }
 
-static void processOverflowIntrinsic(IntrinsicInst *II) {
-  IRBuilder<> B(II);
-  Value *NewOp = nullptr;
-  switch (II->getIntrinsicID()) {
-  default:
-    llvm_unreachable("Unexpected instruction.");
-  case Intrinsic::uadd_with_overflow:
-  case Intrinsic::sadd_with_overflow:
-    NewOp = B.CreateAdd(II->getOperand(0), II->getOperand(1), II->getName());
-    break;
-  case Intrinsic::usub_with_overflow:
-  case Intrinsic::ssub_with_overflow:
-    NewOp = B.CreateSub(II->getOperand(0), II->getOperand(1), II->getName());
-    break;
+static void processOverflowIntrinsic(WithOverflowInst *WO) {
+  IRBuilder<> B(WO);
+  Value *NewOp = B.CreateBinOp(
+      WO->getBinaryOp(), WO->getLHS(), WO->getRHS(), WO->getName());
+  // Constant-holing could have happened.
+  if (auto *Inst = dyn_cast<Instruction>(NewOp)) {
+    if (WO->isSigned())
+      Inst->setHasNoSignedWrap();
+    else
+      Inst->setHasNoUnsignedWrap();
   }
+
+  Value *NewI = B.CreateInsertValue(UndefValue::get(WO->getType()), NewOp, 0);
+  NewI = B.CreateInsertValue(NewI, ConstantInt::getFalse(WO->getContext()), 1);
+  WO->replaceAllUsesWith(NewI);
+  WO->eraseFromParent();
   ++NumOverflows;
-  Value *NewI = B.CreateInsertValue(UndefValue::get(II->getType()), NewOp, 0);
-  NewI = B.CreateInsertValue(NewI, ConstantInt::getFalse(II->getContext()), 1);
-  II->replaceAllUsesWith(NewI);
-  II->eraseFromParent();
 }
 
 /// Infer nonnull attributes for the arguments at the specified callsite.
@@ -456,11 +436,35 @@ static bool processCallSite(CallSite CS, LazyValueInfo *LVI) {
   SmallVector<unsigned, 4> ArgNos;
   unsigned ArgNo = 0;
 
-  if (auto *II = dyn_cast<IntrinsicInst>(CS.getInstruction())) {
-    if (willNotOverflow(II, LVI)) {
-      processOverflowIntrinsic(II);
+  if (auto *WO = dyn_cast<WithOverflowInst>(CS.getInstruction())) {
+    if (willNotOverflow(WO, LVI)) {
+      processOverflowIntrinsic(WO);
       return true;
     }
+  }
+
+  // Deopt bundle operands are intended to capture state with minimal
+  // perturbance of the code otherwise.  If we can find a constant value for
+  // any such operand and remove a use of the original value, that's
+  // desireable since it may allow further optimization of that value (e.g. via
+  // single use rules in instcombine).  Since deopt uses tend to,
+  // idiomatically, appear along rare conditional paths, it's reasonable likely
+  // we may have a conditional fact with which LVI can fold.   
+  if (auto DeoptBundle = CS.getOperandBundle(LLVMContext::OB_deopt)) {
+    bool Progress = false;
+    for (const Use &ConstU : DeoptBundle->Inputs) {
+      Use &U = const_cast<Use&>(ConstU);
+      Value *V = U.get();
+      if (V->getType()->isVectorTy()) continue;
+      if (isa<Constant>(V)) continue;
+
+      Constant *C = LVI->getConstant(V, CS.getParent(), CS.getInstruction());
+      if (!C) continue;
+      U.set(C);
+      Progress = true;
+    }
+    if (Progress)
+      return true;
   }
 
   for (Value *V : CS.args()) {
@@ -603,53 +607,53 @@ static bool processAShr(BinaryOperator *SDI, LazyValueInfo *LVI) {
   return true;
 }
 
-static bool processAdd(BinaryOperator *AddOp, LazyValueInfo *LVI) {
+static bool processBinOp(BinaryOperator *BinOp, LazyValueInfo *LVI) {
   using OBO = OverflowingBinaryOperator;
 
-  if (DontProcessAdds)
+  if (DontAddNoWrapFlags)
     return false;
 
-  if (AddOp->getType()->isVectorTy())
+  if (BinOp->getType()->isVectorTy())
     return false;
 
-  bool NSW = AddOp->hasNoSignedWrap();
-  bool NUW = AddOp->hasNoUnsignedWrap();
+  bool NSW = BinOp->hasNoSignedWrap();
+  bool NUW = BinOp->hasNoUnsignedWrap();
   if (NSW && NUW)
     return false;
 
-  BasicBlock *BB = AddOp->getParent();
+  BasicBlock *BB = BinOp->getParent();
 
-  Value *LHS = AddOp->getOperand(0);
-  Value *RHS = AddOp->getOperand(1);
+  Value *LHS = BinOp->getOperand(0);
+  Value *RHS = BinOp->getOperand(1);
 
-  ConstantRange LRange = LVI->getConstantRange(LHS, BB, AddOp);
+  ConstantRange RRange = LVI->getConstantRange(RHS, BB, BinOp);
 
-  // Initialize RRange only if we need it. If we know that guaranteed no wrap
-  // range for the given LHS range is empty don't spend time calculating the
-  // range for the RHS.
-  Optional<ConstantRange> RRange;
-  auto LazyRRange = [&] () {
-      if (!RRange)
-        RRange = LVI->getConstantRange(RHS, BB, AddOp);
-      return RRange.getValue();
+  // Initialize LRange only if we need it. If we know that guaranteed no wrap
+  // range for the given RHS range is empty don't spend time calculating the
+  // range for the LHS.
+  Optional<ConstantRange> LRange;
+  auto LazyLRange = [&] () {
+      if (!LRange)
+        LRange = LVI->getConstantRange(LHS, BB, BinOp);
+      return LRange.getValue();
   };
 
   bool Changed = false;
   if (!NUW) {
     ConstantRange NUWRange = ConstantRange::makeGuaranteedNoWrapRegion(
-        BinaryOperator::Add, LRange, OBO::NoUnsignedWrap);
+        BinOp->getOpcode(), RRange, OBO::NoUnsignedWrap);
     if (!NUWRange.isEmptySet()) {
-      bool NewNUW = NUWRange.contains(LazyRRange());
-      AddOp->setHasNoUnsignedWrap(NewNUW);
+      bool NewNUW = NUWRange.contains(LazyLRange());
+      BinOp->setHasNoUnsignedWrap(NewNUW);
       Changed |= NewNUW;
     }
   }
   if (!NSW) {
     ConstantRange NSWRange = ConstantRange::makeGuaranteedNoWrapRegion(
-        BinaryOperator::Add, LRange, OBO::NoSignedWrap);
+        BinOp->getOpcode(), RRange, OBO::NoSignedWrap);
     if (!NSWRange.isEmptySet()) {
-      bool NewNSW = NSWRange.contains(LazyRRange());
-      AddOp->setHasNoSignedWrap(NewNSW);
+      bool NewNSW = NSWRange.contains(LazyLRange());
+      BinOp->setHasNoSignedWrap(NewNSW);
       Changed |= NewNSW;
     }
   }
@@ -725,7 +729,8 @@ static bool runImpl(Function &F, LazyValueInfo *LVI, DominatorTree *DT,
         BBChanged |= processAShr(cast<BinaryOperator>(II), LVI);
         break;
       case Instruction::Add:
-        BBChanged |= processAdd(cast<BinaryOperator>(II), LVI);
+      case Instruction::Sub:
+        BBChanged |= processBinOp(cast<BinaryOperator>(II), LVI);
         break;
       }
     }

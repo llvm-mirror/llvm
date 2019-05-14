@@ -1,9 +1,8 @@
 //===-- LanaiMemAluCombiner.cpp - Pass to combine memory & ALU operations -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 // Simple pass to combine memory and ALU operations
@@ -159,7 +158,8 @@ bool isNonVolatileMemoryOp(const MachineInstr &MI) {
   const MachineMemOperand *MemOperand = *MI.memoperands_begin();
 
   // Don't move volatile memory accesses
-  if (MemOperand->isVolatile())
+  // TODO: unclear if we need to be as conservative about atomics
+  if (MemOperand->isVolatile() || MemOperand->isAtomic())
     return false;
 
   return true;

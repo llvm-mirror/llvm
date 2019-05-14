@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/GlobalISel/CallLowering.h - Call lowering ---*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -50,7 +49,10 @@ public:
 
     ArgInfo(unsigned Reg, Type *Ty, ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy{},
             bool IsFixed = true)
-        : Reg(Reg), Ty(Ty), Flags(Flags), IsFixed(IsFixed) {}
+      : Reg(Reg), Ty(Ty), Flags(Flags), IsFixed(IsFixed) {
+      assert((Ty->isVoidTy() == (Reg == 0)) &&
+             "only void types should have no register");
+    }
   };
 
   /// Argument handling is mostly uniform between the four places that
@@ -65,6 +67,10 @@ public:
       : MIRBuilder(MIRBuilder), MRI(MRI), AssignFn(AssignFn) {}
 
     virtual ~ValueHandler() = default;
+
+    /// Returns true if the handler is dealing with formal arguments,
+    /// not with return values etc.
+    virtual bool isArgumentHandler() const { return false; }
 
     /// Materialize a VReg containing the address of the specified
     /// stack-based object. This is either based on a FrameIndex or

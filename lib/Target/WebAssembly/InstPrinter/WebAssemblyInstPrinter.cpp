@@ -1,9 +1,8 @@
 //=- WebAssemblyInstPrinter.cpp - WebAssembly assembly instruction printing -=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -53,15 +52,15 @@ void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   // Print any additional variadic operands.
   const MCInstrDesc &Desc = MII.get(MI->getOpcode());
   if (Desc.isVariadic())
-    for (auto i = Desc.getNumOperands(), e = MI->getNumOperands(); i < e; ++i) {
+    for (auto I = Desc.getNumOperands(), E = MI->getNumOperands(); I < E; ++I) {
       // FIXME: For CALL_INDIRECT_VOID, don't print a leading comma, because
       // we have an extra flags operand which is not currently printed, for
       // compatiblity reasons.
-      if (i != 0 && ((MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID &&
+      if (I != 0 && ((MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID &&
                       MI->getOpcode() != WebAssembly::CALL_INDIRECT_VOID_S) ||
-                     i != Desc.getNumOperands()))
+                     I != Desc.getNumOperands()))
         OS << ", ";
-      printOperand(MI, i, OS);
+      printOperand(MI, I, OS);
     }
 
   // Print any added annotation.
@@ -123,61 +122,48 @@ void WebAssemblyInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
       }
       break;
 
-    case WebAssembly::CATCH_I32:
-    case WebAssembly::CATCH_I32_S:
-    case WebAssembly::CATCH_I64:
-    case WebAssembly::CATCH_I64_S:
-    case WebAssembly::CATCH_ALL:
-    case WebAssembly::CATCH_ALL_S:
-      // There can be multiple catch instructions for one try instruction, so we
-      // print a label only for the first 'catch' label.
-      if (LastSeenEHInst != CATCH) {
-        if (EHPadStack.empty()) {
-          printAnnotation(OS, "try-catch mismatch!");
-        } else {
-          printAnnotation(OS,
-                          "catch" + utostr(EHPadStack.pop_back_val()) + ':');
-        }
+    case WebAssembly::CATCH:
+    case WebAssembly::CATCH_S:
+      if (EHPadStack.empty()) {
+        printAnnotation(OS, "try-catch mismatch!");
+      } else {
+        printAnnotation(OS, "catch" + utostr(EHPadStack.pop_back_val()) + ':');
       }
-      LastSeenEHInst = CATCH;
       break;
     }
 
     // Annotate any control flow label references.
-    unsigned NumFixedOperands = Desc.NumOperands;
-    SmallSet<uint64_t, 8> Printed;
-    for (unsigned i = 0, e = MI->getNumOperands(); i < e; ++i) {
-      // See if this operand denotes a basic block target.
-      if (i < NumFixedOperands) {
-        // A non-variable_ops operand, check its type.
-        if (Desc.OpInfo[i].OperandType != WebAssembly::OPERAND_BASIC_BLOCK)
-          continue;
+
+    // rethrow instruction does not take any depth argument and rethrows to the
+    // nearest enclosing catch scope, if any. If there's no enclosing catch
+    // scope, it throws up to the caller.
+    if (Opc == WebAssembly::RETHROW || Opc == WebAssembly::RETHROW_S) {
+      if (EHPadStack.empty()) {
+        printAnnotation(OS, "to caller");
       } else {
-        // A variable_ops operand, which currently can be immediates (used in
-        // br_table) which are basic block targets, or for call instructions
-        // when using -wasm-keep-registers (in which case they are registers,
-        // and should not be processed).
-        if (!MI->getOperand(i).isImm())
-          continue;
+        printAnnotation(OS, "down to catch" + utostr(EHPadStack.back()));
       }
-      uint64_t Depth = MI->getOperand(i).getImm();
-      if (!Printed.insert(Depth).second)
-        continue;
 
-      if (Opc == WebAssembly::RETHROW || Opc == WebAssembly::RETHROW_S) {
-        if (Depth > EHPadStack.size()) {
-          printAnnotation(OS, "Invalid depth argument!");
-        } else if (Depth == EHPadStack.size()) {
-          // This can happen when rethrow instruction breaks out of all nests
-          // and throws up to the current function's caller.
-          printAnnotation(OS, utostr(Depth) + ": " + "to caller");
+    } else {
+      unsigned NumFixedOperands = Desc.NumOperands;
+      SmallSet<uint64_t, 8> Printed;
+      for (unsigned I = 0, E = MI->getNumOperands(); I < E; ++I) {
+        // See if this operand denotes a basic block target.
+        if (I < NumFixedOperands) {
+          // A non-variable_ops operand, check its type.
+          if (Desc.OpInfo[I].OperandType != WebAssembly::OPERAND_BASIC_BLOCK)
+            continue;
         } else {
-          uint64_t CatchNo = EHPadStack.rbegin()[Depth];
-          printAnnotation(OS, utostr(Depth) + ": " + "down to catch" +
-                                  utostr(CatchNo));
+          // A variable_ops operand, which currently can be immediates (used in
+          // br_table) which are basic block targets, or for call instructions
+          // when using -wasm-keep-registers (in which case they are registers,
+          // and should not be processed).
+          if (!MI->getOperand(I).isImm())
+            continue;
         }
-
-      } else {
+        uint64_t Depth = MI->getOperand(I).getImm();
+        if (!Printed.insert(Depth).second)
+          continue;
         if (Depth >= ControlFlowStack.size()) {
           printAnnotation(OS, "Invalid depth argument!");
         } else {
@@ -206,13 +192,13 @@ static std::string toString(const APFloat &FP) {
 
   // Use C99's hexadecimal floating-point representation.
   static const size_t BufBytes = 128;
-  char buf[BufBytes];
+  char Buf[BufBytes];
   auto Written = FP.convertToHexString(
-      buf, /*hexDigits=*/0, /*upperCase=*/false, APFloat::rmNearestTiesToEven);
+      Buf, /*hexDigits=*/0, /*upperCase=*/false, APFloat::rmNearestTiesToEven);
   (void)Written;
   assert(Written != 0);
   assert(Written < BufBytes);
-  return buf;
+  return Buf;
 }
 
 void WebAssemblyInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,

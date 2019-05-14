@@ -1,9 +1,8 @@
 //===-- llc.cpp - Implement the LLVM Native Code Generator ----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -32,6 +31,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/SubtargetFeature.h"
@@ -147,6 +147,12 @@ static cl::opt<std::string>
     RemarksFilename("pass-remarks-output",
                     cl::desc("YAML output filename for pass remarks"),
                     cl::value_desc("filename"));
+
+static cl::opt<std::string>
+    RemarksPasses("pass-remarks-filter",
+                  cl::desc("Only record optimization remarks from passes whose "
+                           "names match the given regular expression"),
+                  cl::value_desc("regex"));
 
 namespace {
 static ManagedStatic<std::vector<std::string>> RunPassNames;
@@ -334,8 +340,14 @@ int main(int argc, char **argv) {
       WithColor::error(errs(), argv[0]) << EC.message() << '\n';
       return 1;
     }
-    Context.setDiagnosticsOutputFile(
-        llvm::make_unique<yaml::Output>(YamlFile->os()));
+    Context.setRemarkStreamer(
+        llvm::make_unique<RemarkStreamer>(RemarksFilename, YamlFile->os()));
+
+    if (!RemarksPasses.empty())
+      if (Error E = Context.getRemarkStreamer()->setFilter(RemarksPasses)) {
+        WithColor::error(errs(), argv[0]) << E << '\n';
+        return 1;
+      }
   }
 
   if (InputLanguage != "" && InputLanguage != "ir" &&

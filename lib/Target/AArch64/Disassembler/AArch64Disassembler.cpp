@@ -1,9 +1,8 @@
 //===- AArch64Disassembler.cpp - Disassembler for AArch64 -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -219,11 +218,6 @@ static DecodeStatus DecodeImm8OptLsl(MCInst &Inst, unsigned Imm,
                                      uint64_t Addr, const void *Decoder);
 static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
                                        uint64_t Addr, const void *Decoder);
-
-static DecodeStatus DecodeLoadAllocTagArrayInstruction(MCInst &Inst,
-                                                       uint32_t insn,
-                                                       uint64_t address,
-                                                       const void* Decoder);
 
 static bool Check(DecodeStatus &Out, DecodeStatus In) {
   switch (In) {
@@ -1619,7 +1613,7 @@ static DecodeStatus DecodeModImmInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::MOVIv4s_msl:
   case AArch64::MVNIv2s_msl:
   case AArch64::MVNIv4s_msl:
-    Inst.addOperand(MCOperand::createImm(cmode & 1 ? 0x110 : 0x108));
+    Inst.addOperand(MCOperand::createImm((cmode & 1) ? 0x110 : 0x108));
     break;
   }
 
@@ -1779,8 +1773,8 @@ static DecodeStatus DecodeGPRSeqPairsClassRegisterClass(MCInst &Inst,
   if (RegNo & 0x1)
     return Fail;
 
-  unsigned Register = AArch64MCRegisterClasses[RegClassID].getRegister(RegNo);
-  Inst.addOperand(MCOperand::createReg(Register));
+  unsigned Reg = AArch64MCRegisterClasses[RegClassID].getRegister(RegNo / 2);
+  Inst.addOperand(MCOperand::createReg(Reg));
   return Success;
 }
 
@@ -1851,26 +1845,4 @@ static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
                                        uint64_t Addr, const void *Decoder) {
   Inst.addOperand(MCOperand::createImm(Imm + 1));
   return Success;
-}
-
-static DecodeStatus DecodeLoadAllocTagArrayInstruction(MCInst &Inst,
-                                                       uint32_t insn,
-                                                       uint64_t address,
-                                                       const void* Decoder) {
-  unsigned Rn = fieldFromInstruction(insn, 5, 5);
-  unsigned Rt = fieldFromInstruction(insn, 0, 5);
-
-  // Outputs
-  DecodeGPR64spRegisterClass(Inst, Rn, address, Decoder);
-  DecodeGPR64RegisterClass(Inst, Rt, address, Decoder);
-
-  // Input (Rn again)
-  Inst.addOperand(Inst.getOperand(0));
-
-  //Do this post decode since the raw number for xzr and sp is the same
-  if (Inst.getOperand(0).getReg() == Inst.getOperand(1).getReg()) {
-    return SoftFail;
-  } else {
-    return Success;
-  }
 }

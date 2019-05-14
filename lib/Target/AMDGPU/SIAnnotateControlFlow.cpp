@@ -1,9 +1,8 @@
 //===- SIAnnotateControlFlow.cpp ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -265,8 +264,17 @@ void SIAnnotateControlFlow::handleLoop(BranchInst *Term) {
   Term->setCondition(BoolTrue);
   Value *Arg = handleLoopCondition(Cond, Broken, L, Term);
 
-  for (BasicBlock *Pred : predecessors(Target))
-    Broken->addIncoming(Pred == BB ? Arg : Int64Zero, Pred);
+  for (BasicBlock *Pred : predecessors(Target)) {
+    Value *PHIValue = Int64Zero;
+    if (Pred == BB) // Remember the value of the previous iteration.
+      PHIValue = Arg;
+    // If the backedge from Pred to Target could be executed before the exit
+    // of the loop at BB, it should not reset or change "Broken", which keeps
+    // track of the number of threads exited the loop at BB.
+    else if (L->contains(Pred) && DT->dominates(Pred, BB))
+      PHIValue = Broken;
+    Broken->addIncoming(PHIValue, Pred);
+  }
 
   Term->setCondition(CallInst::Create(Loop, Arg, "", Term));
 

@@ -1,9 +1,8 @@
 //===-- llvm/lib/CodeGen/AsmPrinter/DebugHandlerBase.cpp -------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -212,36 +211,53 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
 
   // Request labels for the full history.
   for (const auto &I : DbgValues) {
-    const auto &Ranges = I.second;
-    if (Ranges.empty())
+    const auto &Entries = I.second;
+    if (Entries.empty())
       continue;
 
-    // The first mention of a function argument gets the CurrentFnBegin
-    // label, so arguments are visible when breaking at function entry.
-    const DILocalVariable *DIVar = Ranges.front().first->getDebugVariable();
+    auto IsDescribedByReg = [](const MachineInstr *MI) {
+      return MI->getOperand(0).isReg() && MI->getOperand(0).getReg();
+    };
+
+    // The first mention of a function argument gets the CurrentFnBegin label,
+    // so arguments are visible when breaking at function entry.
+    //
+    // We do not change the label for values that are described by registers,
+    // as that could place them above their defining instructions. We should
+    // ideally not change the labels for constant debug values either, since
+    // doing that violates the ranges that are calculated in the history map.
+    // However, we currently do not emit debug values for constant arguments
+    // directly at the start of the function, so this code is still useful.
+    const DILocalVariable *DIVar =
+        Entries.front().getInstr()->getDebugVariable();
     if (DIVar->isParameter() &&
         getDISubprogram(DIVar->getScope())->describes(&MF->getFunction())) {
-      LabelsBeforeInsn[Ranges.front().first] = Asm->getFunctionBegin();
-      if (Ranges.front().first->getDebugExpression()->isFragment()) {
+      if (!IsDescribedByReg(Entries.front().getInstr()))
+        LabelsBeforeInsn[Entries.front().getInstr()] = Asm->getFunctionBegin();
+      if (Entries.front().getInstr()->getDebugExpression()->isFragment()) {
         // Mark all non-overlapping initial fragments.
-        for (auto I = Ranges.begin(); I != Ranges.end(); ++I) {
-          const DIExpression *Fragment = I->first->getDebugExpression();
-          if (std::all_of(Ranges.begin(), I,
-                          [&](DbgValueHistoryMap::InstrRange Pred) {
-                            return !Fragment->fragmentsOverlap(
-                                Pred.first->getDebugExpression());
+        for (auto I = Entries.begin(); I != Entries.end(); ++I) {
+          if (!I->isDbgValue())
+            continue;
+          const DIExpression *Fragment = I->getInstr()->getDebugExpression();
+          if (std::any_of(Entries.begin(), I,
+                          [&](DbgValueHistoryMap::Entry Pred) {
+                            return Pred.isDbgValue() &&
+                                   Fragment->fragmentsOverlap(
+                                       Pred.getInstr()->getDebugExpression());
                           }))
-            LabelsBeforeInsn[I->first] = Asm->getFunctionBegin();
-          else
             break;
+          if (!IsDescribedByReg(I->getInstr()))
+            LabelsBeforeInsn[I->getInstr()] = Asm->getFunctionBegin();
         }
       }
     }
 
-    for (const auto &Range : Ranges) {
-      requestLabelBeforeInsn(Range.first);
-      if (Range.second)
-        requestLabelAfterInsn(Range.second);
+    for (const auto &Entry : Entries) {
+      if (Entry.isDbgValue())
+        requestLabelBeforeInsn(Entry.getInstr());
+      else
+        requestLabelAfterInsn(Entry.getInstr());
     }
   }
 

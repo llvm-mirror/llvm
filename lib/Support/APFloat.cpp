@@ -1,9 +1,8 @@
 //===-- APFloat.cpp - Implement APFloat class -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -199,7 +198,10 @@ readExponent(StringRef::iterator begin, StringRef::iterator end)
   const unsigned int overlargeExponent = 24000;  /* FIXME.  */
   StringRef::iterator p = begin;
 
-  assert(p != end && "Exponent has no digits");
+  // Treat no exponent as 0 to match binutils
+  if (p == end || ((*p == '-' || *p == '+') && (p + 1) == end)) {
+    return 0;
+  }
 
   isNegative = (*p == '-');
   if (*p == '-' || *p == '+') {

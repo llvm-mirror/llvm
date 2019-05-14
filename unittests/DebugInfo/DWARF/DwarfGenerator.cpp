@@ -1,9 +1,8 @@
 //===--- unittests/DebugInfo/DWARF/DwarfGenerator.cpp -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -184,11 +183,11 @@ DWARFDebugLine::Prologue dwarfgen::LineTable::createBasicPrologue() const {
   P.LineRange = 14;
   P.OpcodeBase = 13;
   P.StandardOpcodeLengths = {0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1};
-  P.IncludeDirectories.push_back(DWARFFormValue(DW_FORM_string));
-  P.IncludeDirectories.back().setPValue("a dir");
+  P.IncludeDirectories.push_back(
+      DWARFFormValue::createFromPValue(DW_FORM_string, "a dir"));
   P.FileNames.push_back(DWARFDebugLine::FileNameEntry());
-  P.FileNames.back().Name.setPValue("a file");
-  P.FileNames.back().Name.setForm(DW_FORM_string);
+  P.FileNames.back().Name =
+      DWARFFormValue::createFromPValue(DW_FORM_string, "a file");
   return P;
 }
 

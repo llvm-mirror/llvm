@@ -1,9 +1,8 @@
 //===-- llvm/MC/MCAsmInfo.h - Asm info --------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,13 +17,13 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCDirectives.h"
-#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include <vector>
 
 namespace llvm {
 
 class MCContext;
+class MCCFIInstruction;
 class MCExpr;
 class MCSection;
 class MCStreamer;
@@ -492,7 +491,7 @@ public:
   StringRef getPrivateLabelPrefix() const { return PrivateLabelPrefix; }
 
   bool hasLinkerPrivateGlobalPrefix() const {
-    return LinkerPrivateGlobalPrefix[0] != '\0';
+    return !LinkerPrivateGlobalPrefix.empty();
   }
 
   StringRef getLinkerPrivateGlobalPrefix() const {
@@ -598,9 +597,7 @@ public:
     return SupportsExtendedDwarfLocDirective;
   }
 
-  void addInitialFrameState(const MCCFIInstruction &Inst) {
-    InitialFrameState.push_back(Inst);
-  }
+  void addInitialFrameState(const MCCFIInstruction &Inst);
 
   const std::vector<MCCFIInstruction> &getInitialFrameState() const {
     return InitialFrameState;

@@ -1,9 +1,8 @@
 //===-- Value.cpp - Implement the Value class -----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -58,7 +57,8 @@ Value::Value(Type *ty, unsigned scid)
   // FIXME: Why isn't this in the subclass gunk??
   // Note, we cannot call isa<CallInst> before the CallInst has been
   // constructed.
-  if (SubclassID == Instruction::Call || SubclassID == Instruction::Invoke)
+  if (SubclassID == Instruction::Call || SubclassID == Instruction::Invoke ||
+      SubclassID == Instruction::CallBr)
     assert((VTy->isFirstClassType() || VTy->isVoidTy() || VTy->isStructTy()) &&
            "invalid CallInst type!");
   else if (SubclassID != BasicBlockVal &&
@@ -648,10 +648,14 @@ unsigned Value::getPointerAlignment(const DataLayout &DL) const {
 
   unsigned Align = 0;
   if (auto *GO = dyn_cast<GlobalObject>(this)) {
-    // Don't make any assumptions about function pointer alignment. Some
-    // targets use the LSBs to store additional information.
-    if (isa<Function>(GO))
-      return 0;
+    if (isa<Function>(GO)) {
+      switch (DL.getFunctionPtrAlignType()) {
+      case DataLayout::FunctionPtrAlignType::Independent:
+        return DL.getFunctionPtrAlign();
+      case DataLayout::FunctionPtrAlignType::MultipleOfFunctionAlign:
+        return std::max(DL.getFunctionPtrAlign(), GO->getAlignment());
+      }
+    }
     Align = GO->getAlignment();
     if (Align == 0) {
       if (auto *GVar = dyn_cast<GlobalVariable>(GO)) {
@@ -931,7 +935,7 @@ void ValueHandleBase::ValueIsRAUWd(Value *Old, Value *New) {
                << Old->getName() << " to " << *New->getType() << " %"
                << New->getName() << "\n";
         llvm_unreachable(
-            "A weak tracking value handle still pointed to the  old value!\n");
+            "A weak tracking value handle still pointed to the old value!\n");
       default:
         break;
       }

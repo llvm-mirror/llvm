@@ -1,9 +1,8 @@
 //===- InlineFunction.cpp - Code to perform function inlining -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1042,11 +1041,10 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
 
       SmallSetVector<const Argument *, 4> NAPtrArgs;
       for (const Value *V : PtrArgs) {
-        SmallVector<Value *, 4> Objects;
-        GetUnderlyingObjects(const_cast<Value*>(V),
-                             Objects, DL, /* LI = */ nullptr);
+        SmallVector<const Value *, 4> Objects;
+        GetUnderlyingObjects(V, Objects, DL, /* LI = */ nullptr);
 
-        for (Value *O : Objects)
+        for (const Value *O : Objects)
           ObjSet.insert(O);
       }
 
@@ -1216,14 +1214,14 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
 
     // If the call was inlined, but then constant folded, there is no edge to
     // add.  Check for this case.
-    Instruction *NewCall = dyn_cast<Instruction>(VMI->second);
+    auto *NewCall = dyn_cast<CallBase>(VMI->second);
     if (!NewCall)
       continue;
 
     // We do not treat intrinsic calls like real function calls because we
     // expect them to become inline code; do not add an edge for an intrinsic.
-    CallSite CS = CallSite(NewCall);
-    if (CS && CS.getCalledFunction() && CS.getCalledFunction()->isIntrinsic())
+    if (NewCall->getCalledFunction() &&
+        NewCall->getCalledFunction()->isIntrinsic())
       continue;
 
     // Remember that this call site got inlined for the client of
@@ -1236,19 +1234,19 @@ static void UpdateCallGraphAfterInlining(CallSite CS,
     // destination.  This can also happen if the call graph node of the caller
     // was just unnecessarily imprecise.
     if (!I->second->getFunction())
-      if (Function *F = CallSite(NewCall).getCalledFunction()) {
+      if (Function *F = NewCall->getCalledFunction()) {
         // Indirect call site resolved to direct call.
-        CallerNode->addCalledFunction(CallSite(NewCall), CG[F]);
+        CallerNode->addCalledFunction(NewCall, CG[F]);
 
         continue;
       }
 
-    CallerNode->addCalledFunction(CallSite(NewCall), I->second);
+    CallerNode->addCalledFunction(NewCall, I->second);
   }
 
   // Update the call graph by deleting the edge from Callee to Caller.  We must
   // do this after the loop above in case Caller and Callee are the same.
-  CallerNode->removeCallEdgeFor(CS);
+  CallerNode->removeCallEdgeFor(*cast<CallBase>(CS.getInstruction()));
 }
 
 static void HandleByValArgumentInit(Value *Dst, Value *Src, Module *M,
@@ -1448,47 +1446,45 @@ static void updateCallProfile(Function *Callee, const ValueToValueMapTy &VMap,
       CalleeEntryCount.getCount() < 1)
     return;
   auto CallSiteCount = PSI ? PSI->getProfileCount(TheCall, CallerBFI) : None;
-  uint64_t CallCount =
+  int64_t CallCount =
       std::min(CallSiteCount.hasValue() ? CallSiteCount.getValue() : 0,
                CalleeEntryCount.getCount());
-
-  for (auto const &Entry : VMap)
-    if (isa<CallInst>(Entry.first))
-      if (auto *CI = dyn_cast_or_null<CallInst>(Entry.second))
-        CI->updateProfWeight(CallCount, CalleeEntryCount.getCount());
-  for (BasicBlock &BB : *Callee)
-    // No need to update the callsite if it is pruned during inlining.
-    if (VMap.count(&BB))
-      for (Instruction &I : BB)
-        if (CallInst *CI = dyn_cast<CallInst>(&I))
-          CI->updateProfWeight(CalleeEntryCount.getCount() - CallCount,
-                               CalleeEntryCount.getCount());
+  updateProfileCallee(Callee, -CallCount, &VMap);
 }
 
-/// Update the entry count of callee after inlining.
-///
-/// The callsite's block count is subtracted from the callee's function entry
-/// count.
-static void updateCalleeCount(BlockFrequencyInfo *CallerBFI, BasicBlock *CallBB,
-                              Instruction *CallInst, Function *Callee,
-                              ProfileSummaryInfo *PSI) {
-  // If the callee has a original count of N, and the estimated count of
-  // callsite is M, the new callee count is set to N - M. M is estimated from
-  // the caller's entry count, its entry block frequency and the block frequency
-  // of the callsite.
+void llvm::updateProfileCallee(
+    Function *Callee, int64_t entryDelta,
+    const ValueMap<const Value *, WeakTrackingVH> *VMap) {
   auto CalleeCount = Callee->getEntryCount();
-  if (!CalleeCount.hasValue() || !PSI)
+  if (!CalleeCount.hasValue())
     return;
-  auto CallCount = PSI->getProfileCount(CallInst, CallerBFI);
-  if (!CallCount.hasValue())
-    return;
+
+  uint64_t priorEntryCount = CalleeCount.getCount();
+  uint64_t newEntryCount = priorEntryCount;
+
   // Since CallSiteCount is an estimate, it could exceed the original callee
-  // count and has to be set to 0.
-  if (CallCount.getValue() > CalleeCount.getCount())
-    CalleeCount.setCount(0);
+  // count and has to be set to 0 so guard against underflow.
+  if (entryDelta < 0 && static_cast<uint64_t>(-entryDelta) > priorEntryCount)
+    newEntryCount = 0;
   else
-    CalleeCount.setCount(CalleeCount.getCount() - CallCount.getValue());
-  Callee->setEntryCount(CalleeCount);
+    newEntryCount = priorEntryCount + entryDelta;
+
+  Callee->setEntryCount(newEntryCount);
+
+  // During inlining ?
+  if (VMap) {
+    uint64_t cloneEntryCount = priorEntryCount - newEntryCount;
+    for (auto const &Entry : *VMap)
+      if (isa<CallInst>(Entry.first))
+        if (auto *CI = dyn_cast_or_null<CallInst>(Entry.second))
+          CI->updateProfWeight(cloneEntryCount, priorEntryCount);
+  }
+  for (BasicBlock &BB : *Callee)
+    // No need to update the callsite if it is pruned during inlining.
+    if (!VMap || VMap->count(&BB))
+      for (Instruction &I : BB)
+        if (CallInst *CI = dyn_cast<CallInst>(&I))
+          CI->updateProfWeight(newEntryCount, priorEntryCount);
 }
 
 /// This function inlines the called function into the basic block of the
@@ -1506,6 +1502,10 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   Instruction *TheCall = CS.getInstruction();
   assert(TheCall->getParent() && TheCall->getFunction()
          && "Instruction not in function!");
+
+  // FIXME: we don't inline callbr yet.
+  if (isa<CallBrInst>(TheCall))
+    return false;
 
   // If IFI has any state in it, zap it before we fill it in.
   IFI.reset();
@@ -1684,8 +1684,6 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
 
     updateCallProfile(CalledFunc, VMap, CalledFunc->getEntryCount(), TheCall,
                       IFI.PSI, IFI.CallerBFI);
-    // Update the profile count of callee.
-    updateCalleeCount(IFI.CallerBFI, OrigBB, TheCall, CalledFunc, IFI.PSI);
 
     // Inject byval arguments initialization.
     for (std::pair<Value*, Value*> &Init : ByValInit)
@@ -1734,6 +1732,8 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
         Instruction *NewI = nullptr;
         if (isa<CallInst>(I))
           NewI = CallInst::Create(cast<CallInst>(I), OpDefs, I);
+        else if (isa<CallBrInst>(I))
+          NewI = CallBrInst::Create(cast<CallBrInst>(I), OpDefs, I);
         else
           NewI = InvokeInst::Create(cast<InvokeInst>(I), OpDefs, I);
 
@@ -1869,10 +1869,8 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
           // Add VarArgs to existing parameters.
           SmallVector<Value *, 6> Params(CI->arg_operands());
           Params.append(VarArgsToForward.begin(), VarArgsToForward.end());
-          CallInst *NewCI =
-              CallInst::Create(CI->getCalledFunction() ? CI->getCalledFunction()
-                                                       : CI->getCalledValue(),
-                               Params, "", CI);
+          CallInst *NewCI = CallInst::Create(
+              CI->getFunctionType(), CI->getCalledOperand(), Params, "", CI);
           NewCI->setDebugLoc(CI->getDebugLoc());
           NewCI->setAttributes(Attrs);
           NewCI->setCallingConv(CI->getCallingConv());
@@ -2038,6 +2036,8 @@ llvm::InlineResult llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
         Instruction *NewInst;
         if (CS.isCall())
           NewInst = CallInst::Create(cast<CallInst>(I), OpBundles, I);
+        else if (CS.isCallBr())
+          NewInst = CallBrInst::Create(cast<CallBrInst>(I), OpBundles, I);
         else
           NewInst = InvokeInst::Create(cast<InvokeInst>(I), OpBundles, I);
         NewInst->takeName(I);

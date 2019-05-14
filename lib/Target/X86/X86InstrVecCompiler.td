@@ -1,9 +1,8 @@
 //===- X86InstrVecCompiler.td - Vector Compiler Patterns ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -176,7 +175,7 @@ multiclass subvec_zero_lowering<string MoveStr,
                                 RegisterClass RC, ValueType DstTy,
                                 ValueType SrcTy, ValueType ZeroTy,
                                 SubRegIndex SubIdx> {
-  def : Pat<(DstTy (insert_subvector (bitconvert (ZeroTy immAllZerosV)),
+  def : Pat<(DstTy (insert_subvector immAllZerosV,
                                      (SrcTy RC:$src), (iPTR 0))),
             (SUBREG_TO_REG (i64 0),
              (SrcTy (!cast<Instruction>("VMOV"#MoveStr#"rr") RC:$src)), SubIdx)>;
@@ -398,7 +397,7 @@ let Predicates = [HasBWI, HasDQI] in {
             (COPY_TO_REGCLASS (KMOVBkk VK8:$mask), VK64)>;
 }
 
-let Predicates = [HasBWI, HasVLX] in {
+let Predicates = [HasBWI] in {
   def : Pat<(v32i1 (insert_subvector (v32i1 immAllZerosV),
                                      (v1i1 VK1:$mask), (iPTR 0))),
             (KSHIFTRDri (KSHIFTLDri (COPY_TO_REGCLASS VK1:$mask, VK32),

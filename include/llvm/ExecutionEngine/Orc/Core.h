@@ -1,9 +1,8 @@
 //===------ Core.h -- Core ORC APIs (Layer, JITDylib, etc.) -----*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -175,7 +174,7 @@ public:
   /// Note: The returned flags may have transient flags (Lazy, Materializing)
   /// set. These should be stripped with JITSymbolFlags::stripTransientFlags
   /// before using.
-  const SymbolFlagsMap &getSymbols() { return SymbolFlags; }
+  const SymbolFlagsMap &getSymbols() const { return SymbolFlags; }
 
   /// Returns the names of any symbols covered by this
   /// MaterializationResponsibility object that have queries pending. This
@@ -419,7 +418,7 @@ public:
   ReexportsGenerator(JITDylib &SourceJD, bool MatchNonExported = false,
                      SymbolPredicate Allow = SymbolPredicate());
 
-  SymbolNameSet operator()(JITDylib &JD, const SymbolNameSet &Names);
+  Expected<SymbolNameSet> operator()(JITDylib &JD, const SymbolNameSet &Names);
 
 private:
   JITDylib &SourceJD;
@@ -498,7 +497,7 @@ class JITDylib {
   friend class ExecutionSession;
   friend class MaterializationResponsibility;
 public:
-  using GeneratorFunction = std::function<SymbolNameSet(
+  using GeneratorFunction = std::function<Expected<SymbolNameSet>(
       JITDylib &Parent, const SymbolNameSet &Names)>;
 
   using AsynchronousSymbolQuerySet =
@@ -596,7 +595,7 @@ public:
 
   /// Search the given JITDylib for the symbols in Symbols. If found, store
   ///        the flags for each symbol in Flags. Returns any unresolved symbols.
-  SymbolFlagsMap lookupFlags(const SymbolNameSet &Names);
+  Expected<SymbolFlagsMap> lookupFlags(const SymbolNameSet &Names);
 
   /// Dump current JITDylib state to OS.
   void dump(raw_ostream &OS);
@@ -609,8 +608,8 @@ public:
   /// and the query will not be applied. The Query is not failed and can be
   /// re-used in a subsequent lookup once the symbols have been added, or
   /// manually failed.
-  SymbolNameSet legacyLookup(std::shared_ptr<AsynchronousSymbolQuery> Q,
-                             SymbolNameSet Names);
+  Expected<SymbolNameSet>
+  legacyLookup(std::shared_ptr<AsynchronousSymbolQuery> Q, SymbolNameSet Names);
 
 private:
   using AsynchronousSymbolQueryList =
@@ -646,12 +645,12 @@ private:
 
   Error defineImpl(MaterializationUnit &MU);
 
-  SymbolNameSet lookupFlagsImpl(SymbolFlagsMap &Flags,
-                                const SymbolNameSet &Names);
+  Expected<SymbolNameSet> lookupFlagsImpl(SymbolFlagsMap &Flags,
+                                          const SymbolNameSet &Names);
 
-  void lodgeQuery(std::shared_ptr<AsynchronousSymbolQuery> &Q,
-                  SymbolNameSet &Unresolved, bool MatchNonExported,
-                  MaterializationUnitList &MUs);
+  Error lodgeQuery(std::shared_ptr<AsynchronousSymbolQuery> &Q,
+                   SymbolNameSet &Unresolved, bool MatchNonExported,
+                   MaterializationUnitList &MUs);
 
   void lodgeQueryImpl(std::shared_ptr<AsynchronousSymbolQuery> &Q,
                       SymbolNameSet &Unresolved, bool MatchNonExported,

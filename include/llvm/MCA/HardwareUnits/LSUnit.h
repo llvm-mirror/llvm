@@ -1,9 +1,8 @@
 //===------------------------- LSUnit.h --------------------------*- C++-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -144,7 +143,6 @@ class LSUnit : public HardwareUnit {
 
   void assignLQSlot(unsigned Index);
   void assignSQSlot(unsigned Index);
-  bool isReadyNoAlias(unsigned Index) const;
 
   // An instruction that both 'mayStore' and 'HasUnmodeledSideEffects' is
   // conservatively treated as a store barrier. It forces older store to be
@@ -188,7 +186,11 @@ public:
   // 4. A store may not pass a previous load (regardless of flag 'NoAlias').
   // 5. A load has to wait until an older load barrier is fully executed.
   // 6. A store has to wait until an older store barrier is fully executed.
-  virtual bool isReady(const InstRef &IR) const;
+  //
+  // Returns an instruction identifier. If IR is ready, then this method returns
+  // `IR.getSourceIndex()`. Otherwise it returns the instruction ID of the
+  // dependent (i.e. conflicting) memory instruction.
+  virtual unsigned isReady(const InstRef &IR) const;
 
   // Load and store instructions are tracked by their corresponding queues from
   // dispatch until the "instruction executed" event.

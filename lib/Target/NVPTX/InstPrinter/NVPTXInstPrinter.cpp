@@ -1,9 +1,8 @@
 //===-- NVPTXInstPrinter.cpp - PTX assembly instruction printing ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -268,6 +267,20 @@ void NVPTXInstPrinter::printLdStCode(const MCInst *MI, int OpNum,
       llvm_unreachable("Unknown Modifier");
   } else
     llvm_unreachable("Empty Modifier");
+}
+
+void NVPTXInstPrinter::printMmaCode(const MCInst *MI, int OpNum, raw_ostream &O,
+                                    const char *Modifier) {
+  const MCOperand &MO = MI->getOperand(OpNum);
+  int Imm = (int)MO.getImm();
+  if (Modifier == nullptr || strcmp(Modifier, "version") == 0) {
+    O << Imm; // Just print out PTX version
+  } else if (strcmp(Modifier, "aligned") == 0) {
+    // PTX63 requires '.aligned' in the name of the instruction.
+    if (Imm >= 63)
+      O << ".aligned";
+  } else
+    llvm_unreachable("Unknown Modifier");
 }
 
 void NVPTXInstPrinter::printMemOperand(const MCInst *MI, int OpNum,

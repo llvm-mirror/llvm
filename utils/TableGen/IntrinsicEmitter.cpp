@@ -1,9 +1,8 @@
 //===- IntrinsicEmitter.cpp - Generate intrinsic information --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -270,7 +269,7 @@ static void EncodeFixedType(Record *R, std::vector<unsigned char> &ArgCodes,
       Sig.push_back(IIT_TRUNC_ARG);
     else if (R->isSubClassOf("LLVMHalfElementsVectorType"))
       Sig.push_back(IIT_HALF_VEC_ARG);
-    else if (R->isSubClassOf("LLVMVectorSameWidth")) {
+    else if (R->isSubClassOf("LLVMScalarOrSameVectorWidth")) {
       Sig.push_back(IIT_SAME_VEC_WIDTH_ARG);
       Sig.push_back((Number << 3) | ArgCodes[Number]);
       MVT::SimpleValueType VT = getValueType(R->getValueAsDef("ElTy"));
@@ -505,7 +504,6 @@ struct AttributeComparator {
     CodeGenIntrinsic::ModRefBehavior LK = L->ModRef;
     CodeGenIntrinsic::ModRefBehavior RK = R->ModRef;
     if (LK != RK) return (LK > RK);
-
     // Order by argument attributes.
     // This is reliable because each side is already sorted internally.
     return (L->ArgumentAttributes < R->ArgumentAttributes);
@@ -611,6 +609,12 @@ void IntrinsicEmitter::EmitAttributes(const CodeGenIntrinsicTable &Ints,
             if (addComma)
               OS << ",";
             OS << "Attribute::ReadNone";
+            addComma = true;
+            break;
+          case CodeGenIntrinsic::ImmArg:
+            if (addComma)
+              OS << ',';
+            OS << "Attribute::ImmArg";
             addComma = true;
             break;
           }
@@ -771,8 +775,9 @@ void IntrinsicEmitter::EmitIntrinsicToBuiltinMap(
           BuiltinMap[Ints[i].TargetPrefix];
 
       if (!BIM.insert(std::make_pair(BuiltinName, Ints[i].EnumName)).second)
-        PrintFatalError("Intrinsic '" + Ints[i].TheDef->getName() +
-                        "': duplicate " + CompilerName + " builtin name!");
+        PrintFatalError(Ints[i].TheDef->getLoc(),
+                        "Intrinsic '" + Ints[i].TheDef->getName() +
+                            "': duplicate " + CompilerName + " builtin name!");
       Table.GetOrAddStringOffset(BuiltinName);
     }
   }

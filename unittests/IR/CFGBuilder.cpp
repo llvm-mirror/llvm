@@ -1,14 +1,14 @@
 //===- llvm/Testing/Support/CFGBuilder.cpp --------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "CFGBuilder.h"
 
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
@@ -23,7 +23,7 @@ CFGHolder::CFGHolder(StringRef ModuleName, StringRef FunctionName)
     : Context(llvm::make_unique<LLVMContext>()),
       M(llvm::make_unique<Module>(ModuleName, *Context)) {
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Context), {}, false);
-  F = cast<Function>(M->getOrInsertFunction(FunctionName, FTy));
+  F = Function::Create(FTy, Function::ExternalLinkage, FunctionName, M.get());
 }
 CFGHolder::~CFGHolder() = default;
 
@@ -266,3 +266,11 @@ TEST(CFGBuilder, Rebuild) {
   EXPECT_TRUE(isa<SwitchInst>(B.getOrAddBlock("c")->getTerminator()));
   EXPECT_TRUE(isa<SwitchInst>(B.getOrAddBlock("d")->getTerminator()));
 }
+
+static_assert(is_trivially_copyable<succ_iterator>::value,
+              "trivially copyable");
+static_assert(is_trivially_copyable<succ_const_iterator>::value,
+              "trivially copyable");
+static_assert(is_trivially_copyable<succ_range>::value, "trivially copyable");
+static_assert(is_trivially_copyable<succ_const_range>::value,
+              "trivially copyable");

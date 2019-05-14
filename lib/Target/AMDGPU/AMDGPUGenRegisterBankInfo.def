@@ -1,9 +1,8 @@
 //===- AMDGPUGenRegisterBankInfo.def -----------------------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -92,6 +91,28 @@ const RegisterBankInfo::ValueMapping ValMappings[] {
   {&PartMappings[17], 1}
 };
 
+const RegisterBankInfo::PartialMapping SGPROnly64BreakDown[] {
+     /*32-bit op*/ {0, 32, SGPRRegBank},
+   /*2x32-bit op*/ {0, 32, SGPRRegBank},
+                   {32, 32, SGPRRegBank},
+/*<2x32-bit> op*/  {0, 64, SGPRRegBank},
+
+    /*32-bit op*/  {0, 32, VGPRRegBank},
+  /*2x32-bit op*/  {0, 32, VGPRRegBank},
+                   {32, 32, VGPRRegBank},
+};
+
+
+// For some instructions which can operate 64-bit only for the scalar version.
+const RegisterBankInfo::ValueMapping ValMappingsSGPR64OnlyVGPR32[] {
+  /*32-bit sgpr*/     {&SGPROnly64BreakDown[0], 1},
+  /*2 x 32-bit sgpr*/ {&SGPROnly64BreakDown[1], 2},
+  /*64-bit sgpr */    {&SGPROnly64BreakDown[3], 1},
+
+  /*32-bit vgpr*/     {&SGPROnly64BreakDown[4], 1},
+  /*2 x 32-bit vgpr*/ {&SGPROnly64BreakDown[5], 2}
+};
+
 enum ValueMappingIdx {
   SCCStartIdx = 0,
   SGPRStartIdx = 2,
@@ -126,6 +147,18 @@ const RegisterBankInfo::ValueMapping *getValueMapping(unsigned BankID,
   assert(BankID == ValMappings[Idx].BreakDown->RegBank->getID());
 
   return &ValMappings[Idx];
+}
+
+const RegisterBankInfo::ValueMapping *getValueMappingSGPR64Only(unsigned BankID,
+                                                                unsigned Size) {
+  if (Size != 64)
+    return getValueMapping(BankID, Size);
+
+  if (BankID == AMDGPU::VGPRRegBankID)
+    return &ValMappingsSGPR64OnlyVGPR32[4];
+
+  assert(BankID == AMDGPU::SGPRRegBankID);
+  return &ValMappingsSGPR64OnlyVGPR32[2];
 }
 
 } // End AMDGPU namespace.

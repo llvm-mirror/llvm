@@ -1,9 +1,8 @@
 //===- Trace.cpp - XRay Trace Loading implementation. ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -462,10 +461,9 @@ Expected<Trace> llvm::xray::loadTrace(const DataExtractor &DE, bool Sort) {
   }
 
   if (Sort)
-    std::stable_sort(T.Records.begin(), T.Records.end(),
-                     [&](const XRayRecord &L, const XRayRecord &R) {
-                       return L.TSC < R.TSC;
-                     });
+    llvm::stable_sort(T.Records, [&](const XRayRecord &L, const XRayRecord &R) {
+      return L.TSC < R.TSC;
+    });
 
   return std::move(T);
 }

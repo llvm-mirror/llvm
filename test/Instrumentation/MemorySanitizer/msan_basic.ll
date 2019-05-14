@@ -9,7 +9,7 @@
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-; CHECK: @llvm.global_ctors {{.*}} { i32 0, void ()* @__msan_init, i8* null }
+; CHECK: @llvm.global_ctors {{.*}} { i32 0, void ()* @msan.module_ctor, i8* null }
 
 ; Check the presence and the linkage type of __msan_track_origins and
 ; other interface symbols.
@@ -39,10 +39,10 @@ entry:
 ; CHECK: store
 ; CHECK-ORIGINS: icmp
 ; CHECK-ORIGINS: br i1
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK-ORIGINS: store
 ; CHECK-ORIGINS: br label
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK: store
 ; CHECK: ret void
 
@@ -63,10 +63,10 @@ entry:
 ; CHECK: store {{.*}} align 32
 ; CHECK-ORIGINS: icmp
 ; CHECK-ORIGINS: br i1
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK-ORIGINS: store {{.*}} align 32
 ; CHECK-ORIGINS: br label
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK: store {{.*}} align 32
 ; CHECK: ret void
 
@@ -991,4 +991,5 @@ define i8* @MismatchingCallMustTailCall(i32 %a) sanitize_memory {
 ; CHECK-NEXT: ret i8*
 
 
-; CHECK: declare void @__msan_init()
+; CHECK-LABEL: define internal void @msan.module_ctor() {
+; CHECK: call void @__msan_init()

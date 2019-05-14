@@ -1,9 +1,8 @@
 //===- yaml2obj - Convert YAML to a binary object file --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -57,6 +56,8 @@ static int convertYAML(yaml::Input &YIn, raw_ostream &Out) {
         return yaml2coff(*Doc.Coff, Out);
       if (Doc.MachO || Doc.FatMachO)
         return yaml2macho(Doc, Out);
+      if (Doc.Minidump)
+        return yaml2minidump(*Doc.Minidump, Out);
       if (Doc.Wasm)
         return yaml2wasm(*Doc.Wasm, Out);
       error("yaml2obj: Unknown document type!");
@@ -86,7 +87,6 @@ int main(int argc, char **argv) {
     return 1;
 
   yaml::Input YIn(Buf.get()->getBuffer());
-
   int Res = convertYAML(YIn, Out->os());
   if (Res == 0)
     Out->keep();

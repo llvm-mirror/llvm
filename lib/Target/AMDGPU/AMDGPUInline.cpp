@@ -1,9 +1,8 @@
 //===- AMDGPUInline.cpp - Code to perform simple function inlining --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -170,7 +169,6 @@ static bool isWrapperOnlyCall(CallSite CS) {
 InlineCost AMDGPUInliner::getInlineCost(CallSite CS) {
   Function *Callee = CS.getCalledFunction();
   Function *Caller = CS.getCaller();
-  TargetTransformInfo &TTI = TTIWP->getTTI(*Callee);
 
   if (!Callee || Callee->isDeclaration())
     return llvm::InlineCost::getNever("undefined callee");
@@ -178,13 +176,15 @@ InlineCost AMDGPUInliner::getInlineCost(CallSite CS) {
   if (CS.isNoInline())
     return llvm::InlineCost::getNever("noinline");
 
+  TargetTransformInfo &TTI = TTIWP->getTTI(*Callee);
   if (!TTI.areInlineCompatible(Caller, Callee))
     return llvm::InlineCost::getNever("incompatible");
 
   if (CS.hasFnAttr(Attribute::AlwaysInline)) {
-    if (isInlineViable(*Callee))
+    auto IsViable = isInlineViable(*Callee);
+    if (IsViable)
       return llvm::InlineCost::getAlways("alwaysinline viable");
-    return llvm::InlineCost::getNever("alwaysinline unviable");
+    return llvm::InlineCost::getNever(IsViable.message);
   }
 
   if (isWrapperOnlyCall(CS))
@@ -206,6 +206,7 @@ InlineCost AMDGPUInliner::getInlineCost(CallSite CS) {
     return ACT->getAssumptionCache(F);
   };
 
-  return llvm::getInlineCost(CS, Callee, LocalParams, TTI, GetAssumptionCache,
-                             None, PSI, RemarksEnabled ? &ORE : nullptr);
+  return llvm::getInlineCost(cast<CallBase>(*CS.getInstruction()), Callee,
+                             LocalParams, TTI, GetAssumptionCache, None, PSI,
+                             RemarksEnabled ? &ORE : nullptr);
 }

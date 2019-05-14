@@ -1,16 +1,18 @@
 llvm_canonicalize_cmake_booleans(
-  LLVM_TOOL_LTO_BUILD
+  BUILD_SHARED_LIBS
+  HAVE_LIBXAR
+  HAVE_LIBZ
   HAVE_OCAMLOPT
   HAVE_OCAML_OUNIT
-  LLVM_INCLUDE_GO_TESTS
-  LLVM_USE_INTEL_JITEVENTS
-  HAVE_LIBZ
-  HAVE_LIBXAR
   LLVM_ENABLE_DIA_SDK
   LLVM_ENABLE_FFI
   LLVM_ENABLE_THREADS
-  BUILD_SHARED_LIBS
+  LLVM_INCLUDE_GO_TESTS
+  LLVM_LIBXML2_ENABLED
   LLVM_LINK_LLVM_DYLIB
+  LLVM_TOOL_LTO_BUILD
+  LLVM_USE_INTEL_JITEVENTS
+  LLVM_BUILD_EXAMPLES
   )
 
 configure_lit_site_cfg(
@@ -43,6 +45,7 @@ set(LLVM_TEST_DEPENDS
           llc
           lli
           lli-child-target
+          llvm-addr2line
           llvm-ar
           llvm-as
           llvm-bcanalyzer
@@ -65,6 +68,7 @@ set(LLVM_TEST_DEPENDS
           llvm-exegesis
           llvm-extract
           llvm-isel-fuzzer
+          llvm-jitlink
           llvm-lib
           llvm-link
           llvm-lto2

@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/GlobalISel/RegisterBankInfo.cpp --------------*- C++ -*-==//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -208,11 +207,23 @@ RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
         continue;
       }
     }
-    const ValueMapping *ValMapping =
-        &getValueMapping(0, getSizeInBits(Reg, MRI, TRI), *CurRegBank);
+
+    unsigned Size = getSizeInBits(Reg, MRI, TRI);
+    const ValueMapping *ValMapping = &getValueMapping(0, Size, *CurRegBank);
     if (IsCopyLike) {
-      OperandsMapping[0] = ValMapping;
-      CompleteMapping = true;
+      if (!OperandsMapping[0]) {
+        if (MI.isRegSequence()) {
+          // For reg_sequence, the result size does not match the input.
+          unsigned ResultSize = getSizeInBits(MI.getOperand(0).getReg(),
+                                              MRI, TRI);
+          OperandsMapping[0] = &getValueMapping(0, ResultSize, *CurRegBank);
+        } else {
+          OperandsMapping[0] = ValMapping;
+        }
+
+        CompleteMapping = true;
+      }
+
       break;
     }
     OperandsMapping[OpIdx] = ValMapping;
@@ -496,6 +507,19 @@ void RegisterBankInfo::PartialMapping::print(raw_ostream &OS) const {
     OS << *RegBank;
   else
     OS << "nullptr";
+}
+
+bool RegisterBankInfo::ValueMapping::partsAllUniform() const {
+  if (NumBreakDowns < 2)
+    return true;
+
+  const PartialMapping *First = begin();
+  for (const PartialMapping *Part = First + 1; Part != end(); ++Part) {
+    if (Part->Length != First->Length || Part->RegBank != First->RegBank)
+      return false;
+  }
+
+  return true;
 }
 
 bool RegisterBankInfo::ValueMapping::verify(unsigned MeaningfulBitWidth) const {

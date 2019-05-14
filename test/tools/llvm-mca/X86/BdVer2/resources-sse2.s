@@ -94,6 +94,8 @@ maxpd       (%rax), %xmm2
 maxsd       %xmm0, %xmm2
 maxsd       (%rax), %xmm2
 
+mfence
+
 minpd       %xmm0, %xmm2
 minpd       (%rax), %xmm2
 
@@ -228,6 +230,9 @@ pcmpgtw     %xmm0, %xmm2
 pcmpgtw     (%rax), %xmm2
 
 pextrw      $1, %xmm0, %rcx
+
+pinsrw      $1, %rax, %xmm0
+pinsrw      $1, (%rax), %xmm0
 
 pmaddwd     %xmm0, %xmm2
 pmaddwd     (%rax), %xmm2
@@ -411,10 +416,10 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  1      2     0.50                        andpd	%xmm0, %xmm2
 # CHECK-NEXT:  1      7     0.50    *                   andpd	(%rax), %xmm2
 # CHECK-NEXT:  1      5     0.50    *      *      U     clflush	(%rax)
-# CHECK-NEXT:  1      2     1.00                        cmppd	$0, %xmm0, %xmm2
-# CHECK-NEXT:  1      7     1.00    *                   cmppd	$0, (%rax), %xmm2
-# CHECK-NEXT:  1      2     1.00                        cmpsd	$0, %xmm0, %xmm2
-# CHECK-NEXT:  1      7     1.00    *                   cmpsd	$0, (%rax), %xmm2
+# CHECK-NEXT:  1      2     1.00                        cmpeqpd	%xmm0, %xmm2
+# CHECK-NEXT:  1      7     1.00    *                   cmpeqpd	(%rax), %xmm2
+# CHECK-NEXT:  1      2     1.00                        cmpeqsd	%xmm0, %xmm2
+# CHECK-NEXT:  1      7     1.00    *                   cmpeqsd	(%rax), %xmm2
 # CHECK-NEXT:  2      1     1.00                        comisd	%xmm0, %xmm1
 # CHECK-NEXT:  2      6     1.00    *                   comisd	(%rax), %xmm1
 # CHECK-NEXT:  2      8     1.00                        cvtdq2pd	%xmm0, %xmm2
@@ -439,8 +444,8 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  2      18    1.00    *                   cvtsd2si	(%rax), %rcx
 # CHECK-NEXT:  1      4     1.00                        cvtsd2ss	%xmm0, %xmm2
 # CHECK-NEXT:  1      9     1.00    *                   cvtsd2ss	(%rax), %xmm2
-# CHECK-NEXT:  2      4     1.00                        cvtsi2sdl	%ecx, %xmm2
-# CHECK-NEXT:  2      13    1.00                        cvtsi2sdq	%rcx, %xmm2
+# CHECK-NEXT:  2      13    1.00                        cvtsi2sd	%ecx, %xmm2
+# CHECK-NEXT:  2      13    1.00                        cvtsi2sd	%rcx, %xmm2
 # CHECK-NEXT:  2      9     1.00    *                   cvtsi2sdl	(%rax), %xmm2
 # CHECK-NEXT:  2      9     1.00    *                   cvtsi2sdl	(%rax), %xmm2
 # CHECK-NEXT:  1      4     1.00                        cvtss2sd	%xmm0, %xmm2
@@ -465,6 +470,7 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  1      7     1.00    *                   maxpd	(%rax), %xmm2
 # CHECK-NEXT:  1      2     1.00                        maxsd	%xmm0, %xmm2
 # CHECK-NEXT:  1      7     1.00    *                   maxsd	(%rax), %xmm2
+# CHECK-NEXT:  1      1     1.00    *      *      U     mfence
 # CHECK-NEXT:  1      2     1.00                        minpd	%xmm0, %xmm2
 # CHECK-NEXT:  1      7     1.00    *                   minpd	(%rax), %xmm2
 # CHECK-NEXT:  1      2     1.00                        minsd	%xmm0, %xmm2
@@ -472,32 +478,32 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  1      1     0.50                        movapd	%xmm0, %xmm2
 # CHECK-NEXT:  1      1     1.00           *            movapd	%xmm0, (%rax)
 # CHECK-NEXT:  1      5     0.50    *                   movapd	(%rax), %xmm2
-# CHECK-NEXT:  2      10    0.50                        movd	%eax, %xmm2
+# CHECK-NEXT:  2      11    0.50                        movd	%eax, %xmm2
 # CHECK-NEXT:  1      5     0.50    *                   movd	(%rax), %xmm2
-# CHECK-NEXT:  1      10    1.00                        movd	%xmm0, %ecx
+# CHECK-NEXT:  1      11    1.00                        movd	%xmm0, %ecx
 # CHECK-NEXT:  1      2     1.00           *            movd	%xmm0, (%rax)
-# CHECK-NEXT:  1      2     0.50                        movdqa	%xmm0, %xmm2
+# CHECK-NEXT:  1      1     0.50                        movdqa	%xmm0, %xmm2
 # CHECK-NEXT:  1      1     1.00           *            movdqa	%xmm0, (%rax)
 # CHECK-NEXT:  1      5     0.50    *                   movdqa	(%rax), %xmm2
-# CHECK-NEXT:  1      2     0.50                        movdqu	%xmm0, %xmm2
+# CHECK-NEXT:  1      1     0.50                        movdqu	%xmm0, %xmm2
 # CHECK-NEXT:  1      1     1.00           *            movdqu	%xmm0, (%rax)
 # CHECK-NEXT:  1      5     0.50    *                   movdqu	(%rax), %xmm2
-# CHECK-NEXT:  1      2     0.50                        movdq2q	%xmm0, %mm2
+# CHECK-NEXT:  1      1     0.50                        movdq2q	%xmm0, %mm2
 # CHECK-NEXT:  2      2     1.00           *            movhpd	%xmm0, (%rax)
 # CHECK-NEXT:  1      7     0.50    *                   movhpd	(%rax), %xmm2
 # CHECK-NEXT:  1      2     1.00           *            movlpd	%xmm0, (%rax)
 # CHECK-NEXT:  1      7     0.50    *                   movlpd	(%rax), %xmm2
-# CHECK-NEXT:  2      10    1.00                        movmskpd	%xmm0, %ecx
+# CHECK-NEXT:  2      12    1.00                        movmskpd	%xmm0, %ecx
 # CHECK-NEXT:  1      1     1.00           *            movntil	%eax, (%rax)
 # CHECK-NEXT:  1      1     1.00           *            movntiq	%rax, (%rax)
 # CHECK-NEXT:  1      2     1.00           *            movntdq	%xmm0, (%rax)
 # CHECK-NEXT:  1      3     1.00           *            movntpd	%xmm0, (%rax)
 # CHECK-NEXT:  1      2     0.50                        movq	%xmm0, %xmm2
-# CHECK-NEXT:  2      10    0.50                        movq	%rax, %xmm2
+# CHECK-NEXT:  2      11    0.50                        movq	%rax, %xmm2
 # CHECK-NEXT:  1      5     0.50    *                   movq	(%rax), %xmm2
-# CHECK-NEXT:  1      10    1.00                        movq	%xmm0, %rcx
+# CHECK-NEXT:  1      11    1.00                        movq	%xmm0, %rcx
 # CHECK-NEXT:  1      2     1.00           *            movq	%xmm0, (%rax)
-# CHECK-NEXT:  1      2     0.50                        movq2dq	%mm0, %xmm2
+# CHECK-NEXT:  1      4     0.50                        movq2dq	%mm0, %xmm2
 # CHECK-NEXT:  1      2     0.50                        movsd	%xmm0, %xmm2
 # CHECK-NEXT:  1      2     1.00           *            movsd	%xmm0, (%rax)
 # CHECK-NEXT:  1      5     0.50    *                   movsd	(%rax), %xmm2
@@ -554,7 +560,9 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  1      7     0.50    *                   pcmpgtd	(%rax), %xmm2
 # CHECK-NEXT:  1      2     0.50                        pcmpgtw	%xmm0, %xmm2
 # CHECK-NEXT:  1      7     0.50    *                   pcmpgtw	(%rax), %xmm2
-# CHECK-NEXT:  2      13    1.00                        pextrw	$1, %xmm0, %ecx
+# CHECK-NEXT:  2      12    1.00                        pextrw	$1, %xmm0, %ecx
+# CHECK-NEXT:  2      12    0.50                        pinsrw	$1, %eax, %xmm0
+# CHECK-NEXT:  2      6     0.50    *                   pinsrw	$1, (%rax), %xmm0
 # CHECK-NEXT:  1      4     1.00                        pmaddwd	%xmm0, %xmm2
 # CHECK-NEXT:  1      9     1.00    *                   pmaddwd	(%rax), %xmm2
 # CHECK-NEXT:  1      2     0.50                        pmaxsw	%xmm0, %xmm2
@@ -565,7 +573,7 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  1      7     0.50    *                   pminsw	(%rax), %xmm2
 # CHECK-NEXT:  1      2     0.50                        pminub	%xmm0, %xmm2
 # CHECK-NEXT:  1      7     0.50    *                   pminub	(%rax), %xmm2
-# CHECK-NEXT:  2      13    1.00                        pmovmskb	%xmm0, %ecx
+# CHECK-NEXT:  2      12    1.00                        pmovmskb	%xmm0, %ecx
 # CHECK-NEXT:  1      4     1.00                        pmulhuw	%xmm0, %xmm2
 # CHECK-NEXT:  1      9     1.00    *                   pmulhuw	(%rax), %xmm2
 # CHECK-NEXT:  1      4     1.00                        pmulhw	%xmm0, %xmm2
@@ -694,7 +702,7 @@ xorpd       (%rax), %xmm2
 
 # CHECK:      Resource pressure per iteration:
 # CHECK-NEXT: [0.0]  [0.1]  [1]    [2]    [3]    [4]    [5]    [6]    [7.0]  [7.1]  [8.0]  [8.1]  [9]    [10]   [11]   [12]   [13]   [14]   [15]   [16.0] [16.1] [17]   [18]
-# CHECK-NEXT: 66.00  66.00   -      -      -     17.00   -      -     124.50 124.50 66.50  66.50  12.00  50.00  119.50 140.50  -      -      -     58.50  58.50   -     15.00
+# CHECK-NEXT: 67.00  67.00   -      -      -     17.00   -      -     124.50 124.50 67.50  67.50  12.00  50.00  120.50 141.50  -      -      -     59.00  59.00   -     16.00
 
 # CHECK:      Resource pressure by instruction:
 # CHECK-NEXT: [0.0]  [0.1]  [1]    [2]    [3]    [4]    [5]    [6]    [7.0]  [7.1]  [8.0]  [8.1]  [9]    [10]   [11]   [12]   [13]   [14]   [15]   [16.0] [16.1] [17]   [18]   Instructions:
@@ -707,10 +715,10 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     0.50   0.50    -      -      -      -      -      -      -     andpd	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     0.50   0.50    -      -      -     0.50   0.50    -      -     andpd	(%rax), %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -     0.50   0.50    -      -     clflush	(%rax)
-# CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     cmppd	$0, %xmm0, %xmm2
-# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     cmppd	$0, (%rax), %xmm2
-# CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     cmpsd	$0, %xmm0, %xmm2
-# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     cmpsd	$0, (%rax), %xmm2
+# CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     cmpeqpd	%xmm0, %xmm2
+# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     cmpeqpd	(%rax), %xmm2
+# CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     cmpeqsd	%xmm0, %xmm2
+# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     cmpeqsd	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -     1.00    -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     comisd	%xmm0, %xmm1
 # CHECK-NEXT: 0.50   0.50    -      -      -     1.00    -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     comisd	(%rax), %xmm1
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtdq2pd	%xmm0, %xmm2
@@ -735,8 +743,8 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -     1.00    -      -     0.50   0.50    -      -      -     1.00    -     1.00    -      -      -     0.50   0.50    -      -     cvtsd2si	(%rax), %rcx
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtsd2ss	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -     0.50   0.50    -      -     cvtsd2ss	(%rax), %xmm2
-# CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtsi2sdl	%ecx, %xmm2
-# CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtsi2sdq	%rcx, %xmm2
+# CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtsi2sd	%ecx, %xmm2
+# CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtsi2sd	%rcx, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -     0.50   0.50    -      -     cvtsi2sdl	(%rax), %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -     0.50   0.50    -      -     cvtsi2sdl	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -     cvtss2sd	%xmm0, %xmm2
@@ -761,6 +769,7 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     maxpd	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     maxsd	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     maxsd	(%rax), %xmm2
+# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -      -     1.00   mfence
 # CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     minpd	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -     0.50   0.50    -      -     minpd	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     minsd	%xmm0, %xmm2
@@ -851,6 +860,8 @@ xorpd       (%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -     0.50   0.50    -      -     0.50   0.50    -      -      -      -      -      -      -     pcmpgtw	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -     0.50   0.50    -      -     0.50   0.50    -      -      -     0.50   0.50    -      -     pcmpgtw	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -     1.00    -      -     0.50   0.50    -      -      -      -     1.00    -      -      -      -      -      -      -      -     pextrw	$1, %xmm0, %ecx
+# CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -     0.50   0.50    -      -     0.50   0.50    -      -      -      -      -      -      -     pinsrw	$1, %eax, %xmm0
+# CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -     0.50   0.50    -      -     0.50   0.50    -      -      -     0.50   0.50    -      -     pinsrw	$1, (%rax), %xmm0
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -      -      -      -      -     pmaddwd	%xmm0, %xmm2
 # CHECK-NEXT: 0.50   0.50    -      -      -      -      -      -      -      -      -      -     1.00    -     1.00    -      -      -      -     0.50   0.50    -      -     pmaddwd	(%rax), %xmm2
 # CHECK-NEXT:  -      -      -      -      -      -      -      -      -      -     0.50   0.50    -      -     0.50   0.50    -      -      -      -      -      -      -     pmaxsw	%xmm0, %xmm2

@@ -1,9 +1,8 @@
 //===-- X86InstPrinterCommon.cpp - X86 assembly instruction printing ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,8 +23,11 @@ public:
   using MCInstPrinter::MCInstPrinter;
 
   virtual void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O) = 0;
+  void printCondCode(const MCInst *MI, unsigned Op, raw_ostream &OS);
   void printSSEAVXCC(const MCInst *MI, unsigned Op, raw_ostream &OS);
-  void printXOPCC(const MCInst *MI, unsigned Op, raw_ostream &OS);
+  void printVPCOMMnemonic(const MCInst *MI, raw_ostream &OS);
+  void printVPCMPMnemonic(const MCInst *MI, raw_ostream &OS);
+  void printCMPMnemonic(const MCInst *MI, bool IsVCmp, raw_ostream &OS);
   void printRoundingControl(const MCInst *MI, unsigned Op, raw_ostream &O);
   void printPCRelImm(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 protected:

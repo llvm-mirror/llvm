@@ -1,9 +1,8 @@
 //===-- RISCVELFObjectWriter.cpp - RISCV ELF Writer -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -84,6 +83,20 @@ unsigned RISCVELFObjectWriter::getRelocType(MCContext &Ctx,
     return ELF::R_RISCV_PCREL_LO12_I;
   case RISCV::fixup_riscv_pcrel_lo12_s:
     return ELF::R_RISCV_PCREL_LO12_S;
+  case RISCV::fixup_riscv_got_hi20:
+    return ELF::R_RISCV_GOT_HI20;
+  case RISCV::fixup_riscv_tprel_hi20:
+    return ELF::R_RISCV_TPREL_HI20;
+  case RISCV::fixup_riscv_tprel_lo12_i:
+    return ELF::R_RISCV_TPREL_LO12_I;
+  case RISCV::fixup_riscv_tprel_lo12_s:
+    return ELF::R_RISCV_TPREL_LO12_S;
+  case RISCV::fixup_riscv_tprel_add:
+    return ELF::R_RISCV_TPREL_ADD;
+  case RISCV::fixup_riscv_tls_got_hi20:
+    return ELF::R_RISCV_TLS_GOT_HI20;
+  case RISCV::fixup_riscv_tls_gd_hi20:
+    return ELF::R_RISCV_TLS_GD_HI20;
   case RISCV::fixup_riscv_jal:
     return ELF::R_RISCV_JAL;
   case RISCV::fixup_riscv_branch:
@@ -94,8 +107,12 @@ unsigned RISCVELFObjectWriter::getRelocType(MCContext &Ctx,
     return ELF::R_RISCV_RVC_BRANCH;
   case RISCV::fixup_riscv_call:
     return ELF::R_RISCV_CALL;
+  case RISCV::fixup_riscv_call_plt:
+    return ELF::R_RISCV_CALL_PLT;
   case RISCV::fixup_riscv_relax:
     return ELF::R_RISCV_RELAX;
+  case RISCV::fixup_riscv_align:
+    return ELF::R_RISCV_ALIGN;
   }
 }
 

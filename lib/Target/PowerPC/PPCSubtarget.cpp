@@ -1,9 +1,8 @@
 //===-- PowerPCSubtarget.cpp - PPC Subtarget Information ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -108,6 +107,9 @@ void PPCSubtarget::initializeEnvironment() {
   IsISA3_0 = false;
   UseLongCalls = false;
   SecurePlt = false;
+  VectorsUseTwoUnits = false;
+  UsePPCPreRASchedStrategy = false;
+  UsePPCPostRASchedStrategy = false;
 
   HasPOPCNTD = POPCNTD_Unavailable;
 }
@@ -137,6 +139,9 @@ void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Set up darwin-specific properties.
   if (isDarwin())
     HasLazyResolverStubs = true;
+
+  if (TargetTriple.isOSNetBSD() || TargetTriple.isOSOpenBSD())
+    SecurePlt = true;
 
   if (HasSPE && IsPPC64)
     report_fatal_error( "SPE is only supported for 32-bit targets.\n", false);

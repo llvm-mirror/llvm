@@ -1,9 +1,8 @@
 //===- llvm/CodeGen/DwarfCompileUnit.cpp - Dwarf Compile Units ------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -18,6 +17,7 @@
 #include "DwarfUnit.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
@@ -104,7 +104,7 @@ unsigned DwarfCompileUnit::getOrCreateSourceID(const DIFile *File) {
   // extend .file to support this.
   unsigned CUID = Asm->OutStreamer->hasRawTextSupport() ? 0 : getUniqueID();
   if (!File)
-    return Asm->OutStreamer->EmitDwarfFileDirective(0, "", "", nullptr, None, CUID);
+    return Asm->OutStreamer->EmitDwarfFileDirective(0, "", "", None, None, CUID);
   return Asm->OutStreamer->EmitDwarfFileDirective(
       0, File->getDirectory(), File->getFilename(), getMD5AsBytes(File),
       File->getSource(), CUID);
@@ -123,7 +123,9 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
 
   // Construct the context before querying for the existence of the DIE in
   // case such construction creates the DIE.
-  DIE *ContextDIE = getOrCreateContextDIE(GVContext);
+  auto *CB = GVContext ? dyn_cast<DICommonBlock>(GVContext) : nullptr;
+  DIE *ContextDIE = CB ? getOrCreateCommonBlock(CB, GlobalExprs)
+    : getOrCreateContextDIE(GVContext);
 
   // Add to map.
   DIE *VariableDIE = &createAndAddDIE(GV->getTag(), *ContextDIE, GV);
@@ -166,8 +168,16 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
     addTemplateParams(*VariableDIE, DINodeArray(TP));
 
   // Add location.
+  addLocationAttribute(VariableDIE, GV, GlobalExprs);
+
+  return VariableDIE;
+}
+
+void DwarfCompileUnit::addLocationAttribute(
+    DIE *VariableDIE, const DIGlobalVariable *GV, ArrayRef<GlobalExpr> GlobalExprs) {
   bool addToAccelTable = false;
   DIELoc *Loc = nullptr;
+  Optional<unsigned> NVPTXAddressSpace;
   std::unique_ptr<DIEDwarfExpression> DwarfExpr;
   for (const auto &GE : GlobalExprs) {
     const GlobalVariable *Global = GE.Var;
@@ -201,8 +211,24 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
       DwarfExpr = llvm::make_unique<DIEDwarfExpression>(*Asm, *this, *Loc);
     }
 
-    if (Expr)
+    if (Expr) {
+      // According to
+      // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+      // cuda-gdb requires DW_AT_address_class for all variables to be able to
+      // correctly interpret address space of the variable address.
+      // Decode DW_OP_constu <DWARF Address Space> DW_OP_swap DW_OP_xderef
+      // sequence for the NVPTX + gdb target.
+      unsigned LocalNVPTXAddressSpace;
+      if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+        const DIExpression *NewExpr =
+            DIExpression::extractAddressClass(Expr, LocalNVPTXAddressSpace);
+        if (NewExpr != Expr) {
+          Expr = NewExpr;
+          NVPTXAddressSpace = LocalNVPTXAddressSpace;
+        }
+      }
       DwarfExpr->addFragmentOffset(Expr);
+    }
 
     if (Global) {
       const MCSymbol *Sym = Asm->getSymbol(Global);
@@ -247,6 +273,15 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
       DwarfExpr->setMemoryLocationKind();
     DwarfExpr->addExpression(Expr);
   }
+  if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+    // According to
+    // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+    // cuda-gdb requires DW_AT_address_class for all variables to be able to
+    // correctly interpret address space of the variable address.
+    const unsigned NVPTX_ADDR_global_space = 5;
+    addUInt(*VariableDIE, dwarf::DW_AT_address_class, dwarf::DW_FORM_data1,
+            NVPTXAddressSpace ? *NVPTXAddressSpace : NVPTX_ADDR_global_space);
+  }
   if (Loc)
     addBlock(*VariableDIE, dwarf::DW_AT_location, DwarfExpr->finalize());
 
@@ -262,8 +297,25 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
         DD->useAllLinkageNames())
       DD->addAccelName(*CUNode, GV->getLinkageName(), *VariableDIE);
   }
+}
 
-  return VariableDIE;
+DIE *DwarfCompileUnit::getOrCreateCommonBlock(
+    const DICommonBlock *CB, ArrayRef<GlobalExpr> GlobalExprs) {
+  // Construct the context before querying for the existence of the DIE in case
+  // such construction creates the DIE.
+  DIE *ContextDIE = getOrCreateContextDIE(CB->getScope());
+
+  if (DIE *NDie = getDIE(CB))
+    return NDie;
+  DIE &NDie = createAndAddDIE(dwarf::DW_TAG_common_block, *ContextDIE, CB);
+  StringRef Name = CB->getName().empty() ? "_BLNK_" : CB->getName();
+  addString(NDie, dwarf::DW_AT_name, Name);
+  addGlobalName(Name, NDie, CB->getScope());
+  if (CB->getFile())
+    addSourceLine(NDie, CB->getLineNo(), CB->getFile());
+  if (DIGlobalVariable *V = CB->getDecl())
+    getCU().addLocationAttribute(&NDie, V, GlobalExprs);
+  return &NDie;
 }
 
 void DwarfCompileUnit::addRange(RangeSpan Range) {
@@ -592,6 +644,7 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
   if (!DV.hasFrameIndexExprs())
     return VariableDie;
 
+  Optional<unsigned> NVPTXAddressSpace;
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
   for (auto &Fragment : DV.getFrameIndexExprs()) {
@@ -603,7 +656,23 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
     SmallVector<uint64_t, 8> Ops;
     Ops.push_back(dwarf::DW_OP_plus_uconst);
     Ops.push_back(Offset);
-    Ops.append(Expr->elements_begin(), Expr->elements_end());
+    // According to
+    // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+    // cuda-gdb requires DW_AT_address_class for all variables to be able to
+    // correctly interpret address space of the variable address.
+    // Decode DW_OP_constu <DWARF Address Space> DW_OP_swap DW_OP_xderef
+    // sequence for the NVPTX + gdb target.
+    unsigned LocalNVPTXAddressSpace;
+    if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+      const DIExpression *NewExpr =
+          DIExpression::extractAddressClass(Expr, LocalNVPTXAddressSpace);
+      if (NewExpr != Expr) {
+        Expr = NewExpr;
+        NVPTXAddressSpace = LocalNVPTXAddressSpace;
+      }
+    }
+    if (Expr)
+      Ops.append(Expr->elements_begin(), Expr->elements_end());
     DIExpressionCursor Cursor(Ops);
     DwarfExpr.setMemoryLocationKind();
     if (const MCSymbol *FrameSymbol = Asm->getFunctionFrameSymbol())
@@ -612,6 +681,15 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
       DwarfExpr.addMachineRegExpression(
           *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, FrameReg);
     DwarfExpr.addExpression(std::move(Cursor));
+  }
+  if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+    // According to
+    // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+    // cuda-gdb requires DW_AT_address_class for all variables to be able to
+    // correctly interpret address space of the variable address.
+    const unsigned NVPTX_ADDR_local_space = 6;
+    addUInt(*VariableDie, dwarf::DW_AT_address_class, dwarf::DW_FORM_data1,
+            NVPTXAddressSpace ? *NVPTXAddressSpace : NVPTX_ADDR_local_space);
   }
   addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
 
@@ -958,7 +1036,9 @@ bool DwarfCompileUnit::hasDwarfPubSections() const {
     return true;
   case DICompileUnit::DebugNameTableKind::Default:
     return DD->tuneForGDB() && !includeMinimalInlineScopes() &&
-           !CUNode->isDebugDirectivesOnly();
+           !CUNode->isDebugDirectivesOnly() &&
+           DD->getAccelTableKind() != AccelTableKind::Apple &&
+           DD->getDwarfVersion() < 5;
   }
   llvm_unreachable("Unhandled DICompileUnit::DebugNameTableKind enum");
 }
@@ -1121,6 +1201,10 @@ bool DwarfCompileUnit::isDwoUnit() const {
   return DD->useSplitDwarf() && Skeleton;
 }
 
+void DwarfCompileUnit::finishNonUnitTypeDIE(DIE& D, const DICompositeType *CTy) {
+  constructTypeDIE(D, CTy);
+}
+
 bool DwarfCompileUnit::includeMinimalInlineScopes() const {
   return getCUNode()->getEmissionKind() == DICompileUnit::LineTablesOnly ||
          (DD->useSplitDwarf() && !Skeleton);
@@ -1133,4 +1217,28 @@ void DwarfCompileUnit::addAddrTableBase() {
                   getDwarfVersion() >= 5 ? dwarf::DW_AT_addr_base
                                          : dwarf::DW_AT_GNU_addr_base,
                   Label, TLOF.getDwarfAddrSection()->getBeginSymbol());
+}
+
+void DwarfCompileUnit::addBaseTypeRef(DIEValueList &Die, int64_t Idx) {
+  Die.addValue(DIEValueAllocator, (dwarf::Attribute)0, dwarf::DW_FORM_udata,
+               new (DIEValueAllocator) DIEBaseTypeRef(this, Idx));
+}
+
+void DwarfCompileUnit::createBaseTypeDIEs() {
+  // Insert the base_type DIEs directly after the CU so that their offsets will
+  // fit in the fixed size ULEB128 used inside the location expressions.
+  // Maintain order by iterating backwards and inserting to the front of CU
+  // child list.
+  for (auto &Btr : reverse(ExprRefedBaseTypes)) {
+    DIE &Die = getUnitDie().addChildFront(
+      DIE::get(DIEValueAllocator, dwarf::DW_TAG_base_type));
+    SmallString<32> Str;
+    addString(Die, dwarf::DW_AT_name,
+              Twine(dwarf::AttributeEncodingString(Btr.Encoding) +
+                    "_" + Twine(Btr.BitSize)).toStringRef(Str));
+    addUInt(Die, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1, Btr.Encoding);
+    addUInt(Die, dwarf::DW_AT_byte_size, None, Btr.BitSize / 8);
+
+    Btr.Die = &Die;
+  }
 }

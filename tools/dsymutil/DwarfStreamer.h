@@ -1,9 +1,8 @@
 //===- tools/dsymutil/DwarfStreamer.h - Dwarf Streamer ----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -96,7 +95,9 @@ public:
   /// Emit the debug_loc contribution for \p Unit by copying the entries from
   /// \p Dwarf and offsetting them. Update the location attributes to point to
   /// the new entries.
-  void emitLocationsForUnit(const CompileUnit &Unit, DWARFContext &Dwarf);
+  void emitLocationsForUnit(
+      const CompileUnit &Unit, DWARFContext &Dwarf,
+      std::function<void(StringRef, SmallVectorImpl<uint8_t> &)> ProcessExpr);
 
   /// Emit the line table described in \p Rows into the debug_line section.
   void emitLineTableForUnit(MCDwarfLineTableParams Params,

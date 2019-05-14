@@ -1,9 +1,8 @@
 //===-- RISCVDisassembler.cpp - Disassembler for RISCV --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -70,7 +69,13 @@ static const unsigned GPRDecoderTable[] = {
 static DecodeStatus DecodeGPRRegisterClass(MCInst &Inst, uint64_t RegNo,
                                            uint64_t Address,
                                            const void *Decoder) {
-  if (RegNo > sizeof(GPRDecoderTable))
+  const FeatureBitset &FeatureBits =
+      static_cast<const MCDisassembler *>(Decoder)
+          ->getSubtargetInfo()
+          .getFeatureBits();
+  bool IsRV32E = FeatureBits[RISCV::FeatureRV32E];
+
+  if (RegNo > array_lengthof(GPRDecoderTable) || (IsRV32E && RegNo > 15))
     return MCDisassembler::Fail;
 
   // We must define our own mapping from RegNo to register identifier.
@@ -95,7 +100,7 @@ static const unsigned FPR32DecoderTable[] = {
 static DecodeStatus DecodeFPR32RegisterClass(MCInst &Inst, uint64_t RegNo,
                                              uint64_t Address,
                                              const void *Decoder) {
-  if (RegNo > sizeof(FPR32DecoderTable))
+  if (RegNo > array_lengthof(FPR32DecoderTable))
     return MCDisassembler::Fail;
 
   // We must define our own mapping from RegNo to register identifier.
@@ -131,7 +136,7 @@ static const unsigned FPR64DecoderTable[] = {
 static DecodeStatus DecodeFPR64RegisterClass(MCInst &Inst, uint64_t RegNo,
                                              uint64_t Address,
                                              const void *Decoder) {
-  if (RegNo > sizeof(FPR64DecoderTable))
+  if (RegNo > array_lengthof(FPR64DecoderTable))
     return MCDisassembler::Fail;
 
   // We must define our own mapping from RegNo to register identifier.

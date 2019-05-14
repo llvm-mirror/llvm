@@ -13,8 +13,10 @@ unittest("GlobalISelTests") {
   ]
   sources = [
     "CSETest.cpp",
+    "GISelMITest.cpp",
     "LegalizerHelperTest.cpp",
     "LegalizerInfoTest.cpp",
+    "MachineIRBuilderTest.cpp",
     "PatternMatchTest.cpp",
   ]
   has_custom_main = true

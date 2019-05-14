@@ -1,9 +1,8 @@
 //===- IntrinsicsARM.td - Defines ARM intrinsics -----------*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -263,59 +262,59 @@ def int_arm_vcvtru    : Intrinsic<[llvm_float_ty], [llvm_anyfloat_ty],
 // Coprocessor
 
 def int_arm_ldc : GCCBuiltin<"__builtin_arm_ldc">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_ldcl : GCCBuiltin<"__builtin_arm_ldcl">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_ldc2 : GCCBuiltin<"__builtin_arm_ldc2">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_ldc2l : GCCBuiltin<"__builtin_arm_ldc2l">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 
 def int_arm_stc : GCCBuiltin<"__builtin_arm_stc">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_stcl : GCCBuiltin<"__builtin_arm_stcl">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_stc2 : GCCBuiltin<"__builtin_arm_stc2">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 def int_arm_stc2l : GCCBuiltin<"__builtin_arm_stc2l">,
-   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], []>;
+   Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_ptr_ty], [ImmArg<0>, ImmArg<1>]>;
 
 // Move to coprocessor
 def int_arm_mcr : GCCBuiltin<"__builtin_arm_mcr">,
    Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], []>;
+                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<3>, ImmArg<4>, ImmArg<5>]>;
 def int_arm_mcr2 : GCCBuiltin<"__builtin_arm_mcr2">,
    Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], []>;
+                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<3>, ImmArg<4>, ImmArg<5>]>;
 
 // Move from coprocessor
 def int_arm_mrc : GCCBuiltin<"__builtin_arm_mrc">,
                   MSBuiltin<"_MoveFromCoprocessor">,
    Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                             llvm_i32_ty, llvm_i32_ty], []>;
+                             llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>, ImmArg<3>, ImmArg<4>]>;
 def int_arm_mrc2 : GCCBuiltin<"__builtin_arm_mrc2">,
                    MSBuiltin<"_MoveFromCoprocessor2">,
    Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                             llvm_i32_ty, llvm_i32_ty], []>;
+                             llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>, ImmArg<3>, ImmArg<4>]>;
 
 // Coprocessor data processing
 def int_arm_cdp : GCCBuiltin<"__builtin_arm_cdp">,
    Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], []>;
+                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>, ImmArg<3>, ImmArg<4>, ImmArg<5>]>;
 def int_arm_cdp2 : GCCBuiltin<"__builtin_arm_cdp2">,
    Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], []>;
+                  llvm_i32_ty, llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>, ImmArg<3>, ImmArg<4>, ImmArg<5>]>;
 
 // Move from two registers to coprocessor
 def int_arm_mcrr : Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                                  llvm_i32_ty, llvm_i32_ty], []>;
+                                  llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<4>]>;
 def int_arm_mcrr2 : Intrinsic<[], [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
-                                   llvm_i32_ty, llvm_i32_ty], []>;
+                                   llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<4>]>;
 
 def int_arm_mrrc : Intrinsic<[llvm_i32_ty, llvm_i32_ty], [llvm_i32_ty,
-                              llvm_i32_ty, llvm_i32_ty], []>;
+                              llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>]>;
 def int_arm_mrrc2 : Intrinsic<[llvm_i32_ty, llvm_i32_ty], [llvm_i32_ty,
-                               llvm_i32_ty, llvm_i32_ty], []>;
+                               llvm_i32_ty, llvm_i32_ty], [ImmArg<0>, ImmArg<1>, ImmArg<2>]>;
 
 //===----------------------------------------------------------------------===//
 // CRC32

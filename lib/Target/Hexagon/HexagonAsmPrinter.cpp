@@ -1,9 +1,8 @@
 //===- HexagonAsmPrinter.cpp - Print machine instrs to Hexagon assembly ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -92,9 +91,7 @@ void HexagonAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
     GetCPISymbol(MO.getIndex())->print(O, MAI);
     return;
   case MachineOperand::MO_GlobalAddress:
-    // Computing the address of a global symbol, not calling it.
-    getSymbol(MO.getGlobal())->print(O, MAI);
-    printOffset(MO.getOffset(), O);
+    PrintSymbolOperand(MO, O);
     return;
   }
 }
@@ -114,7 +111,6 @@ bool HexagonAsmPrinter::isBlockOnlyReachableByFallthrough(
 
 /// PrintAsmOperand - Print out an operand for an inline asm expression.
 bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                                        unsigned AsmVariant,
                                         const char *ExtraCode,
                                         raw_ostream &OS) {
   // Does this asm operand have a single letter operand modifier?
@@ -125,11 +121,7 @@ bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     switch (ExtraCode[0]) {
     default:
       // See if this is a generic print operand
-      return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, OS);
-    case 'c': // Don't print "$" before a global var name or constant.
-      // Hexagon never has a prefix.
-      printOperand(MI, OpNo, OS);
-      return false;
+      return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
     case 'L':
     case 'H': { // The highest-numbered register of a pair.
       const MachineOperand &MO = MI->getOperand(OpNo);
@@ -161,7 +153,6 @@ bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
 
 bool HexagonAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                               unsigned OpNo,
-                                              unsigned AsmVariant,
                                               const char *ExtraCode,
                                               raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])

@@ -1,9 +1,8 @@
 //===-- llvm/CodeGen/GlobalISel/MachineIRBuilder.h - MIBuilder --*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -67,6 +66,7 @@ class DstOp {
 public:
   enum class DstType { Ty_LLT, Ty_Reg, Ty_RC };
   DstOp(unsigned R) : Reg(R), Ty(DstType::Ty_Reg) {}
+  DstOp(const MachineOperand &Op) : Reg(Op.getReg()), Ty(DstType::Ty_Reg) {}
   DstOp(const LLT &T) : LLTTy(T), Ty(DstType::Ty_LLT) {}
   DstOp(const TargetRegisterClass *TRC) : RC(TRC), Ty(DstType::Ty_RC) {}
 
@@ -126,6 +126,7 @@ class SrcOp {
 public:
   enum class SrcType { Ty_Reg, Ty_MIB, Ty_Predicate };
   SrcOp(unsigned R) : Reg(R), Ty(SrcType::Ty_Reg) {}
+  SrcOp(const MachineOperand &Op) : Reg(Op.getReg()), Ty(SrcType::Ty_Reg) {}
   SrcOp(const MachineInstrBuilder &MIB) : SrcMIB(MIB), Ty(SrcType::Ty_MIB) {}
   SrcOp(const CmpInst::Predicate P) : Pred(P), Ty(SrcType::Ty_Predicate) {}
 
@@ -202,6 +203,7 @@ protected:
   void validateTruncExt(const LLT &Dst, const LLT &Src, bool IsExtend);
 
   void validateBinaryOp(const LLT &Res, const LLT &Op0, const LLT &Op1);
+  void validateShiftOp(const LLT &Res, const LLT &Op0, const LLT &Op1);
 
   void validateSelectOp(const LLT &ResTy, const LLT &TstTy, const LLT &Op0Ty,
                         const LLT &Op1Ty);
@@ -228,6 +230,15 @@ public:
   MachineFunction &getMF() {
     assert(State.MF && "MachineFunction is not set");
     return *State.MF;
+  }
+
+  const MachineFunction &getMF() const {
+    assert(State.MF && "MachineFunction is not set");
+    return *State.MF;
+  }
+
+  const DataLayout &getDataLayout() const {
+    return getMF().getFunction().getParent()->getDataLayout();
   }
 
   /// Getter for DebugLoc
@@ -410,6 +421,21 @@ public:
   MachineInstrBuilder buildPtrMask(unsigned Res, unsigned Op0,
                                    uint32_t NumBits);
 
+  /// Build and insert \p Res, \p CarryOut = G_UADDO \p Op0, \p Op1
+  ///
+  /// G_UADDO sets \p Res to \p Op0 + \p Op1 (truncated to the bit width) and
+  /// sets \p CarryOut to 1 if the result overflowed in unsigned arithmetic.
+  ///
+  /// \pre setBasicBlock or setMI must have been called.
+  /// \pre \p Res, \p Op0 and \p Op1 must be generic virtual registers with the
+  /// same scalar type.
+  ////\pre \p CarryOut must be generic virtual register with scalar type
+  ///(typically s1)
+  ///
+  /// \return The newly created instruction.
+  MachineInstrBuilder buildUAddo(const DstOp &Res, const DstOp &CarryOut,
+                                 const SrcOp &Op0, const SrcOp &Op1);
+
   /// Build and insert \p Res, \p CarryOut = G_UADDE \p Op0,
   /// \p Op1, \p CarryIn
   ///
@@ -457,6 +483,25 @@ public:
   ///
   /// \return The newly created instruction.
   MachineInstrBuilder buildSExt(const DstOp &Res, const SrcOp &Op);
+
+  /// Build and insert a G_PTRTOINT instruction.
+  MachineInstrBuilder buildPtrToInt(const DstOp &Dst, const SrcOp &Src) {
+    return buildInstr(TargetOpcode::G_PTRTOINT, {Dst}, {Src});
+  }
+
+  /// Build and insert \p Dst = G_BITCAST \p Src
+  MachineInstrBuilder buildBitcast(const DstOp &Dst, const SrcOp &Src) {
+    return buildInstr(TargetOpcode::G_BITCAST, {Dst}, {Src});
+  }
+
+  /// \return The opcode of the extension the target wants to use for boolean
+  /// values.
+  unsigned getBoolExtOp(bool IsVec, bool IsFP) const;
+
+  // Build and insert \p Res = G_ANYEXT \p Op, \p Res = G_SEXT \p Op, or \p Res
+  // = G_ZEXT \p Op depending on how the target wants to extend boolean values.
+  MachineInstrBuilder buildBoolExt(const DstOp &Res, const SrcOp &Op,
+                                   bool IsFP);
 
   /// Build and insert \p Res = G_ZEXT \p Op
   ///
@@ -572,6 +617,7 @@ public:
   ///
   /// \return The newly created instruction.
   MachineInstrBuilder buildConstant(const DstOp &Res, int64_t Val);
+  MachineInstrBuilder buildConstant(const DstOp &Res, const APInt &Val);
 
   /// Build and insert \p Res = G_FCONSTANT \p Val
   ///
@@ -638,7 +684,7 @@ public:
   /// \pre \p Res and \p Src must be generic virtual registers.
   ///
   /// \return a MachineInstrBuilder for the newly created instruction.
-  MachineInstrBuilder buildExtract(unsigned Res, unsigned Src, uint64_t Index);
+  MachineInstrBuilder buildExtract(const DstOp &Res, const SrcOp &Src, uint64_t Index);
 
   /// Build and insert \p Res = IMPLICIT_DEF.
   MachineInstrBuilder buildUndef(const DstOp &Res);
@@ -685,6 +731,9 @@ public:
   MachineInstrBuilder buildUnmerge(ArrayRef<LLT> Res, const SrcOp &Op);
   MachineInstrBuilder buildUnmerge(ArrayRef<unsigned> Res, const SrcOp &Op);
 
+  /// Build and insert an unmerge of \p Res sized pieces to cover \p Op
+  MachineInstrBuilder buildUnmerge(LLT Res, const SrcOp &Op);
+
   /// Build and insert \p Res = G_BUILD_VECTOR \p Op0, ...
   ///
   /// G_BUILD_VECTOR creates a vector value from multiple scalar registers.
@@ -696,6 +745,11 @@ public:
   /// \return a MachineInstrBuilder for the newly created instruction.
   MachineInstrBuilder buildBuildVector(const DstOp &Res,
                                        ArrayRef<unsigned> Ops);
+
+  /// Build and insert \p Res = G_BUILD_VECTOR with \p Src replicated to fill
+  /// the number of elements
+  MachineInstrBuilder buildSplatVector(const DstOp &Res,
+                                       const SrcOp &Src);
 
   /// Build and insert \p Res = G_BUILD_VECTOR_TRUNC \p Op0, ...
   ///
@@ -740,7 +794,7 @@ public:
   /// \pre setBasicBlock or setMI must have been called.
   ///
   /// \return a MachineInstrBuilder for the newly created instruction.
-  MachineInstrBuilder buildIntrinsic(Intrinsic::ID ID, unsigned Res,
+  MachineInstrBuilder buildIntrinsic(Intrinsic::ID ID, ArrayRef<unsigned> Res,
                                      bool HasSideEffects);
 
   /// Build and insert \p Res = G_FPTRUNC \p Op
@@ -1122,6 +1176,36 @@ public:
                                const SrcOp &Src1,
                                Optional<unsigned> Flags = None) {
     return buildInstr(TargetOpcode::G_MUL, {Dst}, {Src0, Src1}, Flags);
+  }
+
+  MachineInstrBuilder buildUMulH(const DstOp &Dst, const SrcOp &Src0,
+                                 const SrcOp &Src1,
+                                 Optional<unsigned> Flags = None) {
+    return buildInstr(TargetOpcode::G_UMULH, {Dst}, {Src0, Src1}, Flags);
+  }
+
+  MachineInstrBuilder buildSMulH(const DstOp &Dst, const SrcOp &Src0,
+                                 const SrcOp &Src1,
+                                 Optional<unsigned> Flags = None) {
+    return buildInstr(TargetOpcode::G_SMULH, {Dst}, {Src0, Src1}, Flags);
+  }
+
+  MachineInstrBuilder buildShl(const DstOp &Dst, const SrcOp &Src0,
+                               const SrcOp &Src1,
+                               Optional<unsigned> Flags = None) {
+    return buildInstr(TargetOpcode::G_SHL, {Dst}, {Src0, Src1}, Flags);
+  }
+
+  MachineInstrBuilder buildLShr(const DstOp &Dst, const SrcOp &Src0,
+                                const SrcOp &Src1,
+                                Optional<unsigned> Flags = None) {
+    return buildInstr(TargetOpcode::G_LSHR, {Dst}, {Src0, Src1}, Flags);
+  }
+
+  MachineInstrBuilder buildAShr(const DstOp &Dst, const SrcOp &Src0,
+                                const SrcOp &Src1,
+                                Optional<unsigned> Flags = None) {
+    return buildInstr(TargetOpcode::G_ASHR, {Dst}, {Src0, Src1}, Flags);
   }
 
   /// Build and insert \p Res = G_AND \p Op0, \p Op1

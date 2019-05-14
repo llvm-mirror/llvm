@@ -1,9 +1,8 @@
 //===- dsymutil.cpp - Debug info dumping utility for llvm -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -279,23 +278,35 @@ static bool verify(llvm::StringRef OutputFile, llvm::StringRef Arch) {
   return false;
 }
 
-static Expected<std::string> getOutputFileName(llvm::StringRef InputFile) {
+namespace {
+struct OutputLocation {
+  OutputLocation(std::string DWARFFile,
+                 llvm::Optional<std::string> ResourceDir = {})
+      : DWARFFile(DWARFFile), ResourceDir(ResourceDir) {}
+  /// This method is a workaround for older compilers.
+  llvm::Optional<std::string> getResourceDir() const { return ResourceDir; }
+  std::string DWARFFile;
+  llvm::Optional<std::string> ResourceDir;
+};
+}
+
+static Expected<OutputLocation> getOutputFileName(llvm::StringRef InputFile) {
   if (OutputFileOpt == "-")
-    return OutputFileOpt;
+    return OutputLocation(OutputFileOpt);
 
   // When updating, do in place replacement.
   if (OutputFileOpt.empty() && (Update || !SymbolMap.empty()))
-    return InputFile;
+    return OutputLocation(InputFile);
 
   // If a flat dSYM has been requested, things are pretty simple.
   if (FlatOut) {
     if (OutputFileOpt.empty()) {
       if (InputFile == "-")
-        return "a.out.dwarf";
-      return (InputFile + ".dwarf").str();
+        return OutputLocation{"a.out.dwarf", {}};
+      return OutputLocation((InputFile + ".dwarf").str());
     }
 
-    return OutputFileOpt;
+    return OutputLocation(OutputFileOpt);
   }
 
   // We need to create/update a dSYM bundle.
@@ -308,17 +319,18 @@ static Expected<std::string> getOutputFileName(llvm::StringRef InputFile) {
   //                <DWARF file(s)>
   std::string DwarfFile =
       InputFile == "-" ? llvm::StringRef("a.out") : InputFile;
-  llvm::SmallString<128> BundleDir(OutputFileOpt);
-  if (BundleDir.empty())
-    BundleDir = DwarfFile + ".dSYM";
-  if (auto E = createBundleDir(BundleDir))
+  llvm::SmallString<128> Path(OutputFileOpt);
+  if (Path.empty())
+    Path = DwarfFile + ".dSYM";
+  if (auto E = createBundleDir(Path))
     return std::move(E);
-  if (auto E = createPlistFile(DwarfFile, BundleDir))
+  if (auto E = createPlistFile(DwarfFile, Path))
     return std::move(E);
 
-  llvm::sys::path::append(BundleDir, "Contents", "Resources", "DWARF",
-                          llvm::sys::path::filename(DwarfFile));
-  return BundleDir.str();
+  llvm::sys::path::append(Path, "Contents", "Resources");
+  std::string ResourceDir = Path.str();
+  llvm::sys::path::append(Path, "DWARF", llvm::sys::path::filename(DwarfFile));
+  return OutputLocation(Path.str(), ResourceDir);
 }
 
 /// Parses the command line options into the LinkOptions struct and performs
@@ -545,13 +557,15 @@ int main(int argc, char **argv) {
       // types don't work with std::bind in the ThreadPool implementation.
       std::shared_ptr<raw_fd_ostream> OS;
 
-      Expected<std::string> OutputFileOrErr = getOutputFileName(InputFile);
-      if (!OutputFileOrErr) {
-        WithColor::error() << toString(OutputFileOrErr.takeError());
+      Expected<OutputLocation> OutputLocationOrErr =
+          getOutputFileName(InputFile);
+      if (!OutputLocationOrErr) {
+        WithColor::error() << toString(OutputLocationOrErr.takeError());
         return 1;
       }
+      OptionsOrErr->ResourceDir = OutputLocationOrErr->getResourceDir();
 
-      std::string OutputFile = *OutputFileOrErr;
+      std::string OutputFile = OutputLocationOrErr->DWARFFile;
       if (NeedsTempFiles) {
         TempFiles.emplace_back(Map->getTriple().getArchName().str());
 
@@ -598,12 +612,13 @@ int main(int argc, char **argv) {
       return 1;
 
     if (NeedsTempFiles) {
-      Expected<std::string> OutputFileOrErr = getOutputFileName(InputFile);
-      if (!OutputFileOrErr) {
-        WithColor::error() << toString(OutputFileOrErr.takeError());
+      Expected<OutputLocation> OutputLocationOrErr = getOutputFileName(InputFile);
+      if (!OutputLocationOrErr) {
+        WithColor::error() << toString(OutputLocationOrErr.takeError());
         return 1;
       }
-      if (!MachOUtils::generateUniversalBinary(TempFiles, *OutputFileOrErr,
+      if (!MachOUtils::generateUniversalBinary(TempFiles,
+                                               OutputLocationOrErr->DWARFFile,
                                                *OptionsOrErr, SDKPath))
         return 1;
     }

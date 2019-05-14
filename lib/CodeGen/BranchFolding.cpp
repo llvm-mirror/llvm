@@ -1,9 +1,8 @@
 //===- BranchFolding.cpp - Fold machine code branch instructions ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -722,7 +721,7 @@ ProfitableToMerge(MachineBasicBlock *MBB1, MachineBasicBlock *MBB2,
   // branch instruction, which is likely to be smaller than the 2
   // instructions that would be deleted in the merge.
   MachineFunction *MF = MBB1->getParent();
-  return EffectiveTailLen >= 2 && MF->getFunction().optForSize() &&
+  return EffectiveTailLen >= 2 && MF->getFunction().hasOptSize() &&
          (I1 == MBB1->begin() || I2 == MBB2->begin());
 }
 
@@ -1183,29 +1182,6 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
           }
         }
 
-        // Failing case: the only way IBB can be reached from PBB is via
-        // exception handling.  Happens for landing pads.  Would be nice to have
-        // a bit in the edge so we didn't have to do all this.
-        if (IBB->isEHPad()) {
-          MachineFunction::iterator IP = ++PBB->getIterator();
-          MachineBasicBlock *PredNextBB = nullptr;
-          if (IP != MF.end())
-            PredNextBB = &*IP;
-          if (!TBB) {
-            if (IBB != PredNextBB)      // fallthrough
-              continue;
-          } else if (FBB) {
-            if (TBB != IBB && FBB != IBB)   // cbr then ubr
-              continue;
-          } else if (Cond.empty()) {
-            if (TBB != IBB)               // ubr
-              continue;
-          } else {
-            if (TBB != IBB && IBB != PredNextBB)  // cbr
-              continue;
-          }
-        }
-
         // Remove the unconditional branch at the end, if any.
         if (TBB && (Cond.empty() || FBB)) {
           DebugLoc dl = PBB->findBranchDebugLoc();
@@ -1598,7 +1574,7 @@ ReoptimizeBlock:
   }
 
   if (!IsEmptyBlock(MBB) && MBB->pred_size() == 1 &&
-      MF.getFunction().optForSize()) {
+      MF.getFunction().hasOptSize()) {
     // Changing "Jcc foo; foo: jmp bar;" into "Jcc bar;" might change the branch
     // direction, thereby defeating careful block placement and regressing
     // performance. Therefore, only consider this for optsize functions.

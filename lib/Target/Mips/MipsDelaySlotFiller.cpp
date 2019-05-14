@@ -1,9 +1,8 @@
 //===- MipsDelaySlotFiller.cpp - Mips Delay Slot Filler -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -541,10 +540,10 @@ getUnderlyingObjects(const MachineInstr &MI,
 
   const Value *V = (*MI.memoperands_begin())->getValue();
 
-  SmallVector<Value *, 4> Objs;
-  GetUnderlyingObjects(const_cast<Value *>(V), Objs, DL);
+  SmallVector<const Value *, 4> Objs;
+  GetUnderlyingObjects(V, Objs, DL);
 
-  for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), E = Objs.end();
+  for (SmallVectorImpl<const Value *>::iterator I = Objs.begin(), E = Objs.end();
        I != E; ++I) {
     if (!isIdentifiedObject(V))
       return false;
@@ -726,6 +725,7 @@ bool MipsDelaySlotFiller::searchRange(MachineBasicBlock &MBB, IterTy Begin,
     // but we don't have enough information to make that decision.
      if (InMicroMipsMode && TII->getInstSizeInBytes(*CurrI) == 2 &&
         (Opcode == Mips::JR || Opcode == Mips::PseudoIndirectBranch ||
+         Opcode == Mips::PseudoIndirectBranch_MM ||
          Opcode == Mips::PseudoReturn || Opcode == Mips::TAILCALL))
       continue;
      // Instructions LWP/SWP and MOVEP should not be in a delay slot as that

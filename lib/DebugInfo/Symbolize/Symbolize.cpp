@@ -1,9 +1,8 @@
 //===-- LLVMSymbolize.cpp -------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -17,7 +16,6 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/BinaryFormat/COFF.h"
-#include "llvm/Config/config.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/PDB/PDB.h"
 #include "llvm/DebugInfo/PDB/PDBContext.h"
@@ -25,6 +23,7 @@
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
+#include "llvm/Support/CRC.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/DataExtractor.h"
@@ -34,7 +33,6 @@
 #include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cassert>
-#include <cstdlib>
 #include <cstring>
 
 #if defined(_MSC_VER)
@@ -55,7 +53,8 @@ namespace symbolize {
 
 Expected<DILineInfo>
 LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
-                              uint64_t ModuleOffset, StringRef DWPName) {
+                              object::SectionedAddress ModuleOffset,
+                              StringRef DWPName) {
   SymbolizableModule *Info;
   if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName, DWPName))
     Info = InfoOrErr.get();
@@ -70,7 +69,7 @@ LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
   // If the user is giving us relative addresses, add the preferred base of the
   // object to the offset before we do the query. It's what DIContext expects.
   if (Opts.RelativeAddresses)
-    ModuleOffset += Info->getModulePreferredBase();
+    ModuleOffset.Address += Info->getModulePreferredBase();
 
   DILineInfo LineInfo = Info->symbolizeCode(ModuleOffset, Opts.PrintFunctions,
                                             Opts.UseSymbolTable);
@@ -81,7 +80,8 @@ LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
 
 Expected<DIInliningInfo>
 LLVMSymbolizer::symbolizeInlinedCode(const std::string &ModuleName,
-                                     uint64_t ModuleOffset, StringRef DWPName) {
+                                     object::SectionedAddress ModuleOffset,
+                                     StringRef DWPName) {
   SymbolizableModule *Info;
   if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName, DWPName))
     Info = InfoOrErr.get();
@@ -96,7 +96,7 @@ LLVMSymbolizer::symbolizeInlinedCode(const std::string &ModuleName,
   // If the user is giving us relative addresses, add the preferred base of the
   // object to the offset before we do the query. It's what DIContext expects.
   if (Opts.RelativeAddresses)
-    ModuleOffset += Info->getModulePreferredBase();
+    ModuleOffset.Address += Info->getModulePreferredBase();
 
   DIInliningInfo InlinedContext = Info->symbolizeInlinedCode(
       ModuleOffset, Opts.PrintFunctions, Opts.UseSymbolTable);
@@ -109,8 +109,9 @@ LLVMSymbolizer::symbolizeInlinedCode(const std::string &ModuleName,
   return InlinedContext;
 }
 
-Expected<DIGlobal> LLVMSymbolizer::symbolizeData(const std::string &ModuleName,
-                                                 uint64_t ModuleOffset) {
+Expected<DIGlobal>
+LLVMSymbolizer::symbolizeData(const std::string &ModuleName,
+                              object::SectionedAddress ModuleOffset) {
   SymbolizableModule *Info;
   if (auto InfoOrErr = getOrCreateModuleInfo(ModuleName))
     Info = InfoOrErr.get();
@@ -126,7 +127,7 @@ Expected<DIGlobal> LLVMSymbolizer::symbolizeData(const std::string &ModuleName,
   // the object to the offset before we do the query. It's what DIContext
   // expects.
   if (Opts.RelativeAddresses)
-    ModuleOffset += Info->getModulePreferredBase();
+    ModuleOffset.Address += Info->getModulePreferredBase();
 
   DIGlobal Global = Info->symbolizeData(ModuleOffset);
   if (Opts.Demangle)
@@ -163,42 +164,45 @@ bool checkFileCRC(StringRef Path, uint32_t CRCHash) {
       MemoryBuffer::getFileOrSTDIN(Path);
   if (!MB)
     return false;
-  return !zlib::isAvailable() || CRCHash == zlib::crc32(MB.get()->getBuffer());
+  return CRCHash == llvm::crc32(0, MB.get()->getBuffer());
 }
 
 bool findDebugBinary(const std::string &OrigPath,
                      const std::string &DebuglinkName, uint32_t CRCHash,
+                     const std::string &FallbackDebugPath,
                      std::string &Result) {
-  std::string OrigRealPath = OrigPath;
-#if defined(HAVE_REALPATH)
-  if (char *RP = realpath(OrigPath.c_str(), nullptr)) {
-    OrigRealPath = RP;
-    free(RP);
-  }
-#endif
-  SmallString<16> OrigDir(OrigRealPath);
+  SmallString<16> OrigDir(OrigPath);
   llvm::sys::path::remove_filename(OrigDir);
   SmallString<16> DebugPath = OrigDir;
-  // Try /path/to/original_binary/debuglink_name
+  // Try relative/path/to/original_binary/debuglink_name
   llvm::sys::path::append(DebugPath, DebuglinkName);
   if (checkFileCRC(DebugPath, CRCHash)) {
     Result = DebugPath.str();
     return true;
   }
-  // Try /path/to/original_binary/.debug/debuglink_name
+  // Try relative/path/to/original_binary/.debug/debuglink_name
   DebugPath = OrigDir;
   llvm::sys::path::append(DebugPath, ".debug", DebuglinkName);
   if (checkFileCRC(DebugPath, CRCHash)) {
     Result = DebugPath.str();
     return true;
   }
+  // Make the path absolute so that lookups will go to
+  // "/usr/lib/debug/full/path/to/debug", not
+  // "/usr/lib/debug/to/debug"
+  llvm::sys::fs::make_absolute(OrigDir);
+  if (!FallbackDebugPath.empty()) {
+    // Try <FallbackDebugPath>/absolute/path/to/original_binary/debuglink_name
+    DebugPath = FallbackDebugPath;
+  } else {
 #if defined(__NetBSD__)
-  // Try /usr/libdata/debug/path/to/original_binary/debuglink_name
-  DebugPath = "/usr/libdata/debug";
+    // Try /usr/libdata/debug/absolute/path/to/original_binary/debuglink_name
+    DebugPath = "/usr/libdata/debug";
 #else
-  // Try /usr/lib/debug/path/to/original_binary/debuglink_name
-  DebugPath = "/usr/lib/debug";
+    // Try /usr/lib/debug/absolute/path/to/original_binary/debuglink_name
+    DebugPath = "/usr/lib/debug";
 #endif
+  }
   llvm::sys::path::append(DebugPath, llvm::sys::path::relative_path(OrigDir),
                           DebuglinkName);
   if (checkFileCRC(DebugPath, CRCHash)) {
@@ -284,7 +288,8 @@ ObjectFile *LLVMSymbolizer::lookUpDebuglinkObject(const std::string &Path,
   std::string DebugBinaryPath;
   if (!getGNUDebuglinkContents(Obj, DebuglinkName, CRCHash))
     return nullptr;
-  if (!findDebugBinary(Path, DebuglinkName, CRCHash, DebugBinaryPath))
+  if (!findDebugBinary(Path, DebuglinkName, CRCHash, Opts.FallbackDebugPath,
+                       DebugBinaryPath))
     return nullptr;
   auto DbgObjOrErr = getOrCreateObject(DebugBinaryPath, ArchName);
   if (!DbgObjOrErr) {

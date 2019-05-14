@@ -1,9 +1,8 @@
 //===-- X86RegisterInfo.cpp - X86 Register Information --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -164,6 +163,7 @@ X86RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
     case X86::RFP32RegClassID:
     case X86::RFP64RegClassID:
     case X86::RFP80RegClassID:
+    case X86::VR512_0_15RegClassID:
     case X86::VR512RegClassID:
       // Don't return a super-class that would shrink the spill size.
       // That can happen with the vector and float classes.
@@ -497,6 +497,9 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   const X86FrameLowering *TFI = getFrameLowering(MF);
 
+  // Set the floating point control register as reserved.
+  Reserved.set(X86::FPCW);
+
   // Set the stack-pointer register and its aliases as reserved.
   for (MCSubRegIterator I(X86::RSP, this, /*IncludeSelf=*/true); I.isValid();
        ++I)
@@ -759,4 +762,13 @@ X86RegisterInfo::getPtrSizedFrameRegister(const MachineFunction &MF) const {
   if (Subtarget.isTarget64BitILP32())
     FrameReg = getX86SubSuperRegister(FrameReg, 32);
   return FrameReg;
+}
+
+unsigned
+X86RegisterInfo::getPtrSizedStackRegister(const MachineFunction &MF) const {
+  const X86Subtarget &Subtarget = MF.getSubtarget<X86Subtarget>();
+  unsigned StackReg = getStackRegister();
+  if (Subtarget.isTarget64BitILP32())
+    StackReg = getX86SubSuperRegister(StackReg, 32);
+  return StackReg;
 }

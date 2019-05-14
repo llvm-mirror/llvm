@@ -1,9 +1,8 @@
 //===- FunctionImport.cpp - ThinLTO Summary-based Function Import ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -778,9 +777,7 @@ void llvm::computeDeadSymbols(
     if (!VI)
       return;
 
-    // We need to make sure all variants of the symbol are scanned, alias can
-    // make one (but not all) alive.
-    if (llvm::all_of(VI.getSummaryList(),
+    if (llvm::any_of(VI.getSummaryList(),
                      [](const std::unique_ptr<llvm::GlobalValueSummary> &S) {
                        return S->isLive();
                      }))
@@ -820,12 +817,18 @@ void llvm::computeDeadSymbols(
   while (!Worklist.empty()) {
     auto VI = Worklist.pop_back_val();
     for (auto &Summary : VI.getSummaryList()) {
-      GlobalValueSummary *Base = Summary->getBaseObject();
-      // Set base value live in case it is an alias.
-      Base->setLive(true);
-      for (auto Ref : Base->refs())
+      if (auto *AS = dyn_cast<AliasSummary>(Summary.get())) {
+        // If this is an alias, visit the aliasee VI to ensure that all copies
+        // are marked live and it is added to the worklist for further
+        // processing of its references.
+        visit(AS->getAliaseeVI());
+        continue;
+      }
+
+      Summary->setLive(true);
+      for (auto Ref : Summary->refs())
         visit(Ref);
-      if (auto *FS = dyn_cast<FunctionSummary>(Base))
+      if (auto *FS = dyn_cast<FunctionSummary>(Summary.get()))
         for (auto Call : FS->calls())
           visit(Call.first);
     }

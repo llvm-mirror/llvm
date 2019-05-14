@@ -1,9 +1,8 @@
 //=- AArch64.td - Describe the AArch64 Target Machine --------*- tablegen -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -127,7 +126,7 @@ def FeatureStrictAlign : SubtargetFeature<"strict-align",
                                           "Disallow all unaligned memory "
                                           "access">;
 
-foreach i = {1-7,18,20} in
+foreach i = {1-7,9-15,18,20-28} in
     def FeatureReserveX#i : SubtargetFeature<"reserve-x"#i, "ReserveXRegister["#i#"]", "true",
                                              "Reserve X"#i#", making it unavailable "
                                              "as a GPR">;
@@ -386,6 +385,14 @@ def AArch64InstrInfo : InstrInfo;
 include "AArch64SystemOperands.td"
 
 //===----------------------------------------------------------------------===//
+// Access to privileged registers
+//===----------------------------------------------------------------------===//
+
+foreach i = 1-3 in
+def FeatureUseEL#i#ForTP : SubtargetFeature<"tpidr-el"#i, "UseEL"#i#"ForTP",
+  "true", "Permit use of TPIDR_EL"#i#" for the TLS base">;
+
+//===----------------------------------------------------------------------===//
 // AArch64 Processors supported.
 //
 include "AArch64SchedA53.td"
@@ -483,6 +490,18 @@ def ProcA75     : SubtargetFeature<"a75", "ARMProcFamily", "CortexA75",
                                    FeaturePerfMon
                                    ]>;
 
+def ProcA76     : SubtargetFeature<"a76", "ARMProcFamily", "CortexA76",
+                                   "Cortex-A76 ARM processors", [
+                                    HasV8_2aOps,
+                                    FeatureFPARMv8,
+                                    FeatureNEON,
+                                    FeatureRCPC,
+                                    FeatureCrypto,
+                                    FeatureFullFP16,
+                                    FeatureDotProd,
+                                    FeatureSSBS
+                                    ]>;
+
 // Note that cyclone does not fuse AES instructions, but newer apple chips do
 // perform the fusion and cyclone is used by default when targetting apple OSes.
 def ProcCyclone : SubtargetFeature<"cyclone", "ARMProcFamily", "Cyclone",
@@ -554,7 +573,7 @@ def ProcExynosM4 : SubtargetFeature<"exynosm4", "ARMProcFamily", "ExynosM3",
                                      FeatureDotProd,
                                      FeatureExynosCheapAsMoveHandling,
                                      FeatureForce32BitJumpTables,
-                                     FeatureFP16FML,
+                                     FeatureFullFP16,
                                      FeatureFuseAddress,
                                      FeatureFuseAES,
                                      FeatureFuseArithmeticLogic,
@@ -694,15 +713,17 @@ def : ProcessorModel<"cortex-a35", CortexA53Model, [ProcA35]>;
 def : ProcessorModel<"cortex-a53", CortexA53Model, [ProcA53]>;
 def : ProcessorModel<"cortex-a55", CortexA53Model, [ProcA55]>;
 def : ProcessorModel<"cortex-a57", CortexA57Model, [ProcA57]>;
-// FIXME: Cortex-A72, Cortex-A73 and Cortex-A75 are currently modeled as a Cortex-A57.
 def : ProcessorModel<"cortex-a72", CortexA57Model, [ProcA72]>;
 def : ProcessorModel<"cortex-a73", CortexA57Model, [ProcA73]>;
 def : ProcessorModel<"cortex-a75", CortexA57Model, [ProcA75]>;
+def : ProcessorModel<"cortex-a76", CortexA57Model, [ProcA76]>;
+def : ProcessorModel<"cortex-a76ae", CortexA57Model, [ProcA76]>;
 def : ProcessorModel<"cyclone", CycloneModel, [ProcCyclone]>;
 def : ProcessorModel<"exynos-m1", ExynosM1Model, [ProcExynosM1]>;
 def : ProcessorModel<"exynos-m2", ExynosM1Model, [ProcExynosM2]>;
 def : ProcessorModel<"exynos-m3", ExynosM3Model, [ProcExynosM3]>;
 def : ProcessorModel<"exynos-m4", ExynosM4Model, [ProcExynosM4]>;
+def : ProcessorModel<"exynos-m5", ExynosM4Model, [ProcExynosM4]>;
 def : ProcessorModel<"falkor", FalkorModel, [ProcFalkor]>;
 def : ProcessorModel<"saphira", FalkorModel, [ProcSaphira]>;
 def : ProcessorModel<"kryo", KryoModel, [ProcKryo]>;
@@ -715,6 +736,9 @@ def : ProcessorModel<"thunderxt83", ThunderXT8XModel,  [ProcThunderXT83]>;
 def : ProcessorModel<"thunderx2t99", ThunderX2T99Model, [ProcThunderX2T99]>;
 // FIXME: HiSilicon TSV110 is currently modeled as a Cortex-A57.
 def : ProcessorModel<"tsv110", CortexA57Model, [ProcTSV110]>;
+
+// Alias for the latest Apple processor model supported by LLVM.
+def : ProcessorModel<"apple-latest", CycloneModel, [ProcCyclone]>;
 
 //===----------------------------------------------------------------------===//
 // Assembly parser

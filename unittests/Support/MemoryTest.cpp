@@ -1,9 +1,8 @@
 //===- llvm/unittest/Support/AllocatorTest.cpp - BumpPtrAllocator tests ---===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -101,6 +100,22 @@ TEST_P(MappedMemoryTest, AllocAndRelease) {
   EXPECT_EQ(std::error_code(), EC);
 
   EXPECT_NE((void*)nullptr, M1.base());
+  EXPECT_LE(sizeof(int), M1.size());
+
+  EXPECT_FALSE(Memory::releaseMappedMemory(M1));
+}
+
+TEST_P(MappedMemoryTest, AllocAndReleaseHuge) {
+  CHECK_UNSUPPORTED();
+  std::error_code EC;
+  MemoryBlock M1 = Memory::allocateMappedMemory(
+      sizeof(int), nullptr, Flags | Memory::MF_HUGE_HINT, EC);
+  EXPECT_EQ(std::error_code(), EC);
+
+  // Test large/huge memory pages. In the worst case, 4kb pages should be
+  // returned, if large pages aren't available.
+
+  EXPECT_NE((void *)nullptr, M1.base());
   EXPECT_LE(sizeof(int), M1.size());
 
   EXPECT_FALSE(Memory::releaseMappedMemory(M1));

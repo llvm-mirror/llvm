@@ -741,11 +741,13 @@ A function definition contains a list of basic blocks, forming the CFG (Control
 Flow Graph) for the function. Each basic block may optionally start with a label
 (giving the basic block a symbol table entry), contains a list of instructions,
 and ends with a :ref:`terminator <terminators>` instruction (such as a branch or
-function return). If an explicit label is not provided, a block is assigned an
-implicit numbered label, using the next value from the same counter as used for
-unnamed temporaries (:ref:`see above<identifiers>`). For example, if a function
-entry block does not have an explicit label, it will be assigned label "%0",
-then the first unnamed temporary in that block will be "%1", etc.
+function return). If an explicit label name is not provided, a block is assigned
+an implicit numbered label, using the next value from the same counter as used
+for unnamed temporaries (:ref:`see above<identifiers>`). For example, if a
+function entry block does not have an explicit label, it will be assigned label
+"%0", then the first unnamed temporary in that block will be "%1", etc. If a
+numeric label is explicitly specified, it must match the numeric label that
+would be used implicitly.
 
 The first basic block in a function is special in two ways: it is
 immediately executed on entrance to the function, and it is not allowed
@@ -1071,10 +1073,11 @@ Currently, only the following parameter attributes are defined:
 
 ``align <n>``
     This indicates that the pointer value may be assumed by the optimizer to
-    have the specified alignment.
+    have the specified alignment.  If the pointer value does not have the
+    specified alignment, behavior is undefined.
 
     Note that this attribute has additional semantics when combined with the
-    ``byval`` attribute.
+    ``byval`` attribute, which are documented there.
 
 .. _noalias:
 
@@ -1176,6 +1179,13 @@ Currently, only the following parameter attributes are defined:
     These constraints also allow LLVM to assume that a ``swifterror`` argument
     does not alias any other memory visible within a function and that a
     ``swifterror`` alloca passed as an argument does not escape.
+
+``immarg``
+    This indicates the parameter is required to be an immediate
+    value. This must be a trivial immediate integer or floating-point
+    constant. Undef or constant expressions are not valid. This is
+    only valid on intrinsic declarations and cannot be applied to a
+    call site or arbitrary function.
 
 .. _gc:
 
@@ -2003,6 +2013,14 @@ as follows:
     targets.
 ``a:<abi>:<pref>``
     This specifies the alignment for an object of aggregate type.
+``F<type><abi>``
+    This specifies the alignment for function pointers.
+    The options for ``<type>`` are:
+
+    * ``i``: The alignment of function pointers is independent of the alignment
+      of functions, and is a multiple of ``<abi>``.
+    * ``n``: The alignment of function pointers is a multiple of the explicit
+      alignment specified on the function, and is a multiple of ``<abi>``.
 ``m:<mangling>``
     If present, specifies that llvm names are mangled in the output. Symbols
     prefixed with the mangling escape character ``\01`` are passed through
@@ -2180,6 +2198,24 @@ volatile operations or change their order of execution relative to other
 volatile operations. The optimizers *may* change the order of volatile
 operations relative to non-volatile operations. This is not Java's
 "volatile" and has no cross-thread synchronization behavior.
+
+A volatile load or store may have additional target-specific semantics.
+Any volatile operation can have side effects, and any volatile operation
+can read and/or modify state which is not accessible via a regular load
+or store in this module. Volatile operations may use addresses which do
+not point to memory (like MMIO registers). This means the compiler may
+not use a volatile operation to prove a non-volatile access to that
+address has defined behavior.
+
+The allowed side-effects for volatile accesses are limited.  If a
+non-volatile store to a given address would be legal, a volatile
+operation may modify the memory at that address. A volatile operation
+may not modify any other memory accessible by the module being compiled.
+A volatile operation may not call any code in the current module.
+
+The compiler may assume execution will continue after a volatile operation,
+so operations which modify memory or may have undefined behavior can be
+hoisted past a volatile operation.
 
 IR-level volatile loads and stores cannot safely be optimized into
 llvm.memcpy or llvm.memmove intrinsics even when those intrinsics are
@@ -3275,14 +3311,14 @@ basic block in the specified function, and always has an ``i8*`` type.
 Taking the address of the entry block is illegal.
 
 This value only has defined behavior when used as an operand to the
-':ref:`indirectbr <i_indirectbr>`' instruction, or for comparisons
-against null. Pointer equality tests between labels addresses results in
-undefined behavior --- though, again, comparison against null is ok, and
-no label is equal to the null pointer. This may be passed around as an
+':ref:`indirectbr <i_indirectbr>`' or ':ref:`callbr <i_callbr>`'instruction, or
+for comparisons against null. Pointer equality tests between labels addresses
+results in undefined behavior --- though, again, comparison against null is ok,
+and no label is equal to the null pointer. This may be passed around as an
 opaque pointer sized value as long as the bits are not inspected. This
 allows ``ptrtoint`` and arithmetic to be performed on these values so
-long as the original value is reconstituted before the ``indirectbr``
-instruction.
+long as the original value is reconstituted before the ``indirectbr`` or
+``callbr`` instruction.
 
 Finally, some targets may provide defined semantics when using the value
 as the operand to an inline assembly, but that is target specific.
@@ -4493,13 +4529,36 @@ DIGlobalVariable
 
 .. code-block:: text
 
-    !0 = !DIGlobalVariable(name: "foo", linkageName: "foo", scope: !1,
-                           file: !2, line: 7, type: !3, isLocal: true,
-                           isDefinition: false, variable: i32* @foo,
-                           declaration: !4)
+    @foo = global i32, !dbg !0
+    !0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
+    !1 = !DIGlobalVariable(name: "foo", linkageName: "foo", scope: !2,
+                           file: !3, line: 7, type: !4, isLocal: true,
+                           isDefinition: false, declaration: !5)
 
-All global variables should be referenced by the `globals:` field of a
-:ref:`compile unit <DICompileUnit>`.
+
+DIGlobalVariableExpression
+""""""""""""""""""""""""""
+
+``DIGlobalVariableExpression`` nodes tie a :ref:`DIGlobalVariable` together
+with a :ref:`DIExpression`.
+
+.. code-block:: text
+
+    @lower = global i32, !dbg !0
+    @upper = global i32, !dbg !1
+    !0 = !DIGlobalVariableExpression(
+             var: !2,
+             expr: !DIExpression(DW_OP_LLVM_fragment, 0, 32)
+             )
+    !1 = !DIGlobalVariableExpression(
+             var: !2,
+             expr: !DIExpression(DW_OP_LLVM_fragment, 32, 32)
+             )
+    !2 = !DIGlobalVariable(name: "split64", linkageName: "split64", scope: !3,
+                           file: !4, line: 8, type: !5, declaration: !6)
+
+All global variable expressions should be referenced by the `globals:` field of
+a :ref:`compile unit <DICompileUnit>`.
 
 .. _DISubprogram:
 
@@ -4599,6 +4658,8 @@ parameter, and it will be included in the ``variables:`` field of its
                           type: !3)
     !2 = !DILocalVariable(name: "y", scope: !5, file: !2, line: 7, type: !3)
 
+.. _DIExpression:
+
 DIExpression
 """"""""""""
 
@@ -4623,6 +4684,10 @@ The current supported opcode vocabulary is limited:
   here, respectively) of the variable fragment from the working expression. Note
   that contrary to DW_OP_bit_piece, the offset is describing the location
   within the described source variable.
+- ``DW_OP_LLVM_convert, 16, DW_ATE_signed`` specifies a bit size and encoding
+  (``16`` and ``DW_ATE_signed`` here, respectively) to which the top of the
+  expression stack is to be converted. Maps into a ``DW_OP_convert`` operation
+  that references a base type constructed from the supplied values.
 - ``DW_OP_swap`` swaps top two stack entries.
 - ``DW_OP_xderef`` provides extended dereference mechanism. The entry at the top
   of the stack is treated as an address. The second stack entry is treated as an
@@ -5065,6 +5130,80 @@ For example, in the code below, the call instruction may only target the
 
     ...
     !0 = !{i64 (i64, i64)* @add, i64 (i64, i64)* @sub}
+
+'``callback``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^
+
+``callback`` metadata may be attached to a function declaration, or definition.
+(Call sites are excluded only due to the lack of a use case.) For ease of
+exposition, we'll refer to the function annotated w/ metadata as a broker
+function. The metadata describes how the arguments of a call to the broker are
+in turn passed to the callback function specified by the metadata. Thus, the
+``callback`` metadata provides a partial description of a call site inside the
+broker function with regards to the arguments of a call to the broker. The only
+semantic restriction on the broker function itself is that it is not allowed to
+inspect or modify arguments referenced in the ``callback`` metadata as
+pass-through to the callback function.
+
+The broker is not required to actually invoke the callback function at runtime.
+However, the assumptions about not inspecting or modifying arguments that would
+be passed to the specified callback function still hold, even if the callback
+function is not dynamically invoked. The broker is allowed to invoke the
+callback function more than once per invocation of the broker. The broker is
+also allowed to invoke (directly or indirectly) the function passed as a
+callback through another use. Finally, the broker is also allowed to relay the
+callback callee invocation to a different thread.
+
+The metadata is structured as follows: At the outer level, ``callback``
+metadata is a list of ``callback`` encodings. Each encoding starts with a
+constant ``i64`` which describes the argument position of the callback function
+in the call to the broker. The following elements, except the last, describe
+what arguments are passed to the callback function. Each element is again an
+``i64`` constant identifying the argument of the broker that is passed through,
+or ``i64 -1`` to indicate an unknown or inspected argument. The order in which
+they are listed has to be the same in which they are passed to the callback
+callee. The last element of the encoding is a boolean which specifies how
+variadic arguments of the broker are handled. If it is true, all variadic
+arguments of the broker are passed through to the callback function *after* the
+arguments encoded explicitly before.
+
+In the code below, the ``pthread_create`` function is marked as a broker
+through the ``!callback !1`` metadata. In the example, there is only one
+callback encoding, namely ``!2``, associated with the broker. This encoding
+identifies the callback function as the second argument of the broker (``i64
+2``) and the sole argument of the callback function as the third one of the
+broker function (``i64 3``).
+
+.. FIXME why does the llvm-sphinx-docs builder give a highlighting
+   error if the below is set to highlight as 'llvm', despite that we
+   have misc.highlighting_failure set?
+
+.. code-block:: text
+
+    declare !callback !1 dso_local i32 @pthread_create(i64*, %union.pthread_attr_t*, i8* (i8*)*, i8*)
+
+    ...
+    !2 = !{i64 2, i64 3, i1 false}
+    !1 = !{!2}
+
+Another example is shown below. The callback callee is the second argument of
+the ``__kmpc_fork_call`` function (``i64 2``). The callee is given two unknown
+values (each identified by a ``i64 -1``) and afterwards all
+variadic arguments that are passed to the ``__kmpc_fork_call`` call (due to the
+final ``i1 true``).
+
+.. FIXME why does the llvm-sphinx-docs builder give a highlighting
+   error if the below is set to highlight as 'llvm', despite that we
+   have misc.highlighting_failure set?
+
+.. code-block:: text
+
+    declare !callback !0 dso_local void @__kmpc_fork_call(%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...)
+
+    ...
+    !1 = !{i64 2, i64 -1, i64 -1, i1 true}
+    !0 = !{!1}
+
 
 '``unpredictable``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6396,6 +6535,7 @@ control flow, not values (the one exception being the
 The terminator instructions are: ':ref:`ret <i_ret>`',
 ':ref:`br <i_br>`', ':ref:`switch <i_switch>`',
 ':ref:`indirectbr <i_indirectbr>`', ':ref:`invoke <i_invoke>`',
+':ref:`callbr <i_callbr>`'
 ':ref:`resume <i_resume>`', ':ref:`catchswitch <i_catchswitch>`',
 ':ref:`catchret <i_catchret>`',
 ':ref:`cleanupret <i_cleanupret>`',
@@ -6431,7 +6571,7 @@ The '``ret``' instruction optionally accepts a single argument, the
 return value. The type of the return value must be a ':ref:`first
 class <t_firstclass>`' type.
 
-A function is not :ref:`well formed <wellformed>` if it it has a non-void
+A function is not :ref:`well formed <wellformed>` if it has a non-void
 return type and contains a '``ret``' instruction with no return value or
 a return value with a type that does not match its type, or if it has a
 void return type and contains a '``ret``' instruction with a return
@@ -6719,6 +6859,85 @@ Example:
                   unwind label %TestCleanup              ; i32:retval set
       %retval = invoke coldcc i32 %Testfnptr(i32 15) to label %Continue
                   unwind label %TestCleanup              ; i32:retval set
+
+.. _i_callbr:
+
+'``callbr``' Instruction
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      <result> = callbr [cconv] [ret attrs] [addrspace(<num>)] [<ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
+                    [operand bundles] to label <normal label> or jump [other labels]
+
+Overview:
+"""""""""
+
+The '``callbr``' instruction causes control to transfer to a specified
+function, with the possibility of control flow transfer to either the
+'``normal``' label or one of the '``other``' labels.
+
+This instruction should only be used to implement the "goto" feature of gcc
+style inline assembly. Any other usage is an error in the IR verifier.
+
+Arguments:
+""""""""""
+
+This instruction requires several arguments:
+
+#. The optional "cconv" marker indicates which :ref:`calling
+   convention <callingconv>` the call should use. If none is
+   specified, the call defaults to using C calling conventions.
+#. The optional :ref:`Parameter Attributes <paramattrs>` list for return
+   values. Only '``zeroext``', '``signext``', and '``inreg``' attributes
+   are valid here.
+#. The optional addrspace attribute can be used to indicate the address space
+   of the called function. If it is not specified, the program address space
+   from the :ref:`datalayout string<langref_datalayout>` will be used.
+#. '``ty``': the type of the call instruction itself which is also the
+   type of the return value. Functions that return no value are marked
+   ``void``.
+#. '``fnty``': shall be the signature of the function being called. The
+   argument types must match the types implied by this signature. This
+   type can be omitted if the function is not varargs.
+#. '``fnptrval``': An LLVM value containing a pointer to a function to
+   be called. In most cases, this is a direct function call, but
+   indirect ``callbr``'s are just as possible, calling an arbitrary pointer
+   to function value.
+#. '``function args``': argument list whose types match the function
+   signature argument types and parameter attributes. All arguments must
+   be of :ref:`first class <t_firstclass>` type. If the function signature
+   indicates the function accepts a variable number of arguments, the
+   extra arguments can be specified.
+#. '``normal label``': the label reached when the called function
+   executes a '``ret``' instruction.
+#. '``other labels``': the labels reached when a callee transfers control
+   to a location other than the normal '``normal label``'
+#. The optional :ref:`function attributes <fnattrs>` list.
+#. The optional :ref:`operand bundles <opbundles>` list.
+
+Semantics:
+""""""""""
+
+This instruction is designed to operate as a standard '``call``'
+instruction in most regards. The primary difference is that it
+establishes an association with additional labels to define where control
+flow goes after the call.
+
+The only use of this today is to implement the "goto" feature of gcc inline
+assembly where additional labels can be provided as locations for the inline
+assembly to jump to.
+
+Example:
+""""""""
+
+.. code-block:: text
+
+      callbr void asm "", "r,x"(i32 %x, i8 *blockaddress(@foo, %fail))
+                  to label %normal or jump [label %fail]
 
 .. _i_resume:
 
@@ -8167,15 +8386,16 @@ boundary compatible with the type.
 Semantics:
 """"""""""
 
-Memory is allocated; a pointer is returned. The operation is undefined
-if there is insufficient stack space for the allocation. '``alloca``'d
-memory is automatically released when the function returns. The
-'``alloca``' instruction is commonly used to represent automatic
-variables that must have an address available. When the function returns
-(either with the ``ret`` or ``resume`` instructions), the memory is
-reclaimed. Allocating zero bytes is legal, but the returned pointer may not
-be unique. The order in which memory is allocated (ie., which way the stack
-grows) is not specified.
+Memory is allocated; a pointer is returned. The allocated memory is
+uninitialized, and loading from uninitialized memory produces an undefined
+value. The operation itself is undefined if there is insufficient stack
+space for the allocation.'``alloca``'d memory is automatically released
+when the function returns. The '``alloca``' instruction is commonly used
+to represent automatic variables that must have an address available. When
+the function returns (either with the ``ret`` or ``resume`` instructions),
+the memory is reclaimed. Allocating zero bytes is legal, but the returned
+pointer may not be unique. The order in which memory is allocated (ie.,
+which way the stack grows) is not specified.
 
 Example:
 """"""""
@@ -8583,14 +8803,18 @@ operation. The operation must be one of the following keywords:
 -  min
 -  umax
 -  umin
+-  fadd
+-  fsub
 
-The type of '<value>' must be an integer type whose bit width is a power
-of two greater than or equal to eight and less than or equal to a
-target-specific size limit. The type of the '``<pointer>``' operand must
-be a pointer to that type. If the ``atomicrmw`` is marked as
-``volatile``, then the optimizer is not allowed to modify the number or
-order of execution of this ``atomicrmw`` with other :ref:`volatile
-operations <volatile>`.
+For most of these operations, the type of '<value>' must be an integer
+type whose bit width is a power of two greater than or equal to eight
+and less than or equal to a target-specific size limit. For xchg, this
+may also be a floating point type with the same size constraints as
+integers.  For fadd/fsub, this must be a floating point type.  The
+type of the '``<pointer>``' operand must be a pointer to that type. If
+the ``atomicrmw`` is marked as ``volatile``, then the optimizer is not
+allowed to modify the number or order of execution of this
+``atomicrmw`` with other :ref:`volatile operations <volatile>`.
 
 A ``atomicrmw`` instruction can also take an optional
 ":ref:`syncscope <syncscope>`" argument.
@@ -8616,6 +8840,8 @@ operation argument:
    comparison)
 -  umin: ``*ptr = *ptr < val ? *ptr : val`` (using an unsigned
    comparison)
+- fadd: ``*ptr = *ptr + val`` (using floating point arithmetic)
+- fsub: ``*ptr = *ptr - val`` (using floating point arithmetic)
 
 Example:
 """"""""
@@ -11121,8 +11347,11 @@ Semantics:
 The '``llvm.memcpy.*``' intrinsics copy a block of memory from the
 source location to the destination location, which are not allowed to
 overlap. It copies "len" bytes of memory over. If the argument is known
-to be aligned to some boundary, this can be specified as the fourth
-argument, otherwise it should be set to 0 or 1 (both meaning no alignment).
+to be aligned to some boundary, this can be specified as an attribute on
+the argument.
+
+If "len" is 0, the pointers may be NULL or dangling. However, they must still
+be appropriately aligned.
 
 .. _int_memmove:
 
@@ -11176,8 +11405,11 @@ Semantics:
 The '``llvm.memmove.*``' intrinsics copy a block of memory from the
 source location to the destination location, which may overlap. It
 copies "len" bytes of memory over. If the argument is known to be
-aligned to some boundary, this can be specified as the fourth argument,
-otherwise it should be set to 0 or 1 (both meaning no alignment).
+aligned to some boundary, this can be specified as an attribute on
+the argument.
+
+If "len" is 0, the pointers may be NULL or dangling. However, they must still
+be appropriately aligned.
 
 .. _int_memset:
 
@@ -11227,7 +11459,12 @@ Semantics:
 """"""""""
 
 The '``llvm.memset.*``' intrinsics fill "len" bytes of memory starting
-at the destination location.
+at the destination location. If the argument is known to be
+aligned to some boundary, this can be specified as an attribute on
+the argument.
+
+If "len" is 0, the pointers may be NULL or dangling. However, they must still
+be appropriately aligned.
 
 '``llvm.sqrt.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -12127,19 +12364,22 @@ integer type.
       declare i16 @llvm.bitreverse.i16(i16 <id>)
       declare i32 @llvm.bitreverse.i32(i32 <id>)
       declare i64 @llvm.bitreverse.i64(i64 <id>)
+      declare <4 x i32> @llvm.bitreverse.v4i32(<4 x i32> <id>)
 
 Overview:
 """""""""
 
 The '``llvm.bitreverse``' family of intrinsics is used to reverse the
-bitpattern of an integer value; for example ``0b10110110`` becomes
-``0b01101101``.
+bitpattern of an integer value or vector of integer values; for example
+``0b10110110`` becomes ``0b01101101``.
 
 Semantics:
 """"""""""
 
 The ``llvm.bitreverse.iN`` intrinsic returns an iN value that has bit
-``M`` in the input moved to bit ``N-M`` in the output.
+``M`` in the input moved to bit ``N-M`` in the output. The vector
+intrinsics, such as ``llvm.bitreverse.v4i32``, operate on a per-element
+basis and the element order is not affected.
 
 '``llvm.bswap.*``' Intrinsics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -12155,14 +12395,14 @@ integer type that is an even number of bytes (i.e. BitWidth % 16 == 0).
       declare i16 @llvm.bswap.i16(i16 <id>)
       declare i32 @llvm.bswap.i32(i32 <id>)
       declare i64 @llvm.bswap.i64(i64 <id>)
+      declare <4 x i32> @llvm.bswap.v4i32(<4 x i32> <id>)
 
 Overview:
 """""""""
 
-The '``llvm.bswap``' family of intrinsics is used to byte swap integer
-values with an even number of bytes (positive multiple of 16 bits).
-These are useful for performing operations on data that is not in the
-target's native byte order.
+The '``llvm.bswap``' family of intrinsics is used to byte swap an integer
+value or vector of integer values with an even number of bytes (positive
+multiple of 16 bits).
 
 Semantics:
 """"""""""
@@ -12174,7 +12414,8 @@ swapped, so that if the input bytes are numbered 0, 1, 2, 3 then the
 returned i32 will have its bytes in 3, 2, 1, 0 order. The
 ``llvm.bswap.i48``, ``llvm.bswap.i64`` and other intrinsics extend this
 concept to additional even-byte lengths (6 bytes, 8 bytes and more,
-respectively).
+respectively). The vector intrinsics, such as ``llvm.bswap.v4i32``,
+operate on a per-element basis and the element order is not affected.
 
 '``llvm.ctpop.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -12433,13 +12674,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.sadd.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.sadd.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.sadd.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.sadd.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.sadd.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12483,13 +12725,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.uadd.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.uadd.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.uadd.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.uadd.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.uadd.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12532,13 +12775,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.ssub.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.ssub.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.ssub.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.ssub.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.ssub.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12582,13 +12826,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.usub.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.usub.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.usub.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.usub.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.usub.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12632,13 +12877,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.smul.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.smul.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.smul.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.smul.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.smul.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12682,13 +12928,14 @@ Syntax:
 """""""
 
 This is an overloaded intrinsic. You can use ``llvm.umul.with.overflow``
-on any integer bit width.
+on any integer bit width or vectors of integers.
 
 ::
 
       declare {i16, i1} @llvm.umul.with.overflow.i16(i16 %a, i16 %b)
       declare {i32, i1} @llvm.umul.with.overflow.i32(i32 %a, i32 %b)
       declare {i64, i1} @llvm.umul.with.overflow.i64(i64 %a, i64 %b)
+      declare {<4 x i32>, <4 x i1>} @llvm.umul.with.overflow.v4i32(<4 x i32> %a, <4 x i32> %b)
 
 Overview:
 """""""""
@@ -12962,7 +13209,8 @@ Arguments
 """"""""""
 
 The arguments (%a and %b) and the result may be of integer types of any bit
-width, but they must have the same bit width. ``%a`` and ``%b`` are the two
+width, but they must have the same bit width. The arguments may also work with
+int vectors of the same length and int size. ``%a`` and ``%b`` are the two
 values that will undergo signed fixed point multiplication. The argument
 ``%scale`` represents the scale of both operands, and must be a constant
 integer.
@@ -12978,7 +13226,7 @@ If the result value cannot be precisely represented in the given scale, the
 value is rounded up or down to the closest representable value. The rounding
 direction is unspecified.
 
-It is undefined behavior if the source value does not fit within the range of
+It is undefined behavior if the result value does not fit within the range of
 the fixed point type.
 
 
@@ -12993,6 +13241,65 @@ Examples
 
       ; The result in the following could be rounded up to -2 or down to -2.5
       %res = call i4 @llvm.smul.fix.i4(i4 3, i4 -3, i32 1)  ; %res = -5 (or -4) (1.5 x -1.5 = -2.25)
+
+
+'``llvm.umul.fix.*``' Intrinsics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.umul.fix``
+on any integer bit width or vectors of integers.
+
+::
+
+      declare i16 @llvm.umul.fix.i16(i16 %a, i16 %b, i32 %scale)
+      declare i32 @llvm.umul.fix.i32(i32 %a, i32 %b, i32 %scale)
+      declare i64 @llvm.umul.fix.i64(i64 %a, i64 %b, i32 %scale)
+      declare <4 x i32> @llvm.umul.fix.v4i32(<4 x i32> %a, <4 x i32> %b, i32 %scale)
+
+Overview
+"""""""""
+
+The '``llvm.umul.fix``' family of intrinsic functions perform unsigned
+fixed point multiplication on 2 arguments of the same scale.
+
+Arguments
+""""""""""
+
+The arguments (%a and %b) and the result may be of integer types of any bit
+width, but they must have the same bit width. The arguments may also work with
+int vectors of the same length and int size. ``%a`` and ``%b`` are the two
+values that will undergo unsigned fixed point multiplication. The argument
+``%scale`` represents the scale of both operands, and must be a constant
+integer.
+
+Semantics:
+""""""""""
+
+This operation performs unsigned fixed point multiplication on the 2 arguments of a
+specified scale. The result will also be returned in the same scale specified
+in the third argument.
+
+If the result value cannot be precisely represented in the given scale, the
+value is rounded up or down to the closest representable value. The rounding
+direction is unspecified.
+
+It is undefined behavior if the result value does not fit within the range of
+the fixed point type.
+
+
+Examples
+"""""""""
+
+.. code-block:: llvm
+
+      %res = call i4 @llvm.umul.fix.i4(i4 3, i4 2, i32 0)  ; %res = 6 (2 x 3 = 6)
+      %res = call i4 @llvm.umul.fix.i4(i4 3, i4 2, i32 1)  ; %res = 3 (1.5 x 1 = 1.5)
+
+      ; The result in the following could be rounded down to 3.5 or up to 4
+      %res = call i4 @llvm.umul.fix.i4(i4 15, i4 1, i32 1)  ; %res = 7 (or 8) (7.5 x 0.5 = 3.75)
 
 
 Specialised Arithmetic Intrinsics
@@ -15458,40 +15765,40 @@ Syntax:
 
 ::
 
-      declare i32 @llvm.objectsize.i32(i8* <object>, i1 <min>, i1 <nullunknown>)
-      declare i64 @llvm.objectsize.i64(i8* <object>, i1 <min>, i1 <nullunknown>)
+      declare i32 @llvm.objectsize.i32(i8* <object>, i1 <min>, i1 <nullunknown>, i1 <dynamic>)
+      declare i64 @llvm.objectsize.i64(i8* <object>, i1 <min>, i1 <nullunknown>, i1 <dynamic>)
 
 Overview:
 """""""""
 
-The ``llvm.objectsize`` intrinsic is designed to provide information to
-the optimizers to determine at compile time whether a) an operation
-(like memcpy) will overflow a buffer that corresponds to an object, or
-b) that a runtime check for overflow isn't necessary. An object in this
-context means an allocation of a specific class, structure, array, or
-other object.
+The ``llvm.objectsize`` intrinsic is designed to provide information to the
+optimizer to determine whether a) an operation (like memcpy) will overflow a
+buffer that corresponds to an object, or b) that a runtime check for overflow
+isn't necessary. An object in this context means an allocation of a specific
+class, structure, array, or other object.
 
 Arguments:
 """"""""""
 
-The ``llvm.objectsize`` intrinsic takes three arguments. The first argument is
-a pointer to or into the ``object``. The second argument determines whether
-``llvm.objectsize`` returns 0 (if true) or -1 (if false) when the object size
-is unknown. The third argument controls how ``llvm.objectsize`` acts when
-``null`` in address space 0 is used as its pointer argument. If it's ``false``,
+The ``llvm.objectsize`` intrinsic takes four arguments. The first argument is a
+pointer to or into the ``object``. The second argument determines whether
+``llvm.objectsize`` returns 0 (if true) or -1 (if false) when the object size is
+unknown. The third argument controls how ``llvm.objectsize`` acts when ``null``
+in address space 0 is used as its pointer argument. If it's ``false``,
 ``llvm.objectsize`` reports 0 bytes available when given ``null``. Otherwise, if
 the ``null`` is in a non-zero address space or if ``true`` is given for the
-third argument of ``llvm.objectsize``, we assume its size is unknown.
+third argument of ``llvm.objectsize``, we assume its size is unknown. The fourth
+argument to ``llvm.objectsize`` determines if the value should be evaluated at
+runtime.
 
-The second and third arguments only accept constants.
+The second, third, and fourth arguments only accept constants.
 
 Semantics:
 """"""""""
 
-The ``llvm.objectsize`` intrinsic is lowered to a constant representing
-the size of the object concerned. If the size cannot be determined at
-compile time, ``llvm.objectsize`` returns ``i32/i64 -1 or 0`` (depending
-on the ``min`` argument).
+The ``llvm.objectsize`` intrinsic is lowered to a value representing the size of
+the object concerned. If the size cannot be determined, ``llvm.objectsize``
+returns ``i32/i64 -1 or 0`` (depending on the ``min`` argument).
 
 '``llvm.expect``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -15518,8 +15825,7 @@ Arguments:
 """"""""""
 
 The ``llvm.expect`` intrinsic takes two arguments. The first argument is
-a value. The second argument is an expected value, this needs to be a
-constant value, variables are not allowed.
+a value. The second argument is an expected value.
 
 Semantics:
 """"""""""

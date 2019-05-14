@@ -1,9 +1,8 @@
 //===-- SparcAsmParser.cpp - Parse Sparc assembly to MCInst instructions --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -646,7 +645,8 @@ bool SparcAsmParser::ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
   return Error(StartLoc, "invalid register name");
 }
 
-static void applyMnemonicAliases(StringRef &Mnemonic, uint64_t Features,
+static void applyMnemonicAliases(StringRef &Mnemonic,
+                                 const FeatureBitset &Features,
                                  unsigned VariantID);
 
 bool SparcAsmParser::ParseInstruction(ParseInstructionInfo &Info,

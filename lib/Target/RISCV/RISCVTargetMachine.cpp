@@ -1,9 +1,8 @@
 //===-- RISCVTargetMachine.cpp - Define TargetMachine for RISCV -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -31,7 +30,7 @@ extern "C" void LLVMInitializeRISCVTarget() {
   initializeRISCVExpandPseudoPass(*PR);
 }
 
-static std::string computeDataLayout(const Triple &TT) {
+static StringRef computeDataLayout(const Triple &TT) {
   if (TT.isArch64Bit()) {
     return "e-m:e-p:64:64-i64:64-i128:128-n64-S128";
   } else {
@@ -57,7 +56,7 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
                         getEffectiveRelocModel(TT, RM),
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(make_unique<RISCVELFTargetObjectFile>()),
-      Subtarget(TT, CPU, FS, *this) {
+      Subtarget(TT, CPU, FS, Options.MCOptions.getABIName(), *this) {
   initAsmInfo();
 }
 

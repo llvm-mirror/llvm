@@ -24,12 +24,14 @@ add_llvm_target(AArch64CodeGen
   AArch64AdvSIMDScalarPass.cpp
   AArch64AsmPrinter.cpp
   AArch64BranchTargets.cpp
+  AArch64CallingConvention.cpp
   AArch64CallLowering.cpp
   AArch64CleanupLocalDynamicTLSPass.cpp
   AArch64CollectLOH.cpp
   AArch64CondBrTuning.cpp
   AArch64ConditionalCompares.cpp
   AArch64DeadRegisterDefinitionsPass.cpp
+  AArch64ExpandImm.cpp
   AArch64ExpandPseudoInsts.cpp
   AArch64FalkorHWPFFix.cpp
   AArch64FastISel.cpp

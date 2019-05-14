@@ -1,9 +1,8 @@
 //===- ARMISelLowering.h - ARM DAG Lowering Interface -----------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -328,11 +327,14 @@ class VectorType;
                             unsigned DstAlign, unsigned SrcAlign,
                             bool IsMemset, bool ZeroMemset,
                             bool MemcpyStrSrc,
-                            MachineFunction &MF) const override;
+                            const AttributeList &FuncAttributes) const override;
 
     bool isTruncateFree(Type *SrcTy, Type *DstTy) const override;
     bool isTruncateFree(EVT SrcVT, EVT DstVT) const override;
     bool isZExtFree(SDValue Val, EVT VT2) const override;
+    bool shouldSinkOperands(Instruction *I,
+                            SmallVectorImpl<Use *> &Ops) const override;
+
     bool isFNegFree(EVT VT) const override;
 
     bool isVectorLoadExtDesirable(SDValue ExtVal) const override;
@@ -479,7 +481,8 @@ class VectorType;
     /// isFPImmLegal - Returns true if the target can instruction select the
     /// specified FP immediate natively. If false, the legalizer will
     /// materialize the FP immediate as a load from a constant pool.
-    bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
+    bool isFPImmLegal(const APFloat &Imm, EVT VT,
+                      bool ForCodeSize = false) const override;
 
     bool getTgtMemIntrinsic(IntrinsicInfo &Info,
                             const CallInst &I,
@@ -568,6 +571,8 @@ class VectorType;
       return HasStandaloneRem;
     }
 
+    bool shouldExpandShift(SelectionDAG &DAG, SDNode *N) const override;
+
     CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool isVarArg) const;
     CCAssignFn *CCAssignFnForReturn(CallingConv::ID CC, bool isVarArg) const;
 
@@ -593,8 +598,8 @@ class VectorType;
     bool isDesirableToCommuteWithShift(const SDNode *N,
                                        CombineLevel Level) const override;
 
-    bool shouldFoldShiftPairToMask(const SDNode *N,
-                                   CombineLevel Level) const override;
+    bool shouldFoldConstantShiftPairToMask(const SDNode *N,
+                                           CombineLevel Level) const override;
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
     findRepresentativeClass(const TargetRegisterInfo *TRI,
@@ -693,6 +698,8 @@ class VectorType;
     SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
+    void lowerABS(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                  SelectionDAG &DAG) const;
 
     unsigned getRegisterByName(const char* RegName, EVT VT,
                                SelectionDAG &DAG) const override;

@@ -1,9 +1,8 @@
 //===-- X86Subtarget.cpp - X86 Subtarget Information ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,6 +14,7 @@
 
 #include "X86CallLowering.h"
 #include "X86LegalizerInfo.h"
+#include "X86MacroFusion.h"
 #include "X86RegisterBankInfo.h"
 #include "X86Subtarget.h"
 #include "MCTargetDesc/X86BaseInfo.h"
@@ -366,4 +366,9 @@ const RegisterBankInfo *X86Subtarget::getRegBankInfo() const {
 
 bool X86Subtarget::enableEarlyIfConversion() const {
   return hasCMov() && X86EarlyIfConv;
+}
+
+void X86Subtarget::getPostRAMutations(
+    std::vector<std::unique_ptr<ScheduleDAGMutation>> &Mutations) const {
+  Mutations.push_back(createX86MacroFusionDAGMutation());
 }

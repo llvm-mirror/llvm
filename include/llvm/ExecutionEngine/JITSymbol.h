@@ -1,9 +1,8 @@
 //===- JITSymbol.h - JIT symbol abstraction ---------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,7 +55,7 @@ template <typename T> JITTargetAddress pointerToJITTargetAddress(T *Ptr) {
 class JITSymbolFlags {
 public:
   using UnderlyingType = uint8_t;
-  using TargetFlagsType = uint64_t;
+  using TargetFlagsType = uint8_t;
 
   enum FlagNames : UnderlyingType {
     None = 0,
@@ -84,7 +83,7 @@ public:
   /// Construct a JITSymbolFlags instance from the given flags and target
   ///        flags.
   JITSymbolFlags(FlagNames Flags, TargetFlagsType TargetFlags)
-    : Flags(Flags), TargetFlags(TargetFlags) {}
+      : TargetFlags(TargetFlags), Flags(Flags) {}
 
   /// Implicitly convert to bool. Returs true if any flag is set.
   explicit operator bool() const { return Flags != None || TargetFlags != 0; }
@@ -168,8 +167,8 @@ public:
   fromObjectSymbol(const object::SymbolRef &Symbol);
 
 private:
-  FlagNames Flags = None;
   TargetFlagsType TargetFlags = 0;
+  FlagNames Flags = None;
 };
 
 inline JITSymbolFlags operator&(const JITSymbolFlags &LHS,

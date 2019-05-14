@@ -266,8 +266,12 @@ LLVM-specific variables
 **LLVM_ENABLE_THREADS**:BOOL
   Build with threads support, if available. Defaults to ON.
 
-**LLVM_ENABLE_CXX1Y**:BOOL
-  Build in C++1y mode, if available. Defaults to OFF.
+**LLVM_ENABLE_UNWIND_TABLES**:BOOL
+  Enable unwind tables in the binary.  Disabling unwind tables can reduce the
+  size of the libraries.  Defaults to ON.
+
+**LLVM_CXX_STD**:STRING
+  Build with the specified C++ standard. Defaults to "c++11".
 
 **LLVM_ENABLE_ASSERTIONS**:BOOL
   Enables code assertions. Defaults to ON if and only if ``CMAKE_BUILD_TYPE``
@@ -280,6 +284,15 @@ LLVM-specific variables
 
 **LLVM_ENABLE_EXPENSIVE_CHECKS**:BOOL
   Enable additional time/memory expensive checking. Defaults to OFF.
+
+**LLVM_ENABLE_IDE**:BOOL
+  Tell the build system that an IDE is being used. This in turn disables the
+  creation of certain convenience build system targets, such as the various
+  ``install-*`` and ``check-*`` targets, since IDEs don't always deal well with
+  a large number of targets. This is usually autodetected, but it can be
+  configured manually to explicitly control the generation of those targets. One
+  scenario where a manual override may be desirable is when using Visual Studio
+  2017's CMake integration, which would not be detected as an IDE otherwise.
 
 **LLVM_ENABLE_PIC**:BOOL
   Add the ``-fPIC`` flag to the compiler command-line, if the compiler supports
@@ -572,6 +585,18 @@ LLVM-specific variables
   by ``ccache`` can be adjusted via the LLVM_CCACHE_MAXSIZE and LLVM_CCACHE_DIR
   options, which are passed to the CCACHE_MAXSIZE and CCACHE_DIR environment
   variables, respectively.
+
+**LLVM_FORCE_USE_OLD_TOOLCHAIN**:BOOL
+  If enabled, the compiler and standard library versions won't be checked. LLVM
+  may not compile at all, or might fail at runtime due to known bugs in these
+  toolchains.
+
+**LLVM_TEMPORARILY_ALLOW_OLD_TOOLCHAIN**:BOOL
+  If enabled, the compiler version check will only warn when using a toolchain
+  which is about to be deprecated, instead of emitting an error.
+
+**LLVM_USE_NEWPM**:BOOL
+  If enabled, use the experimental new pass manager.
 
 CMake Caches
 ============

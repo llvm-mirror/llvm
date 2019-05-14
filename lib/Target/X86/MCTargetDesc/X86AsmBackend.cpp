@@ -1,9 +1,8 @@
 //===-- X86AsmBackend.cpp - X86 Assembler Backend -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,6 +12,7 @@
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixupKindInfo.h"
@@ -137,40 +137,10 @@ static unsigned getRelaxedOpcodeBranch(const MCInst &Inst, bool is16BitMode) {
   switch (Op) {
   default:
     return Op;
-  case X86::JAE_1:
-    return (is16BitMode) ? X86::JAE_2 : X86::JAE_4;
-  case X86::JA_1:
-    return (is16BitMode) ? X86::JA_2 : X86::JA_4;
-  case X86::JBE_1:
-    return (is16BitMode) ? X86::JBE_2 : X86::JBE_4;
-  case X86::JB_1:
-    return (is16BitMode) ? X86::JB_2 : X86::JB_4;
-  case X86::JE_1:
-    return (is16BitMode) ? X86::JE_2 : X86::JE_4;
-  case X86::JGE_1:
-    return (is16BitMode) ? X86::JGE_2 : X86::JGE_4;
-  case X86::JG_1:
-    return (is16BitMode) ? X86::JG_2 : X86::JG_4;
-  case X86::JLE_1:
-    return (is16BitMode) ? X86::JLE_2 : X86::JLE_4;
-  case X86::JL_1:
-    return (is16BitMode) ? X86::JL_2 : X86::JL_4;
+  case X86::JCC_1:
+    return (is16BitMode) ? X86::JCC_2 : X86::JCC_4;
   case X86::JMP_1:
     return (is16BitMode) ? X86::JMP_2 : X86::JMP_4;
-  case X86::JNE_1:
-    return (is16BitMode) ? X86::JNE_2 : X86::JNE_4;
-  case X86::JNO_1:
-    return (is16BitMode) ? X86::JNO_2 : X86::JNO_4;
-  case X86::JNP_1:
-    return (is16BitMode) ? X86::JNP_2 : X86::JNP_4;
-  case X86::JNS_1:
-    return (is16BitMode) ? X86::JNS_2 : X86::JNS_4;
-  case X86::JO_1:
-    return (is16BitMode) ? X86::JO_2 : X86::JO_4;
-  case X86::JP_1:
-    return (is16BitMode) ? X86::JP_2 : X86::JP_4;
-  case X86::JS_1:
-    return (is16BitMode) ? X86::JS_2 : X86::JS_4;
   }
 }
 

@@ -1,9 +1,8 @@
 //===-- AArch64TargetMachine.cpp - Define TargetMachine for AArch64 -------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,6 +19,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/CodeGen/CSEConfigBase.h"
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
@@ -209,8 +209,8 @@ static std::string computeDataLayout(const Triple &TT,
 
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
                                            Optional<Reloc::Model> RM) {
-  // AArch64 Darwin is always PIC.
-  if (TT.isOSDarwin())
+  // AArch64 Darwin and Windows are always PIC.
+  if (TT.isOSDarwin() || TT.isOSWindows())
     return Reloc::PIC_;
   // On ELF platforms the default static relocation model has a smart enough
   // linker to cope with referencing external symbols defined in a shared
@@ -384,6 +384,8 @@ public:
   void addPostRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
+
+  std::unique_ptr<CSEConfigBase> getCSEConfig() const override;
 };
 
 } // end anonymous namespace
@@ -395,6 +397,10 @@ AArch64TargetMachine::getTargetTransformInfo(const Function &F) {
 
 TargetPassConfig *AArch64TargetMachine::createPassConfig(PassManagerBase &PM) {
   return new AArch64PassConfig(*this, PM);
+}
+
+std::unique_ptr<CSEConfigBase> AArch64PassConfig::getCSEConfig() const {
+  return getStandardCSEConfigForOpt(TM->getOptLevel());
 }
 
 void AArch64PassConfig::addIRPasses() {

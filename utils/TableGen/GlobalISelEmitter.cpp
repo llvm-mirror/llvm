@@ -1,9 +1,8 @@
 //===- GlobalISelEmitter.cpp - Generate an instruction selector -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -882,12 +881,19 @@ public:
 
   void defineOperand(StringRef SymbolicName, OperandMatcher &OM);
 
-  void defineComplexSubOperand(StringRef SymbolicName, Record *ComplexPattern,
-                               unsigned RendererID, unsigned SubOperandID) {
-    assert(ComplexSubOperands.count(SymbolicName) == 0 && "Already defined");
+  Error defineComplexSubOperand(StringRef SymbolicName, Record *ComplexPattern,
+                                unsigned RendererID, unsigned SubOperandID) {
+    if (ComplexSubOperands.count(SymbolicName))
+      return failedImport(
+          "Complex suboperand referenced more than once (Operand: " +
+          SymbolicName + ")");
+
     ComplexSubOperands[SymbolicName] =
         std::make_tuple(ComplexPattern, RendererID, SubOperandID);
+
+    return Error::success();
   }
+
   Optional<DefinedComplexPatternSubOperand>
   getComplexSubOperand(StringRef SymbolicName) const {
     const auto &I = ComplexSubOperands.find(SymbolicName);
@@ -1507,6 +1513,9 @@ Error OperandMatcher::addTypeCheckPredicate(const TypeSetByHwMode &VTy,
 
   if (OperandIsAPointer)
     addPredicate<PointerToAnyOperandMatcher>(OpTyOrNone->get().getSizeInBits());
+  else if (VTy.isPointer())
+    addPredicate<LLTOperandMatcher>(LLT::pointer(VTy.getPtrAddrSpace(),
+                                                 OpTyOrNone->get().getSizeInBits()));
   else
     addPredicate<LLTOperandMatcher>(*OpTyOrNone);
   return Error::success();
@@ -3422,9 +3431,12 @@ Error GlobalISelEmitter::importChildMatcher(RuleMatcher &Rule,
 
       for (unsigned i = 0, e = SrcChild->getNumChildren(); i != e; ++i) {
         auto *SubOperand = SrcChild->getChild(i);
-        if (!SubOperand->getName().empty())
-          Rule.defineComplexSubOperand(SubOperand->getName(),
-                                       SrcChild->getOperator(), RendererID, i);
+        if (!SubOperand->getName().empty()) {
+          if (auto Error = Rule.defineComplexSubOperand(SubOperand->getName(),
+                                                        SrcChild->getOperator(),
+                                                        RendererID, i))
+            return Error;
+        }
       }
 
       return Error::success();
@@ -4489,8 +4501,7 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
        << ", // " << Record->getName() << "\n";
   OS << "};\n\n";
 
-  std::stable_sort(Rules.begin(), Rules.end(), [&](const RuleMatcher &A,
-                                                   const RuleMatcher &B) {
+  llvm::stable_sort(Rules, [&](const RuleMatcher &A, const RuleMatcher &B) {
     int ScoreA = RuleMatcherScores[A.getRuleID()];
     int ScoreB = RuleMatcherScores[B.getRuleID()];
     if (ScoreA > ScoreB)

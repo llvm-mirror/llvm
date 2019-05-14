@@ -1,9 +1,8 @@
 //=-- SVEInstrFormats.td -  AArch64 SVE Instruction classes -*- tablegen -*--=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1983,6 +1982,16 @@ class sve_int_bin_cons_log<bits<2> opc, string asm>
   let Inst{4-0}   = Zd;
 }
 
+multiclass sve_int_bin_cons_log<bits<2> opc, string asm> {
+  def NAME : sve_int_bin_cons_log<opc, asm>;
+
+  def : InstAlias<asm # "\t$Zd, $Zn, $Zm",
+                  (!cast<Instruction>(NAME) ZPR8:$Zd,  ZPR8:$Zn,  ZPR8:$Zm),  1>;
+  def : InstAlias<asm # "\t$Zd, $Zn, $Zm",
+                  (!cast<Instruction>(NAME) ZPR16:$Zd, ZPR16:$Zn, ZPR16:$Zm), 1>;
+  def : InstAlias<asm # "\t$Zd, $Zn, $Zm",
+                  (!cast<Instruction>(NAME) ZPR32:$Zd, ZPR32:$Zn, ZPR32:$Zm), 1>;
+}
 
 //===----------------------------------------------------------------------===//
 // SVE Integer Wide Immediate - Predicated Group

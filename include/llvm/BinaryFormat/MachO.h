@@ -1,9 +1,8 @@
 //===-- llvm/BinaryFormat/MachO.h - The MachO file format -------*- C++/-*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -335,6 +334,7 @@ enum {
   N_WEAK_DEF = 0x0080u,
   N_SYMBOL_RESOLVER = 0x0100u,
   N_ALT_ENTRY = 0x0200u,
+  N_COLD_FUNC = 0x0400u,
   // For undefined symbols coming from libraries, see GET_LIBRARY_ORDINAL()
   // as these are in the top 8 bits.
   SELF_LIBRARY_ORDINAL = 0x0,
@@ -942,8 +942,13 @@ struct fat_arch_64 {
 // Structs from <mach-o/reloc.h>
 struct relocation_info {
   int32_t r_address;
+#if defined(BYTE_ORDER) && defined(BIG_ENDIAN) && (BYTE_ORDER == BIG_ENDIAN)
+  uint32_t r_type : 4,  r_extern : 1, r_length : 2, r_pcrel : 1,
+      r_symbolnum : 24;
+#else
   uint32_t r_symbolnum : 24, r_pcrel : 1, r_length : 2, r_extern : 1,
       r_type : 4;
+#endif
 };
 
 struct scattered_relocation_info {
@@ -1477,7 +1482,10 @@ enum CPUSubTypeARM {
   CPU_SUBTYPE_ARM_V7EM = 16
 };
 
-enum CPUSubTypeARM64 { CPU_SUBTYPE_ARM64_ALL = 0 };
+enum CPUSubTypeARM64 {
+  CPU_SUBTYPE_ARM64_ALL = 0,
+  CPU_SUBTYPE_ARM64E = 2,
+};
 
 enum CPUSubTypeSPARC { CPU_SUBTYPE_SPARC_ALL = 0 };
 

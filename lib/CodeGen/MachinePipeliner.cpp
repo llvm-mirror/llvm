@@ -1,9 +1,8 @@
 //===- MachinePipeliner.cpp - Machine Software Pipeliner Pass -------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -211,8 +210,11 @@ bool MachinePipeliner::scheduleLoop(MachineLoop &L) {
   }
 #endif
 
-  if (!canPipelineLoop(L))
+  setPragmaPipelineOptions(L);
+  if (!canPipelineLoop(L)) {
+    LLVM_DEBUG(dbgs() << "\n!!! Can not pipeline loop.\n");
     return Changed;
+  }
 
   ++NumTrytoPipeline;
 
@@ -221,11 +223,58 @@ bool MachinePipeliner::scheduleLoop(MachineLoop &L) {
   return Changed;
 }
 
+void MachinePipeliner::setPragmaPipelineOptions(MachineLoop &L) {
+  MachineBasicBlock *LBLK = L.getTopBlock();
+
+  if (LBLK == nullptr)
+    return;
+
+  const BasicBlock *BBLK = LBLK->getBasicBlock();
+  if (BBLK == nullptr)
+    return;
+
+  const Instruction *TI = BBLK->getTerminator();
+  if (TI == nullptr)
+    return;
+
+  MDNode *LoopID = TI->getMetadata(LLVMContext::MD_loop);
+  if (LoopID == nullptr)
+    return;
+
+  assert(LoopID->getNumOperands() > 0 && "requires atleast one operand");
+  assert(LoopID->getOperand(0) == LoopID && "invalid loop");
+
+  for (unsigned i = 1, e = LoopID->getNumOperands(); i < e; ++i) {
+    MDNode *MD = dyn_cast<MDNode>(LoopID->getOperand(i));
+
+    if (MD == nullptr)
+      continue;
+
+    MDString *S = dyn_cast<MDString>(MD->getOperand(0));
+
+    if (S == nullptr)
+      continue;
+
+    if (S->getString() == "llvm.loop.pipeline.initiationinterval") {
+      assert(MD->getNumOperands() == 2 &&
+             "Pipeline initiation interval hint metadata should have two operands.");
+      II_setByPragma =
+          mdconst::extract<ConstantInt>(MD->getOperand(1))->getZExtValue();
+      assert(II_setByPragma >= 1 && "Pipeline initiation interval must be positive.");
+    } else if (S->getString() == "llvm.loop.pipeline.disable") {
+      disabledByPragma = true;
+    }
+  }
+}
+
 /// Return true if the loop can be software pipelined.  The algorithm is
 /// restricted to loops with a single basic block.  Make sure that the
 /// branch in the loop can be analyzed.
 bool MachinePipeliner::canPipelineLoop(MachineLoop &L) {
   if (L.getNumBlocks() != 1)
+    return false;
+
+  if (disabledByPragma)
     return false;
 
   // Check if the branch can't be understood because we can't do pipelining
@@ -286,7 +335,8 @@ void MachinePipeliner::preprocessPhiNodes(MachineBasicBlock &B) {
 bool MachinePipeliner::swingModuloScheduler(MachineLoop &L) {
   assert(L.getBlocks().size() == 1 && "SMS works on single blocks only.");
 
-  SwingSchedulerDAG SMS(*this, L, getAnalysis<LiveIntervals>(), RegClassInfo);
+  SwingSchedulerDAG SMS(*this, L, getAnalysis<LiveIntervals>(), RegClassInfo,
+                        II_setByPragma);
 
   MachineBasicBlock *MBB = L.getHeader();
   // The kernel should not include any terminator instructions.  These
@@ -307,6 +357,20 @@ bool MachinePipeliner::swingModuloScheduler(MachineLoop &L) {
 
   SMS.finishBlock();
   return SMS.hasNewSchedule();
+}
+
+void SwingSchedulerDAG::setMII(unsigned ResMII, unsigned RecMII) {
+  if (II_setByPragma > 0)
+    MII = II_setByPragma;
+  else
+    MII = std::max(ResMII, RecMII);
+}
+
+void SwingSchedulerDAG::setMAX_II() {
+  if (II_setByPragma > 0)
+    MAX_II = II_setByPragma;
+  else
+    MAX_II = MII + 10;
 }
 
 /// We override the schedule function in ScheduleDAGInstrs to implement the
@@ -335,9 +399,11 @@ void SwingSchedulerDAG::schedule() {
   if (SwpIgnoreRecMII)
     RecMII = 0;
 
-  MII = std::max(ResMII, RecMII);
-  LLVM_DEBUG(dbgs() << "MII = " << MII << " (rec=" << RecMII
-                    << ", res=" << ResMII << ")\n");
+  setMII(ResMII, RecMII);
+  setMAX_II();
+
+  LLVM_DEBUG(dbgs() << "MII = " << MII << " MAX_II = " << MAX_II
+                    << " (rec=" << RecMII << ", res=" << ResMII << ")\n");
 
   // Can't schedule a loop without a valid MII.
   if (MII == 0)
@@ -362,7 +428,7 @@ void SwingSchedulerDAG::schedule() {
     }
   });
 
-  std::stable_sort(NodeSets.begin(), NodeSets.end(), std::greater<NodeSet>());
+  llvm::stable_sort(NodeSets, std::greater<NodeSet>());
 
   groupRemainingNodes(NodeSets);
 
@@ -475,16 +541,16 @@ static bool isDependenceBarrier(MachineInstr &MI, AliasAnalysis *AA) {
 /// Return the underlying objects for the memory references of an instruction.
 /// This function calls the code in ValueTracking, but first checks that the
 /// instruction has a memory operand.
-static void getUnderlyingObjects(MachineInstr *MI,
-                                 SmallVectorImpl<Value *> &Objs,
+static void getUnderlyingObjects(const MachineInstr *MI,
+                                 SmallVectorImpl<const Value *> &Objs,
                                  const DataLayout &DL) {
   if (!MI->hasOneMemOperand())
     return;
   MachineMemOperand *MM = *MI->memoperands_begin();
   if (!MM->getValue())
     return;
-  GetUnderlyingObjects(const_cast<Value *>(MM->getValue()), Objs, DL);
-  for (Value *V : Objs) {
+  GetUnderlyingObjects(MM->getValue(), Objs, DL);
+  for (const Value *V : Objs) {
     if (!isIdentifiedObject(V)) {
       Objs.clear();
       return;
@@ -498,7 +564,7 @@ static void getUnderlyingObjects(MachineInstr *MI,
 /// dependence. This code is very similar to the code in ScheduleDAGInstrs
 /// but that code doesn't create loop carried dependences.
 void SwingSchedulerDAG::addLoopCarriedDependences(AliasAnalysis *AA) {
-  MapVector<Value *, SmallVector<SUnit *, 4>> PendingLoads;
+  MapVector<const Value *, SmallVector<SUnit *, 4>> PendingLoads;
   Value *UnknownValue =
     UndefValue::get(Type::getVoidTy(MF.getFunction().getContext()));
   for (auto &SU : SUnits) {
@@ -506,7 +572,7 @@ void SwingSchedulerDAG::addLoopCarriedDependences(AliasAnalysis *AA) {
     if (isDependenceBarrier(MI, AA))
       PendingLoads.clear();
     else if (MI.mayLoad()) {
-      SmallVector<Value *, 4> Objs;
+      SmallVector<const Value *, 4> Objs;
       getUnderlyingObjects(&MI, Objs, MF.getDataLayout());
       if (Objs.empty())
         Objs.push_back(UnknownValue);
@@ -515,12 +581,12 @@ void SwingSchedulerDAG::addLoopCarriedDependences(AliasAnalysis *AA) {
         SUs.push_back(&SU);
       }
     } else if (MI.mayStore()) {
-      SmallVector<Value *, 4> Objs;
+      SmallVector<const Value *, 4> Objs;
       getUnderlyingObjects(&MI, Objs, MF.getDataLayout());
       if (Objs.empty())
         Objs.push_back(UnknownValue);
       for (auto V : Objs) {
-        MapVector<Value *, SmallVector<SUnit *, 4>>::iterator I =
+        MapVector<const Value *, SmallVector<SUnit *, 4>>::iterator I =
             PendingLoads.find(V);
         if (I == PendingLoads.end())
           continue;
@@ -531,7 +597,7 @@ void SwingSchedulerDAG::addLoopCarriedDependences(AliasAnalysis *AA) {
           // First, perform the cheaper check that compares the base register.
           // If they are the same and the load offset is less than the store
           // offset, then mark the dependence as loop carried potentially.
-          MachineOperand *BaseOp1, *BaseOp2;
+          const MachineOperand *BaseOp1, *BaseOp2;
           int64_t Offset1, Offset2;
           if (TII->getMemOperandWithOffset(LdMI, BaseOp1, Offset1, TRI) &&
               TII->getMemOperandWithOffset(MI, BaseOp2, Offset2, TRI)) {
@@ -1517,7 +1583,7 @@ void SwingSchedulerDAG::groupRemainingNodes(NodeSetType &NodeSets) {
   }
 }
 
-/// Add the node to the set, and add all is its connected nodes to the set.
+/// Add the node to the set, and add all of its connected nodes to the set.
 void SwingSchedulerDAG::addConnectedNodes(SUnit *SU, NodeSet &NewSet,
                                           SetVector<SUnit *> &NodesAdded) {
   NewSet.insert(SU);
@@ -1745,8 +1811,9 @@ bool SwingSchedulerDAG::schedulePipeline(SMSchedule &Schedule) {
     return false;
 
   bool scheduleFound = false;
+  unsigned II = 0;
   // Keep increasing II until a valid schedule is found.
-  for (unsigned II = MII; II < MII + 10 && !scheduleFound; ++II) {
+  for (II = MII; II <= MAX_II && !scheduleFound; ++II) {
     Schedule.reset();
     Schedule.setInitiationInterval(II);
     LLVM_DEBUG(dbgs() << "Try to schedule with " << II << "\n");
@@ -1818,7 +1885,8 @@ bool SwingSchedulerDAG::schedulePipeline(SMSchedule &Schedule) {
       scheduleFound = Schedule.isValidSchedule(this);
   }
 
-  LLVM_DEBUG(dbgs() << "Schedule Found? " << scheduleFound << "\n");
+  LLVM_DEBUG(dbgs() << "Schedule Found? " << scheduleFound << " (II=" << II
+                    << ")\n");
 
   if (scheduleFound)
     Schedule.finalizeSchedule(this);
@@ -2657,7 +2725,7 @@ void SwingSchedulerDAG::addBranches(MBBVectorTy &PrologBBs,
 /// during each iteration. Set Delta to the amount of the change.
 bool SwingSchedulerDAG::computeDelta(MachineInstr &MI, unsigned &Delta) {
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  MachineOperand *BaseOp;
+  const MachineOperand *BaseOp;
   int64_t Offset;
   if (!TII->getMemOperandWithOffset(MI, BaseOp, Offset, TRI))
     return false;
@@ -2698,7 +2766,9 @@ void SwingSchedulerDAG::updateMemOperands(MachineInstr &NewMI,
     return;
   SmallVector<MachineMemOperand *, 2> NewMMOs;
   for (MachineMemOperand *MMO : NewMI.memoperands()) {
-    if (MMO->isVolatile() || (MMO->isInvariant() && MMO->isDereferenceable()) ||
+    // TODO: Figure out whether isAtomic is really necessary (see D57601).
+    if (MMO->isVolatile() || MMO->isAtomic() ||
+        (MMO->isInvariant() && MMO->isDereferenceable()) ||
         (!MMO->getValue())) {
       NewMMOs.push_back(MMO);
       continue;
@@ -3069,7 +3139,7 @@ bool SwingSchedulerDAG::isLoopCarriedDep(SUnit *Source, const SDep &Dep,
   if (!computeDelta(*SI, DeltaS) || !computeDelta(*DI, DeltaD))
     return true;
 
-  MachineOperand *BaseOpS, *BaseOpD;
+  const MachineOperand *BaseOpS, *BaseOpD;
   int64_t OffsetS, OffsetD;
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   if (!TII->getMemOperandWithOffset(*SI, BaseOpS, OffsetS, TRI) ||
@@ -3097,12 +3167,14 @@ bool SwingSchedulerDAG::isLoopCarriedDep(SUnit *Source, const SDep &Dep,
 
   // This is the main test, which checks the offset values and the loop
   // increment value to determine if the accesses may be loop carried.
-  if (OffsetS >= OffsetD)
-    return OffsetS + AccessSizeS > DeltaS;
-  else
-    return OffsetD + AccessSizeD > DeltaD;
+  if (AccessSizeS == MemoryLocation::UnknownSize ||
+      AccessSizeD == MemoryLocation::UnknownSize)
+    return true;
 
-  return true;
+  if (DeltaS != DeltaD || DeltaS < AccessSizeS || DeltaD < AccessSizeD)
+    return true;
+
+  return (OffsetS + (int64_t)AccessSizeS < OffsetD + (int64_t)AccessSizeD);
 }
 
 void SwingSchedulerDAG::postprocessDAG() {

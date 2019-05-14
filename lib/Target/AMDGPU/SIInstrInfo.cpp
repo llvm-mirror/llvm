@@ -1,9 +1,8 @@
 //===- SIInstrInfo.cpp - SI Instruction Information  ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -14,7 +13,6 @@
 
 #include "SIInstrInfo.h"
 #include "AMDGPU.h"
-#include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "GCNHazardRecognizer.h"
 #include "SIDefines.h"
@@ -100,12 +98,6 @@ static unsigned getNumOperandsNoGlue(SDNode *Node) {
   return N;
 }
 
-static SDValue findChainOperand(SDNode *Load) {
-  SDValue LastOp = Load->getOperand(getNumOperandsNoGlue(Load) - 1);
-  assert(LastOp.getValueType() == MVT::Other && "Chain missing from load node");
-  return LastOp;
-}
-
 /// Returns true if both nodes have the same value for the given
 ///        operand \p Op, or if both nodes do not have this operand.
 static bool nodesHaveSameOperandValue(SDNode *N0, SDNode* N1, unsigned OpName) {
@@ -142,7 +134,8 @@ bool SIInstrInfo::isReallyTriviallyReMaterializable(const MachineInstr &MI,
   case AMDGPU::V_MOV_B32_e32:
   case AMDGPU::V_MOV_B32_e64:
   case AMDGPU::V_MOV_B64_PSEUDO:
-    return true;
+    // No implicit operands.
+    return MI.getNumOperands() == MI.getDesc().getNumOperands();
   default:
     return false;
   }
@@ -168,22 +161,25 @@ bool SIInstrInfo::areLoadsFromSameBasePtr(SDNode *Load0, SDNode *Load1,
       return false;
 
     // Check base reg.
-    if (Load0->getOperand(1) != Load1->getOperand(1))
-      return false;
-
-    // Check chain.
-    if (findChainOperand(Load0) != findChainOperand(Load1))
+    if (Load0->getOperand(0) != Load1->getOperand(0))
       return false;
 
     // Skip read2 / write2 variants for simplicity.
     // TODO: We should report true if the used offsets are adjacent (excluded
     // st64 versions).
-    if (AMDGPU::getNamedOperandIdx(Opc0, AMDGPU::OpName::data1) != -1 ||
-        AMDGPU::getNamedOperandIdx(Opc1, AMDGPU::OpName::data1) != -1)
+    int Offset0Idx = AMDGPU::getNamedOperandIdx(Opc0, AMDGPU::OpName::offset);
+    int Offset1Idx = AMDGPU::getNamedOperandIdx(Opc1, AMDGPU::OpName::offset);
+    if (Offset0Idx == -1 || Offset1Idx == -1)
       return false;
 
-    Offset0 = cast<ConstantSDNode>(Load0->getOperand(2))->getZExtValue();
-    Offset1 = cast<ConstantSDNode>(Load1->getOperand(2))->getZExtValue();
+    // XXX - be careful of datalesss loads
+    // getNamedOperandIdx returns the index for MachineInstrs.  Since they
+    // include the output in the operand list, but SDNodes don't, we need to
+    // subtract the index by one.
+    Offset0Idx -= get(Opc0).NumDefs;
+    Offset1Idx -= get(Opc1).NumDefs;
+    Offset0 = cast<ConstantSDNode>(Load0->getOperand(Offset0Idx))->getZExtValue();
+    Offset1 = cast<ConstantSDNode>(Load1->getOperand(Offset1Idx))->getZExtValue();
     return true;
   }
 
@@ -207,10 +203,6 @@ bool SIInstrInfo::areLoadsFromSameBasePtr(SDNode *Load0, SDNode *Load1,
     if (!Load0Offset || !Load1Offset)
       return false;
 
-    // Check chain.
-    if (findChainOperand(Load0) != findChainOperand(Load1))
-      return false;
-
     Offset0 = Load0Offset->getZExtValue();
     Offset1 = Load1Offset->getZExtValue();
     return true;
@@ -221,7 +213,6 @@ bool SIInstrInfo::areLoadsFromSameBasePtr(SDNode *Load0, SDNode *Load1,
 
     // MUBUF and MTBUF have vaddr at different indices.
     if (!nodesHaveSameOperandValue(Load0, Load1, AMDGPU::OpName::soffset) ||
-        findChainOperand(Load0) != findChainOperand(Load1) ||
         !nodesHaveSameOperandValue(Load0, Load1, AMDGPU::OpName::vaddr) ||
         !nodesHaveSameOperandValue(Load0, Load1, AMDGPU::OpName::srsrc))
       return false;
@@ -233,10 +224,10 @@ bool SIInstrInfo::areLoadsFromSameBasePtr(SDNode *Load0, SDNode *Load1,
       return false;
 
     // getNamedOperandIdx returns the index for MachineInstrs.  Since they
-    // inlcude the output in the operand list, but SDNodes don't, we need to
+    // include the output in the operand list, but SDNodes don't, we need to
     // subtract the index by one.
-    --OffIdx0;
-    --OffIdx1;
+    OffIdx0 -= get(Opc0).NumDefs;
+    OffIdx1 -= get(Opc1).NumDefs;
 
     SDValue Off0 = Load0->getOperand(OffIdx0);
     SDValue Off1 = Load1->getOperand(OffIdx1);
@@ -265,8 +256,8 @@ static bool isStride64(unsigned Opc) {
   }
 }
 
-bool SIInstrInfo::getMemOperandWithOffset(MachineInstr &LdSt,
-                                          MachineOperand *&BaseOp,
+bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
+                                          const MachineOperand *&BaseOp,
                                           int64_t &Offset,
                                           const TargetRegisterInfo *TRI) const {
   unsigned Opc = LdSt.getOpcode();
@@ -277,6 +268,11 @@ bool SIInstrInfo::getMemOperandWithOffset(MachineInstr &LdSt,
     if (OffsetImm) {
       // Normal, single offset LDS instruction.
       BaseOp = getNamedOperand(LdSt, AMDGPU::OpName::addr);
+      // TODO: ds_consume/ds_append use M0 for the base address. Is it safe to
+      // report that here?
+      if (!BaseOp)
+        return false;
+
       Offset = OffsetImm->getImm();
       assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
                                 "operands of type register.");
@@ -325,7 +321,7 @@ bool SIInstrInfo::getMemOperandWithOffset(MachineInstr &LdSt,
     if (SOffset && SOffset->isReg())
       return false;
 
-    MachineOperand *AddrReg = getNamedOperand(LdSt, AMDGPU::OpName::vaddr);
+    const MachineOperand *AddrReg = getNamedOperand(LdSt, AMDGPU::OpName::vaddr);
     if (!AddrReg)
       return false;
 
@@ -348,7 +344,7 @@ bool SIInstrInfo::getMemOperandWithOffset(MachineInstr &LdSt,
     if (!OffsetImm)
       return false;
 
-    MachineOperand *SBaseReg = getNamedOperand(LdSt, AMDGPU::OpName::sbase);
+    const MachineOperand *SBaseReg = getNamedOperand(LdSt, AMDGPU::OpName::sbase);
     BaseOp = SBaseReg;
     Offset = OffsetImm->getImm();
     assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
@@ -357,7 +353,7 @@ bool SIInstrInfo::getMemOperandWithOffset(MachineInstr &LdSt,
   }
 
   if (isFLAT(LdSt)) {
-    MachineOperand *VAddr = getNamedOperand(LdSt, AMDGPU::OpName::vaddr);
+    const MachineOperand *VAddr = getNamedOperand(LdSt, AMDGPU::OpName::vaddr);
     if (VAddr) {
       // Can't analyze 2 offsets.
       if (getNamedOperand(LdSt, AMDGPU::OpName::saddr))
@@ -413,11 +409,11 @@ static bool memOpsHaveSameBasePtr(const MachineInstr &MI1,
   return Base1 == Base2;
 }
 
-bool SIInstrInfo::shouldClusterMemOps(MachineOperand &BaseOp1,
-                                      MachineOperand &BaseOp2,
+bool SIInstrInfo::shouldClusterMemOps(const MachineOperand &BaseOp1,
+                                      const MachineOperand &BaseOp2,
                                       unsigned NumLoads) const {
-  MachineInstr &FirstLdSt = *BaseOp1.getParent();
-  MachineInstr &SecondLdSt = *BaseOp2.getParent();
+  const MachineInstr &FirstLdSt = *BaseOp1.getParent();
+  const MachineInstr &SecondLdSt = *BaseOp2.getParent();
 
   if (!memOpsHaveSameBasePtr(FirstLdSt, BaseOp1, SecondLdSt, BaseOp2))
     return false;
@@ -461,7 +457,12 @@ bool SIInstrInfo::shouldClusterMemOps(MachineOperand &BaseOp1,
 
   const MachineRegisterInfo &MRI =
       FirstLdSt.getParent()->getParent()->getRegInfo();
-  const TargetRegisterClass *DstRC = MRI.getRegClass(FirstDst->getReg());
+
+  const unsigned Reg = FirstDst->getReg();
+
+  const TargetRegisterClass *DstRC = TargetRegisterInfo::isVirtualRegister(Reg)
+                                         ? MRI.getRegClass(Reg)
+                                         : RI.getPhysRegClass(Reg);
 
   return (NumLoads * (RI.getRegSizeInBits(*DstRC) / 8)) <= LoadClusterThreshold;
 }
@@ -573,7 +574,8 @@ void SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   unsigned EltSize = 4;
   unsigned Opcode = AMDGPU::V_MOV_B32_e32;
   if (RI.isSGPRClass(RC)) {
-    if (RI.getRegSizeInBits(*RC) > 32) {
+    // TODO: Copy vec3/vec5 with s_mov_b64s then final s_mov_b32.
+    if (!(RI.getRegSizeInBits(*RC) % 64)) {
       Opcode =  AMDGPU::S_MOV_B64;
       EltSize = 8;
     } else {
@@ -704,7 +706,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
       .add(Cond[0]);
     BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+      .addImm(0)
       .addReg(FalseReg)
+      .addImm(0)
       .addReg(TrueReg)
       .addReg(SReg);
   } else if (Cond.size() == 2) {
@@ -716,7 +720,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
         .addImm(-1)
         .addImm(0);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+        .addImm(0)
         .addReg(FalseReg)
+        .addImm(0)
         .addReg(TrueReg)
         .addReg(SReg);
       break;
@@ -727,7 +733,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
         .addImm(0)
         .addImm(-1);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+        .addImm(0)
         .addReg(FalseReg)
+        .addImm(0)
         .addReg(TrueReg)
         .addReg(SReg);
       break;
@@ -739,7 +747,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
       BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
         .add(RegOp);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+          .addImm(0)
           .addReg(FalseReg)
+          .addImm(0)
           .addReg(TrueReg)
           .addReg(SReg);
       break;
@@ -751,7 +761,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
       BuildMI(MBB, I, DL, get(AMDGPU::COPY), SReg)
         .add(RegOp);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+          .addImm(0)
           .addReg(TrueReg)
+          .addImm(0)
           .addReg(FalseReg)
           .addReg(SReg);
       break;
@@ -765,7 +777,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
         .addImm(-1)
         .addImm(0);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+        .addImm(0)
         .addReg(FalseReg)
+        .addImm(0)
         .addReg(TrueReg)
         .addReg(SReg);
       break;
@@ -779,7 +793,9 @@ void SIInstrInfo::insertVectorSelect(MachineBasicBlock &MBB,
         .addImm(0)
         .addImm(-1);
       BuildMI(MBB, I, DL, get(AMDGPU::V_CNDMASK_B32_e64), DstReg)
+        .addImm(0)
         .addReg(FalseReg)
+        .addImm(0)
         .addReg(TrueReg)
         .addReg(SReg);
       llvm_unreachable("Unhandled branch predicate EXECZ");
@@ -837,8 +853,12 @@ static unsigned getSGPRSpillSaveOpcode(unsigned Size) {
     return AMDGPU::SI_SPILL_S32_SAVE;
   case 8:
     return AMDGPU::SI_SPILL_S64_SAVE;
+  case 12:
+    return AMDGPU::SI_SPILL_S96_SAVE;
   case 16:
     return AMDGPU::SI_SPILL_S128_SAVE;
+  case 20:
+    return AMDGPU::SI_SPILL_S160_SAVE;
   case 32:
     return AMDGPU::SI_SPILL_S256_SAVE;
   case 64:
@@ -858,6 +878,8 @@ static unsigned getVGPRSpillSaveOpcode(unsigned Size) {
     return AMDGPU::SI_SPILL_V96_SAVE;
   case 16:
     return AMDGPU::SI_SPILL_V128_SAVE;
+  case 20:
+    return AMDGPU::SI_SPILL_V160_SAVE;
   case 32:
     return AMDGPU::SI_SPILL_V256_SAVE;
   case 64:
@@ -939,8 +961,12 @@ static unsigned getSGPRSpillRestoreOpcode(unsigned Size) {
     return AMDGPU::SI_SPILL_S32_RESTORE;
   case 8:
     return AMDGPU::SI_SPILL_S64_RESTORE;
+  case 12:
+    return AMDGPU::SI_SPILL_S96_RESTORE;
   case 16:
     return AMDGPU::SI_SPILL_S128_RESTORE;
+  case 20:
+    return AMDGPU::SI_SPILL_S160_RESTORE;
   case 32:
     return AMDGPU::SI_SPILL_S256_RESTORE;
   case 64:
@@ -960,6 +986,8 @@ static unsigned getVGPRSpillRestoreOpcode(unsigned Size) {
     return AMDGPU::SI_SPILL_V96_RESTORE;
   case 16:
     return AMDGPU::SI_SPILL_V128_RESTORE;
+  case 20:
+    return AMDGPU::SI_SPILL_V160_RESTORE;
   case 32:
     return AMDGPU::SI_SPILL_V256_RESTORE;
   case 64:
@@ -1089,7 +1117,8 @@ unsigned SIInstrInfo::calculateLDSSpillAddress(
       // (NGROUPS.Z * TIDIG.Y + (NGROUPS.X * NGROPUS.Y * TIDIG.X)) + TIDIG.Z
       getAddNoCarry(Entry, Insert, DL, TIDReg)
         .addReg(TIDReg)
-        .addReg(TIDIGZReg);
+        .addReg(TIDIGZReg)
+        .addImm(0); // clamp bit
     } else {
       // Get the wave id
       BuildMI(Entry, Insert, DL, get(AMDGPU::V_MBCNT_LO_U32_B32_e64),
@@ -1114,7 +1143,8 @@ unsigned SIInstrInfo::calculateLDSSpillAddress(
   unsigned LDSOffset = MFI->getLDSSize() + (FrameOffset * WorkGroupSize);
   getAddNoCarry(MBB, MI, DL, TmpReg)
     .addImm(LDSOffset)
-    .addReg(TIDReg);
+    .addReg(TIDReg)
+    .addImm(0); // clamp bit
 
   return TmpReg;
 }
@@ -1148,13 +1178,17 @@ void SIInstrInfo::insertReturn(MachineBasicBlock &MBB) const {
 
   if (MBB.succ_empty()) {
     bool HasNoTerminator = MBB.getFirstTerminator() == MBB.end();
-    if (HasNoTerminator)
-      BuildMI(MBB, MBB.end(), DebugLoc(),
-              get(Info->returnsVoid() ? AMDGPU::S_ENDPGM : AMDGPU::SI_RETURN_TO_EPILOG));
+    if (HasNoTerminator) {
+      if (Info->returnsVoid()) {
+        BuildMI(MBB, MBB.end(), DebugLoc(), get(AMDGPU::S_ENDPGM)).addImm(0);
+      } else {
+        BuildMI(MBB, MBB.end(), DebugLoc(), get(AMDGPU::SI_RETURN_TO_EPILOG));
+      }
+    }
   }
 }
 
-unsigned SIInstrInfo::getNumWaitStates(const MachineInstr &MI) const {
+unsigned SIInstrInfo::getNumWaitStates(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   default: return 1; // FIXME: Do wait states equal cycles?
 
@@ -1293,9 +1327,15 @@ bool SIInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     break;
   }
+  case AMDGPU::ENTER_WWM: {
+    // This only gets its own opcode so that SIPreAllocateWWMRegs can tell when
+    // WWM is entered.
+    MI.setDesc(get(AMDGPU::S_OR_SAVEEXEC_B64));
+    break;
+  }
   case AMDGPU::EXIT_WWM: {
-    // This only gets its own opcode so that SIFixWWMLiveness can tell when WWM
-    // is exited.
+    // This only gets its own opcode so that SIPreAllocateWWMRegs can tell when
+    // WWM is exited.
     MI.setDesc(get(AMDGPU::S_MOV_B64));
     break;
   }
@@ -1907,14 +1947,18 @@ void SIInstrInfo::insertSelect(MachineBasicBlock &MBB,
   const int16_t *SubIndices = Sub0_15;
   int NElts = DstSize / 32;
 
-  // 64-bit select is only avaialble for SALU.
+  // 64-bit select is only available for SALU.
+  // TODO: Split 96-bit into 64-bit and 32-bit, not 3x 32-bit.
   if (Pred == SCC_TRUE) {
-    SelOp = AMDGPU::S_CSELECT_B64;
-    EltRC = &AMDGPU::SGPR_64RegClass;
-    SubIndices = Sub0_15_64;
-
-    assert(NElts % 2 == 0);
-    NElts /= 2;
+    if (NElts % 2) {
+      SelOp = AMDGPU::S_CSELECT_B32;
+      EltRC = &AMDGPU::SGPR_32RegClass;
+    } else {
+      SelOp = AMDGPU::S_CSELECT_B64;
+      EltRC = &AMDGPU::SGPR_64RegClass;
+      SubIndices = Sub0_15_64;
+      NElts /= 2;
+    }
   }
 
   MachineInstrBuilder MIB = BuildMI(
@@ -2027,7 +2071,9 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
   }
 
   if (Opc == AMDGPU::V_MAD_F32 || Opc == AMDGPU::V_MAC_F32_e64 ||
-      Opc == AMDGPU::V_MAD_F16 || Opc == AMDGPU::V_MAC_F16_e64) {
+      Opc == AMDGPU::V_MAD_F16 || Opc == AMDGPU::V_MAC_F16_e64 ||
+      Opc == AMDGPU::V_FMA_F32 || Opc == AMDGPU::V_FMAC_F32_e64 ||
+      Opc == AMDGPU::V_FMA_F16 || Opc == AMDGPU::V_FMAC_F16_e64) {
     // Don't fold if we are using source or output modifiers. The new VOP2
     // instructions don't have them.
     if (hasAnyModifiersSet(UseMI))
@@ -2042,7 +2088,10 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
     if (isInlineConstant(UseMI, *Src0, *ImmOp))
       return false;
 
-    bool IsF32 = Opc == AMDGPU::V_MAD_F32 || Opc == AMDGPU::V_MAC_F32_e64;
+    bool IsF32 = Opc == AMDGPU::V_MAD_F32 || Opc == AMDGPU::V_MAC_F32_e64 ||
+                 Opc == AMDGPU::V_FMA_F32 || Opc == AMDGPU::V_FMAC_F32_e64;
+    bool IsFMA = Opc == AMDGPU::V_FMA_F32 || Opc == AMDGPU::V_FMAC_F32_e64 ||
+                 Opc == AMDGPU::V_FMA_F16 || Opc == AMDGPU::V_FMAC_F16_e64;
     MachineOperand *Src1 = getNamedOperand(UseMI, AMDGPU::OpName::src1);
     MachineOperand *Src2 = getNamedOperand(UseMI, AMDGPU::OpName::src2);
 
@@ -2053,6 +2102,12 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
         return false;
 
       if (!Src2->isReg() || RI.isSGPRClass(MRI->getRegClass(Src2->getReg())))
+        return false;
+
+      unsigned NewOpc =
+        IsFMA ? (IsF32 ? AMDGPU::V_FMAMK_F32 : AMDGPU::V_FMAMK_F16)
+              : (IsF32 ? AMDGPU::V_MADMK_F32 : AMDGPU::V_MADMK_F16);
+      if (pseudoToMCOpcode(NewOpc) == -1)
         return false;
 
       // We need to swap operands 0 and 1 since madmk constant is at operand 1.
@@ -2075,14 +2130,16 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
       Src0->setIsKill(Src1->isKill());
 
       if (Opc == AMDGPU::V_MAC_F32_e64 ||
-          Opc == AMDGPU::V_MAC_F16_e64)
+          Opc == AMDGPU::V_MAC_F16_e64 ||
+          Opc == AMDGPU::V_FMAC_F32_e64 ||
+          Opc == AMDGPU::V_FMAC_F16_e64)
         UseMI.untieRegOperand(
             AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2));
 
       Src1->ChangeToImmediate(Imm);
 
       removeModOperands(UseMI);
-      UseMI.setDesc(get(IsF32 ? AMDGPU::V_MADMK_F32 : AMDGPU::V_MADMK_F16));
+      UseMI.setDesc(get(NewOpc));
 
       bool DeleteDef = MRI->hasOneNonDBGUse(Reg);
       if (DeleteDef)
@@ -2107,9 +2164,11 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
           Src0->ChangeToImmediate(Def->getOperand(1).getImm());
           Src0Inlined = true;
         } else if ((RI.isPhysicalRegister(Src0->getReg()) &&
-            RI.isSGPRClass(RI.getPhysRegClass(Src0->getReg()))) ||
+            (ST.getConstantBusLimit(Opc) <= 1 &&
+             RI.isSGPRClass(RI.getPhysRegClass(Src0->getReg())))) ||
             (RI.isVirtualRegister(Src0->getReg()) &&
-            RI.isSGPRClass(MRI->getRegClass(Src0->getReg()))))
+            (ST.getConstantBusLimit(Opc) <= 1 &&
+             RI.isSGPRClass(MRI->getRegClass(Src0->getReg())))))
           return false;
           // VGPR is okay as Src0 - fallthrough
       }
@@ -2130,6 +2189,12 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
           // VGPR is okay as Src1 - fallthrough
       }
 
+      unsigned NewOpc =
+        IsFMA ? (IsF32 ? AMDGPU::V_FMAAK_F32 : AMDGPU::V_FMAAK_F16)
+              : (IsF32 ? AMDGPU::V_MADAK_F32 : AMDGPU::V_MADAK_F16);
+      if (pseudoToMCOpcode(NewOpc) == -1)
+        return false;
+
       const int64_t Imm = ImmOp->getImm();
 
       // FIXME: This would be a lot easier if we could return a new instruction
@@ -2142,7 +2207,9 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
           AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::clamp));
 
       if (Opc == AMDGPU::V_MAC_F32_e64 ||
-          Opc == AMDGPU::V_MAC_F16_e64)
+          Opc == AMDGPU::V_MAC_F16_e64 ||
+          Opc == AMDGPU::V_FMAC_F32_e64 ||
+          Opc == AMDGPU::V_FMAC_F16_e64)
         UseMI.untieRegOperand(
             AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2));
 
@@ -2151,7 +2218,7 @@ bool SIInstrInfo::FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI,
 
       // These come before src2.
       removeModOperands(UseMI);
-      UseMI.setDesc(get(IsF32 ? AMDGPU::V_MADAK_F32 : AMDGPU::V_MADAK_F16));
+      UseMI.setDesc(get(NewOpc));
 
       bool DeleteDef = MRI->hasOneNonDBGUse(Reg);
       if (DeleteDef)
@@ -2172,9 +2239,9 @@ static bool offsetsDoNotOverlap(int WidthA, int OffsetA,
   return LowOffset + LowWidth <= HighOffset;
 }
 
-bool SIInstrInfo::checkInstOffsetsDoNotOverlap(MachineInstr &MIa,
-                                               MachineInstr &MIb) const {
-  MachineOperand *BaseOp0, *BaseOp1;
+bool SIInstrInfo::checkInstOffsetsDoNotOverlap(const MachineInstr &MIa,
+                                               const MachineInstr &MIb) const {
+  const MachineOperand *BaseOp0, *BaseOp1;
   int64_t Offset0, Offset1;
 
   if (getMemOperandWithOffset(MIa, BaseOp0, Offset0, &RI) &&
@@ -2196,8 +2263,8 @@ bool SIInstrInfo::checkInstOffsetsDoNotOverlap(MachineInstr &MIa,
   return false;
 }
 
-bool SIInstrInfo::areMemAccessesTriviallyDisjoint(MachineInstr &MIa,
-                                                  MachineInstr &MIb,
+bool SIInstrInfo::areMemAccessesTriviallyDisjoint(const MachineInstr &MIa,
+                                                  const MachineInstr &MIb,
                                                   AliasAnalysis *AA) const {
   assert((MIa.mayLoad() || MIa.mayStore()) &&
          "MIa must load from or modify a memory location");
@@ -2210,17 +2277,6 @@ bool SIInstrInfo::areMemAccessesTriviallyDisjoint(MachineInstr &MIa,
   // XXX - Can we relax this between address spaces?
   if (MIa.hasOrderedMemoryRef() || MIb.hasOrderedMemoryRef())
     return false;
-
-  if (AA && MIa.hasOneMemOperand() && MIb.hasOneMemOperand()) {
-    const MachineMemOperand *MMOa = *MIa.memoperands_begin();
-    const MachineMemOperand *MMOb = *MIb.memoperands_begin();
-    if (MMOa->getValue() && MMOb->getValue()) {
-      MemoryLocation LocA(MMOa->getValue(), MMOa->getSize(), MMOa->getAAInfo());
-      MemoryLocation LocB(MMOb->getValue(), MMOb->getSize(), MMOb->getAAInfo());
-      if (!AA->alias(LocA, LocB))
-        return true;
-    }
-  }
 
   // TODO: Should we check the address space from the MachineMemOperand? That
   // would allow us to distinguish objects we know don't alias based on the
@@ -2275,18 +2331,21 @@ MachineInstr *SIInstrInfo::convertToThreeAddress(MachineFunction::iterator &MBB,
                                                  LiveVariables *LV) const {
   unsigned Opc = MI.getOpcode();
   bool IsF16 = false;
-  bool IsFMA = Opc == AMDGPU::V_FMAC_F32_e32 || Opc == AMDGPU::V_FMAC_F32_e64;
+  bool IsFMA = Opc == AMDGPU::V_FMAC_F32_e32 || Opc == AMDGPU::V_FMAC_F32_e64 ||
+               Opc == AMDGPU::V_FMAC_F16_e32 || Opc == AMDGPU::V_FMAC_F16_e64;
 
   switch (Opc) {
   default:
     return nullptr;
   case AMDGPU::V_MAC_F16_e64:
+  case AMDGPU::V_FMAC_F16_e64:
     IsF16 = true;
     LLVM_FALLTHROUGH;
   case AMDGPU::V_MAC_F32_e64:
   case AMDGPU::V_FMAC_F32_e64:
     break;
   case AMDGPU::V_MAC_F16_e32:
+  case AMDGPU::V_FMAC_F16_e32:
     IsF16 = true;
     LLVM_FALLTHROUGH;
   case AMDGPU::V_MAC_F32_e32:
@@ -2315,30 +2374,38 @@ MachineInstr *SIInstrInfo::convertToThreeAddress(MachineFunction::iterator &MBB,
   const MachineOperand *Clamp = getNamedOperand(MI, AMDGPU::OpName::clamp);
   const MachineOperand *Omod = getNamedOperand(MI, AMDGPU::OpName::omod);
 
-  if (!IsFMA && !Src0Mods && !Src1Mods && !Clamp && !Omod &&
+  if (!Src0Mods && !Src1Mods && !Clamp && !Omod &&
       // If we have an SGPR input, we will violate the constant bus restriction.
-      (!Src0->isReg() || !RI.isSGPRReg(MBB->getParent()->getRegInfo(), Src0->getReg()))) {
+      (ST.getConstantBusLimit(Opc) > 1 ||
+       !Src0->isReg() ||
+       !RI.isSGPRReg(MBB->getParent()->getRegInfo(), Src0->getReg()))) {
     if (auto Imm = getFoldableImm(Src2)) {
-      return BuildMI(*MBB, MI, MI.getDebugLoc(),
-                     get(IsF16 ? AMDGPU::V_MADAK_F16 : AMDGPU::V_MADAK_F32))
-               .add(*Dst)
-               .add(*Src0)
-               .add(*Src1)
-               .addImm(Imm);
+      unsigned NewOpc =
+         IsFMA ? (IsF16 ? AMDGPU::V_FMAAK_F16 : AMDGPU::V_FMAAK_F32)
+               : (IsF16 ? AMDGPU::V_MADAK_F16 : AMDGPU::V_MADAK_F32);
+      if (pseudoToMCOpcode(NewOpc) != -1)
+        return BuildMI(*MBB, MI, MI.getDebugLoc(), get(NewOpc))
+                 .add(*Dst)
+                 .add(*Src0)
+                 .add(*Src1)
+                 .addImm(Imm);
     }
+    unsigned NewOpc =
+      IsFMA ? (IsF16 ? AMDGPU::V_FMAMK_F16 : AMDGPU::V_FMAMK_F32)
+            : (IsF16 ? AMDGPU::V_MADMK_F16 : AMDGPU::V_MADMK_F32);
     if (auto Imm = getFoldableImm(Src1)) {
-      return BuildMI(*MBB, MI, MI.getDebugLoc(),
-                     get(IsF16 ? AMDGPU::V_MADMK_F16 : AMDGPU::V_MADMK_F32))
-               .add(*Dst)
-               .add(*Src0)
-               .addImm(Imm)
-               .add(*Src2);
+      if (pseudoToMCOpcode(NewOpc) != -1)
+        return BuildMI(*MBB, MI, MI.getDebugLoc(), get(NewOpc))
+                 .add(*Dst)
+                 .add(*Src0)
+                 .addImm(Imm)
+                 .add(*Src2);
     }
     if (auto Imm = getFoldableImm(Src0)) {
-      if (isOperandLegal(MI, AMDGPU::getNamedOperandIdx(AMDGPU::V_MADMK_F32,
+      if (pseudoToMCOpcode(NewOpc) != -1 &&
+          isOperandLegal(MI, AMDGPU::getNamedOperandIdx(NewOpc,
                            AMDGPU::OpName::src0), Src1))
-        return BuildMI(*MBB, MI, MI.getDebugLoc(),
-                       get(IsF16 ? AMDGPU::V_MADMK_F16 : AMDGPU::V_MADMK_F32))
+        return BuildMI(*MBB, MI, MI.getDebugLoc(), get(NewOpc))
                  .add(*Dst)
                  .add(*Src1)
                  .addImm(Imm)
@@ -2346,9 +2413,11 @@ MachineInstr *SIInstrInfo::convertToThreeAddress(MachineFunction::iterator &MBB,
     }
   }
 
-  assert((!IsFMA || !IsF16) && "fmac only expected with f32");
-  unsigned NewOpc = IsFMA ? AMDGPU::V_FMA_F32 :
-    (IsF16 ? AMDGPU::V_MAD_F16 : AMDGPU::V_MAD_F32);
+  unsigned NewOpc = IsFMA ? (IsF16 ? AMDGPU::V_FMA_F16 : AMDGPU::V_FMA_F32)
+                          : (IsF16 ? AMDGPU::V_MAD_F16 : AMDGPU::V_MAD_F32);
+  if (pseudoToMCOpcode(NewOpc) == -1)
+    return nullptr;
+
   return BuildMI(*MBB, MI, MI.getDebugLoc(), get(NewOpc))
       .add(*Dst)
       .addImm(Src0Mods ? Src0Mods->getImm() : 0)
@@ -2390,6 +2459,16 @@ bool SIInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
          changesVGPRIndexingMode(MI);
 }
 
+bool SIInstrInfo::isAlwaysGDS(uint16_t Opcode) const {
+  return Opcode == AMDGPU::DS_ORDERED_COUNT ||
+         Opcode == AMDGPU::DS_GWS_INIT ||
+         Opcode == AMDGPU::DS_GWS_SEMA_V ||
+         Opcode == AMDGPU::DS_GWS_SEMA_BR ||
+         Opcode == AMDGPU::DS_GWS_SEMA_P ||
+         Opcode == AMDGPU::DS_GWS_SEMA_RELEASE_ALL ||
+         Opcode == AMDGPU::DS_GWS_BARRIER;
+}
+
 bool SIInstrInfo::hasUnwantedEffectsWhenEXECEmpty(const MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
 
@@ -2403,7 +2482,8 @@ bool SIInstrInfo::hasUnwantedEffectsWhenEXECEmpty(const MachineInstr &MI) const 
   //       EXEC = 0, but checking for that case here seems not worth it
   //       given the typical code patterns.
   if (Opcode == AMDGPU::S_SENDMSG || Opcode == AMDGPU::S_SENDMSGHALT ||
-      Opcode == AMDGPU::EXP || Opcode == AMDGPU::EXP_DONE)
+      Opcode == AMDGPU::EXP || Opcode == AMDGPU::EXP_DONE ||
+      Opcode == AMDGPU::DS_ORDERED_COUNT)
     return true;
 
   if (MI.isInlineAsm())
@@ -2418,6 +2498,27 @@ bool SIInstrInfo::hasUnwantedEffectsWhenEXECEmpty(const MachineInstr &MI) const 
     return true;
 
   return false;
+}
+
+bool SIInstrInfo::mayReadEXEC(const MachineRegisterInfo &MRI,
+                              const MachineInstr &MI) const {
+  if (MI.isMetaInstruction())
+    return false;
+
+  // This won't read exec if this is an SGPR->SGPR copy.
+  if (MI.isCopyLike()) {
+    if (!RI.isSGPRReg(MRI, MI.getOperand(0).getReg()))
+      return true;
+
+    // Make sure this isn't copying exec as a normal operand
+    return MI.readsRegister(AMDGPU::EXEC, &RI);
+  }
+
+  // Be conservative with any unhandled generic opcodes.
+  if (!isTargetSpecificOpcode(MI.getOpcode()))
+    return true;
+
+  return !isSALU(MI) || MI.readsRegister(AMDGPU::EXEC, &RI);
 }
 
 bool SIInstrInfo::isInlineConstant(const APInt &Imm) const {
@@ -2480,19 +2581,12 @@ bool SIInstrInfo::isInlineConstant(const MachineOperand &MO,
 
     return false;
   }
+  case AMDGPU::OPERAND_REG_IMM_V2INT16:
+  case AMDGPU::OPERAND_REG_IMM_V2FP16:
   case AMDGPU::OPERAND_REG_INLINE_C_V2INT16:
   case AMDGPU::OPERAND_REG_INLINE_C_V2FP16: {
-    if (isUInt<16>(Imm)) {
-      int16_t Trunc = static_cast<int16_t>(Imm);
-      return ST.has16BitInsts() &&
-             AMDGPU::isInlinableLiteral16(Trunc, ST.hasInv2PiInlineImm());
-    }
-    if (!(Imm & 0xffff)) {
-      return ST.has16BitInsts() &&
-             AMDGPU::isInlinableLiteral16(Imm >> 16, ST.hasInv2PiInlineImm());
-    }
     uint32_t Trunc = static_cast<uint32_t>(Imm);
-    return  AMDGPU::isInlinableLiteralV216(Trunc, ST.hasInv2PiInlineImm());
+    return AMDGPU::isInlinableLiteralV216(Trunc, ST.hasInv2PiInlineImm());
   }
   default:
     llvm_unreachable("invalid bitwidth");
@@ -2534,7 +2628,8 @@ static bool compareMachineOp(const MachineOperand &Op0,
 
 bool SIInstrInfo::isImmOperandLegal(const MachineInstr &MI, unsigned OpNo,
                                     const MachineOperand &MO) const {
-  const MCOperandInfo &OpInfo = get(MI.getOpcode()).OpInfo[OpNo];
+  const MCInstrDesc &InstDesc = MI.getDesc();
+  const MCOperandInfo &OpInfo = InstDesc.OpInfo[OpNo];
 
   assert(MO.isImm() || MO.isTargetIndex() || MO.isFI());
 
@@ -2547,7 +2642,15 @@ bool SIInstrInfo::isImmOperandLegal(const MachineInstr &MI, unsigned OpNo,
   if (MO.isImm() && isInlineConstant(MO, OpInfo))
     return RI.opCanUseInlineConstant(OpInfo.OperandType);
 
-  return RI.opCanUseLiteralConstant(OpInfo.OperandType);
+  if (!RI.opCanUseLiteralConstant(OpInfo.OperandType))
+    return false;
+
+  if (!isVOP3(MI) || !AMDGPU::isSISrcOperand(InstDesc, OpNo))
+    return true;
+
+  const MachineFunction *MF = MI.getParent()->getParent();
+  const GCNSubtarget &ST = MF->getSubtarget<GCNSubtarget>();
+  return ST.hasVOP3Literal();
 }
 
 bool SIInstrInfo::hasVALU32BitEncoding(unsigned Opcode) const {
@@ -2586,7 +2689,8 @@ bool SIInstrInfo::canShrink(const MachineInstr &MI,
   // Can't shrink instruction with three operands.
   // FIXME: v_cndmask_b32 has 3 operands and is shrinkable, but we need to add
   // a special case for it.  It can only be shrunk if the third operand
-  // is vcc.  We should handle this the same way we handle vopc, by addding
+  // is vcc, and src0_modifiers and src1_modifiers are not set.
+  // We should handle this the same way we handle vopc, by addding
   // a register allocation hint pre-regalloc and then do the shrinking
   // post-regalloc.
   if (Src2) {
@@ -2606,6 +2710,7 @@ bool SIInstrInfo::canShrink(const MachineInstr &MI,
       case AMDGPU::V_MAC_F32_e64:
       case AMDGPU::V_MAC_F16_e64:
       case AMDGPU::V_FMAC_F32_e64:
+      case AMDGPU::V_FMAC_F16_e64:
         if (!Src2->isReg() || !RI.isVGPR(MRI, Src2->getReg()) ||
             hasModifiersSet(MI, AMDGPU::OpName::src2_modifiers))
           return false;
@@ -2746,10 +2851,12 @@ static bool shouldReadExec(const MachineInstr &MI) {
   if (SIInstrInfo::isVALU(MI)) {
     switch (MI.getOpcode()) {
     case AMDGPU::V_READLANE_B32:
-    case AMDGPU::V_READLANE_B32_si:
+    case AMDGPU::V_READLANE_B32_gfx6_gfx7:
+    case AMDGPU::V_READLANE_B32_gfx10:
     case AMDGPU::V_READLANE_B32_vi:
     case AMDGPU::V_WRITELANE_B32:
-    case AMDGPU::V_WRITELANE_B32_si:
+    case AMDGPU::V_WRITELANE_B32_gfx6_gfx7:
+    case AMDGPU::V_WRITELANE_B32_gfx10:
     case AMDGPU::V_WRITELANE_B32_vi:
       return false;
     }
@@ -3022,9 +3129,12 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
     if (AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::imm) != -1)
       ++ConstantBusCount;
 
+    SmallVector<unsigned, 2> SGPRsUsed;
     unsigned SGPRUsed = findImplicitSGPRRead(MI);
-    if (SGPRUsed != AMDGPU::NoRegister)
+    if (SGPRUsed != AMDGPU::NoRegister) {
       ++ConstantBusCount;
+      SGPRsUsed.push_back(SGPRUsed);
+    }
 
     for (int OpIdx : OpIndices) {
       if (OpIdx == -1)
@@ -3032,23 +3142,37 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
       const MachineOperand &MO = MI.getOperand(OpIdx);
       if (usesConstantBus(MRI, MO, MI.getDesc().OpInfo[OpIdx])) {
         if (MO.isReg()) {
-          if (MO.getReg() != SGPRUsed)
-            ++ConstantBusCount;
           SGPRUsed = MO.getReg();
+          if (llvm::all_of(SGPRsUsed, [this, SGPRUsed](unsigned SGPR) {
+                return !RI.regsOverlap(SGPRUsed, SGPR);
+              })) {
+            ++ConstantBusCount;
+            SGPRsUsed.push_back(SGPRUsed);
+          }
         } else {
           ++ConstantBusCount;
           ++LiteralCount;
         }
       }
     }
-    if (ConstantBusCount > 1) {
-      ErrInfo = "VOP* instruction uses the constant bus more than once";
+    const GCNSubtarget &ST = MF->getSubtarget<GCNSubtarget>();
+    // v_writelane_b32 is an exception from constant bus restriction:
+    // vsrc0 can be sgpr, const or m0 and lane select sgpr, m0 or inline-const
+    if (ConstantBusCount > ST.getConstantBusLimit(Opcode) &&
+        Opcode != AMDGPU::V_WRITELANE_B32) {
+      ErrInfo = "VOP* instruction violates constant bus restriction";
       return false;
     }
 
     if (isVOP3(MI) && LiteralCount) {
-      ErrInfo = "VOP3 instruction uses literal";
-      return false;
+      if (LiteralCount && !ST.hasVOP3Literal()) {
+        ErrInfo = "VOP3 instruction uses literal";
+        return false;
+      }
+      if (LiteralCount > 1) {
+        ErrInfo = "VOP3 instruction uses more than one literal";
+        return false;
+      }
     }
   }
 
@@ -3068,16 +3192,24 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
   }
 
   if (isSOPK(MI)) {
-    int64_t Imm = getNamedOperand(MI, AMDGPU::OpName::simm16)->getImm();
-    if (sopkIsZext(MI)) {
-      if (!isUInt<16>(Imm)) {
-        ErrInfo = "invalid immediate for SOPK instruction";
+    auto Op = getNamedOperand(MI, AMDGPU::OpName::simm16);
+    if (Desc.isBranch()) {
+      if (!Op->isMBB()) {
+        ErrInfo = "invalid branch target for SOPK instruction";
         return false;
       }
     } else {
-      if (!isInt<16>(Imm)) {
-        ErrInfo = "invalid immediate for SOPK instruction";
-        return false;
+      uint64_t Imm = Op->getImm();
+      if (sopkIsZext(MI)) {
+        if (!isUInt<16>(Imm)) {
+          ErrInfo = "invalid immediate for SOPK instruction";
+          return false;
+        }
+      } else {
+        if (!isInt<16>(Imm)) {
+          ErrInfo = "invalid immediate for SOPK instruction";
+          return false;
+        }
       }
     }
   }
@@ -3155,6 +3287,53 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
     }
   }
 
+  if (isMIMG(MI)) {
+    const MachineOperand *DimOp = getNamedOperand(MI, AMDGPU::OpName::dim);
+    if (DimOp) {
+      int VAddr0Idx = AMDGPU::getNamedOperandIdx(Opcode,
+                                                 AMDGPU::OpName::vaddr0);
+      int SRsrcIdx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::srsrc);
+      const AMDGPU::MIMGInfo *Info = AMDGPU::getMIMGInfo(Opcode);
+      const AMDGPU::MIMGBaseOpcodeInfo *BaseOpcode =
+          AMDGPU::getMIMGBaseOpcodeInfo(Info->BaseOpcode);
+      const AMDGPU::MIMGDimInfo *Dim =
+          AMDGPU::getMIMGDimInfoByEncoding(DimOp->getImm());
+
+      if (!Dim) {
+        ErrInfo = "dim is out of range";
+        return false;
+      }
+
+      bool IsNSA = SRsrcIdx - VAddr0Idx > 1;
+      unsigned AddrWords = BaseOpcode->NumExtraArgs +
+                           (BaseOpcode->Gradients ? Dim->NumGradients : 0) +
+                           (BaseOpcode->Coordinates ? Dim->NumCoords : 0) +
+                           (BaseOpcode->LodOrClampOrMip ? 1 : 0);
+
+      unsigned VAddrWords;
+      if (IsNSA) {
+        VAddrWords = SRsrcIdx - VAddr0Idx;
+      } else {
+        const TargetRegisterClass *RC = getOpRegClass(MI, VAddr0Idx);
+        VAddrWords = MRI.getTargetRegisterInfo()->getRegSizeInBits(*RC) / 32;
+        if (AddrWords > 8)
+          AddrWords = 16;
+        else if (AddrWords > 4)
+          AddrWords = 8;
+        else if (AddrWords == 3 && VAddrWords == 4) {
+          // CodeGen uses the V4 variant of instructions for three addresses,
+          // because the selection DAG does not support non-power-of-two types.
+          AddrWords = 4;
+        }
+      }
+
+      if (VAddrWords != AddrWords) {
+        ErrInfo = "bad vaddr size";
+        return false;
+      }
+    }
+  }
+
   const MachineOperand *DppCt = getNamedOperand(MI, AMDGPU::OpName::dpp_ctrl);
   if (DppCt) {
     using namespace AMDGPU::DPP;
@@ -3199,7 +3378,9 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) const {
   case AMDGPU::S_SUB_U32:
     return AMDGPU::V_SUB_I32_e32;
   case AMDGPU::S_SUBB_U32: return AMDGPU::V_SUBB_U32_e32;
-  case AMDGPU::S_MUL_I32: return AMDGPU::V_MUL_LO_I32;
+  case AMDGPU::S_MUL_I32: return AMDGPU::V_MUL_LO_U32;
+  case AMDGPU::S_MUL_HI_U32: return AMDGPU::V_MUL_HI_U32;
+  case AMDGPU::S_MUL_HI_I32: return AMDGPU::V_MUL_HI_I32;
   case AMDGPU::S_AND_B32: return AMDGPU::V_AND_B32_e64;
   case AMDGPU::S_OR_B32: return AMDGPU::V_OR_B32_e64;
   case AMDGPU::S_XOR_B32: return AMDGPU::V_XOR_B32_e64;
@@ -3244,6 +3425,8 @@ unsigned SIInstrInfo::getVALUOp(const MachineInstr &MI) const {
   case AMDGPU::S_CBRANCH_SCC0: return AMDGPU::S_CBRANCH_VCCZ;
   case AMDGPU::S_CBRANCH_SCC1: return AMDGPU::S_CBRANCH_VCCNZ;
   }
+  llvm_unreachable(
+      "Unexpected scalar opcode without corresponding vector one!");
 }
 
 const TargetRegisterClass *SIInstrInfo::getOpRegClass(const MachineInstr &MI,
@@ -3263,30 +3446,21 @@ const TargetRegisterClass *SIInstrInfo::getOpRegClass(const MachineInstr &MI,
   return RI.getRegClass(RCID);
 }
 
-bool SIInstrInfo::canReadVGPR(const MachineInstr &MI, unsigned OpNo) const {
-  switch (MI.getOpcode()) {
-  case AMDGPU::COPY:
-  case AMDGPU::REG_SEQUENCE:
-  case AMDGPU::PHI:
-  case AMDGPU::INSERT_SUBREG:
-    return RI.hasVGPRs(getOpRegClass(MI, 0));
-  default:
-    return RI.hasVGPRs(getOpRegClass(MI, OpNo));
-  }
-}
-
 void SIInstrInfo::legalizeOpWithMove(MachineInstr &MI, unsigned OpIdx) const {
   MachineBasicBlock::iterator I = MI;
   MachineBasicBlock *MBB = MI.getParent();
   MachineOperand &MO = MI.getOperand(OpIdx);
   MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  const SIRegisterInfo *TRI =
+      static_cast<const SIRegisterInfo*>(MRI.getTargetRegisterInfo());
   unsigned RCID = get(MI.getOpcode()).OpInfo[OpIdx].RegClass;
   const TargetRegisterClass *RC = RI.getRegClass(RCID);
-  unsigned Opcode = AMDGPU::V_MOV_B32_e32;
+  unsigned Size = TRI->getRegSizeInBits(*RC);
+  unsigned Opcode = (Size == 64) ? AMDGPU::V_MOV_B64_PSEUDO : AMDGPU::V_MOV_B32_e32;
   if (MO.isReg())
     Opcode = AMDGPU::COPY;
   else if (RI.isSGPRClass(RC))
-    Opcode = AMDGPU::S_MOV_B32;
+    Opcode = (Size == 64) ? AMDGPU::S_MOV_B64 : AMDGPU::S_MOV_B32;
 
   const TargetRegisterClass *VRC = RI.getEquivalentVGPRClass(RC);
   if (RI.getCommonSubClass(&AMDGPU::VReg_64RegClass, VRC))
@@ -3402,31 +3576,47 @@ bool SIInstrInfo::isLegalVSrcOperand(const MachineRegisterInfo &MRI,
 
 bool SIInstrInfo::isOperandLegal(const MachineInstr &MI, unsigned OpIdx,
                                  const MachineOperand *MO) const {
-  const MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
+  const MachineFunction &MF = *MI.getParent()->getParent();
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
   const MCInstrDesc &InstDesc = MI.getDesc();
   const MCOperandInfo &OpInfo = InstDesc.OpInfo[OpIdx];
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const TargetRegisterClass *DefinedRC =
       OpInfo.RegClass != -1 ? RI.getRegClass(OpInfo.RegClass) : nullptr;
   if (!MO)
     MO = &MI.getOperand(OpIdx);
 
+  int ConstantBusLimit = ST.getConstantBusLimit(MI.getOpcode());
+  int VOP3LiteralLimit = ST.hasVOP3Literal() ? 1 : 0;
   if (isVALU(MI) && usesConstantBus(MRI, *MO, OpInfo)) {
+    if (isVOP3(MI) && isLiteralConstantLike(*MO, OpInfo) && !VOP3LiteralLimit--)
+      return false;
 
-    RegSubRegPair SGPRUsed;
+    SmallDenseSet<RegSubRegPair> SGPRsUsed;
     if (MO->isReg())
-      SGPRUsed = RegSubRegPair(MO->getReg(), MO->getSubReg());
+      SGPRsUsed.insert(RegSubRegPair(MO->getReg(), MO->getSubReg()));
 
     for (unsigned i = 0, e = MI.getNumOperands(); i != e; ++i) {
       if (i == OpIdx)
         continue;
       const MachineOperand &Op = MI.getOperand(i);
       if (Op.isReg()) {
-        if ((Op.getReg() != SGPRUsed.Reg || Op.getSubReg() != SGPRUsed.SubReg) &&
+        RegSubRegPair SGPR(Op.getReg(), Op.getSubReg());
+        if (!SGPRsUsed.count(SGPR) &&
             usesConstantBus(MRI, Op, InstDesc.OpInfo[i])) {
-          return false;
+          if (--ConstantBusLimit <= 0)
+            return false;
+          SGPRsUsed.insert(SGPR);
         }
       } else if (InstDesc.OpInfo[i].OperandType == AMDGPU::OPERAND_KIMM32) {
-        return false;
+        if (--ConstantBusLimit <= 0)
+          return false;
+      } else if (isVOP3(MI) && AMDGPU::isSISrcOperand(InstDesc, i) &&
+                 isLiteralConstantLike(Op, InstDesc.OpInfo[i])) {
+        if (!VOP3LiteralLimit--)
+          return false;
+        if (--ConstantBusLimit <= 0)
+          return false;
       }
     }
   }
@@ -3456,17 +3646,14 @@ void SIInstrInfo::legalizeOperandsVOP2(MachineRegisterInfo &MRI,
   MachineOperand &Src1 = MI.getOperand(Src1Idx);
 
   // If there is an implicit SGPR use such as VCC use for v_addc_u32/v_subb_u32
-  // we need to only have one constant bus use.
-  //
-  // Note we do not need to worry about literal constants here. They are
-  // disabled for the operand type for instructions because they will always
-  // violate the one constant bus use rule.
+  // we need to only have one constant bus use before GFX10.
   bool HasImplicitSGPR = findImplicitSGPRRead(MI) != AMDGPU::NoRegister;
-  if (HasImplicitSGPR) {
+  if (HasImplicitSGPR && ST.getConstantBusLimit(Opc) <= 1) {
     int Src0Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src0);
     MachineOperand &Src0 = MI.getOperand(Src0Idx);
 
-    if (Src0.isReg() && RI.isSGPRReg(MRI, Src0.getReg()))
+    if (Src0.isReg() && (RI.isSGPRReg(MRI, Src0.getReg()) ||
+         isLiteralConstantLike(Src0, InstrDesc.OpInfo[Src0Idx])))
       legalizeOpWithMove(MI, Src0Idx);
   }
 
@@ -3558,10 +3745,8 @@ void SIInstrInfo::legalizeOperandsVOP2(MachineRegisterInfo &MRI,
   Src1.setSubReg(Src0SubReg);
 }
 
-// Legalize VOP3 operands. Because all operand types are supported for any
-// operand, and since literal constants are not allowed and should never be
-// seen, we only need to worry about inserting copies if we use multiple SGPR
-// operands.
+// Legalize VOP3 operands. All operand types are supported for any operand
+// but only one literal constant and only starting from GFX10.
 void SIInstrInfo::legalizeOperandsVOP3(MachineRegisterInfo &MRI,
                                        MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
@@ -3573,7 +3758,14 @@ void SIInstrInfo::legalizeOperandsVOP3(MachineRegisterInfo &MRI,
   };
 
   // Find the one SGPR operand we are allowed to use.
+  int ConstantBusLimit = ST.getConstantBusLimit(Opc);
+  int LiteralLimit = ST.hasVOP3Literal() ? 1 : 0;
+  SmallDenseSet<unsigned> SGPRsUsed;
   unsigned SGPRReg = findUsedSGPR(MI, VOP3Idx);
+  if (SGPRReg != AMDGPU::NoRegister) {
+    SGPRsUsed.insert(SGPRReg);
+    --ConstantBusLimit;
+  }
 
   for (unsigned i = 0; i < 3; ++i) {
     int Idx = VOP3Idx[i];
@@ -3581,16 +3773,32 @@ void SIInstrInfo::legalizeOperandsVOP3(MachineRegisterInfo &MRI,
       break;
     MachineOperand &MO = MI.getOperand(Idx);
 
-    // We should never see a VOP3 instruction with an illegal immediate operand.
-    if (!MO.isReg())
+    if (!MO.isReg()) {
+      if (!isLiteralConstantLike(MO, get(Opc).OpInfo[Idx]))
+        continue;
+
+      if (LiteralLimit > 0 && ConstantBusLimit > 0) {
+        --LiteralLimit;
+        --ConstantBusLimit;
+        continue;
+      }
+
+      --LiteralLimit;
+      --ConstantBusLimit;
+      legalizeOpWithMove(MI, Idx);
       continue;
+    }
 
     if (!RI.isSGPRClass(MRI.getRegClass(MO.getReg())))
       continue; // VGPRs are legal
 
-    if (SGPRReg == AMDGPU::NoRegister || SGPRReg == MO.getReg()) {
-      SGPRReg = MO.getReg();
-      // We can use one SGPR in each VOP3 instruction.
+    // We can use one SGPR in each VOP3 instruction prior to GFX10
+    // and two starting from GFX10.
+    if (SGPRsUsed.count(MO.getReg()))
+      continue;
+    if (ConstantBusLimit > 0) {
+      SGPRsUsed.insert(MO.getReg());
+      --ConstantBusLimit;
       continue;
     }
 
@@ -4106,6 +4314,10 @@ void SIInstrInfo::legalizeOperands(MachineInstr &MI,
                 getNamedOperand(MI, AMDGPU::OpName::glc)) {
           MIB.addImm(GLC->getImm());
         }
+        if (const MachineOperand *DLC =
+                getNamedOperand(MI, AMDGPU::OpName::dlc)) {
+          MIB.addImm(DLC->getImm());
+        }
 
         MIB.addImm(getNamedImmOperand(MI, AMDGPU::OpName::slc));
 
@@ -4339,8 +4551,10 @@ void SIInstrInfo::moveToVALU(MachineInstr &TopInst,
     for (unsigned i = Inst.getNumOperands() - 1; i > 0; --i) {
       MachineOperand &Op = Inst.getOperand(i);
       if (Op.isReg() && Op.getReg() == AMDGPU::SCC) {
+        // Only propagate through live-def of SCC.
+        if (Op.isDef() && !Op.isDead())
+          addSCCDefUsersToVALUWorklist(Op, Inst, Worklist);
         Inst.RemoveOperand(i);
-        addSCCDefUsersToVALUWorklist(Inst, Worklist);
       }
     }
 
@@ -4445,6 +4659,7 @@ bool SIInstrInfo::moveScalarAddSub(SetVectorType &Worklist, MachineInstr &Inst,
     Inst.RemoveOperand(3);
 
     Inst.setDesc(get(NewOpc));
+    Inst.addOperand(MachineOperand::CreateImm(0)); // clamp bit
     Inst.addImplicitDefUseOperands(*MBB.getParent());
     MRI.replaceRegWith(OldDstReg, ResultReg);
     legalizeOperands(Inst, MDT);
@@ -4705,7 +4920,8 @@ void SIInstrInfo::splitScalar64BitAddSub(SetVectorType &Worklist,
     BuildMI(MBB, MII, DL, get(LoOpc), DestSub0)
     .addReg(CarryReg, RegState::Define)
     .add(SrcReg0Sub0)
-    .add(SrcReg1Sub0);
+    .add(SrcReg1Sub0)
+    .addImm(0); // clamp bit
 
   unsigned HiOpc = IsAdd ? AMDGPU::V_ADDC_U32_e64 : AMDGPU::V_SUBB_U32_e64;
   MachineInstr *HiHalf =
@@ -4713,7 +4929,8 @@ void SIInstrInfo::splitScalar64BitAddSub(SetVectorType &Worklist,
     .addReg(DeadCarryReg, RegState::Define | RegState::Dead)
     .add(SrcReg0Sub1)
     .add(SrcReg1Sub1)
-    .addReg(CarryReg, RegState::Kill);
+    .addReg(CarryReg, RegState::Kill)
+    .addImm(0); // clamp bit
 
   BuildMI(MBB, MII, DL, get(TargetOpcode::REG_SEQUENCE), FullDestReg)
     .addReg(DestSub0)
@@ -4943,7 +5160,23 @@ void SIInstrInfo::addUsersToMoveToVALUWorklist(
   for (MachineRegisterInfo::use_iterator I = MRI.use_begin(DstReg),
          E = MRI.use_end(); I != E;) {
     MachineInstr &UseMI = *I->getParent();
-    if (!canReadVGPR(UseMI, I.getOperandNo())) {
+
+    unsigned OpNo = 0;
+
+    switch (UseMI.getOpcode()) {
+    case AMDGPU::COPY:
+    case AMDGPU::WQM:
+    case AMDGPU::WWM:
+    case AMDGPU::REG_SEQUENCE:
+    case AMDGPU::PHI:
+    case AMDGPU::INSERT_SUBREG:
+      break;
+    default:
+      OpNo = I.getOperandNo();
+      break;
+    }
+
+    if (!RI.hasVGPRs(getOpRegClass(UseMI, OpNo))) {
       Worklist.insert(&UseMI);
 
       do {
@@ -5017,19 +5250,23 @@ void SIInstrInfo::movePackToVALU(SetVectorType &Worklist,
   addUsersToMoveToVALUWorklist(ResultReg, MRI, Worklist);
 }
 
-void SIInstrInfo::addSCCDefUsersToVALUWorklist(
-    MachineInstr &SCCDefInst, SetVectorType &Worklist) const {
+void SIInstrInfo::addSCCDefUsersToVALUWorklist(MachineOperand &Op,
+                                               MachineInstr &SCCDefInst,
+                                               SetVectorType &Worklist) const {
+  // Ensure that def inst defines SCC, which is still live.
+  assert(Op.isReg() && Op.getReg() == AMDGPU::SCC && Op.isDef() &&
+         !Op.isDead() && Op.getParent() == &SCCDefInst);
   // This assumes that all the users of SCC are in the same block
   // as the SCC def.
-  for (MachineInstr &MI :
-       make_range(MachineBasicBlock::iterator(SCCDefInst),
-                      SCCDefInst.getParent()->end())) {
+  for (MachineInstr &MI : // Skip the def inst itself.
+       make_range(std::next(MachineBasicBlock::iterator(SCCDefInst)),
+                  SCCDefInst.getParent()->end())) {
+    // Check if SCC is used first.
+    if (MI.findRegisterUseOperandIdx(AMDGPU::SCC, false, &RI) != -1)
+      Worklist.insert(&MI);
     // Exit if we find another SCC def.
     if (MI.findRegisterDefOperandIdx(AMDGPU::SCC, false, false, &RI) != -1)
       return;
-
-    if (MI.findRegisterUseOperandIdx(AMDGPU::SCC, false, &RI) != -1)
-      Worklist.insert(&MI);
   }
 }
 
@@ -5139,6 +5376,12 @@ MachineOperand *SIInstrInfo::getNamedOperand(MachineInstr &MI,
 }
 
 uint64_t SIInstrInfo::getDefaultRsrcDataFormat() const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::GFX10) {
+    return (16ULL << 44) | // IMG_FORMAT_32_FLOAT
+           (1ULL << 56) | // RESOURCE_LEVEL = 1
+           (3ULL << 60); // OOB_SELECT = 3
+  }
+
   uint64_t RsrcDataFormat = AMDGPU::RSRC_DATA_FORMAT;
   if (ST.isAmdHsaOS()) {
     // Set ATC = 1. GFX9 doesn't have this bit.
@@ -5165,12 +5408,14 @@ uint64_t SIInstrInfo::getScratchRsrcWords23() const {
     Rsrc23 |= EltSizeValue << AMDGPU::RSRC_ELEMENT_SIZE_SHIFT;
   }
 
-  // IndexStride = 64.
-  Rsrc23 |= UINT64_C(3) << AMDGPU::RSRC_INDEX_STRIDE_SHIFT;
+  // IndexStride = 64 / 32.
+  uint64_t IndexStride = ST.getGeneration() <= AMDGPUSubtarget::GFX9 ? 3 : 2;
+  Rsrc23 |= IndexStride << AMDGPU::RSRC_INDEX_STRIDE_SHIFT;
 
   // If TID_ENABLE is set, DATA_FORMAT specifies stride bits [14:17].
   // Clear them unless we want a huge stride.
-  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS &&
+      ST.getGeneration() <= AMDGPUSubtarget::GFX9)
     Rsrc23 &= ~AMDGPU::RSRC_DATA_FORMAT;
 
   return Rsrc23;
@@ -5267,23 +5512,33 @@ unsigned SIInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
       return DescSize; // No operands.
 
     if (isLiteralConstantLike(MI.getOperand(Src0Idx), Desc.OpInfo[Src0Idx]))
-      return DescSize + 4;
+      return isVOP3(MI) ? 12 : (DescSize + 4);
 
     int Src1Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src1);
     if (Src1Idx == -1)
       return DescSize;
 
     if (isLiteralConstantLike(MI.getOperand(Src1Idx), Desc.OpInfo[Src1Idx]))
-      return DescSize + 4;
+      return isVOP3(MI) ? 12 : (DescSize + 4);
 
     int Src2Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2);
     if (Src2Idx == -1)
       return DescSize;
 
     if (isLiteralConstantLike(MI.getOperand(Src2Idx), Desc.OpInfo[Src2Idx]))
-      return DescSize + 4;
+      return isVOP3(MI) ? 12 : (DescSize + 4);
 
     return DescSize;
+  }
+
+  // Check whether we have extra NSA words.
+  if (isMIMG(MI)) {
+    int VAddr0Idx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::vaddr0);
+    if (VAddr0Idx < 0)
+      return 8;
+
+    int RSrcIdx = AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::srsrc);
+    return 8 + 4 * ((RSrcIdx - VAddr0Idx + 2) / 4);
   }
 
   switch (Opc) {
@@ -5294,7 +5549,8 @@ unsigned SIInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     return 0;
   case TargetOpcode::BUNDLE:
     return getInstBundleSize(MI);
-  case TargetOpcode::INLINEASM: {
+  case TargetOpcode::INLINEASM:
+  case TargetOpcode::INLINEASM_BR: {
     const MachineFunction *MF = MI.getParent()->getParent();
     const char *AsmStr = MI.getOperand(0).getSymbolName();
     return getInlineAsmLength(AsmStr, *MF->getTarget().getMCAsmInfo());
@@ -5500,7 +5756,9 @@ enum SIEncodingFamily {
   SDWA = 2,
   SDWA9 = 3,
   GFX80 = 4,
-  GFX9 = 5
+  GFX9 = 5,
+  GFX10 = 6,
+  SDWA10 = 7
 };
 
 static SIEncodingFamily subtargetEncodingFamily(const GCNSubtarget &ST) {
@@ -5513,6 +5771,8 @@ static SIEncodingFamily subtargetEncodingFamily(const GCNSubtarget &ST) {
   case AMDGPUSubtarget::VOLCANIC_ISLANDS:
   case AMDGPUSubtarget::GFX9:
     return SIEncodingFamily::VI;
+  case AMDGPUSubtarget::GFX10:
+    return SIEncodingFamily::GFX10;
   }
   llvm_unreachable("Unknown subtarget generation!");
 }
@@ -5521,17 +5781,28 @@ int SIInstrInfo::pseudoToMCOpcode(int Opcode) const {
   SIEncodingFamily Gen = subtargetEncodingFamily(ST);
 
   if ((get(Opcode).TSFlags & SIInstrFlags::renamedInGFX9) != 0 &&
-    ST.getGeneration() >= AMDGPUSubtarget::GFX9)
+    ST.getGeneration() == AMDGPUSubtarget::GFX9)
     Gen = SIEncodingFamily::GFX9;
 
-  if (get(Opcode).TSFlags & SIInstrFlags::SDWA)
-    Gen = ST.getGeneration() == AMDGPUSubtarget::GFX9 ? SIEncodingFamily::SDWA9
-                                                      : SIEncodingFamily::SDWA;
   // Adjust the encoding family to GFX80 for D16 buffer instructions when the
   // subtarget has UnpackedD16VMem feature.
   // TODO: remove this when we discard GFX80 encoding.
   if (ST.hasUnpackedD16VMem() && (get(Opcode).TSFlags & SIInstrFlags::D16Buf))
     Gen = SIEncodingFamily::GFX80;
+
+  if (get(Opcode).TSFlags & SIInstrFlags::SDWA) {
+    switch (ST.getGeneration()) {
+    default:
+      Gen = SIEncodingFamily::SDWA;
+      break;
+    case AMDGPUSubtarget::GFX9:
+      Gen = SIEncodingFamily::SDWA9;
+      break;
+    case AMDGPUSubtarget::GFX10:
+      Gen = SIEncodingFamily::SDWA10;
+      break;
+    }
+  }
 
   int MCOp = AMDGPU::getMCOpcode(Opcode, Gen);
 
@@ -5626,4 +5897,30 @@ MachineInstr *llvm::getVRegSubRegDef(const TargetInstrInfo::RegSubRegPair &P,
       return MI;
   }
   return nullptr;
+}
+
+bool llvm::isEXECMaskConstantBetweenDefAndUses(unsigned VReg,
+                                               MachineRegisterInfo &MRI) {
+  assert(MRI.isSSA() && "Must be run on SSA");
+  auto *TRI = MRI.getTargetRegisterInfo();
+
+  auto *DefI = MRI.getVRegDef(VReg);
+  auto *BB = DefI->getParent();
+
+  DenseSet<MachineInstr*> Uses;
+  for (auto &Use : MRI.use_nodbg_operands(VReg)) {
+    auto *I = Use.getParent();
+    if (I->getParent() != BB)
+      return false;
+    Uses.insert(I);
+  }
+
+  auto E = BB->end();
+  for (auto I = std::next(DefI->getIterator()); I != E; ++I) {
+    Uses.erase(&*I);
+    // don't check the last use
+    if (Uses.empty() || I->modifiesRegister(AMDGPU::EXEC, TRI))
+      break;
+  }
+  return Uses.empty();
 }

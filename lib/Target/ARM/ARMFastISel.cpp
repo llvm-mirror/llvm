@@ -1,9 +1,8 @@
 //===- ARMFastISel.cpp - ARM FastISel implementation ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -244,8 +243,6 @@ class ARMFastISel final : public FastISel {
 };
 
 } // end anonymous namespace
-
-#include "ARMGenCallingConv.inc"
 
 // DefinesOptionalPredicate - This is different from DefinesPredicate in that
 // we don't care about implicit defs here, just places we'll need to add a
@@ -500,7 +497,7 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
   }
 
   unsigned ResultReg = 0;
-  if (Subtarget->useMovt(*FuncInfo.MF))
+  if (Subtarget->useMovt())
     ResultReg = fastEmit_i(VT, VT, ISD::Constant, CI->getZExtValue());
 
   if (ResultReg)
@@ -558,7 +555,7 @@ unsigned ARMFastISel::ARMMaterializeGV(const GlobalValue *GV, MVT VT) {
   bool IsPositionIndependent = isPositionIndependent();
   // Use movw+movt when possible, it avoids constant pool entries.
   // Non-darwin targets only support static movt relocations in FastISel.
-  if (Subtarget->useMovt(*FuncInfo.MF) &&
+  if (Subtarget->useMovt() &&
       (Subtarget->isTargetMachO() || !IsPositionIndependent)) {
     unsigned Opc;
     unsigned char TF = 0;

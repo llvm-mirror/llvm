@@ -1,10 +1,8 @@
-//===- GISelMITest.h
-//-----------------------------------------------===//
+//===- GISelMITest.h --------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 #ifndef LLVM_UNITTEST_CODEGEN_GLOBALISEL_GISELMI_H
@@ -43,6 +41,15 @@ static inline void initLLVM() {
   PassRegistry *Registry = PassRegistry::getPassRegistry();
   initializeCore(*Registry);
   initializeCodeGen(*Registry);
+}
+
+// Define a printers to help debugging when things go wrong.
+namespace llvm {
+std::ostream &
+operator<<(std::ostream &OS, const LLT Ty);
+
+std::ostream &
+operator<<(std::ostream &OS, const MachineFunction &MF);
 }
 
 /// Create a TargetMachine. As we lack a dedicated always available target for
@@ -188,7 +195,9 @@ static inline bool CheckMachineFunction(const MachineFunction &MF,
                         SMLoc());
   Regex PrefixRE = FC.buildCheckPrefixRegex();
   std::vector<FileCheckString> CheckStrings;
-  FC.ReadCheckFile(SM, CheckFileText, PrefixRE, CheckStrings);
+  if (FC.ReadCheckFile(SM, CheckFileText, PrefixRE, CheckStrings))
+    return false;
+
   auto OutBuffer = OutputBuf->getBuffer();
   SM.AddNewSourceBuffer(std::move(OutputBuf), SMLoc());
   return FC.CheckInput(SM, OutBuffer, CheckStrings);

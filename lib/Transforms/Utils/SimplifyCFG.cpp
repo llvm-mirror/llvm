@@ -1,9 +1,8 @@
 //===- SimplifyCFG.cpp - Code to perform CFG simplification ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1266,8 +1265,10 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
     while (isa<DbgInfoIntrinsic>(I2))
       I2 = &*BB2_Itr++;
   }
+  // FIXME: Can we define a safety predicate for CallBr?
   if (isa<PHINode>(I1) || !I1->isIdenticalToWhenDefined(I2) ||
-      (isa<InvokeInst>(I1) && !isSafeToHoistInvoke(BB1, BB2, I1, I2)))
+      (isa<InvokeInst>(I1) && !isSafeToHoistInvoke(BB1, BB2, I1, I2)) ||
+      isa<CallBrInst>(I1))
     return false;
 
   BasicBlock *BIParent = BI->getParent();
@@ -1350,7 +1351,12 @@ static bool HoistThenElseCodeToIf(BranchInst *BI,
 
 HoistTerminator:
   // It may not be possible to hoist an invoke.
+  // FIXME: Can we define a safety predicate for CallBr?
   if (isa<InvokeInst>(I1) && !isSafeToHoistInvoke(BB1, BB2, I1, I2))
+    return Changed;
+
+  // TODO: callbr hoisting currently disabled pending further study.
+  if (isa<CallBrInst>(I1))
     return Changed;
 
   for (BasicBlock *Succ : successors(BB1)) {
@@ -1444,7 +1450,7 @@ static bool canSinkInstructions(
     // Conservatively return false if I is an inline-asm instruction. Sinking
     // and merging inline-asm instructions can potentially create arguments
     // that cannot satisfy the inline-asm constraints.
-    if (const auto *C = dyn_cast<CallInst>(I))
+    if (const auto *C = dyn_cast<CallBase>(I))
       if (C->isInlineAsm())
         return false;
 
@@ -1507,7 +1513,7 @@ static bool canSinkInstructions(
         // We can't create a PHI from this GEP.
         return false;
       // Don't create indirect calls! The called value is the final operand.
-      if ((isa<CallInst>(I0) || isa<InvokeInst>(I0)) && OI == OE - 1) {
+      if (isa<CallBase>(I0) && OI == OE - 1) {
         // FIXME: if the call was *already* indirect, we should do this.
         return false;
       }
@@ -2203,7 +2209,8 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL,
     BasicBlock *EdgeBB =
         BasicBlock::Create(BB->getContext(), RealDest->getName() + ".critedge",
                            RealDest->getParent(), RealDest);
-    BranchInst::Create(RealDest, EdgeBB);
+    BranchInst *CritEdgeBranch = BranchInst::Create(RealDest, EdgeBB);
+    CritEdgeBranch->setDebugLoc(BI->getDebugLoc());
 
     // Update PHI nodes.
     AddPredecessorToBlock(RealDest, EdgeBB, BB);
@@ -3430,7 +3437,7 @@ static bool SimplifyTerminatorOnSelect(Instruction *OldTerm, Value *Cond,
       KeepEdge2 = nullptr;
     else
       Succ->removePredecessor(OldTerm->getParent(),
-                              /*DontDeleteUselessPHIs=*/true);
+                              /*KeepOneInputPHIs=*/true);
   }
 
   IRBuilder<> Builder(OldTerm);
@@ -5091,7 +5098,9 @@ Value *SwitchLookupTable::BuildLookup(Value *Index, IRBuilder<> &Builder) {
     Value *GEPIndices[] = {Builder.getInt32(0), Index};
     Value *GEP = Builder.CreateInBoundsGEP(Array->getValueType(), Array,
                                            GEPIndices, "switch.gep");
-    return Builder.CreateLoad(GEP, "switch.load");
+    return Builder.CreateLoad(
+        cast<ArrayType>(Array->getValueType())->getElementType(), GEP,
+        "switch.load");
   }
   }
   llvm_unreachable("Unknown lookup table kind!");
@@ -5425,7 +5434,7 @@ static bool SwitchToLookupTable(SwitchInst *SI, IRBuilder<> &Builder,
     // We cached PHINodes in PHIs. To avoid accessing deleted PHINodes later,
     // do not delete PHINodes here.
     SI->getDefaultDest()->removePredecessor(SI->getParent(),
-                                            /*DontDeleteUselessPHIs=*/true);
+                                            /*KeepOneInputPHIs=*/true);
   }
 
   bool ReturnedEarly = false;

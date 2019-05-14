@@ -1,9 +1,8 @@
 //===- TGLexer.cpp - Lexer for TableGen -----------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -545,6 +544,7 @@ tgtok::TokKind TGLexer::LexExclaim() {
     .Case("ge", tgtok::XGe)
     .Case("gt", tgtok::XGt)
     .Case("if", tgtok::XIf)
+    .Case("cond", tgtok::XCond)
     .Case("isa", tgtok::XIsA)
     .Case("head", tgtok::XHead)
     .Case("tail", tgtok::XTail)
@@ -552,6 +552,7 @@ tgtok::TokKind TGLexer::LexExclaim() {
     .Case("con", tgtok::XConcat)
     .Case("dag", tgtok::XDag)
     .Case("add", tgtok::XADD)
+    .Case("mul", tgtok::XMUL)
     .Case("and", tgtok::XAND)
     .Case("or", tgtok::XOR)
     .Case("shl", tgtok::XSHL)
@@ -563,6 +564,7 @@ tgtok::TokKind TGLexer::LexExclaim() {
     .Case("foldl", tgtok::XFoldl)
     .Case("foreach", tgtok::XForEach)
     .Case("listconcat", tgtok::XListConcat)
+    .Case("listsplat", tgtok::XListSplat)
     .Case("strconcat", tgtok::XStrConcat)
     .Default(tgtok::Error);
 

@@ -1,9 +1,8 @@
 //===- CallSiteSplitting.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -367,7 +366,7 @@ static void splitCallSite(
     assert(Splits.size() == 2 && "Expected exactly 2 splits!");
     for (unsigned i = 0; i < Splits.size(); i++) {
       Splits[i]->getTerminator()->eraseFromParent();
-      DTU.deleteEdge(Splits[i], TailBB);
+      DTU.applyUpdatesPermissive({{DominatorTree::Delete, Splits[i], TailBB}});
     }
 
     // Erase the tail block once done with musttail patching

@@ -1,9 +1,8 @@
 //===--- CaptureTracking.cpp - Determine whether a pointer is captured ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -102,14 +101,14 @@ namespace {
 
         SmallVector<BasicBlock*, 32> Worklist;
         Worklist.append(succ_begin(BB), succ_end(BB));
-        return !isPotentiallyReachableFromMany(Worklist, BB, DT);
+        return !isPotentiallyReachableFromMany(Worklist, BB, nullptr, DT);
       }
 
       // If the value is defined in the same basic block as use and BeforeHere,
       // there is no need to explore the use if BeforeHere dominates use.
       // Check whether there is a path from I to BeforeHere.
       if (BeforeHere != I && DT->dominates(BeforeHere, I) &&
-          !isPotentiallyReachable(I, BeforeHere, DT))
+          !isPotentiallyReachable(I, BeforeHere, nullptr, DT))
         return true;
 
       return false;

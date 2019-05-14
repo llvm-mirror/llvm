@@ -1,9 +1,8 @@
 //====- X86SpeculativeLoadHardening.cpp - A Spectre v1 mitigation ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -661,7 +660,7 @@ X86SpeculativeLoadHardeningPass::collectBlockCondInfo(MachineFunction &MF) {
       //   jmpq *%rax
       // ```
       // We still want to harden the edge to `L1`.
-      if (X86::getCondFromBranchOpc(MI.getOpcode()) == X86::COND_INVALID) {
+      if (X86::getCondFromBranch(MI) == X86::COND_INVALID) {
         Info.CondBrs.clear();
         Info.UncondBr = &MI;
         continue;
@@ -752,7 +751,7 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughCFG(
 
           for (X86::CondCode Cond : Conds) {
             int PredStateSizeInBytes = TRI->getRegSizeInBits(*PS->RC) / 8;
-            auto CMovOp = X86::getCMovFromCond(Cond, PredStateSizeInBytes);
+            auto CMovOp = X86::getCMovOpcode(PredStateSizeInBytes);
 
             unsigned UpdatedStateReg = MRI->createVirtualRegister(PS->RC);
             // Note that we intentionally use an empty debug location so that
@@ -760,7 +759,8 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughCFG(
             auto CMovI = BuildMI(CheckingMBB, InsertPt, DebugLoc(),
                                  TII->get(CMovOp), UpdatedStateReg)
                              .addReg(CurStateReg)
-                             .addReg(PS->PoisonReg);
+                             .addReg(PS->PoisonReg)
+                             .addImm(Cond);
             // If this is the last cmov and the EFLAGS weren't originally
             // live-in, mark them as killed.
             if (!LiveEFLAGS && Cond == Conds.back())
@@ -789,7 +789,7 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughCFG(
       MachineBasicBlock &Succ = *CondBr->getOperand(0).getMBB();
       int &SuccCount = SuccCounts[&Succ];
 
-      X86::CondCode Cond = X86::getCondFromBranchOpc(CondBr->getOpcode());
+      X86::CondCode Cond = X86::getCondFromBranch(*CondBr);
       X86::CondCode InvCond = X86::GetOppositeBranchCondition(Cond);
       UncondCodeSeq.push_back(Cond);
 
@@ -1177,12 +1177,13 @@ X86SpeculativeLoadHardeningPass::tracePredStateThroughIndirectBranches(
 
     // Now cmov over the predicate if the comparison wasn't equal.
     int PredStateSizeInBytes = TRI->getRegSizeInBits(*PS->RC) / 8;
-    auto CMovOp = X86::getCMovFromCond(X86::COND_NE, PredStateSizeInBytes);
+    auto CMovOp = X86::getCMovOpcode(PredStateSizeInBytes);
     unsigned UpdatedStateReg = MRI->createVirtualRegister(PS->RC);
     auto CMovI =
         BuildMI(MBB, InsertPt, DebugLoc(), TII->get(CMovOp), UpdatedStateReg)
             .addReg(PS->InitialReg)
-            .addReg(PS->PoisonReg);
+            .addReg(PS->PoisonReg)
+            .addImm(X86::COND_NE);
     CMovI->findRegisterUseOperand(X86::EFLAGS)->setIsKill(true);
     ++NumInstsInserted;
     LLVM_DEBUG(dbgs() << "  Inserting cmov: "; CMovI->dump(); dbgs() << "\n");
@@ -2546,12 +2547,13 @@ void X86SpeculativeLoadHardeningPass::tracePredStateThroughCall(
   // Now conditionally update the predicate state we just extracted if we ended
   // up at a different return address than expected.
   int PredStateSizeInBytes = TRI->getRegSizeInBits(*PS->RC) / 8;
-  auto CMovOp = X86::getCMovFromCond(X86::COND_NE, PredStateSizeInBytes);
+  auto CMovOp = X86::getCMovOpcode(PredStateSizeInBytes);
 
   unsigned UpdatedStateReg = MRI->createVirtualRegister(PS->RC);
   auto CMovI = BuildMI(MBB, InsertPt, Loc, TII->get(CMovOp), UpdatedStateReg)
                    .addReg(NewStateReg, RegState::Kill)
-                   .addReg(PS->PoisonReg);
+                   .addReg(PS->PoisonReg)
+                   .addImm(X86::COND_NE);
   CMovI->findRegisterUseOperand(X86::EFLAGS)->setIsKill(true);
   ++NumInstsInserted;
   LLVM_DEBUG(dbgs() << "  Inserting cmov: "; CMovI->dump(); dbgs() << "\n");

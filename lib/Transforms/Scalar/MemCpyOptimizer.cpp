@@ -1,9 +1,8 @@
 //===- MemCpyOptimizer.cpp - Optimize use of memcpy and friends -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1135,8 +1134,10 @@ bool MemCpyOptPass::processMemSetMemCpyDependence(MemCpyInst *MemCpy,
   Value *SizeDiff = Builder.CreateSub(DestSize, SrcSize);
   Value *MemsetLen = Builder.CreateSelect(
       Ule, ConstantInt::getNullValue(DestSize->getType()), SizeDiff);
-  Builder.CreateMemSet(Builder.CreateGEP(Dest, SrcSize), MemSet->getOperand(1),
-                       MemsetLen, Align);
+  Builder.CreateMemSet(
+      Builder.CreateGEP(Dest->getType()->getPointerElementType(), Dest,
+                        SrcSize),
+      MemSet->getOperand(1), MemsetLen, Align);
 
   MD->removeInstruction(MemSet);
   MemSet->eraseFromParent();

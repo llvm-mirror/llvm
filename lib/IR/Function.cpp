@@ -1,9 +1,8 @@
 //===- Function.cpp - Implement the Global object classes -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -144,6 +143,10 @@ bool Argument::hasNoCaptureAttr() const {
 bool Argument::hasStructRetAttr() const {
   if (!getType()->isPointerTy()) return false;
   return hasAttribute(Attribute::StructRet);
+}
+
+bool Argument::hasInRegAttr() const {
+  return hasAttribute(Attribute::InReg);
 }
 
 bool Argument::hasReturnedAttr() const {
@@ -949,10 +952,9 @@ static Type *DecodeFixedType(ArrayRef<Intrinsic::IITDescriptor> &Infos,
   case IITDescriptor::SameVecWidthArgument: {
     Type *EltTy = DecodeFixedType(Infos, Tys, Context);
     Type *Ty = Tys[D.getArgumentNumber()];
-    if (VectorType *VTy = dyn_cast<VectorType>(Ty)) {
+    if (auto *VTy = dyn_cast<VectorType>(Ty))
       return VectorType::get(EltTy, VTy->getNumElements());
-    }
-    llvm_unreachable("unhandled");
+    return EltTy;
   }
   case IITDescriptor::PtrToArgument: {
     Type *Ty = Tys[D.getArgumentNumber()];
@@ -1020,9 +1022,10 @@ bool Intrinsic::isLeaf(ID id) {
 Function *Intrinsic::getDeclaration(Module *M, ID id, ArrayRef<Type*> Tys) {
   // There can never be multiple globals with the same name of different types,
   // because intrinsics must be a specific type.
-  return
-    cast<Function>(M->getOrInsertFunction(getName(id, Tys),
-                                          getType(M->getContext(), id, Tys)));
+  return cast<Function>(
+      M->getOrInsertFunction(getName(id, Tys),
+                             getType(M->getContext(), id, Tys))
+          .getCallee());
 }
 
 // This defines the "Intrinsic::getIntrinsicForGCCBuiltin()" method.
@@ -1083,19 +1086,19 @@ bool Intrinsic::matchIntrinsicType(Type *Ty, ArrayRef<Intrinsic::IITDescriptor> 
       if (D.getArgumentNumber() < ArgTys.size())
         return Ty != ArgTys[D.getArgumentNumber()];
 
-          // Otherwise, if this is the first instance of an argument, record it and
-          // verify the "Any" kind.
-          assert(D.getArgumentNumber() == ArgTys.size() && "Table consistency error");
-          ArgTys.push_back(Ty);
+      // Otherwise, if this is the first instance of an argument, record it and
+      // verify the "Any" kind.
+      assert(D.getArgumentNumber() == ArgTys.size() && "Table consistency error");
+      ArgTys.push_back(Ty);
 
-          switch (D.getArgumentKind()) {
-            case IITDescriptor::AK_Any:        return false; // Success
-            case IITDescriptor::AK_AnyInteger: return !Ty->isIntOrIntVectorTy();
-            case IITDescriptor::AK_AnyFloat:   return !Ty->isFPOrFPVectorTy();
-            case IITDescriptor::AK_AnyVector:  return !isa<VectorType>(Ty);
-            case IITDescriptor::AK_AnyPointer: return !isa<PointerType>(Ty);
-          }
-          llvm_unreachable("all argument kinds not covered");
+      switch (D.getArgumentKind()) {
+        case IITDescriptor::AK_Any:        return false; // Success
+        case IITDescriptor::AK_AnyInteger: return !Ty->isIntOrIntVectorTy();
+        case IITDescriptor::AK_AnyFloat:   return !Ty->isFPOrFPVectorTy();
+        case IITDescriptor::AK_AnyVector:  return !isa<VectorType>(Ty);
+        case IITDescriptor::AK_AnyPointer: return !isa<PointerType>(Ty);
+      }
+      llvm_unreachable("all argument kinds not covered");
 
     case IITDescriptor::ExtendArgument: {
       // This may only be used when referring to a previous vector argument.
@@ -1136,15 +1139,19 @@ bool Intrinsic::matchIntrinsicType(Type *Ty, ArrayRef<Intrinsic::IITDescriptor> 
     case IITDescriptor::SameVecWidthArgument: {
       if (D.getArgumentNumber() >= ArgTys.size())
         return true;
-      VectorType * ReferenceType =
-        dyn_cast<VectorType>(ArgTys[D.getArgumentNumber()]);
-      VectorType *ThisArgType = dyn_cast<VectorType>(Ty);
-      if (!ThisArgType || !ReferenceType ||
-          (ReferenceType->getVectorNumElements() !=
-           ThisArgType->getVectorNumElements()))
+      auto *ReferenceType = dyn_cast<VectorType>(ArgTys[D.getArgumentNumber()]);
+      auto *ThisArgType = dyn_cast<VectorType>(Ty);
+      // Both must be vectors of the same number of elements or neither.
+      if ((ReferenceType != nullptr) != (ThisArgType != nullptr))
         return true;
-      return matchIntrinsicType(ThisArgType->getVectorElementType(),
-                                Infos, ArgTys);
+      Type *EltTy = Ty;
+      if (ThisArgType) {
+        if (ReferenceType->getVectorNumElements() !=
+            ThisArgType->getVectorNumElements())
+          return true;
+        EltTy = ThisArgType->getVectorElementType();
+      }
+      return matchIntrinsicType(EltTy, Infos, ArgTys);
     }
     case IITDescriptor::PtrToArgument: {
       if (D.getArgumentNumber() >= ArgTys.size())
@@ -1378,7 +1385,7 @@ void Function::setEntryCount(uint64_t Count, Function::ProfileCountType Type,
   setEntryCount(ProfileCount(Count, Type), Imports);
 }
 
-ProfileCount Function::getEntryCount() const {
+ProfileCount Function::getEntryCount(bool AllowSynthetic) const {
   MDNode *MD = getMetadata(LLVMContext::MD_prof);
   if (MD && MD->getOperand(0))
     if (MDString *MDS = dyn_cast<MDString>(MD->getOperand(0))) {
@@ -1390,7 +1397,8 @@ ProfileCount Function::getEntryCount() const {
         if (Count == (uint64_t)-1)
           return ProfileCount::getInvalid();
         return ProfileCount(Count, PCT_Real);
-      } else if (MDS->getString().equals("synthetic_function_entry_count")) {
+      } else if (AllowSynthetic &&
+                 MDS->getString().equals("synthetic_function_entry_count")) {
         ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(1));
         uint64_t Count = CI->getValue().getZExtValue();
         return ProfileCount(Count, PCT_Synthetic);

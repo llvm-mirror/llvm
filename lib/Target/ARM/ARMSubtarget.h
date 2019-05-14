@@ -1,9 +1,8 @@
 //===-- ARMSubtarget.h - Define Subtarget for the ARM ----------*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -60,6 +59,7 @@ protected:
     CortexA72,
     CortexA73,
     CortexA75,
+    CortexA76,
     CortexA8,
     CortexA9,
     CortexM3,
@@ -446,6 +446,10 @@ protected:
   /// What alignment is preferred for loop bodies, in log2(bytes).
   unsigned PrefLoopAlignment = 0;
 
+  /// OptMinSize - True if we're optimising for minimum code size, equal to
+  /// the function attribute.
+  bool OptMinSize = false;
+
   /// IsLittle - The target is Little Endian
   bool IsLittle;
 
@@ -468,7 +472,8 @@ public:
   /// of the specified triple.
   ///
   ARMSubtarget(const Triple &TT, const std::string &CPU, const std::string &FS,
-               const ARMBaseTargetMachine &TM, bool IsLittle);
+               const ARMBaseTargetMachine &TM, bool IsLittle,
+               bool MinSize = false);
 
   /// getMaxInlineSizeThreshold - Returns the maximum memset / memcpy size
   /// that still makes it profitable to inline the call.
@@ -710,6 +715,7 @@ public:
   bool disablePostRAScheduler() const { return DisablePostRAScheduler; }
   bool useSoftFloat() const { return UseSoftFloat; }
   bool isThumb() const { return InThumbMode; }
+  bool hasMinSize() const { return OptMinSize; }
   bool isThumb1Only() const { return InThumbMode && !HasThumb2; }
   bool isThumb2() const { return InThumbMode && HasThumb2; }
   bool hasThumb2() const { return HasThumb2; }
@@ -736,9 +742,9 @@ public:
            isThumb1Only();
   }
 
-  bool useStride4VFPs(const MachineFunction &MF) const;
+  bool useStride4VFPs() const;
 
-  bool useMovt(const MachineFunction &MF) const;
+  bool useMovt() const;
 
   bool supportsTailCall() const { return SupportsTailCall; }
 

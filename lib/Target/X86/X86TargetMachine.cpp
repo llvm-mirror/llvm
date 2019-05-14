@@ -1,9 +1,8 @@
 //===-- X86TargetMachine.cpp - Define TargetMachine for the X86 -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -38,6 +37,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
@@ -70,9 +70,9 @@ extern "C" void LLVMInitializeX86Target() {
   initializeFixupBWInstPassPass(PR);
   initializeEvexToVexInstPassPass(PR);
   initializeFixupLEAPassPass(PR);
-  initializeShadowCallStackPass(PR);
   initializeX86CallFrameOptimizationPass(PR);
   initializeX86CmovConverterPassPass(PR);
+  initializeX86ExpandPseudoPass(PR);
   initializeX86ExecutionDomainFixPass(PR);
   initializeX86DomainReassignmentPass(PR);
   initializeX86AvoidSFBPassPass(PR);
@@ -357,6 +357,13 @@ public:
     return DAG;
   }
 
+  ScheduleDAGInstrs *
+  createPostMachineScheduler(MachineSchedContext *C) const override {
+    ScheduleDAGMI *DAG = createGenericSchedPostRA(C);
+    DAG->addMutation(createX86MacroFusionDAGMutation());
+    return DAG;
+  }
+
   void addIRPasses() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
@@ -371,6 +378,8 @@ public:
   void addPreEmitPass() override;
   void addPreEmitPass2() override;
   void addPreSched2() override;
+
+  std::unique_ptr<CSEConfigBase> getCSEConfig() const override;
 };
 
 class X86ExecutionDomainFix : public ExecutionDomainFix {
@@ -490,7 +499,6 @@ void X86PassConfig::addPreEmitPass() {
     addPass(createBreakFalseDeps());
   }
 
-  addPass(createShadowCallStackPass());
   addPass(createX86IndirectBranchTrackingPass());
 
   if (UseVZeroUpper)
@@ -512,6 +520,13 @@ void X86PassConfig::addPreEmitPass2() {
   // correct CFA calculation rule where needed by inserting appropriate CFI
   // instructions.
   const Triple &TT = TM->getTargetTriple();
-  if (!TT.isOSDarwin() && !TT.isOSWindows())
+  const MCAsmInfo *MAI = TM->getMCAsmInfo();
+  if (!TT.isOSDarwin() &&
+      (!TT.isOSWindows() ||
+       MAI->getExceptionHandlingType() == ExceptionHandling::DwarfCFI))
     addPass(createCFIInstrInserter());
+}
+
+std::unique_ptr<CSEConfigBase> X86PassConfig::getCSEConfig() const {
+  return getStandardCSEConfigForOpt(TM->getOptLevel());
 }

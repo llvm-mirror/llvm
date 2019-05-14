@@ -1,9 +1,8 @@
 //===-- FunctionLoweringInfo.cpp ------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -322,13 +321,6 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       NewMap[MBBMap[Src]] = MBBMap[Dst];
     }
     EHInfo.EHPadUnwindMap = std::move(NewMap);
-    NewMap.clear();
-    for (auto &KV : EHInfo.ThrowUnwindMap) {
-      const auto *Src = KV.first.get<const BasicBlock *>();
-      const auto *Dst = KV.second.get<const BasicBlock *>();
-      NewMap[MBBMap[Src]] = MBBMap[Dst];
-    }
-    EHInfo.ThrowUnwindMap = std::move(NewMap);
   }
 }
 
@@ -343,6 +335,7 @@ void FunctionLoweringInfo::clear() {
   LiveOutRegInfo.clear();
   VisitedBBs.clear();
   ArgDbgValues.clear();
+  DescribedArgs.clear();
   ByValArgFrameIndexMap.clear();
   RegFixups.clear();
   RegsWithFixups.clear();
@@ -400,7 +393,7 @@ FunctionLoweringInfo::GetLiveOutRegInfo(unsigned Reg, unsigned BitWidth) {
 
   if (BitWidth > LOI->Known.getBitWidth()) {
     LOI->NumSignBits = 1;
-    LOI->Known = LOI->Known.zextOrTrunc(BitWidth);
+    LOI->Known = LOI->Known.zext(BitWidth, false /* => any extend */);
   }
 
   return LOI;

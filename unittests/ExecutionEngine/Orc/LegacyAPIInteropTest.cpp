@@ -1,9 +1,8 @@
 //===----------- CoreAPIsTest.cpp - Unit tests for Core ORC APIs ----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,7 +24,7 @@ TEST_F(LegacyAPIsStandardTest, TestLambdaSymbolResolver) {
 
   auto Resolver = createSymbolResolver(
       [&](const SymbolNameSet &Symbols) {
-        auto FlagsMap = JD.lookupFlags(Symbols);
+        auto FlagsMap = cantFail(JD.lookupFlags(Symbols));
         SymbolNameSet Result;
         for (auto &KV : FlagsMap)
           if (!KV.second.isStrong())
@@ -33,7 +32,7 @@ TEST_F(LegacyAPIsStandardTest, TestLambdaSymbolResolver) {
         return Result;
       },
       [&](std::shared_ptr<AsynchronousSymbolQuery> Q, SymbolNameSet Symbols) {
-        return JD.legacyLookup(std::move(Q), Symbols);
+        return cantFail(JD.legacyLookup(std::move(Q), Symbols));
       });
 
   auto RS = Resolver->getResponsibilitySet(SymbolNameSet({Bar, Baz}));

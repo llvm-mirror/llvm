@@ -1,9 +1,8 @@
 //===-- PPCISelLowering.h - PPC32 DAG Lowering Interface --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,7 +40,7 @@ namespace llvm {
     // the enum. The order of elements in this enum matters!
     // Values that are added after this entry:
     //     STBRX = ISD::FIRST_TARGET_MEMORY_OPCODE
-    // are considerd memory opcodes and are treated differently than entries
+    // are considered memory opcodes and are treated differently than entries
     // that come before it. For example, ADD or MUL should be placed before
     // the ISD::FIRST_TARGET_MEMORY_OPCODE while a LOAD or STORE should come
     // after it.
@@ -193,7 +192,7 @@ namespace llvm {
       /// Direct move from a GPR to a VSX register (zero)
       MTVSRZ,
 
-      /// Direct move of 2 consective GPR to a VSX register.
+      /// Direct move of 2 consecutive GPR to a VSX register.
       BUILD_FP128,
 
       /// Extract a subvector from signed integer vector and convert to FP.
@@ -265,11 +264,11 @@ namespace llvm {
       CR6UNSET,
 
       /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by initial-exec TLS
-      /// on PPC32.
+      /// for non-position independent code on PPC32.
       PPC32_GOT,
 
       /// GPRC = address of _GLOBAL_OFFSET_TABLE_. Used by general dynamic and
-      /// local dynamic TLS on PPC32.
+      /// local dynamic TLS and position indendepent code on PPC32.
       PPC32_PICGOT,
 
       /// G8RC = ADDIS_GOT_TPREL_HA %x2, Symbol - Used by the initial-exec
@@ -833,7 +832,7 @@ namespace llvm {
     EVT
     getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign,
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
-                        MachineFunction &MF) const override;
+                        const AttributeList &FuncAttributes) const override;
 
     /// Is unaligned memory access allowed for the given type, and is it fast
     /// relative to software emulation.
@@ -888,7 +887,8 @@ namespace llvm {
     bool useLoadStackGuardNode() const override;
     void insertSSPDeclarations(Module &M) const override;
 
-    bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
+    bool isFPImmLegal(const APFloat &Imm, EVT VT,
+                      bool ForCodeSize) const override;
 
     unsigned getJumpTableEncoding() const override;
     bool isJumpTableRelative() const override;
@@ -952,6 +952,8 @@ namespace llvm {
 
     SDValue LowerINT_TO_FPVector(SDValue Op, SelectionDAG &DAG,
                                  const SDLoc &dl) const;
+
+    SDValue LowerTRUNCATEVector(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue getFramePointerFrameIndex(SelectionDAG & DAG) const;
     SDValue getReturnAddrFrameIndex(SelectionDAG & DAG) const;
@@ -1119,6 +1121,7 @@ namespace llvm {
     SDValue combineSHL(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSRA(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSRL(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue combineMUL(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineADD(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineTRUNCATE(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSetCC(SDNode *N, DAGCombinerInfo &DCI) const;
@@ -1136,8 +1139,6 @@ namespace llvm {
     SDValue getRecipEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
                              int &RefinementSteps) const override;
     unsigned combineRepeatedFPDivisors() const override;
-
-    CCAssignFn *useFastISelCCs(unsigned Flag) const;
 
     SDValue
     combineElementTruncationToVectorTruncation(SDNode *N,
@@ -1168,30 +1169,6 @@ namespace llvm {
                              const TargetLibraryInfo *LibInfo);
 
   } // end namespace PPC
-
-  bool CC_PPC32_SVR4_Custom_Dummy(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
-                                  CCValAssign::LocInfo &LocInfo,
-                                  ISD::ArgFlagsTy &ArgFlags,
-                                  CCState &State);
-
-  bool CC_PPC32_SVR4_Custom_AlignArgRegs(unsigned &ValNo, MVT &ValVT,
-                                         MVT &LocVT,
-                                         CCValAssign::LocInfo &LocInfo,
-                                         ISD::ArgFlagsTy &ArgFlags,
-                                         CCState &State);
-
-  bool
-  CC_PPC32_SVR4_Custom_SkipLastArgRegsPPCF128(unsigned &ValNo, MVT &ValVT,
-                                                 MVT &LocVT,
-                                                 CCValAssign::LocInfo &LocInfo,
-                                                 ISD::ArgFlagsTy &ArgFlags,
-                                                 CCState &State);
-
-  bool CC_PPC32_SVR4_Custom_AlignFPArgRegs(unsigned &ValNo, MVT &ValVT,
-                                           MVT &LocVT,
-                                           CCValAssign::LocInfo &LocInfo,
-                                           ISD::ArgFlagsTy &ArgFlags,
-                                           CCState &State);
 
   bool isIntS16Immediate(SDNode *N, int16_t &Imm);
   bool isIntS16Immediate(SDValue Op, int16_t &Imm);

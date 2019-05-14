@@ -1,9 +1,8 @@
 //===- LoopIdiomRecognize.cpp - Loop idiom recognition --------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -285,7 +284,7 @@ bool LoopIdiomRecognize::runOnLoop(Loop *L) {
 
   // Determine if code size heuristics need to be applied.
   ApplyCodeSizeHeuristics =
-      L->getHeader()->getParent()->optForSize() && UseLIRCodeSizeHeurs;
+      L->getHeader()->getParent()->hasOptSize() && UseLIRCodeSizeHeurs;
 
   HasMemset = TLI->has(LibFunc_memset);
   HasMemsetPattern = TLI->has(LibFunc_memset_pattern16);
@@ -931,9 +930,8 @@ bool LoopIdiomRecognize::processLoopStridedStore(
 
     Module *M = TheStore->getModule();
     StringRef FuncName = "memset_pattern16";
-    Value *MSP =
-        M->getOrInsertFunction(FuncName, Builder.getVoidTy(),
-                               Int8PtrTy, Int8PtrTy, IntPtr);
+    FunctionCallee MSP = M->getOrInsertFunction(FuncName, Builder.getVoidTy(),
+                                                Int8PtrTy, Int8PtrTy, IntPtr);
     inferLibFuncAttributes(M, FuncName, *TLI);
 
     // Otherwise we should form a memset_pattern16.  PatternValue is known to be
@@ -1462,9 +1460,15 @@ bool LoopIdiomRecognize::recognizeAndInsertFFS() {
   const Value *Args[] =
       {InitX, ZeroCheck ? ConstantInt::getTrue(InitX->getContext())
                         : ConstantInt::getFalse(InitX->getContext())};
-  if (CurLoop->getHeader()->size() != IdiomCanonicalSize &&
+
+  // @llvm.dbg doesn't count as they have no semantic effect.
+  auto InstWithoutDebugIt = CurLoop->getHeader()->instructionsWithoutDebug();
+  uint32_t HeaderSize =
+      std::distance(InstWithoutDebugIt.begin(), InstWithoutDebugIt.end());
+
+  if (HeaderSize != IdiomCanonicalSize &&
       TTI->getIntrinsicCost(IntrinID, InitX->getType(), Args) >
-        TargetTransformInfo::TCC_Basic)
+          TargetTransformInfo::TCC_Basic)
     return false;
 
   transformLoopToCountable(IntrinID, PH, CntInst, CntPhi, InitX, DefX,
@@ -1529,7 +1533,7 @@ static CallInst *createPopcntIntrinsic(IRBuilder<> &IRBuilder, Value *Val,
   Type *Tys[] = {Val->getType()};
 
   Module *M = IRBuilder.GetInsertBlock()->getParent()->getParent();
-  Value *Func = Intrinsic::getDeclaration(M, Intrinsic::ctpop, Tys);
+  Function *Func = Intrinsic::getDeclaration(M, Intrinsic::ctpop, Tys);
   CallInst *CI = IRBuilder.CreateCall(Func, Ops);
   CI->setDebugLoc(DL);
 
@@ -1543,7 +1547,7 @@ static CallInst *createFFSIntrinsic(IRBuilder<> &IRBuilder, Value *Val,
   Type *Tys[] = {Val->getType()};
 
   Module *M = IRBuilder.GetInsertBlock()->getParent()->getParent();
-  Value *Func = Intrinsic::getDeclaration(M, IID, Tys);
+  Function *Func = Intrinsic::getDeclaration(M, IID, Tys);
   CallInst *CI = IRBuilder.CreateCall(Func, Ops);
   CI->setDebugLoc(DL);
 

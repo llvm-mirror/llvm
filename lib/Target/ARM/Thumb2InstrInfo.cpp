@@ -1,9 +1,8 @@
 //===- Thumb2InstrInfo.cpp - Thumb-2 Instruction Information --------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -639,7 +638,7 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
       // Replace the FrameIndex with fp/sp
       MI.getOperand(FrameRegIdx).ChangeToRegister(FrameReg, false);
       if (isSub) {
-        if (AddrMode == ARMII::AddrMode5)
+        if (AddrMode == ARMII::AddrMode5 || AddrMode == ARMII::AddrMode5FP16)
           // FIXME: Not consistent.
           ImmedOffset |= 1 << NumBits;
         else
@@ -653,7 +652,7 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
     // Otherwise, offset doesn't fit. Pull in what we can to simplify
     ImmedOffset = ImmedOffset & Mask;
     if (isSub) {
-      if (AddrMode == ARMII::AddrMode5)
+      if (AddrMode == ARMII::AddrMode5 || AddrMode == ARMII::AddrMode5FP16)
         // FIXME: Not consistent.
         ImmedOffset |= 1 << NumBits;
       else {

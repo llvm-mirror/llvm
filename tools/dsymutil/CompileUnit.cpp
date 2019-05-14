@@ -1,9 +1,8 @@
 //===- tools/dsymutil/CompileUnit.h - Dwarf compile unit ------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,6 +20,14 @@ static bool inFunctionScope(CompileUnit &U, unsigned Idx) {
     Idx = U.getInfo(Idx).ParentIdx;
   }
   return false;
+}
+
+uint16_t CompileUnit::getLanguage() {
+  if (!Language) {
+    DWARFDie CU = getOrigUnit().getUnitDIE();
+    Language = dwarf::toUnsigned(CU.find(dwarf::DW_AT_language), 0);
+  }
+  return Language;
 }
 
 void CompileUnit::markEverythingAsKept() {
@@ -56,12 +63,11 @@ void CompileUnit::markEverythingAsKept() {
 }
 
 uint64_t CompileUnit::computeNextUnitOffset() {
-  NextUnitOffset = StartOffset + 11 /* Header size */;
-  // The root DIE might be null, meaning that the Unit had nothing to
-  // contribute to the linked output. In that case, we will emit the
-  // unit header without any actual DIE.
-  if (NewUnit)
+  NextUnitOffset = StartOffset;
+  if (NewUnit) {
+    NextUnitOffset += 11 /* Header size */;
     NextUnitOffset += NewUnit->getUnitDie().getSize();
+  }
   return NextUnitOffset;
 }
 

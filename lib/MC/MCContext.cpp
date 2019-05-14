@@ -1,9 +1,8 @@
 //===- lib/MC/MCContext.cpp - Machine Code Context ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -38,6 +37,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
@@ -161,6 +161,9 @@ MCSymbol *MCContext::createSymbolImpl(const StringMapEntry<bool> *Name,
       return new (Name, *this) MCSymbolMachO(Name, IsTemporary);
     case MCObjectFileInfo::IsWasm:
       return new (Name, *this) MCSymbolWasm(Name, IsTemporary);
+    case MCObjectFileInfo::IsXCOFF:
+      // TODO: Need to implement class MCSymbolXCOFF.
+      break;
     }
   }
   return new (Name, *this) MCSymbol(MCSymbol::SymbolKindUnset, Name,
@@ -566,6 +569,31 @@ void MCContext::RemapDebugPaths() {
 // Dwarf Management
 //===----------------------------------------------------------------------===//
 
+void MCContext::setGenDwarfRootFile(StringRef InputFileName, StringRef Buffer) {
+  // MCDwarf needs the root file as well as the compilation directory.
+  // If we find a '.file 0' directive that will supersede these values.
+  Optional<MD5::MD5Result> Cksum;
+  if (getDwarfVersion() >= 5) {
+    MD5 Hash;
+    MD5::MD5Result Sum;
+    Hash.update(Buffer);
+    Hash.final(Sum);
+    Cksum = Sum;
+  }
+  // Canonicalize the root filename. It cannot be empty, and should not
+  // repeat the compilation dir.
+  StringRef FileName =
+      !getMainFileName().empty() ? StringRef(getMainFileName()) : InputFileName;
+  if (FileName.empty() || FileName == "-")
+    FileName = "<stdin>";
+  if (FileName.consume_front(getCompilationDir()))
+    if (llvm::sys::path::is_separator(FileName.front()))
+      FileName = FileName.drop_front();
+  assert(!FileName.empty());
+  setMCLineTableRootFile(
+      /*CUID=*/0, getCompilationDir(), FileName, Cksum, None);
+}
+
 /// getDwarfFile - takes a file name and number to place in the dwarf file and
 /// directory tables.  If the file number has already been allocated it is an
 /// error and zero is returned and the client reports the error, else the
@@ -573,11 +601,12 @@ void MCContext::RemapDebugPaths() {
 Expected<unsigned> MCContext::getDwarfFile(StringRef Directory,
                                            StringRef FileName,
                                            unsigned FileNumber,
-                                           MD5::MD5Result *Checksum,
+                                           Optional<MD5::MD5Result> Checksum,
                                            Optional<StringRef> Source,
                                            unsigned CUID) {
   MCDwarfLineTable &Table = MCDwarfLineTablesCUMap[CUID];
-  return Table.tryGetFile(Directory, FileName, Checksum, Source, FileNumber);
+  return Table.tryGetFile(Directory, FileName, Checksum, Source, DwarfVersion,
+                          FileNumber);
 }
 
 /// isValidDwarfFileNumber - takes a dwarf file number and returns true if it
@@ -585,7 +614,7 @@ Expected<unsigned> MCContext::getDwarfFile(StringRef Directory,
 bool MCContext::isValidDwarfFileNumber(unsigned FileNumber, unsigned CUID) {
   const MCDwarfLineTable &LineTable = getMCDwarfLineTable(CUID);
   if (FileNumber == 0)
-    return getDwarfVersion() >= 5 && LineTable.hasRootFile();
+    return getDwarfVersion() >= 5;
   if (FileNumber >= LineTable.getMCDwarfFiles().size())
     return false;
 

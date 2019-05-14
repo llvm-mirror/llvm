@@ -72,22 +72,34 @@ OPTIONS
 
   Path to object file to be symbolized.
 
-.. option:: -functions=[none|short|linkage]
+.. _llvm-symbolizer-opt-f:
+
+.. option:: -functions[=<none|short|linkage>], -f
 
   Specify the way function names are printed (omit function name,
   print short function name, or print full linkage name, respectively).
   Defaults to ``linkage``.
+
+.. _llvm-symbolizer-opt-use-symbol-table:
 
 .. option:: -use-symbol-table
 
  Prefer function names stored in symbol table to function names
  in debug info sections. Defaults to true.
 
+.. _llvm-symbolizer-opt-C:
+
 .. option:: -demangle, -C
 
  Print demangled function names. Defaults to true.
 
-.. option:: -inlining 
+.. option:: -no-demangle
+
+ Don't print demangled function names.
+
+.. _llvm-symbolizer-opt-i:
+
+.. option:: -inlining, -inlines, -i
 
  If a source code location is in an inlined function, prints all the
  inlnied frames. Defaults to true.
@@ -114,6 +126,48 @@ OPTIONS
 
  Print human readable output. If ``-inlining`` is specified, enclosing scope is
  prefixed by (inlined by). Refer to listed examples.
+
+.. option:: -basenames, -s
+
+ Strip directories when printing the file path.
+
+.. option:: -adjust-vma=<offset>
+
+ Add the specified offset to object file addresses when performing lookups. This
+ can be used to perform lookups as if the object were relocated by the offset.
+
+.. _llvm-symbolizer-opt-output-style:
+
+.. option:: -output-style=<LLVM|GNU>
+
+  Specify the preferred output style. Defaults to ``LLVM``. When the output
+  style is set to ``GNU``, the tool follows the style of GNU's **addr2line**.
+  The differences from the ``LLVM`` style are:
+  
+  * Does not print column of a source code location.
+
+  * Does not add an empty line after the report for an address.
+
+  * Does not replace the name of an inlined function with the name of the
+    topmost caller when inlined frames are not shown and ``-use-symbol-table``
+    is on.
+
+  .. code-block:: console
+
+    $ llvm-symbolizer -p -e=addr.exe 0x40054d 0x400568
+    inc at /tmp/x.c:3:3
+     (inlined by) main at /tmp/x.c:14:0
+
+    main at /tmp/x.c:14:3
+
+    $ llvm-symbolizer --output-style=LLVM -p -i=0 -e=addr.exe 0x40054d 0x400568
+    main at /tmp/x.c:3:3
+
+    main at /tmp/x.c:14:3
+
+    $ llvm-symbolizer --output-style=GNU -p -i=0 -e=addr.exe 0x40054d 0x400568
+    inc at /tmp/x.c:3
+    main at /tmp/x.c:14
 
 EXIT STATUS
 -----------

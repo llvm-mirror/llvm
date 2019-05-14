@@ -70,7 +70,7 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
   get_compiler_rt_path(compiler_rt_path)
   if(compiler_rt_path)
     list(REMOVE_ITEM runtimes ${compiler_rt_path})
-    if(NOT LLVM_BUILD_COMPILER_RT)
+    if(NOT DEFINED LLVM_BUILD_COMPILER_RT OR LLVM_BUILD_COMPILER_RT)
       list(INSERT runtimes 0 ${compiler_rt_path})
     endif()
   endif()
@@ -87,28 +87,21 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 
   # This variable makes sure that e.g. llvm-lit is found.
   set(LLVM_MAIN_SRC_DIR ${LLVM_BUILD_MAIN_SRC_DIR})
+  set(LLVM_CMAKE_PATH ${LLVM_MAIN_SRC_DIR}/cmake/modules)
 
   if(APPLE)
     set(LLVM_ENABLE_LIBCXX ON CACHE BOOL "")
   endif()
 
-  set(SAFE_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-  set(SAFE_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
-
   include(CheckLibraryExists)
   include(CheckCCompilerFlag)
 
-  check_library_exists(c fopen "" LLVM_HAS_C_LIB)
-  check_c_compiler_flag(-nodefaultlibs LLVM_HAS_NODEFAULTLIBS_FLAG)
-  if(LLVM_HAS_NODEFAULTLIBS_FLAG)
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -nodefaultlibs")
-    if(LLVM_HAS_C_LIB)
-      list(APPEND CMAKE_REQUIRED_LIBRARIES c)
-    endif()
-  endif()
+  # We don't have libc++ (yet).
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -nostdlib++")
 
   # Avoid checking whether the compiler is working.
   set(LLVM_COMPILER_CHECKED ON)
+
   # Enable warnings, otherwise -w gets added to the cflags by HandleLLVMOptions
   # resulting in unjustified successes by check_cxx_compiler_flag.
   set(LLVM_ENABLE_WARNINGS ON)
@@ -116,9 +109,13 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
   # Handle common options used by all runtimes.
   include(AddLLVM)
   include(HandleLLVMOptions)
+  include(FindPythonInterp)
 
-  set(CMAKE_REQUIRED_FLAGS ${SAFE_CMAKE_REQUIRED_FLAGS})
-  set(CMAKE_REQUIRED_LIBRARIES ${SAFE_CMAKE_REQUIRED_LIBRARIES})
+  # Remove the -nostdlib++ option we've added earlier.
+  string(REPLACE "-nostdlib++" "" CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+
+  # This can be used to detect whether we're in the runtimes build.
+  set(RUNTIMES_BUILD ON)
 
   foreach(entry ${runtimes})
     get_filename_component(projName ${entry} NAME)
@@ -126,8 +123,6 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
     # TODO: Clean this up as part of an interface standardization
     string(REPLACE "-" "_" canon_name ${projName})
     string(TOUPPER ${canon_name} canon_name)
-    # The subdirectories need to treat this as standalone builds
-    set(${canon_name}_STANDALONE_BUILD On)
 
     if(LLVM_RUNTIMES_LIBDIR_SUFFIX)
       set(${canon_name}_LIBDIR_SUFFIX "${LLVM_RUNTIMES_LIBDIR_SUFFIX}" CACHE STRING "" FORCE)
@@ -135,7 +130,7 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 
     # Setting a variable to let sub-projects detect which other projects
     # will be included under here.
-    set(HAVE_${canon_name} On)
+    set(HAVE_${canon_name} ON)
   endforeach()
 
   # We do this in two loops so that HAVE_* is set for each runtime before the
@@ -216,8 +211,11 @@ else() # if this is included from LLVM's CMake
   endif()
 
   function(builtin_default_target compiler_rt_path)
+    cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
+
     llvm_ExternalProject_Add(builtins
                              ${compiler_rt_path}/lib/builtins
+                             DEPENDS ${ARG_DEPENDS}
                              CMAKE_ARGS -DLLVM_LIBRARY_OUTPUT_INTDIR=${LLVM_LIBRARY_DIR}
                                         -DLLVM_RUNTIME_OUTPUT_INTDIR=${LLVM_TOOLS_BINARY_DIR}
                                         -DLLVM_DEFAULT_TARGET_TRIPLE=${TARGET_TRIPLE}
@@ -232,6 +230,8 @@ else() # if this is included from LLVM's CMake
   endfunction()
 
   function(builtin_register_target compiler_rt_path target)
+    cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
+
     string(REPLACE "-" ";" builtin_target_list ${target})
     foreach(item ${builtin_target_list})
       string(TOLOWER "${item}" item_lower)
@@ -242,7 +242,8 @@ else() # if this is included from LLVM's CMake
 
     get_cmake_property(variableNames VARIABLES)
     foreach(variableName ${variableNames})
-      if(variableName MATCHES "^BUILTINS_${target}")
+      string(FIND "${variableName}" "BUILTINS_${target}" out)
+      if("${out}" EQUAL 0)
         string(REPLACE "BUILTINS_${target}_" "" new_name ${variableName})
         list(APPEND ${target}_extra_args "-D${new_name}=${${variableName}}")
       endif()
@@ -250,6 +251,7 @@ else() # if this is included from LLVM's CMake
 
     llvm_ExternalProject_Add(builtins-${target}
                              ${compiler_rt_path}/lib/builtins
+                             DEPENDS ${ARG_DEPENDS}
                              CMAKE_ARGS -DLLVM_LIBRARY_OUTPUT_INTDIR=${LLVM_LIBRARY_DIR}
                                         -DLLVM_RUNTIME_OUTPUT_INTDIR=${LLVM_TOOLS_BINARY_DIR}
                                         -DLLVM_DEFAULT_TARGET_TRIPLE=${target}
@@ -271,10 +273,12 @@ else() # if this is included from LLVM's CMake
   get_compiler_rt_path(compiler_rt_path)
   if(compiler_rt_path)
     if(NOT LLVM_BUILTIN_TARGETS)
-      builtin_default_target(${compiler_rt_path})
+      builtin_default_target(${compiler_rt_path}
+        DEPENDS clang-resource-headers)
     else()
       if("default" IN_LIST LLVM_BUILTIN_TARGETS)
-        builtin_default_target(${compiler_rt_path})
+        builtin_default_target(${compiler_rt_path}
+          DEPENDS clang-resource-headers)
         list(REMOVE_ITEM LLVM_BUILTIN_TARGETS "default")
       else()
         add_custom_target(builtins)
@@ -283,7 +287,8 @@ else() # if this is included from LLVM's CMake
       endif()
 
       foreach(target ${LLVM_BUILTIN_TARGETS})
-        builtin_register_target(${compiler_rt_path} ${target})
+        builtin_register_target(${compiler_rt_path} ${target}
+          DEPENDS clang-resource-headers)
 
         add_dependencies(builtins builtins-${target})
         add_dependencies(install-builtins install-builtins-${target})
@@ -314,8 +319,16 @@ else() # if this is included from LLVM's CMake
     list(APPEND runtime_names ${projName})
   endforeach()
 
+  if(LLVM_RUNTIME_BUILD_ID_LINK_TARGETS)
+    configure_file(
+      ${CMAKE_CURRENT_SOURCE_DIR}/llvm-strip-link.in
+      ${CMAKE_CURRENT_BINARY_DIR}/llvm-strip-link
+      @ONLY
+    )
+  endif()
+
   function(runtime_default_target)
-    cmake_parse_arguments(ARG "" "" "DEPS;PREFIXES" ${ARGN})
+    cmake_parse_arguments(ARG "" "" "DEPENDS;PREFIXES" ${ARGN})
 
     include(${LLVM_BINARY_DIR}/runtimes/Components.cmake OPTIONAL)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LLVM_BINARY_DIR}/runtimes/Components.cmake)
@@ -341,7 +354,7 @@ else() # if this is included from LLVM's CMake
 
     llvm_ExternalProject_Add(runtimes
                              ${CMAKE_CURRENT_SOURCE_DIR}
-                             DEPENDS ${ARG_DEPS}
+                             DEPENDS ${ARG_DEPENDS}
                              # Builtins were built separately above
                              CMAKE_ARGS -DCOMPILER_RT_BUILD_BUILTINS=Off
                                         -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
@@ -368,11 +381,11 @@ else() # if this is included from LLVM's CMake
   # runtime_register_target(target)
   #   Utility function to register external runtime target.
   function(runtime_register_target name target)
-    cmake_parse_arguments(ARG "" "" "DEPS" ${ARGN})
+    cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
     include(${LLVM_BINARY_DIR}/runtimes/${name}/Components.cmake OPTIONAL)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LLVM_BINARY_DIR}/runtimes/${name}/Components.cmake)
 
-    set(${name}_deps ${ARG_DEPS})
+    set(${name}_deps ${ARG_DEPENDS})
     if(NOT name STREQUAL target)
       list(APPEND ${name}_deps runtimes-${target})
     endif()
@@ -394,11 +407,9 @@ else() # if this is included from LLVM's CMake
     endforeach()
 
     foreach(component ${LLVM_RUNTIME_DISTRIBUTION_COMPONENTS})
-      if(NOT "${target_name}:${target_name}-${component}" IN_LIST extra_targets)
-        list(APPEND ${name}_extra_targets
-          "${target_name}:${target_name}-${component}"
-          "${target_name}:${target_name}-install-${component}")
-      endif()
+      set(${component}-${name} ${component})
+      set(install-${component}-${name} ${component})
+      list(APPEND ${name}_extra_targets ${component}-${name} install-${component}-${name})
     endforeach()
 
     if(LLVM_INCLUDE_TESTS)
@@ -415,14 +426,21 @@ else() # if this is included from LLVM's CMake
 
     get_cmake_property(variableNames VARIABLES)
     foreach(variableName ${variableNames})
-      if(variableName MATCHES "^RUNTIMES_${name}")
+      string(FIND "${variableName}" "RUNTIMES_${name}_" out)
+      if("${out}" EQUAL 0)
         string(REPLACE "RUNTIMES_${name}_" "" new_name ${variableName})
         list(APPEND ${name}_extra_args "-D${new_name}=${${variableName}}")
-      elseif(variableName MATCHES "^RUNTIMES_${target}")
+      endif()
+      string(FIND "${variableName}" "RUNTIMES_${target}_" out)
+      if("${out}" EQUAL 0)
         string(REPLACE "RUNTIMES_${target}_" "" new_name ${variableName})
         list(APPEND ${name}_extra_args "-D${new_name}=${${variableName}}")
       endif()
     endforeach()
+
+    if(target IN_LIST LLVM_RUNTIME_BUILD_ID_LINK_TARGETS)
+      list(APPEND EXTRA_ARGS STRIP_TOOL ${CMAKE_CURRENT_BINARY_DIR}/llvm-strip-link)
+    endif()
 
     llvm_ExternalProject_Add(runtimes-${name}
                              ${CMAKE_CURRENT_SOURCE_DIR}
@@ -456,13 +474,12 @@ else() # if this is included from LLVM's CMake
     # together in a single CMake invocaiton.
     if(NOT LLVM_RUNTIME_TARGETS)
       runtime_default_target(
-        DEPS ${deps}
-        PREFIXES ${prefixes}
-        )
+        DEPENDS ${deps}
+        PREFIXES ${prefixes})
     else()
       if("default" IN_LIST LLVM_RUNTIME_TARGETS)
         runtime_default_target(
-          DEPS ${deps}
+          DEPENDS ${deps}
           PREFIXES ${prefixes})
         list(REMOVE_ITEM LLVM_RUNTIME_TARGETS "default")
       else()
@@ -485,8 +502,7 @@ else() # if this is included from LLVM's CMake
 
       foreach(name ${LLVM_RUNTIME_TARGETS})
         runtime_register_target(${name} ${name}
-          DEPS ${deps}
-          )
+          DEPENDS ${deps})
 
         add_dependencies(runtimes runtimes-${name})
         add_dependencies(runtimes-configure runtimes-${name}-configure)
@@ -498,29 +514,16 @@ else() # if this is included from LLVM's CMake
         endif()
       endforeach()
 
-      foreach(sanitizer ${LLVM_RUNTIME_SANITIZERS})
-        if (sanitizer STREQUAL "Address")
-          set(sanitizer_name "asan")
-        elseif (sanitizer STREQUAL "Memory")
-          set(sanitizer_name "msan")
-        elseif (sanitizer STREQUAL "Thread")
-          set(sanitizer_name "tsan")
-        elseif (sanitizer STREQUAL "Undefined")
-          set(sanitizer_name "ubsan")
-        else()
-          message(FATAL_ERROR "Unsupported value of LLVM_RUNTIME_TARGET_SANITIZERS: ${sanitizers}")
-        endif()
-        foreach(name ${LLVM_RUNTIME_SANITIZER_${sanitizer}_TARGETS})
-          runtime_register_target(${name}-${sanitizer_name} ${name}
-            DEPS runtimes-${name}
-            CMAKE_ARGS -DLLVM_USE_SANITIZER=${sanitizer}
-                       -DLLVM_RUNTIMES_PREFIX=${name}/
-                       -DLLVM_RUNTIMES_LIBDIR_SUFFIX=/${sanitizer_name}
-            )
-          add_dependencies(runtimes runtimes-${name}-${sanitizer_name})
-          add_dependencies(runtimes-configure runtimes-${name}-${sanitizer_name}-configure)
-          add_dependencies(install-runtimes install-runtimes-${name}-${sanitizer_name})
-          add_dependencies(install-runtimes-stripped install-runtimes-${name}-${sanitizer_name}-stripped)
+      foreach(multilib ${LLVM_RUNTIME_MULTILIBS})
+        foreach(name ${LLVM_RUNTIME_MULTILIB_${multilib}_TARGETS})
+          runtime_register_target(${name}+${multilib} ${name}
+            DEPENDS runtimes-${name}
+            CMAKE_ARGS -DLLVM_RUNTIMES_PREFIX=${name}/
+                       -DLLVM_RUNTIMES_LIBDIR_SUFFIX=/${multilib})
+          add_dependencies(runtimes runtimes-${name}+${multilib})
+          add_dependencies(runtimes-configure runtimes-${name}+${multilib}-configure)
+          add_dependencies(install-runtimes install-runtimes-${name}+${multilib})
+          add_dependencies(install-runtimes-stripped install-runtimes-${name}+${multilib}-stripped)
         endforeach()
       endforeach()
     endif()

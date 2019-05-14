@@ -1,11 +1,30 @@
+//===- MicrosoftDemangleNodes.h ---------------------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file defines the AST nodes used in the MSVC demangler.
+//
+//===----------------------------------------------------------------------===//
+
 #ifndef LLVM_SUPPORT_MICROSOFTDEMANGLENODES_H
 #define LLVM_SUPPORT_MICROSOFTDEMANGLENODES_H
 
-#include "llvm/Demangle/Compiler.h"
+#include "llvm/Demangle/DemangleConfig.h"
 #include "llvm/Demangle/StringView.h"
 #include <array>
 
+namespace llvm {
+namespace itanium_demangle {
 class OutputStream;
+}
+}
+
+using llvm::itanium_demangle::OutputStream;
+using llvm::itanium_demangle::StringView;
 
 namespace llvm {
 namespace ms_demangle {
@@ -151,8 +170,8 @@ enum class IntrinsicFunctionKind : uint8_t {
   VectorCopyCtorIter,         // ?__G vector copy constructor iterator
   VectorVbaseCopyCtorIter,    // ?__H vector vbase copy constructor iterator
   ManVectorVbaseCopyCtorIter, // ?__I managed vector vbase copy constructor
-  CoAwait,                    // ?__L co_await
-  Spaceship,                  // operator<=>
+  CoAwait,                    // ?__L operator co_await
+  Spaceship,                  // ?__M operator<=>
   MaxIntrinsic
 };
 

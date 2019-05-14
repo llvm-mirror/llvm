@@ -1,9 +1,8 @@
 //===- LoopVectorizationLegality.cpp --------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -22,6 +21,8 @@ using namespace llvm;
 
 #define LV_NAME "loop-vectorize"
 #define DEBUG_TYPE LV_NAME
+
+extern cl::opt<bool> EnableVPlanPredication;
 
 static cl::opt<bool>
     EnableIfConversion("enable-if-conversion", cl::init(true), cl::Hidden,
@@ -101,6 +102,25 @@ LoopVectorizeHints::LoopVectorizeHints(const Loop *L,
     IsVectorized.Value = Width.Value == 1 && Interleave.Value == 1;
   LLVM_DEBUG(if (InterleaveOnlyWhenForced && Interleave.Value == 1) dbgs()
              << "LV: Interleaving disabled by the pass manager\n");
+}
+
+void LoopVectorizeHints::setAlreadyVectorized() {
+  LLVMContext &Context = TheLoop->getHeader()->getContext();
+
+  MDNode *IsVectorizedMD = MDNode::get(
+      Context,
+      {MDString::get(Context, "llvm.loop.isvectorized"),
+       ConstantAsMetadata::get(ConstantInt::get(Context, APInt(32, 1)))});
+  MDNode *LoopID = TheLoop->getLoopID();
+  MDNode *NewLoopID =
+      makePostTransformationMetadata(Context, LoopID,
+                                     {Twine(Prefix(), "vectorize.").str(),
+                                      Twine(Prefix(), "interleave.").str()},
+                                     {IsVectorizedMD});
+  TheLoop->setLoopID(NewLoopID);
+
+  // Update internal cache.
+  IsVectorized.Value = 1;
 }
 
 bool LoopVectorizeHints::allowVectorization(
@@ -228,57 +248,6 @@ void LoopVectorizeHints::setHint(StringRef Name, Metadata *Arg) {
       break;
     }
   }
-}
-
-MDNode *LoopVectorizeHints::createHintMetadata(StringRef Name,
-                                               unsigned V) const {
-  LLVMContext &Context = TheLoop->getHeader()->getContext();
-  Metadata *MDs[] = {
-      MDString::get(Context, Name),
-      ConstantAsMetadata::get(ConstantInt::get(Type::getInt32Ty(Context), V))};
-  return MDNode::get(Context, MDs);
-}
-
-bool LoopVectorizeHints::matchesHintMetadataName(MDNode *Node,
-                                                 ArrayRef<Hint> HintTypes) {
-  MDString *Name = dyn_cast<MDString>(Node->getOperand(0));
-  if (!Name)
-    return false;
-
-  for (auto H : HintTypes)
-    if (Name->getString().endswith(H.Name))
-      return true;
-  return false;
-}
-
-void LoopVectorizeHints::writeHintsToMetadata(ArrayRef<Hint> HintTypes) {
-  if (HintTypes.empty())
-    return;
-
-  // Reserve the first element to LoopID (see below).
-  SmallVector<Metadata *, 4> MDs(1);
-  // If the loop already has metadata, then ignore the existing operands.
-  MDNode *LoopID = TheLoop->getLoopID();
-  if (LoopID) {
-    for (unsigned i = 1, ie = LoopID->getNumOperands(); i < ie; ++i) {
-      MDNode *Node = cast<MDNode>(LoopID->getOperand(i));
-      // If node in update list, ignore old value.
-      if (!matchesHintMetadataName(Node, HintTypes))
-        MDs.push_back(Node);
-    }
-  }
-
-  // Now, add the missing hints.
-  for (auto H : HintTypes)
-    MDs.push_back(createHintMetadata(Twine(Prefix(), H.Name).str(), H.Value));
-
-  // Replace current metadata node with new one.
-  LLVMContext &Context = TheLoop->getHeader()->getContext();
-  MDNode *NewLoopID = MDNode::get(Context, MDs);
-  // Set operand 0 to refer to the loop id itself.
-  NewLoopID->replaceOperandWith(0, NewLoopID);
-
-  TheLoop->setLoopID(NewLoopID);
 }
 
 bool LoopVectorizationRequirements::doesNotMeet(
@@ -488,7 +457,10 @@ bool LoopVectorizationLegality::canVectorizeOuterLoop() {
     // Check whether the BranchInst is a supported one. Only unconditional
     // branches, conditional branches with an outer loop invariant condition or
     // backedges are supported.
-    if (Br && Br->isConditional() &&
+    // FIXME: We skip these checks when VPlan predication is enabled as we
+    // want to allow divergent branches. This whole check will be removed
+    // once VPlan predication is on by default.
+    if (!EnableVPlanPredication && Br && Br->isConditional() &&
         !TheLoop->isLoopInvariant(Br->getCondition()) &&
         !LI->isLoopHeader(Br->getSuccessor(0)) &&
         !LI->isLoopHeader(Br->getSuccessor(1))) {
@@ -741,18 +713,21 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         return false;
       }
 
-      // Intrinsics such as powi,cttz and ctlz are legal to vectorize if the
-      // second argument is the same (i.e. loop invariant)
-      if (CI && hasVectorInstrinsicScalarOpd(
-                    getVectorIntrinsicIDForCall(CI, TLI), 1)) {
+      // Some intrinsics have scalar arguments and should be same in order for
+      // them to be vectorized (i.e. loop invariant).
+      if (CI) {
         auto *SE = PSE.getSE();
-        if (!SE->isLoopInvariant(PSE.getSCEV(CI->getOperand(1)), TheLoop)) {
-          ORE->emit(createMissedAnalysis("CantVectorizeIntrinsic", CI)
-                    << "intrinsic instruction cannot be vectorized");
-          LLVM_DEBUG(dbgs()
-                     << "LV: Found unvectorizable intrinsic " << *CI << "\n");
-          return false;
-        }
+        Intrinsic::ID IntrinID = getVectorIntrinsicIDForCall(CI, TLI);
+        for (unsigned i = 0, e = CI->getNumArgOperands(); i != e; ++i)
+          if (hasVectorInstrinsicScalarOpd(IntrinID, i)) {
+            if (!SE->isLoopInvariant(PSE.getSCEV(CI->getOperand(i)), TheLoop)) {
+              ORE->emit(createMissedAnalysis("CantVectorizeIntrinsic", CI)
+                        << "intrinsic instruction cannot be vectorized");
+              LLVM_DEBUG(dbgs() << "LV: Found unvectorizable intrinsic " << *CI
+                                << "\n");
+              return false;
+            }
+          }
       }
 
       // Check that the instruction return type is vectorizable.

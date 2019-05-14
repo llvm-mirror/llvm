@@ -1,9 +1,8 @@
 //===- TargetSelectionDAG.td - Common code for DAG isels ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -125,7 +124,7 @@ def SDTIntSatNoShOp : SDTypeProfile<1, 2, [   // ssat with no shift
 def SDTIntBinHiLoOp : SDTypeProfile<2, 2, [ // mulhi, mullo, sdivrem, udivrem
   SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisSameAs<0, 3>,SDTCisInt<0>
 ]>;
-def SDTIntScaledBinOp : SDTypeProfile<1, 3, [  // smulfix
+def SDTIntScaledBinOp : SDTypeProfile<1, 3, [  // smulfix, umulfix
   SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>, SDTCisInt<0>, SDTCisInt<3>
 ]>;
 
@@ -265,6 +264,11 @@ def SDTAtomic3 : SDTypeProfile<1, 3, [
 def SDTAtomic2 : SDTypeProfile<1, 2, [
   SDTCisSameAs<0,2>, SDTCisInt<0>, SDTCisPtrTy<1>
 ]>;
+
+def SDTFPAtomic2 : SDTypeProfile<1, 2, [
+  SDTCisSameAs<0,2>, SDTCisFP<0>, SDTCisPtrTy<1>
+]>;
+
 def SDTAtomicStore : SDTypeProfile<0, 2, [
   SDTCisPtrTy<0>, SDTCisInt<1>
 ]>;
@@ -385,7 +389,9 @@ def saddsat    : SDNode<"ISD::SADDSAT"   , SDTIntBinOp, [SDNPCommutative]>;
 def uaddsat    : SDNode<"ISD::UADDSAT"   , SDTIntBinOp, [SDNPCommutative]>;
 def ssubsat    : SDNode<"ISD::SSUBSAT"   , SDTIntBinOp>;
 def usubsat    : SDNode<"ISD::USUBSAT"   , SDTIntBinOp>;
+
 def smulfix    : SDNode<"ISD::SMULFIX"   , SDTIntScaledBinOp, [SDNPCommutative]>;
+def umulfix    : SDNode<"ISD::UMULFIX"   , SDTIntScaledBinOp, [SDNPCommutative]>;
 
 def sext_inreg : SDNode<"ISD::SIGN_EXTEND_INREG", SDTExtInreg>;
 def sext_invec : SDNode<"ISD::SIGN_EXTEND_VECTOR_INREG", SDTExtInvec>;
@@ -511,6 +517,11 @@ def atomic_load_umin : SDNode<"ISD::ATOMIC_LOAD_UMIN", SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_load_umax : SDNode<"ISD::ATOMIC_LOAD_UMAX", SDTAtomic2,
                     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+def atomic_load_fadd : SDNode<"ISD::ATOMIC_LOAD_FADD" , SDTFPAtomic2,
+                    [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+def atomic_load_fsub : SDNode<"ISD::ATOMIC_LOAD_FSUB" , SDTFPAtomic2,
+                    [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand]>;
+
 def atomic_load      : SDNode<"ISD::ATOMIC_LOAD", SDTAtomicLoad,
                     [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def atomic_store     : SDNode<"ISD::ATOMIC_STORE", SDTAtomicStore,
@@ -771,14 +782,11 @@ class FPImmLeaf<ValueType vt, code pred, SDNodeXForm xform = NOOP_SDNodeXForm>
 def vtInt      : PatLeaf<(vt),  [{ return N->getVT().isInteger(); }]>;
 def vtFP       : PatLeaf<(vt),  [{ return N->getVT().isFloatingPoint(); }]>;
 
-def immAllOnesV: PatLeaf<(build_vector), [{
-  return ISD::isBuildVectorAllOnes(N);
-}]>;
-def immAllZerosV: PatLeaf<(build_vector), [{
-  return ISD::isBuildVectorAllZeros(N);
-}]>;
-
-
+// Use ISD::isBuildVectorAllOnes or ISD::isBuildVectorAllZeros to look for
+// the corresponding build_vector. Will look through bitcasts except when used
+// as a pattern root.
+def immAllOnesV; // ISD::isBuildVectorAllOnes
+def immAllZerosV; // ISD::isBuildVectorAllZeros
 
 // Other helper fragments.
 def not  : PatFrag<(ops node:$in), (xor node:$in, -1)>;

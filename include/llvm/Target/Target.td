@@ -1,9 +1,8 @@
 //===- Target.td - Target Independent TableGen interface ---*- tablegen -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -122,6 +121,10 @@ class ComposedSubRegIndex<SubRegIndex A, SubRegIndex B>
 // this register class when printing.
 class RegAltNameIndex {
   string Namespace = "";
+
+  // A set to be used if the name for a register is not defined in this set.
+  // This allows creating name sets with only a few alternative names.
+  RegAltNameIndex FallbackRegAltNameIndex = ?;
 }
 def NoRegAltName : RegAltNameIndex;
 
@@ -457,7 +460,11 @@ class Instruction {
   bit isCommutable = 0;     // Is this 3 operand instruction commutable?
   bit isTerminator = 0;     // Is this part of the terminator for a basic block?
   bit isReMaterializable = 0; // Is this instruction re-materializable?
-  bit isPredicable = 0;     // Is this instruction predicable?
+  bit isPredicable = 0;     // 1 means this instruction is predicable
+                            // even if it does not have any operand
+                            // tablegen can identify as a predicate
+  bit isUnpredicable = 0;   // 1 means this instruction is not predicable
+                            // even if it _does_ have a predicate operand
   bit hasDelaySlot = 0;     // Does this instruction have an delay slot?
   bit usesCustomInserter = 0; // Pseudo instr needing special help.
   bit hasPostISelHook = 0;  // To be *adjusted* after isel by target hook.
@@ -909,7 +916,7 @@ class InstrInfo {
 }
 
 // Standard Pseudo Instructions.
-// This list must match TargetOpcodes.h and CodeGenTarget.cpp.
+// This list must match TargetOpcodes.def.
 // Only these instructions are allowed in the TargetOpcode namespace.
 // Ensure mayLoad and mayStore have a default value, so as not to break
 // targets that set guessInstructionProperties=0. Any local definition of
@@ -933,6 +940,15 @@ def INLINEASM : StandardPseudoInstruction {
   let InOperandList = (ins variable_ops);
   let AsmString = "";
   let hasSideEffects = 0;  // Note side effect is encoded in an operand.
+}
+def INLINEASM_BR : StandardPseudoInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins variable_ops);
+  let AsmString = "";
+  let hasSideEffects = 0;  // Note side effect is encoded in an operand.
+  let isTerminator = 1;
+  let isBranch = 1;
+  let isIndirectBranch = 1;
 }
 def CFI_INSTRUCTION : StandardPseudoInstruction {
   let OutOperandList = (outs);

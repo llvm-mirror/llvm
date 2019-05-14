@@ -1,9 +1,8 @@
 //===-- XCoreISelLowering.cpp - XCore DAG Lowering Implementation ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1007,6 +1006,27 @@ LowerATOMIC_STORE(SDValue Op, SelectionDAG &DAG) const {
                              N->getAlignment(), N->getMemOperand()->getFlags(),
                              N->getAAInfo());
   return SDValue();
+}
+
+MachineMemOperand::Flags
+XCoreTargetLowering::getMMOFlags(const Instruction &I) const {
+  // Because of how we convert atomic_load and atomic_store to normal loads and
+  // stores in the DAG, we need to ensure that the MMOs are marked volatile
+  // since DAGCombine hasn't been updated to account for atomic, but non
+  // volatile loads.  (See D57601)
+  if (auto *SI = dyn_cast<StoreInst>(&I))
+    if (SI->isAtomic())
+      return MachineMemOperand::MOVolatile;
+  if (auto *LI = dyn_cast<LoadInst>(&I))
+    if (LI->isAtomic())
+      return MachineMemOperand::MOVolatile;
+  if (auto *AI = dyn_cast<AtomicRMWInst>(&I))
+    if (AI->isAtomic())
+      return MachineMemOperand::MOVolatile;
+  if (auto *AI = dyn_cast<AtomicCmpXchgInst>(&I))
+    if (AI->isAtomic())
+      return MachineMemOperand::MOVolatile;
+  return MachineMemOperand::MONone;
 }
 
 //===----------------------------------------------------------------------===//

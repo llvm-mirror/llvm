@@ -1,9 +1,8 @@
 //===-Config.h - LLVM Link Time Optimizer Configuration -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -56,6 +55,9 @@ struct Config {
   /// Disable entirely the optimizer, including importing for ThinLTO
   bool CodeGenOnly = false;
 
+  /// Run PGO context sensitive IR instrumentation.
+  bool RunCSIRInstr = false;
+
   /// If this field is set, the set of passes run in the middle-end optimizer
   /// will be the one specified by the string. Only works with the new pass
   /// manager as the old one doesn't have this ability.
@@ -74,6 +76,9 @@ struct Config {
   /// with this triple.
   std::string DefaultTriple;
 
+  /// Context Sensitive PGO profile path.
+  std::string CSIRProfile;
+
   /// Sample PGO profile path.
   std::string SampleProfile;
 
@@ -90,6 +95,9 @@ struct Config {
 
   /// Optimization remarks file path.
   std::string RemarksFilename = "";
+
+  /// Optimization remarks pass filter.
+  std::string RemarksPasses = "";
 
   /// Whether to emit optimization remarks with hotness informations.
   bool RemarksWithHotness = false;
@@ -133,7 +141,7 @@ struct Config {
   ///
   /// Note that in out-of-process backend scenarios, none of the hooks will be
   /// called for ThinLTO tasks.
-  typedef std::function<bool(unsigned Task, const Module &)> ModuleHookFn;
+  using ModuleHookFn = std::function<bool(unsigned Task, const Module &)>;
 
   /// This module hook is called after linking (regular LTO) or loading
   /// (ThinLTO) the module, before modifying it.
@@ -166,8 +174,8 @@ struct Config {
   ///
   /// It is called regardless of whether the backend is in-process, although it
   /// is not called from individual backend processes.
-  typedef std::function<bool(const ModuleSummaryIndex &Index)>
-      CombinedIndexHookFn;
+  using CombinedIndexHookFn =
+      std::function<bool(const ModuleSummaryIndex &Index)>;
   CombinedIndexHookFn CombinedIndexHook;
 
   /// This is a convenience function that configures this Config object to write

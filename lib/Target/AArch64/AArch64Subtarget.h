@@ -1,9 +1,8 @@
 //===--- AArch64Subtarget.h - Define Subtarget for the AArch64 -*- C++ -*--===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,6 +45,7 @@ public:
     CortexA72,
     CortexA73,
     CortexA75,
+    CortexA76,
     Cyclone,
     ExynosM1,
     ExynosM3,
@@ -173,6 +173,9 @@ protected:
   bool DisableLatencySchedHeuristic = false;
   bool UseRSqrt = false;
   bool Force32BitJumpTables = false;
+  bool UseEL1ForTP = false;
+  bool UseEL2ForTP = false;
+  bool UseEL3ForTP = false;
   uint8_t MaxInterleaveFactor = 2;
   uint8_t VectorInsertExtractBaseCost = 3;
   uint16_t CacheLineSize = 0;
@@ -323,6 +326,10 @@ public:
            hasFuseAES() || hasFuseArithmeticLogic() ||
            hasFuseCCSelect() || hasFuseLiterals();
   }
+
+  bool useEL1ForTP() const { return UseEL1ForTP; }
+  bool useEL2ForTP() const { return UseEL2ForTP; }
+  bool useEL3ForTP() const { return UseEL3ForTP; }
 
   bool useRSqrt() const { return UseRSqrt; }
   bool force32BitJumpTables() const { return Force32BitJumpTables; }

@@ -1,9 +1,8 @@
 //===---- PPCReduceCRLogicals.cpp - Reduce CR Bit Logical operations ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===---------------------------------------------------------------------===//
 //
@@ -48,10 +47,6 @@ STATISTIC(NumNotSplitChainCopies,
           "Number of blocks not split due to operands being chained copies.");
 STATISTIC(NumNotSplitWrongOpcode,
           "Number of blocks not split due to the wrong opcode.");
-
-namespace llvm {
-  void initializePPCReduceCRLogicalsPass(PassRegistry&);
-}
 
 /// Given a basic block \p Successor that potentially contains PHIs, this
 /// function will look for any incoming values in the PHIs that are supposed to

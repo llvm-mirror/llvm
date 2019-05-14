@@ -1,9 +1,8 @@
 //===-LTOCodeGenerator.cpp - LLVM Link Time Optimizer ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -86,9 +85,20 @@ cl::opt<std::string>
                        cl::desc("Output filename for pass remarks"),
                        cl::value_desc("filename"));
 
+cl::opt<std::string>
+    LTORemarksPasses("lto-pass-remarks-filter",
+                     cl::desc("Only record optimization remarks from passes "
+                              "whose names match the given regular expression"),
+                     cl::value_desc("regex"));
+
 cl::opt<bool> LTOPassRemarksWithHotness(
     "lto-pass-remarks-with-hotness",
     cl::desc("With PGO, include profile count in optimization remarks"),
+    cl::Hidden);
+
+cl::opt<std::string> LTOStatsFile(
+    "lto-stats-file",
+    cl::desc("Save statistics to the specified file"),
     cl::Hidden);
 }
 
@@ -506,12 +516,20 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
     return false;
 
   auto DiagFileOrErr = lto::setupOptimizationRemarks(
-      Context, LTORemarksFilename, LTOPassRemarksWithHotness);
+      Context, LTORemarksFilename, LTORemarksPasses, LTOPassRemarksWithHotness);
   if (!DiagFileOrErr) {
     errs() << "Error: " << toString(DiagFileOrErr.takeError()) << "\n";
     report_fatal_error("Can't get an output file for the remarks");
   }
   DiagnosticOutputFile = std::move(*DiagFileOrErr);
+
+  // Setup output file to emit statistics.
+  auto StatsFileOrErr = lto::setupStatsFile(LTOStatsFile);
+  if (!StatsFileOrErr) {
+    errs() << "Error: " << toString(StatsFileOrErr.takeError()) << "\n";
+    report_fatal_error("Can't get an output file for the statistics");
+  }
+  StatsFile = std::move(StatsFileOrErr.get());
 
   // We always run the verifier once on the merged module, the `DisableVerify`
   // parameter only applies to subsequent verify.
@@ -579,9 +597,13 @@ bool LTOCodeGenerator::compileOptimized(ArrayRef<raw_pwrite_stream *> Out) {
                               [&]() { return createTargetMachine(); }, FileType,
                               ShouldRestoreGlobalsLinkage);
 
-  // If statistics were requested, print them out after codegen.
-  if (llvm::AreStatisticsEnabled())
-    llvm::PrintStatistics();
+  // If statistics were requested, save them to the specified file or
+  // print them out after codegen.
+  if (StatsFile)
+    PrintStatisticsJSON(StatsFile->os());
+  else if (AreStatisticsEnabled())
+    PrintStatistics();
+
   reportAndResetTimings();
 
   finishOptimizationRemarks();

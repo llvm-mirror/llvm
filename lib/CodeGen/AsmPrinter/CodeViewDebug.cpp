@@ -1,9 +1,8 @@
 //===- llvm/lib/CodeGen/AsmPrinter/CodeViewDebug.cpp ----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -364,8 +363,8 @@ TypeIndex CodeViewDebug::getFuncIdForSubprogram(const DISubprogram *SP) {
   return recordTypeIndexForDINode(SP, TI);
 }
 
-static bool isTrivial(const DICompositeType *DCTy) {
-  return ((DCTy->getFlags() & DINode::FlagTrivial) == DINode::FlagTrivial);
+static bool isNonTrivial(const DICompositeType *DCTy) {
+  return ((DCTy->getFlags() & DINode::FlagNonTrivial) == DINode::FlagNonTrivial);
 }
 
 static FunctionOptions
@@ -380,12 +379,12 @@ getFunctionOptions(const DISubroutineType *Ty,
   }
 
   if (auto *ReturnDCTy = dyn_cast_or_null<DICompositeType>(ReturnTy)) {
-    if (!isTrivial(ReturnDCTy))
+    if (isNonTrivial(ReturnDCTy))
       FO |= FunctionOptions::CxxReturnUdt;
   }
 
   // DISubroutineType is unnamed. Use DISubprogram's i.e. SPName in comparison.
-  if (ClassTy && !isTrivial(ClassTy) && SPName == ClassTy->getName()) {
+  if (ClassTy && isNonTrivial(ClassTy) && SPName == ClassTy->getName()) {
     FO |= FunctionOptions::Constructor;
 
   // TODO: put the FunctionOptions::ConstructorWithVirtualBases flag.
@@ -700,6 +699,8 @@ static SourceLanguage MapDWLangToCVLang(unsigned DWLang) {
     return SourceLanguage::Java;
   case dwarf::DW_LANG_D:
     return SourceLanguage::D;
+  case dwarf::DW_LANG_Swift:
+    return SourceLanguage::Swift;
   default:
     // There's no CodeView representation for this language, and CV doesn't
     // have an "unknown" option for the language field, so we'll use MASM,
@@ -1071,6 +1072,28 @@ void CodeViewDebug::emitDebugInfoForFunction(const Function *GV,
       endSymbolRecord(AnnotEnd);
     }
 
+    for (auto HeapAllocSite : FI.HeapAllocSites) {
+      MCSymbol *BeginLabel = std::get<0>(HeapAllocSite);
+      MCSymbol *EndLabel = std::get<1>(HeapAllocSite);
+
+      // The labels might not be defined if the instruction was replaced
+      // somewhere in the codegen pipeline.
+      if (!BeginLabel->isDefined() || !EndLabel->isDefined())
+        continue;
+
+      DIType *DITy = std::get<2>(HeapAllocSite);
+      MCSymbol *HeapAllocEnd = beginSymbolRecord(SymbolKind::S_HEAPALLOCSITE);
+      OS.AddComment("Call site offset");
+      OS.EmitCOFFSecRel32(BeginLabel, /*Offset=*/0);
+      OS.AddComment("Call site section index");
+      OS.EmitCOFFSectionIndex(BeginLabel);
+      OS.AddComment("Call instruction length");
+      OS.emitAbsoluteSymbolDiff(EndLabel, BeginLabel, 2);
+      OS.AddComment("Type index");
+      OS.EmitIntValue(getCompleteTypeIndex(DITy).getIndex(), 4);
+      endSymbolRecord(HeapAllocEnd);
+    }
+
     if (SP != nullptr)
       emitDebugInfoForUDTs(LocalUDTs);
 
@@ -1153,13 +1176,15 @@ static bool needsReferenceType(const DbgVariableLocation &Loc) {
 }
 
 void CodeViewDebug::calculateRanges(
-    LocalVariable &Var, const DbgValueHistoryMap::InstrRanges &Ranges) {
+    LocalVariable &Var, const DbgValueHistoryMap::Entries &Entries) {
   const TargetRegisterInfo *TRI = Asm->MF->getSubtarget().getRegisterInfo();
 
   // Calculate the definition ranges.
-  for (auto I = Ranges.begin(), E = Ranges.end(); I != E; ++I) {
-    const InsnRange &Range = *I;
-    const MachineInstr *DVInst = Range.first;
+  for (auto I = Entries.begin(), E = Entries.end(); I != E; ++I) {
+    const auto &Entry = *I;
+    if (!Entry.isDbgValue())
+      continue;
+    const MachineInstr *DVInst = Entry.getInstr();
     assert(DVInst->isDebugValue() && "Invalid History entry");
     // FIXME: Find a way to represent constant variables, since they are
     // relatively common.
@@ -1186,7 +1211,7 @@ void CodeViewDebug::calculateRanges(
       // Start over using that.
       Var.UseReferenceType = true;
       Var.DefRanges.clear();
-      calculateRanges(Var, Ranges);
+      calculateRanges(Var, Entries);
       return;
     }
 
@@ -1214,21 +1239,15 @@ void CodeViewDebug::calculateRanges(
     }
 
     // Compute the label range.
-    const MCSymbol *Begin = getLabelBeforeInsn(Range.first);
-    const MCSymbol *End = getLabelAfterInsn(Range.second);
-    if (!End) {
-      // This range is valid until the next overlapping bitpiece. In the
-      // common case, ranges will not be bitpieces, so they will overlap.
-      auto J = std::next(I);
-      const DIExpression *DIExpr = DVInst->getDebugExpression();
-      while (J != E &&
-             !DIExpr->fragmentsOverlap(J->first->getDebugExpression()))
-        ++J;
-      if (J != E)
-        End = getLabelBeforeInsn(J->first);
-      else
-        End = Asm->getFunctionEnd();
-    }
+    const MCSymbol *Begin = getLabelBeforeInsn(Entry.getInstr());
+    const MCSymbol *End;
+    if (Entry.getEndIndex() != DbgValueHistoryMap::NoEntry) {
+      auto &EndingEntry = Entries[Entry.getEndIndex()];
+      End = EndingEntry.isDbgValue()
+                ? getLabelBeforeInsn(EndingEntry.getInstr())
+                : getLabelAfterInsn(EndingEntry.getInstr());
+    } else
+      End = Asm->getFunctionEnd();
 
     // If the last range end is our begin, just extend the last range.
     // Otherwise make a new range.
@@ -1256,7 +1275,7 @@ void CodeViewDebug::collectVariableInfo(const DISubprogram *SP) {
     const DILocation *InlinedAt = IV.second;
 
     // Instruction ranges, specifying where IV is accessible.
-    const auto &Ranges = I.second;
+    const auto &Entries = I.second;
 
     LexicalScope *Scope = nullptr;
     if (InlinedAt)
@@ -1270,7 +1289,7 @@ void CodeViewDebug::collectVariableInfo(const DISubprogram *SP) {
     LocalVariable Var;
     Var.DIVar = DIVar;
 
-    calculateRanges(Var, Ranges);
+    calculateRanges(Var, Entries);
     recordLocalVariable(std::move(Var), Scope);
   }
 }
@@ -1340,8 +1359,8 @@ void CodeViewDebug::beginFunctionImpl(const MachineFunction *MF) {
     FPO |= FrameProcedureOptions::SecurityChecks;
   FPO |= FrameProcedureOptions(uint32_t(CurFn->EncodedLocalFramePtrReg) << 14U);
   FPO |= FrameProcedureOptions(uint32_t(CurFn->EncodedParamFramePtrReg) << 16U);
-  if (Asm->TM.getOptLevel() != CodeGenOpt::None && !GV.optForSize() &&
-      !GV.hasFnAttribute(Attribute::OptimizeNone))
+  if (Asm->TM.getOptLevel() != CodeGenOpt::None &&
+      !GV.hasOptSize() && !GV.hasOptNone())
     FPO |= FrameProcedureOptions::OptimizedForSpeed;
   // FIXME: Set GuardCfg when it is implemented.
   CurFn->FrameProcOpts = FPO;
@@ -1836,7 +1855,10 @@ TypeIndex CodeViewDebug::lowerTypeMemberFunction(const DISubroutineType *Ty,
 
   unsigned Index = 0;
   SmallVector<TypeIndex, 8> ArgTypeIndices;
-  TypeIndex ReturnTypeIndex = getTypeIndex(ReturnAndArgs[Index++]);
+  TypeIndex ReturnTypeIndex = TypeIndex::Void();
+  if (ReturnAndArgs.size() > Index) {
+    ReturnTypeIndex = getTypeIndex(ReturnAndArgs[Index++]);
+  }
 
   // If the first argument is a pointer type and this isn't a static method,
   // treat it as the special 'this' parameter, which is encoded separately from
@@ -2184,6 +2206,14 @@ TypeIndex CodeViewDebug::lowerCompleteTypeClass(const DICompositeType *Ty) {
   if (ContainsNestedClass)
     CO |= ClassOptions::ContainsNestedClass;
 
+  // MSVC appears to set this flag by searching any destructor or method with
+  // FunctionOptions::Constructor among the emitted members. Clang AST has all
+  // the members, however special member functions are not yet emitted into 
+  // debug information. For now checking a class's non-triviality seems enough.
+  // FIXME: not true for a nested unnamed struct.
+  if (isNonTrivial(Ty))
+    CO |= ClassOptions::HasConstructorOrDestructor;
+
   std::string FullName = getFullyQualifiedName(Ty);
 
   uint64_t SizeInBytes = Ty->getSizeInBits() / 8;
@@ -2467,11 +2497,7 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
     return getTypeIndex(Ty);
   }
 
-  // Check if we've already translated the complete record type.
   const auto *CTy = cast<DICompositeType>(Ty);
-  auto InsertResult = CompleteTypeIndices.insert({CTy, TypeIndex()});
-  if (!InsertResult.second)
-    return InsertResult.first->second;
 
   TypeLoweringScope S(*this);
 
@@ -2488,6 +2514,13 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
     if (CTy->isForwardDecl())
       return FwdDeclTI;
   }
+
+  // Check if we've already translated the complete record type.
+  // Insert the type with a null TypeIndex to signify that the type is currently
+  // being lowered.
+  auto InsertResult = CompleteTypeIndices.insert({CTy, TypeIndex()});
+  if (!InsertResult.second)
+    return InsertResult.first->second;
 
   TypeIndex TI;
   switch (CTy->getTag()) {
@@ -2799,6 +2832,7 @@ void CodeViewDebug::endFunctionImpl(const MachineFunction *MF) {
   }
 
   CurFn->Annotations = MF->getCodeViewAnnotations();
+  CurFn->HeapAllocSites = MF->getCodeViewHeapAllocSites();
 
   CurFn->End = Asm->getFunctionEnd();
 

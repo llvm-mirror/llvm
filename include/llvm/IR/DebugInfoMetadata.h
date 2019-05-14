@@ -1,9 +1,8 @@
 //===- llvm/IR/DebugInfoMetadata.h - Debug info metadata --------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -228,6 +227,7 @@ public:
     case DILexicalBlockKind:
     case DILexicalBlockFileKind:
     case DINamespaceKind:
+    case DICommonBlockKind:
     case DITemplateTypeParameterKind:
     case DITemplateValueParameterKind:
     case DIGlobalVariableKind:
@@ -486,6 +486,7 @@ public:
     case DILexicalBlockKind:
     case DILexicalBlockFileKind:
     case DINamespaceKind:
+    case DICommonBlockKind:
     case DIModuleKind:
       return true;
     }
@@ -1541,9 +1542,6 @@ public:
   ///
   /// For precise control over the data being encoded in the discriminator,
   /// use encodeDiscriminator/decodeDiscriminator.
-  ///
-  /// Use {get|set}BaseDiscriminator and cloneWithDuplicationFactor after reading
-  /// their documentation, as their behavior has side-effects.
 
   inline unsigned getDiscriminator() const;
 
@@ -1554,7 +1552,7 @@ public:
   /// base discriminator is set in the new DILocation, the other encoded values
   /// are elided.
   /// If the discriminator cannot be encoded, the function returns None.
-  inline Optional<const DILocation *> setBaseDiscriminator(unsigned BD) const;
+  inline Optional<const DILocation *> cloneWithBaseDiscriminator(unsigned BD) const;
 
   /// Returns the duplication factor stored in the discriminator, or 1 if no
   /// duplication factor (or 0) is encoded.
@@ -1570,7 +1568,7 @@ public:
   /// duplication factor encoded in the discriminator. The current duplication
   /// factor is as defined by getDuplicationFactor().
   /// Returns None if encoding failed.
-  inline Optional<const DILocation *> cloneWithDuplicationFactor(unsigned DF) const;
+  inline Optional<const DILocation *> cloneByMultiplyingDuplicationFactor(unsigned DF) const;
 
   /// When two instructions are combined into a single instruction we also
   /// need to combine the original locations into a single location.
@@ -1594,10 +1592,11 @@ public:
     return getUnsignedFromPrefixEncoding(D);
   }
 
-  /// Raw encoding of the discriminator. APIs such as setBaseDiscriminator or
-  /// cloneWithDuplicationFactor have certain side-effects. This API, in
-  /// conjunction with cloneWithDiscriminator, may be used to encode precisely
-  /// the values provided. \p BD: base discriminator \p DF: duplication factor
+  /// Raw encoding of the discriminator. APIs such as cloneWithDuplicationFactor
+  /// have certain special case behavior (e.g. treating empty duplication factor
+  /// as the value '1').
+  /// This API, in conjunction with cloneWithDiscriminator, may be used to encode
+  /// the raw values provided. \p BD: base discriminator \p DF: duplication factor
   /// \p CI: copy index
   /// The return is None if the values cannot be encoded in 32 bits - for
   /// example, values for BD or DF larger than 12 bits. Otherwise, the return
@@ -1638,9 +1637,6 @@ public:
 };
 
 /// Subprogram description.
-///
-/// TODO: Remove DisplayName.  It's always equal to Name.
-/// TODO: Split up flags.
 class DISubprogram : public DILocalScope {
   friend class LLVMContextImpl;
   friend class MDNode;
@@ -1678,7 +1674,8 @@ public:
   // Helper for converting old bitfields to new flags word.
   static DISPFlags toSPFlags(bool IsLocalToUnit, bool IsDefinition,
                              bool IsOptimized,
-                             unsigned Virtuality = SPFlagNonvirtual) {
+                             unsigned Virtuality = SPFlagNonvirtual,
+                             bool IsMainSubprogram = false) {
     // We're assuming virtuality is the low-order field.
     static_assert(
         int(SPFlagVirtual) == int(dwarf::DW_VIRTUALITY_virtual) &&
@@ -1688,7 +1685,8 @@ public:
         (Virtuality & SPFlagVirtuality) |
         (IsLocalToUnit ? SPFlagLocalToUnit : SPFlagZero) |
         (IsDefinition ? SPFlagDefinition : SPFlagZero) |
-        (IsOptimized ? SPFlagOptimized : SPFlagZero));
+        (IsOptimized ? SPFlagOptimized : SPFlagZero) |
+        (IsMainSubprogram ? SPFlagMainSubprogram : SPFlagZero));
   }
 
 private:
@@ -1787,6 +1785,7 @@ public:
   bool isLocalToUnit() const { return getSPFlags() & SPFlagLocalToUnit; }
   bool isDefinition() const { return getSPFlags() & SPFlagDefinition; }
   bool isOptimized() const { return getSPFlags() & SPFlagOptimized; }
+  bool isMainSubprogram() const { return getSPFlags() & SPFlagMainSubprogram; }
 
   bool isArtificial() const { return getFlags() & FlagArtificial; }
   bool isPrivate() const {
@@ -1803,7 +1802,9 @@ public:
   bool areAllCallsDescribed() const {
     return getFlags() & FlagAllCallsDescribed;
   }
-  bool isMainSubprogram() const { return getFlags() & FlagMainSubprogram; }
+  bool isPure() const { return getSPFlags() & SPFlagPure; }
+  bool isElemental() const { return getSPFlags() & SPFlagElemental; }
+  bool isRecursive() const { return getSPFlags() & SPFlagRecursive; }
 
   /// Check if this is reference-qualified.
   ///
@@ -2039,15 +2040,17 @@ unsigned DILocation::getCopyIdentifier() const {
   return getCopyIdentifierFromDiscriminator(getDiscriminator());
 }
 
-Optional<const DILocation *> DILocation::setBaseDiscriminator(unsigned D) const {
-  if (D == 0)
+Optional<const DILocation *> DILocation::cloneWithBaseDiscriminator(unsigned D) const {
+  unsigned BD, DF, CI;
+  decodeDiscriminator(getDiscriminator(), BD, DF, CI);
+  if (D == BD)
     return this;
-  if (D > 0xfff)
-    return None;
-  return cloneWithDiscriminator(encodeComponent(D));
+  if (Optional<unsigned> Encoded = encodeDiscriminator(D, DF, CI))
+    return cloneWithDiscriminator(*Encoded);
+  return None;
 }
 
-Optional<const DILocation *> DILocation::cloneWithDuplicationFactor(unsigned DF) const {
+Optional<const DILocation *> DILocation::cloneByMultiplyingDuplicationFactor(unsigned DF) const {
   DF *= getDuplicationFactor();
   if (DF <= 1)
     return this;
@@ -2504,12 +2507,21 @@ public:
   /// Return whether this is a piece of an aggregate variable.
   bool isFragment() const { return getFragmentInfo().hasValue(); }
 
+  /// Return whether this is an implicit location description.
+  bool isImplicit() const;
+
   /// Append \p Ops with operations to apply the \p Offset.
   static void appendOffset(SmallVectorImpl<uint64_t> &Ops, int64_t Offset);
 
   /// If this is a constant offset, extract it. If there is no expression,
   /// return true with an offset of zero.
   bool extractIfOffset(int64_t &Offset) const;
+
+  /// Checks if the last 4 elements of the expression are DW_OP_constu <DWARF
+  /// Address Space> DW_OP_swap DW_OP_xderef and extracts the <DWARF Address
+  /// Space>.
+  static const DIExpression *extractAddressClass(const DIExpression *Expr,
+                                                 unsigned &AddrClass);
 
   /// Constants for DIExpression::prepend.
   enum { NoDeref = false, WithDeref = true, WithStackValue = true };
@@ -2660,6 +2672,65 @@ public:
 
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DIGlobalVariableKind;
+  }
+};
+
+class DICommonBlock : public DIScope {
+  unsigned LineNo;
+
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  DICommonBlock(LLVMContext &Context, StorageType Storage, unsigned LineNo,
+                ArrayRef<Metadata *> Ops)
+      : DIScope(Context, DICommonBlockKind, Storage, dwarf::DW_TAG_common_block,
+                Ops), LineNo(LineNo) {}
+
+  static DICommonBlock *getImpl(LLVMContext &Context, DIScope *Scope,
+                                DIGlobalVariable *Decl, StringRef Name,
+                                DIFile *File, unsigned LineNo,
+                                StorageType Storage,
+                                bool ShouldCreate = true) {
+    return getImpl(Context, Scope, Decl, getCanonicalMDString(Context, Name),
+                   File, LineNo, Storage, ShouldCreate);
+  }
+  static DICommonBlock *getImpl(LLVMContext &Context, Metadata *Scope,
+                                Metadata *Decl, MDString *Name, Metadata *File,
+                                unsigned LineNo, 
+                                StorageType Storage, bool ShouldCreate = true);
+
+  TempDICommonBlock cloneImpl() const {
+    return getTemporary(getContext(), getScope(), getDecl(), getName(),
+                        getFile(), getLineNo());
+  }
+
+public:
+  DEFINE_MDNODE_GET(DICommonBlock,
+                    (DIScope *Scope, DIGlobalVariable *Decl, StringRef Name,
+                     DIFile *File, unsigned LineNo),
+                    (Scope, Decl, Name, File, LineNo))
+  DEFINE_MDNODE_GET(DICommonBlock,
+                    (Metadata *Scope, Metadata *Decl, MDString *Name,
+                     Metadata *File, unsigned LineNo),
+                    (Scope, Decl, Name, File, LineNo))
+
+  TempDICommonBlock clone() const { return cloneImpl(); }
+
+  DIScope *getScope() const { return cast_or_null<DIScope>(getRawScope()); }
+  DIGlobalVariable *getDecl() const {
+    return cast_or_null<DIGlobalVariable>(getRawDecl());
+  }
+  StringRef getName() const { return getStringOperand(2); }
+  DIFile *getFile() const { return cast_or_null<DIFile>(getRawFile()); }
+  unsigned getLineNo() const { return LineNo; }
+
+  Metadata *getRawScope() const { return getOperand(0); }
+  Metadata *getRawDecl() const { return getOperand(1); }
+  MDString *getRawName() const { return getOperandAs<MDString>(2); }
+  Metadata *getRawFile() const { return getOperand(3); }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DICommonBlockKind;
   }
 };
 

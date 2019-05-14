@@ -1,9 +1,8 @@
 //===- AArch64RegisterBankInfo.cpp ----------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 /// \file
@@ -243,12 +242,17 @@ const RegisterBank &AArch64RegisterBankInfo::getRegBankFromRegClass(
   case AArch64::GPR32RegClassID:
   case AArch64::GPR32spRegClassID:
   case AArch64::GPR32sponlyRegClassID:
+  case AArch64::GPR32argRegClassID:
   case AArch64::GPR32allRegClassID:
   case AArch64::GPR64commonRegClassID:
   case AArch64::GPR64RegClassID:
   case AArch64::GPR64spRegClassID:
   case AArch64::GPR64sponlyRegClassID:
+  case AArch64::GPR64argRegClassID:
   case AArch64::GPR64allRegClassID:
+  case AArch64::GPR64noipRegClassID:
+  case AArch64::GPR64common_and_GPR64noipRegClassID:
+  case AArch64::GPR64noip_and_tcGPR64RegClassID:
   case AArch64::tcGPR64RegClassID:
   case AArch64::WSeqPairsClassRegClassID:
   case AArch64::XSeqPairsClassRegClassID:
@@ -385,11 +389,26 @@ static bool isPreISelGenericFloatingPointOpcode(unsigned Opc) {
   case TargetOpcode::G_FADD:
   case TargetOpcode::G_FSUB:
   case TargetOpcode::G_FMUL:
+  case TargetOpcode::G_FMA:
   case TargetOpcode::G_FDIV:
   case TargetOpcode::G_FCONSTANT:
   case TargetOpcode::G_FPEXT:
   case TargetOpcode::G_FPTRUNC:
   case TargetOpcode::G_FCEIL:
+  case TargetOpcode::G_FFLOOR:
+  case TargetOpcode::G_FNEARBYINT:
+  case TargetOpcode::G_FNEG:
+  case TargetOpcode::G_FCOS:
+  case TargetOpcode::G_FSIN:
+  case TargetOpcode::G_FLOG10:
+  case TargetOpcode::G_FLOG:
+  case TargetOpcode::G_FLOG2:
+  case TargetOpcode::G_FSQRT:
+  case TargetOpcode::G_FABS:
+  case TargetOpcode::G_FEXP:
+  case TargetOpcode::G_FRINT:
+  case TargetOpcode::G_INTRINSIC_TRUNC:
+  case TargetOpcode::G_INTRINSIC_ROUND:
     return true;
   }
   return false;
@@ -456,6 +475,24 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   const TargetSubtargetInfo &STI = MF.getSubtarget();
   const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
+
+  // Helper lambda that returns true if MI has floating point constraints.
+  auto HasFPConstraints = [&TRI, &MRI, this](MachineInstr &MI) {
+    unsigned Op = MI.getOpcode();
+
+    // Do we have an explicit floating point instruction?
+    if (isPreISelGenericFloatingPointOpcode(Op))
+      return true;
+
+    // No. Check if we have a copy-like instruction. If we do, then we could
+    // still be fed by floating point instructions.
+    if (Op != TargetOpcode::COPY && !MI.isPHI())
+      return false;
+
+    // MI is copy-like. Return true if it's using an FPR.
+    return getRegBank(MI.getOperand(0).getReg(), MRI, TRI) ==
+           &AArch64::FPRRegBank;
+  };
 
   switch (Opc) {
     // G_{F|S|U}REM are not listed because they are not legal.
@@ -563,10 +600,14 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   switch (Opc) {
   case TargetOpcode::G_SITOFP:
   case TargetOpcode::G_UITOFP:
+    if (MRI.getType(MI.getOperand(0).getReg()).isVector())
+      break;
     OpRegBankIdx = {PMI_FirstFPR, PMI_FirstGPR};
     break;
   case TargetOpcode::G_FPTOSI:
   case TargetOpcode::G_FPTOUI:
+    if (MRI.getType(MI.getOperand(0).getReg()).isVector())
+      break;
     OpRegBankIdx = {PMI_FirstGPR, PMI_FirstFPR};
     break;
   case TargetOpcode::G_FCMP:
@@ -633,6 +674,86 @@ AArch64RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
         OpRegBankIdx[0] = PMI_FirstFPR;
       break;
     }
+    break;
+  case TargetOpcode::G_SELECT: {
+    // If the destination is FPR, preserve that.
+    if (OpRegBankIdx[0] != PMI_FirstGPR)
+      break;
+    LLT SrcTy = MRI.getType(MI.getOperand(2).getReg());
+    if (SrcTy.isVector() ||
+        any_of(MRI.use_instructions(MI.getOperand(0).getReg()),
+               [&](MachineInstr &MI) { return HasFPConstraints(MI); })) {
+      // Set the register bank of every operand to FPR.
+      for (unsigned Idx = 0, NumOperands = MI.getNumOperands();
+           Idx < NumOperands; ++Idx)
+        OpRegBankIdx[Idx] = PMI_FirstFPR;
+    }
+    break;
+  }
+  case TargetOpcode::G_UNMERGE_VALUES: {
+    // If the first operand belongs to a FPR register bank, then make sure that
+    // we preserve that.
+    if (OpRegBankIdx[0] != PMI_FirstGPR)
+      break;
+
+    LLT SrcTy = MRI.getType(MI.getOperand(MI.getNumOperands()-1).getReg());
+    // UNMERGE into scalars from a vector should always use FPR.
+    // Likewise if any of the uses are FP instructions.
+    if (SrcTy.isVector() ||
+        any_of(MRI.use_instructions(MI.getOperand(0).getReg()),
+               [&](MachineInstr &MI) { return HasFPConstraints(MI); })) {
+      // Set the register bank of every operand to FPR.
+      for (unsigned Idx = 0, NumOperands = MI.getNumOperands();
+           Idx < NumOperands; ++Idx)
+        OpRegBankIdx[Idx] = PMI_FirstFPR;
+    }
+    break;
+  }
+  case TargetOpcode::G_EXTRACT_VECTOR_ELT:
+    // Destination and source need to be FPRs.
+    OpRegBankIdx[0] = PMI_FirstFPR;
+    OpRegBankIdx[1] = PMI_FirstFPR;
+
+    // Index needs to be a GPR.
+    OpRegBankIdx[2] = PMI_FirstGPR;
+    break;
+  case TargetOpcode::G_INSERT_VECTOR_ELT:
+    OpRegBankIdx[0] = PMI_FirstFPR;
+    OpRegBankIdx[1] = PMI_FirstFPR;
+
+    // The element may be either a GPR or FPR. Preserve that behaviour.
+    if (getRegBank(MI.getOperand(2).getReg(), MRI, TRI) == &AArch64::FPRRegBank)
+      OpRegBankIdx[2] = PMI_FirstFPR;
+    else
+      OpRegBankIdx[2] = PMI_FirstGPR;
+
+    // Index needs to be a GPR.
+    OpRegBankIdx[3] = PMI_FirstGPR;
+    break;
+  case TargetOpcode::G_BUILD_VECTOR:
+    // If the first source operand belongs to a FPR register bank, then make
+    // sure that we preserve that.
+    if (OpRegBankIdx[1] != PMI_FirstGPR)
+      break;
+    unsigned VReg = MI.getOperand(1).getReg();
+    if (!VReg)
+      break;
+
+    // Get the instruction that defined the source operand reg, and check if
+    // it's a floating point operation. Or, if it's a type like s16 which
+    // doesn't have a exact size gpr register class.
+    MachineInstr *DefMI = MRI.getVRegDef(VReg);
+    unsigned DefOpc = DefMI->getOpcode();
+    const LLT SrcTy = MRI.getType(VReg);
+    if (isPreISelGenericFloatingPointOpcode(DefOpc) ||
+        SrcTy.getSizeInBits() < 32) {
+      // Have a floating point op.
+      // Make sure every operand gets mapped to a FPR register class.
+      unsigned NumOperands = MI.getNumOperands();
+      for (unsigned Idx = 0; Idx < NumOperands; ++Idx)
+        OpRegBankIdx[Idx] = PMI_FirstFPR;
+    }
+    break;
   }
 
   // Finally construct the computed mapping.

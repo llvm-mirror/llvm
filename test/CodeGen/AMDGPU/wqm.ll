@@ -92,7 +92,7 @@ main_body:
 ;CHECK-NEXT: ; %main_body
 ;CHECK-NEXT: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
 ;CHECK-NEXT: s_wqm_b64 exec, exec
-;CHECK: v_mul_lo_i32 [[MUL:v[0-9]+]], v0, v1
+;CHECK: v_mul_lo_u32 [[MUL:v[0-9]+]], v0, v1
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
 ;CHECK: store
 ;CHECK: s_wqm_b64 exec, exec
@@ -423,6 +423,7 @@ END:
 ;CHECK-NEXT: s_and_b64 [[SAVED]], exec, [[SAVED]]
 ;CHECK-NEXT: s_xor_b64 exec, exec, [[SAVED]]
 ;CHECK-NEXT: mask branch [[END_BB:BB[0-9]+_[0-9]+]]
+;CHECK-NEXT: s_cbranch_execz [[END_BB]]
 ;CHECK-NEXT: BB{{[0-9]+_[0-9]+}}: ; %ELSE
 ;CHECK: store_dword
 ;CHECK: [[END_BB]]: ; %END

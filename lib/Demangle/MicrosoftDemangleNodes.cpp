@@ -1,9 +1,8 @@
 //===- MicrosoftDemangle.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Demangle/MicrosoftDemangleNodes.h"
-#include "llvm/Demangle/Compiler.h"
+#include "llvm/Demangle/DemangleConfig.h"
 #include "llvm/Demangle/Utility.h"
 #include <cctype>
 #include <string>
@@ -338,8 +337,9 @@ void IntrinsicFunctionIdentifierNode::output(OutputStream &OS,
                             "`vector vbase copy constructor iterator'");
     OUTPUT_ENUM_CLASS_VALUE(IntrinsicFunctionKind, ManVectorVbaseCopyCtorIter,
                             "`managed vector vbase copy constructor iterator'");
-    OUTPUT_ENUM_CLASS_VALUE(IntrinsicFunctionKind, CoAwait, "co_await");
-    OUTPUT_ENUM_CLASS_VALUE(IntrinsicFunctionKind, Spaceship, "operator <=>");
+    OUTPUT_ENUM_CLASS_VALUE(IntrinsicFunctionKind, CoAwait,
+                            "operator co_await");
+    OUTPUT_ENUM_CLASS_VALUE(IntrinsicFunctionKind, Spaceship, "operator<=>");
   case IntrinsicFunctionKind::MaxIntrinsic:
   case IntrinsicFunctionKind::None:
     break;

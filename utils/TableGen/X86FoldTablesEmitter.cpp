@@ -1,9 +1,8 @@
 //===- utils/TableGen/X86FoldTablesEmitter.cpp - X86 backend-*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -62,9 +61,12 @@ const ManualMapEntry ManualMapSet[] = {
     { "ADD64ri32_DB",     "ADD64mi32",       NO_UNFOLD  },
     { "ADD64ri8_DB",      "ADD64mi8",        NO_UNFOLD  },
     { "ADD64rr_DB",       "ADD64mr",         NO_UNFOLD  },
+    { "ADD8ri_DB",        "ADD8mi",          NO_UNFOLD  },
+    { "ADD8rr_DB",        "ADD8mr",          NO_UNFOLD  },
     { "ADD16rr_DB",       "ADD16rm",         NO_UNFOLD  },
     { "ADD32rr_DB",       "ADD32rm",         NO_UNFOLD  },
     { "ADD64rr_DB",       "ADD64rm",         NO_UNFOLD  },
+    { "ADD8rr_DB",        "ADD8rm",          NO_UNFOLD  },
     { "PUSH16r",          "PUSH16rmm",       UNFOLD },
     { "PUSH32r",          "PUSH32rmm",       UNFOLD },
     { "PUSH64r",          "PUSH64rmm",       UNFOLD },

@@ -1,9 +1,8 @@
 //===- DAGISelMatcherGen.cpp - Matcher generator --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -276,6 +275,27 @@ void MatcherGen::EmitLeafMatchCode(const TreePatternNode *N) {
     unsigned InputOperand = VariableMap[N->getName()] - 1;
     MatchedComplexPatterns.push_back(std::make_pair(N, InputOperand));
     return;
+  }
+
+  if (LeafRec->getName() == "immAllOnesV") {
+    // If this is the root of the dag we're matching, we emit a redundant opcode
+    // check to ensure that this gets folded into the normal top-level
+    // OpcodeSwitch.
+    if (N == Pattern.getSrcPattern()) {
+      const SDNodeInfo &NI = CGP.getSDNodeInfo(CGP.getSDNodeNamed("build_vector"));
+      AddMatcher(new CheckOpcodeMatcher(NI));
+    }
+    return AddMatcher(new CheckImmAllOnesVMatcher());
+  }
+  if (LeafRec->getName() == "immAllZerosV") {
+    // If this is the root of the dag we're matching, we emit a redundant opcode
+    // check to ensure that this gets folded into the normal top-level
+    // OpcodeSwitch.
+    if (N == Pattern.getSrcPattern()) {
+      const SDNodeInfo &NI = CGP.getSDNodeInfo(CGP.getSDNodeNamed("build_vector"));
+      AddMatcher(new CheckOpcodeMatcher(NI));
+    }
+    return AddMatcher(new CheckImmAllZerosVMatcher());
   }
 
   errs() << "Unknown leaf kind: " << *N << "\n";

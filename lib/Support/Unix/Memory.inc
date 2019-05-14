@@ -1,9 +1,8 @@
 //===- Unix/Memory.cpp - Generic UNIX System Configuration ------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -46,7 +45,7 @@ extern "C" void __clear_cache(void *, void*);
 namespace {
 
 int getPosixProtectionFlags(unsigned Flags) {
-  switch (Flags) {
+  switch (Flags & llvm::sys::Memory::MF_RWE_MASK) {
   case llvm::sys::Memory::MF_READ:
     return PROT_READ;
   case llvm::sys::Memory::MF_WRITE:
@@ -92,19 +91,9 @@ Memory::allocateMappedMemory(size_t NumBytes,
   if (NumBytes == 0)
     return MemoryBlock();
 
-  static const size_t PageSize = Process::getPageSize();
-  const size_t NumPages = (NumBytes+PageSize-1)/PageSize;
-
   int fd = -1;
 
-  int MMFlags = MAP_PRIVATE |
-#ifdef MAP_ANONYMOUS
-  MAP_ANONYMOUS
-#else
-  MAP_ANON
-#endif
-  ; // Ends statement above
-
+  int MMFlags = MAP_PRIVATE | MAP_ANON;
   int Protect = getPosixProtectionFlags(PFlags);
 
 #if defined(__NetBSD__) && defined(PROT_MPROTECT)
@@ -114,11 +103,13 @@ Memory::allocateMappedMemory(size_t NumBytes,
   // Use any near hint and the page size to set a page-aligned starting address
   uintptr_t Start = NearBlock ? reinterpret_cast<uintptr_t>(NearBlock->base()) +
                                       NearBlock->size() : 0;
+  static const size_t PageSize = Process::getPageSize();
   if (Start && Start % PageSize)
     Start += PageSize - Start % PageSize;
 
-  void *Addr = ::mmap(reinterpret_cast<void*>(Start), PageSize*NumPages,
-                      Protect, MMFlags, fd, 0);
+  // FIXME: Handle huge page requests (MF_HUGE_HINT).
+  void *Addr = ::mmap(reinterpret_cast<void *>(Start), NumBytes, Protect,
+                      MMFlags, fd, 0);
   if (Addr == MAP_FAILED) {
     if (NearBlock) //Try again without a near hint
       return allocateMappedMemory(NumBytes, nullptr, PFlags, EC);
@@ -129,7 +120,8 @@ Memory::allocateMappedMemory(size_t NumBytes,
 
   MemoryBlock Result;
   Result.Address = Addr;
-  Result.Size = NumPages*PageSize;
+  Result.Size = NumBytes;
+  Result.Flags = PFlags;
 
   // Rely on protectMappedMemory to invalidate instruction cache.
   if (PFlags & MF_EXEC) {

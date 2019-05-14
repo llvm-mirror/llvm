@@ -1,9 +1,8 @@
 //===-- MemorySSAUpdater.cpp - Memory SSA Updater--------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------===//
 //
@@ -73,7 +72,10 @@ MemoryAccess *MemorySSAUpdater::getPreviousDefRecursive(
     // potential phi node. This will insert phi nodes if we cycle in order to
     // break the cycle and have an operand.
     for (auto *Pred : predecessors(BB))
-      PhiOps.push_back(getPreviousDefFromEnd(Pred, CachedPreviousDef));
+      if (MSSA->DT->isReachableFromEntry(Pred))
+        PhiOps.push_back(getPreviousDefFromEnd(Pred, CachedPreviousDef));
+      else
+        PhiOps.push_back(MSSA->getLiveOnEntryDef());
 
     // Now try to simplify the ops to avoid placing a phi.
     // This may return null if we never created a phi yet, that's okay
@@ -157,8 +159,10 @@ MemoryAccess *MemorySSAUpdater::getPreviousDefFromEnd(
     DenseMap<BasicBlock *, TrackingVH<MemoryAccess>> &CachedPreviousDef) {
   auto *Defs = MSSA->getWritableBlockDefs(BB);
 
-  if (Defs)
+  if (Defs) {
+    CachedPreviousDef.insert({BB, &*Defs->rbegin()});
     return &*Defs->rbegin();
+  }
 
   return getPreviousDefRecursive(BB, CachedPreviousDef);
 }
@@ -270,12 +274,17 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
       // Also make sure we skip ourselves to avoid self references.
       if (isa<MemoryUse>(U.getUser()) || U.getUser() == MD)
         continue;
+      // Defs are automatically unoptimized when the user is set to MD below,
+      // because the isOptimized() call will fail to find the same ID.
       U.set(MD);
     }
   }
 
   // and that def is now our defining access.
   MD->setDefiningAccess(DefBefore);
+
+  // Remember the index where we may insert new phis below.
+  unsigned NewPhiIndex = InsertedPHIs.size();
 
   SmallVector<WeakVH, 8> FixupList(InsertedPHIs.begin(), InsertedPHIs.end());
   if (!DefBeforeSameBlock) {
@@ -290,8 +299,55 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
     // backwards to find the def.  To make that work, we'd have to track whether
     // getDefRecursive only ever used the single predecessor case.  These types
     // of paths also only exist in between CFG simplifications.
+
+    // If this is the first def in the block and this insert is in an arbitrary
+    // place, compute IDF and place phis.
+    auto Iter = MD->getDefsIterator();
+    ++Iter;
+    auto IterEnd = MSSA->getBlockDefs(MD->getBlock())->end();
+    if (Iter == IterEnd) {
+      ForwardIDFCalculator IDFs(*MSSA->DT);
+      SmallVector<BasicBlock *, 32> IDFBlocks;
+      SmallPtrSet<BasicBlock *, 2> DefiningBlocks;
+      DefiningBlocks.insert(MD->getBlock());
+      IDFs.setDefiningBlocks(DefiningBlocks);
+      IDFs.calculate(IDFBlocks);
+      SmallVector<AssertingVH<MemoryPhi>, 4> NewInsertedPHIs;
+      for (auto *BBIDF : IDFBlocks)
+        if (!MSSA->getMemoryAccess(BBIDF)) {
+          auto *MPhi = MSSA->createMemoryPhi(BBIDF);
+          NewInsertedPHIs.push_back(MPhi);
+          // Add the phis created into the IDF blocks to NonOptPhis, so they are
+          // not optimized out as trivial by the call to getPreviousDefFromEnd
+          // below. Once they are complete, all these Phis are added to the
+          // FixupList, and removed from NonOptPhis inside fixupDefs().
+          NonOptPhis.insert(MPhi);
+        }
+
+      for (auto &MPhi : NewInsertedPHIs) {
+        auto *BBIDF = MPhi->getBlock();
+        for (auto *Pred : predecessors(BBIDF)) {
+          DenseMap<BasicBlock *, TrackingVH<MemoryAccess>> CachedPreviousDef;
+          MPhi->addIncoming(getPreviousDefFromEnd(Pred, CachedPreviousDef),
+                            Pred);
+        }
+      }
+
+      // Re-take the index where we're adding the new phis, because the above
+      // call to getPreviousDefFromEnd, may have inserted into InsertedPHIs.
+      NewPhiIndex = InsertedPHIs.size();
+      for (auto &MPhi : NewInsertedPHIs) {
+        InsertedPHIs.push_back(&*MPhi);
+        FixupList.push_back(&*MPhi);
+      }
+    }
+
     FixupList.push_back(MD);
   }
+
+  // Remember the index where we stopped inserting new phis above, since the
+  // fixupDefs call in the loop below may insert more, that are already minimal.
+  unsigned NewPhiIndexEnd = InsertedPHIs.size();
 
   while (!FixupList.empty()) {
     unsigned StartingPHISize = InsertedPHIs.size();
@@ -300,6 +356,12 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
     // Put any new phis on the fixup list, and process them
     FixupList.append(InsertedPHIs.begin() + StartingPHISize, InsertedPHIs.end());
   }
+
+  // Optimize potentially non-minimal phis added in this method.
+  unsigned NewPhiSize = NewPhiIndexEnd - NewPhiIndex;
+  if (NewPhiSize)
+    tryRemoveTrivialPhis(ArrayRef<WeakVH>(&InsertedPHIs[NewPhiIndex], NewPhiSize));
+
   // Now that all fixups are done, rename all uses if we are asked.
   if (RenameUses) {
     SmallPtrSet<BasicBlock *, 16> Visited;
@@ -599,7 +661,7 @@ void MemorySSAUpdater::applyUpdates(ArrayRef<CFGUpdate> Updates,
 
   if (!RevDeleteUpdates.empty()) {
     // Update for inserted edges: use newDT and snapshot CFG as if deletes had
-    // not occured.
+    // not occurred.
     // FIXME: This creates a new DT, so it's more expensive to do mix
     // delete/inserts vs just inserts. We can do an incremental update on the DT
     // to revert deletes, than re-delete the edges. Teaching DT to do this, is
@@ -697,7 +759,7 @@ void MemorySSAUpdater::applyInsertUpdates(ArrayRef<CFGUpdate> Updates,
 
   // Map a BB to its predecessors: added + previously existing. To get a
   // deterministic order, store predecessors as SetVectors. The order in each
-  // will be defined by teh order in Updates (fixed) and the order given by
+  // will be defined by the order in Updates (fixed) and the order given by
   // children<> (also fixed). Since we further iterate over these ordered sets,
   // we lose the information of multiple edges possibly existing between two
   // blocks, so we'll keep and EdgeCount map for that.
@@ -1052,7 +1114,7 @@ void MemorySSAUpdater::wireOldPredecessorsToNewImmediatePredecessor(
   }
 }
 
-void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
+void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA, bool OptimizePhis) {
   assert(!MSSA->isLiveOnEntryDef(MA) &&
          "Trying to remove the live on entry def");
   // We can only delete phi nodes if they have no uses, or we can replace all
@@ -1070,6 +1132,8 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
   } else {
     NewDefTarget = cast<MemoryUseOrDef>(MA)->getDefiningAccess();
   }
+
+  SmallSetVector<MemoryPhi *, 4> PhisToCheck;
 
   // Re-point the uses at our defining access
   if (!isa<MemoryUse>(MA) && !MA->use_empty()) {
@@ -1090,6 +1154,9 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
       Use &U = *MA->use_begin();
       if (auto *MUD = dyn_cast<MemoryUseOrDef>(U.getUser()))
         MUD->resetOptimized();
+      if (OptimizePhis)
+        if (MemoryPhi *MP = dyn_cast<MemoryPhi>(U.getUser()))
+          PhisToCheck.insert(MP);
       U.set(NewDefTarget);
     }
   }
@@ -1098,6 +1165,21 @@ void MemorySSAUpdater::removeMemoryAccess(MemoryAccess *MA) {
   // are doing things here
   MSSA->removeFromLookups(MA);
   MSSA->removeFromLists(MA);
+
+  // Optionally optimize Phi uses. This will recursively remove trivial phis.
+  if (!PhisToCheck.empty()) {
+    SmallVector<WeakVH, 16> PhisToOptimize{PhisToCheck.begin(),
+                                           PhisToCheck.end()};
+    PhisToCheck.clear();
+
+    unsigned PhisSize = PhisToOptimize.size();
+    while (PhisSize-- > 0)
+      if (MemoryPhi *MP =
+              cast_or_null<MemoryPhi>(PhisToOptimize.pop_back_val())) {
+        auto OperRange = MP->operands();
+        tryRemoveTrivialPhi(MP, OperRange);
+      }
+  }
 }
 
 void MemorySSAUpdater::removeBlocks(
@@ -1131,6 +1213,14 @@ void MemorySSAUpdater::removeBlocks(
       MSSA->removeFromLists(MA);
     }
   }
+}
+
+void MemorySSAUpdater::tryRemoveTrivialPhis(ArrayRef<WeakVH> UpdatedPHIs) {
+  for (auto &VH : UpdatedPHIs)
+    if (auto *MPhi = cast_or_null<MemoryPhi>(VH)) {
+      auto OperRange = MPhi->operands();
+      tryRemoveTrivialPhi(MPhi, OperRange);
+    }
 }
 
 MemoryAccess *MemorySSAUpdater::createMemoryAccessInBB(

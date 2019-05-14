@@ -1,9 +1,8 @@
 //===- ELFObjectFile.cpp - ELF object file implementation -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -35,6 +34,16 @@
 
 using namespace llvm;
 using namespace object;
+
+const EnumEntry<unsigned> llvm::object::ElfSymbolTypes[NumElfSymbolTypes] = {
+    {"None", "NOTYPE", ELF::STT_NOTYPE},
+    {"Object", "OBJECT", ELF::STT_OBJECT},
+    {"Function", "FUNC", ELF::STT_FUNC},
+    {"Section", "SECTION", ELF::STT_SECTION},
+    {"File", "FILE", ELF::STT_FILE},
+    {"Common", "COMMON", ELF::STT_COMMON},
+    {"TLS", "TLS", ELF::STT_TLS},
+    {"GNU_IFunc", "IFUNC", ELF::STT_GNU_IFUNC}};
 
 ELFObjectFileBase::ELFObjectFileBase(unsigned int Type, MemoryBufferRef Source)
     : ObjectFile(Type, Source) {}

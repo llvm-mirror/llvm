@@ -1,9 +1,8 @@
 //===- DWARFUnit.h ----------------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -218,7 +217,7 @@ class DWARFUnit {
   Optional<DWARFDebugRnglistTable> RngListTable;
 
   mutable const DWARFAbbreviationDeclarationSet *Abbrevs;
-  llvm::Optional<SectionedAddress> BaseAddr;
+  llvm::Optional<object::SectionedAddress> BaseAddr;
   /// The compile unit debug information entry items.
   std::vector<DWARFDebugInfoEntry> DieArray;
 
@@ -305,7 +304,8 @@ public:
     RangeSectionBase = Base;
   }
 
-  Optional<SectionedAddress> getAddrOffsetSectionItem(uint32_t Index) const;
+  Optional<object::SectionedAddress>
+  getAddrOffsetSectionItem(uint32_t Index) const;
   Optional<uint64_t> getStringOffsetSectionItem(uint32_t Index) const;
 
   DWARFDataExtractor getDebugInfoExtractor() const;
@@ -376,7 +376,7 @@ public:
     llvm_unreachable("Invalid UnitType.");
   }
 
-  llvm::Optional<SectionedAddress> getBaseAddress();
+  llvm::Optional<object::SectionedAddress> getBaseAddress();
 
   DWARFDie getUnitDIE(bool ExtractUnitDIEOnly = true) {
     extractDIEsIfNeeded(ExtractUnitDIEOnly);
@@ -462,13 +462,11 @@ public:
   DWARFDie getDIEForOffset(uint32_t Offset) {
     extractDIEsIfNeeded(false);
     assert(!DieArray.empty());
-    auto it = std::lower_bound(
-        DieArray.begin(), DieArray.end(), Offset,
-        [](const DWARFDebugInfoEntry &LHS, uint32_t Offset) {
-          return LHS.getOffset() < Offset;
-        });
-    if (it != DieArray.end() && it->getOffset() == Offset)
-      return DWARFDie(this, &*it);
+    auto It = llvm::bsearch(DieArray, [=](const DWARFDebugInfoEntry &LHS) {
+      return Offset <= LHS.getOffset();
+    });
+    if (It != DieArray.end() && It->getOffset() == Offset)
+      return DWARFDie(this, &*It);
     return DWARFDie();
   }
 

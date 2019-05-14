@@ -1,9 +1,8 @@
 //===----------------------- SIFrameLowering.cpp --------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //==-----------------------------------------------------------------------===//
 
@@ -71,6 +70,24 @@ void SIFrameLowering::emitFlatScratchInit(const GCNSubtarget &ST,
 
   // Do a 64-bit pointer add.
   if (ST.flatScratchIsPointer()) {
+    if (ST.getGeneration() >= AMDGPUSubtarget::GFX10) {
+      BuildMI(MBB, I, DL, TII->get(AMDGPU::S_ADD_U32), FlatScrInitLo)
+        .addReg(FlatScrInitLo)
+        .addReg(ScratchWaveOffsetReg);
+      BuildMI(MBB, I, DL, TII->get(AMDGPU::S_ADDC_U32), FlatScrInitHi)
+        .addReg(FlatScrInitHi)
+        .addImm(0);
+      BuildMI(MBB, I, DL, TII->get(AMDGPU::S_SETREG_B32)).
+        addReg(FlatScrInitLo).
+        addImm(int16_t(AMDGPU::Hwreg::ID_FLAT_SCR_LO |
+                       (31 << AMDGPU::Hwreg::WIDTH_M1_SHIFT_)));
+      BuildMI(MBB, I, DL, TII->get(AMDGPU::S_SETREG_B32)).
+        addReg(FlatScrInitHi).
+        addImm(int16_t(AMDGPU::Hwreg::ID_FLAT_SCR_HI |
+                       (31 << AMDGPU::Hwreg::WIDTH_M1_SHIFT_)));
+      return;
+    }
+
     BuildMI(MBB, I, DL, TII->get(AMDGPU::S_ADD_U32), AMDGPU::FLAT_SCR_LO)
       .addReg(FlatScrInitLo)
       .addReg(ScratchWaveOffsetReg);
@@ -80,6 +97,8 @@ void SIFrameLowering::emitFlatScratchInit(const GCNSubtarget &ST,
 
     return;
   }
+
+  assert(ST.getGeneration() < AMDGPUSubtarget::GFX10);
 
   // Copy the size in bytes.
   BuildMI(MBB, I, DL, TII->get(AMDGPU::COPY), AMDGPU::FLAT_SCR_LO)
@@ -218,12 +237,6 @@ SIFrameLowering::getReservedPrivateSegmentWaveByteOffsetReg(
 
 void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
                                                 MachineBasicBlock &MBB) const {
-  // Emit debugger prologue if "amdgpu-debugger-emit-prologue" attribute was
-  // specified.
-  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
-  if (ST.debuggerEmitPrologue())
-    emitDebuggerPrologue(MF, MBB);
-
   assert(&MF.front() == &MBB && "Shrink-wrapping not yet supported");
 
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
@@ -234,6 +247,7 @@ void SIFrameLowering::emitEntryFunctionPrologue(MachineFunction &MF,
   // FIXME: We should be cleaning up these unused SGPR spill frame indices
   // somewhere.
 
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo *TRI = &TII->getRegisterInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -421,12 +435,15 @@ void SIFrameLowering::emitEntryFunctionScratchSetup(const GCNSubtarget &ST,
                                        MachineMemOperand::MOLoad |
                                        MachineMemOperand::MOInvariant |
                                        MachineMemOperand::MODereferenceable,
-                                       0, 0);
+                                       16, 4);
     unsigned Offset = Fn.getCallingConv() == CallingConv::AMDGPU_CS ? 16 : 0;
+    const GCNSubtarget &Subtarget = MF.getSubtarget<GCNSubtarget>();
+    unsigned EncodedOffset = AMDGPU::getSMRDEncodedOffset(Subtarget, Offset);
     BuildMI(MBB, I, DL, LoadDwordX4, ScratchRsrcReg)
       .addReg(Rsrc01)
-      .addImm(Offset) // offset
+      .addImm(EncodedOffset) // offset
       .addImm(0) // glc
+      .addImm(0) // dlc
       .addReg(ScratchRsrcReg, RegState::ImplicitDefine)
       .addMemOperand(MMO);
     return;
@@ -462,11 +479,12 @@ void SIFrameLowering::emitEntryFunctionScratchSetup(const GCNSubtarget &ST,
                                            MachineMemOperand::MOLoad |
                                            MachineMemOperand::MOInvariant |
                                            MachineMemOperand::MODereferenceable,
-                                           0, 0);
+                                           8, 4);
         BuildMI(MBB, I, DL, LoadDwordX2, Rsrc01)
           .addReg(MFI->getImplicitBufferPtrUserSGPR())
           .addImm(0) // offset
           .addImm(0) // glc
+          .addImm(0) // dlc
           .addMemOperand(MMO)
           .addReg(ScratchRsrcReg, RegState::ImplicitDefine);
       }
@@ -703,9 +721,9 @@ void SIFrameLowering::processFunctionBeforeFrameFinalized(
         }
       }
     }
-
-    FuncInfo->removeSGPRToVGPRFrameIndices(MFI);
   }
+
+  FuncInfo->removeSGPRToVGPRFrameIndices(MFI);
 
   // FIXME: The other checks should be redundant with allStackObjectsAreDead,
   // but currently hasNonSpillStackObjects is set only from source
@@ -775,47 +793,6 @@ MachineBasicBlock::iterator SIFrameLowering::eliminateCallFramePseudoInstr(
   }
 
   return MBB.erase(I);
-}
-
-void SIFrameLowering::emitDebuggerPrologue(MachineFunction &MF,
-                                           MachineBasicBlock &MBB) const {
-  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
-  const SIInstrInfo *TII = ST.getInstrInfo();
-  const SIRegisterInfo *TRI = &TII->getRegisterInfo();
-  const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
-
-  MachineBasicBlock::iterator I = MBB.begin();
-  DebugLoc DL;
-
-  // For each dimension:
-  for (unsigned i = 0; i < 3; ++i) {
-    // Get work group ID SGPR, and make it live-in again.
-    unsigned WorkGroupIDSGPR = MFI->getWorkGroupIDSGPR(i);
-    MF.getRegInfo().addLiveIn(WorkGroupIDSGPR);
-    MBB.addLiveIn(WorkGroupIDSGPR);
-
-    // Since SGPRs are spilled into VGPRs, copy work group ID SGPR to VGPR in
-    // order to spill it to scratch.
-    unsigned WorkGroupIDVGPR =
-      MF.getRegInfo().createVirtualRegister(&AMDGPU::VGPR_32RegClass);
-    BuildMI(MBB, I, DL, TII->get(AMDGPU::V_MOV_B32_e32), WorkGroupIDVGPR)
-      .addReg(WorkGroupIDSGPR);
-
-    // Spill work group ID.
-    int WorkGroupIDObjectIdx = MFI->getDebuggerWorkGroupIDStackObjectIndex(i);
-    TII->storeRegToStackSlot(MBB, I, WorkGroupIDVGPR, false,
-      WorkGroupIDObjectIdx, &AMDGPU::VGPR_32RegClass, TRI);
-
-    // Get work item ID VGPR, and make it live-in again.
-    unsigned WorkItemIDVGPR = MFI->getWorkItemIDVGPR(i);
-    MF.getRegInfo().addLiveIn(WorkItemIDVGPR);
-    MBB.addLiveIn(WorkItemIDVGPR);
-
-    // Spill work item ID.
-    int WorkItemIDObjectIdx = MFI->getDebuggerWorkItemIDStackObjectIndex(i);
-    TII->storeRegToStackSlot(MBB, I, WorkItemIDVGPR, false,
-      WorkItemIDObjectIdx, &AMDGPU::VGPR_32RegClass, TRI);
-  }
 }
 
 bool SIFrameLowering::hasFP(const MachineFunction &MF) const {

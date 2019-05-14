@@ -85,10 +85,11 @@ define i32 @overflow_add_positive_const_limit(i8 zeroext %a) {
 }
 
 ; CHECK-LABEL: unsafe_add_underflow:
-; CHECK:  subs r0, #2
-; CHECK:  uxtb [[EXT:r[0-9]+]], r0
-; CHECK:  cmp [[EXT]], #255
-; CHECK:  moveq r0, #8
+; CHECK: movs	r1, #16
+; CHECK: cmp	r0, #1
+; CHECK: it	eq
+; CHECK: moveq	r1, #8
+; CHECK: mov	r0, r1
 define i32 @unsafe_add_underflow(i8 zeroext %a) {
   %add = add i8 %a, -2
   %cmp = icmp ugt i8 %add, 254
@@ -229,4 +230,21 @@ entry:
   %cmp = icmp ugt i8 %add, 127
   %conv4 = zext i1 %cmp to i32
   ret i32 %conv4
+}
+
+; CHECK-LABEL: convert_add_order
+; CHECK: orr{{.*}}, #1
+; CHECK: sub{{.*}}, #40
+; CHECK-NOT: uxt
+define i8 @convert_add_order(i8 zeroext %arg) {
+  %mask.0 = and i8 %arg, 1
+  %mask.1 = and i8 %arg, 2
+  %shl = or i8 %arg, 1
+  %add = add nuw i8 %shl, 10
+  %cmp.0 = icmp ult i8 %add, 60
+  %sub = add nsw i8 %shl, -40
+  %cmp.1 = icmp ult i8 %sub, 20
+  %mask.sel = select i1 %cmp.1, i8 %mask.0, i8 %mask.1
+  %res = select i1 %cmp.0, i8 %mask.sel, i8 %arg
+  ret i8 %res
 }

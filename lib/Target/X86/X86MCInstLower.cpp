@@ -1,9 +1,8 @@
 //===-- X86MCInstLower.cpp - Convert X86 MachineInstr to an MCInst --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -101,9 +100,7 @@ void X86AsmPrinter::StackMapShadowTracker::emitShadowPadding(
 }
 
 void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
-  OutStreamer->EmitInstruction(Inst, getSubtargetInfo(),
-                               EnablePrintSchedInfo &&
-                                   !(Inst.getFlags() & X86::NO_SCHED_INFO));
+  OutStreamer->EmitInstruction(Inst, getSubtargetInfo());
   SMShadowTracker.count(Inst, getSubtargetInfo(), CodeEmitter.get());
 }
 
@@ -438,7 +435,6 @@ void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
       OutMI.addOperand(MaybeMCOp.getValue());
 
   // Handle a few special cases to eliminate operand modifiers.
-ReSimplify:
   switch (OutMI.getOpcode()) {
   case X86::LEA64_32r:
   case X86::LEA64r:
@@ -554,11 +550,6 @@ ReSimplify:
     case X86::TAILJMPd64:
       Opcode = X86::JMP_1;
       goto SetTailJmpOpcode;
-    case X86::TAILJMPd_CC:
-    case X86::TAILJMPd64_CC:
-      Opcode = X86::GetCondBranchFromCond(
-          static_cast<X86::CondCode>(MI->getOperand(1).getImm()));
-      goto SetTailJmpOpcode;
 
     SetTailJmpOpcode:
       MCOperand Saved = OutMI.getOperand(0);
@@ -567,6 +558,17 @@ ReSimplify:
       OutMI.addOperand(Saved);
       break;
     }
+
+  case X86::TAILJMPd_CC:
+  case X86::TAILJMPd64_CC: {
+    MCOperand Saved = OutMI.getOperand(0);
+    MCOperand Saved2 = OutMI.getOperand(1);
+    OutMI = MCInst();
+    OutMI.setOpcode(X86::JCC_1);
+    OutMI.addOperand(Saved);
+    OutMI.addOperand(Saved2);
+    break;
+  }
 
   case X86::DEC16r:
   case X86::DEC32r:
@@ -585,19 +587,6 @@ ReSimplify:
       OutMI.setOpcode(Opcode);
     }
     break;
-
-  // These are pseudo-ops for OR to help with the OR->ADD transformation.  We do
-  // this with an ugly goto in case the resultant OR uses EAX and needs the
-  // short form.
-  case X86::ADD16rr_DB:   OutMI.setOpcode(X86::OR16rr);   goto ReSimplify;
-  case X86::ADD32rr_DB:   OutMI.setOpcode(X86::OR32rr);   goto ReSimplify;
-  case X86::ADD64rr_DB:   OutMI.setOpcode(X86::OR64rr);   goto ReSimplify;
-  case X86::ADD16ri_DB:   OutMI.setOpcode(X86::OR16ri);   goto ReSimplify;
-  case X86::ADD32ri_DB:   OutMI.setOpcode(X86::OR32ri);   goto ReSimplify;
-  case X86::ADD64ri32_DB: OutMI.setOpcode(X86::OR64ri32); goto ReSimplify;
-  case X86::ADD16ri8_DB:  OutMI.setOpcode(X86::OR16ri8);  goto ReSimplify;
-  case X86::ADD32ri8_DB:  OutMI.setOpcode(X86::OR32ri8);  goto ReSimplify;
-  case X86::ADD64ri8_DB:  OutMI.setOpcode(X86::OR64ri8);  goto ReSimplify;
 
   // We don't currently select the correct instruction form for instructions
   // which have a short %eax, etc. form. Handle this by custom lowering, for
@@ -963,6 +952,7 @@ void X86AsmPrinter::LowerFAULTING_OP(const MachineInstr &FaultingMI,
     if (auto MaybeOperand = MCIL.LowerMachineOperand(&FaultingMI, *I))
       MI.addOperand(MaybeOperand.getValue());
 
+  OutStreamer->AddComment("on-fault: " + HandlerLabel->getName());
   OutStreamer->EmitInstruction(MI, getSubtargetInfo());
 }
 
@@ -1374,7 +1364,8 @@ PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
     MBB = MBB->getPrevNode();
     MBBI = MBB->end();
   }
-  return --MBBI;
+  --MBBI;
+  return MBBI;
 }
 
 static const Constant *getConstantFromPool(const MachineInstr &MI,
@@ -1861,8 +1852,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 64> Mask;
       DecodePSHUFBMask(C, Width, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask),
-                                !EnablePrintSchedInfo);
+        OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask));
     }
     break;
   }
@@ -1934,8 +1924,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 16> Mask;
       DecodeVPERMILPMask(C, ElSize, Width, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask),
-                                !EnablePrintSchedInfo);
+        OutStreamer->AddComment(getShuffleComment(MI, SrcIdx, SrcIdx, Mask));
     }
     break;
   }
@@ -1966,8 +1955,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 16> Mask;
       DecodeVPERMIL2PMask(C, (unsigned)CtrlOp.getImm(), ElSize, Width, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask),
-                                !EnablePrintSchedInfo);
+        OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask));
     }
     break;
   }
@@ -1984,8 +1972,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 16> Mask;
       DecodeVPPERMMask(C, Width, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask),
-                                !EnablePrintSchedInfo);
+        OutStreamer->AddComment(getShuffleComment(MI, 1, 2, Mask));
     }
     break;
   }
@@ -2002,7 +1989,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       CS << X86ATTInstPrinter::getRegisterName(DstOp.getReg()) << " = ";
       if (auto *CF = dyn_cast<ConstantFP>(C)) {
         CS << "0x" << CF->getValueAPF().bitcastToAPInt().toString(16, false);
-        OutStreamer->AddComment(CS.str(), !EnablePrintSchedInfo);
+        OutStreamer->AddComment(CS.str());
       }
     }
     break;
@@ -2099,7 +2086,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           }
         }
         CS << "]";
-        OutStreamer->AddComment(CS.str(), !EnablePrintSchedInfo);
+        OutStreamer->AddComment(CS.str());
       } else if (auto *CV = dyn_cast<ConstantVector>(C)) {
         CS << "<";
         for (int l = 0; l != NumLanes; ++l) {
@@ -2111,7 +2098,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           }
         }
         CS << ">";
-        OutStreamer->AddComment(CS.str(), !EnablePrintSchedInfo);
+        OutStreamer->AddComment(CS.str());
       }
     }
     break;
@@ -2198,14 +2185,12 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
         printConstant(C, CS);
       }
       CS << "]";
-      OutStreamer->AddComment(CS.str(), !EnablePrintSchedInfo);
+      OutStreamer->AddComment(CS.str());
     }
   }
 
   MCInst TmpInst;
   MCInstLowering.Lower(MI, TmpInst);
-  if (MI->getAsmPrinterFlag(MachineInstr::NoSchedComment))
-    TmpInst.setFlags(TmpInst.getFlags() | X86::NO_SCHED_INFO);
 
   // Stackmap shadows cannot include branch targets, so we can count the bytes
   // in a call towards the shadow, but must ensure that the no thread returns

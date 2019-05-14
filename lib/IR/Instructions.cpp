@@ -1,9 +1,8 @@
 //===- Instructions.cpp - Implement the LLVM instructions -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -29,6 +28,7 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -257,6 +257,11 @@ void LandingPadInst::addClause(Constant *Val) {
 
 Function *CallBase::getCaller() { return getParent()->getParent(); }
 
+unsigned CallBase::getNumSubclassExtraOperandsDynamic() const {
+  assert(getOpcode() == Instruction::CallBr && "Unexpected opcode!");
+  return cast<CallBrInst>(this)->getNumIndirectDests() + 1;
+}
+
 bool CallBase::isIndirectCall() const {
   const Value *V = getCalledValue();
   if (isa<Function>(V) || isa<Constant>(V))
@@ -265,6 +270,21 @@ bool CallBase::isIndirectCall() const {
     if (CI->isInlineAsm())
       return false;
   return true;
+}
+
+/// Tests if this call site must be tail call optimized. Only a CallInst can
+/// be tail call optimized.
+bool CallBase::isMustTailCall() const {
+  if (auto *CI = dyn_cast<CallInst>(this))
+    return CI->isMustTailCall();
+  return false;
+}
+
+/// Tests if this call site is marked as a tail call.
+bool CallBase::isTailCall() const {
+  if (auto *CI = dyn_cast<CallInst>(this))
+    return CI->isTailCall();
+  return false;
 }
 
 Intrinsic::ID CallBase::getIntrinsicID() const {
@@ -429,8 +449,8 @@ CallInst *CallInst::Create(CallInst *CI, ArrayRef<OperandBundleDef> OpB,
                            Instruction *InsertPt) {
   std::vector<Value *> Args(CI->arg_begin(), CI->arg_end());
 
-  auto *NewCI = CallInst::Create(CI->getCalledValue(), Args, OpB, CI->getName(),
-                                 InsertPt);
+  auto *NewCI = CallInst::Create(CI->getFunctionType(), CI->getCalledValue(),
+                                 Args, OpB, CI->getName(), InsertPt);
   NewCI->setTailCallKind(CI->getTailCallKind());
   NewCI->setCallingConv(CI->getCallingConv());
   NewCI->SubclassOptionalData = CI->SubclassOptionalData;
@@ -439,14 +459,48 @@ CallInst *CallInst::Create(CallInst *CI, ArrayRef<OperandBundleDef> OpB,
   return NewCI;
 }
 
+// Update profile weight for call instruction by scaling it using the ratio
+// of S/T. The meaning of "branch_weights" meta data for call instruction is
+// transfered to represent call count.
+void CallInst::updateProfWeight(uint64_t S, uint64_t T) {
+  auto *ProfileData = getMetadata(LLVMContext::MD_prof);
+  if (ProfileData == nullptr)
+    return;
 
+  auto *ProfDataName = dyn_cast<MDString>(ProfileData->getOperand(0));
+  if (!ProfDataName || (!ProfDataName->getString().equals("branch_weights") &&
+                        !ProfDataName->getString().equals("VP")))
+    return;
 
-
-
-
-
-
-
+  MDBuilder MDB(getContext());
+  SmallVector<Metadata *, 3> Vals;
+  Vals.push_back(ProfileData->getOperand(0));
+  APInt APS(128, S), APT(128, T);
+  if (ProfDataName->getString().equals("branch_weights") &&
+      ProfileData->getNumOperands() > 0) {
+    // Using APInt::div may be expensive, but most cases should fit 64 bits.
+    APInt Val(128, mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(1))
+                       ->getValue()
+                       .getZExtValue());
+    Val *= APS;
+    Vals.push_back(MDB.createConstant(ConstantInt::get(
+        Type::getInt64Ty(getContext()), Val.udiv(APT).getLimitedValue())));
+  } else if (ProfDataName->getString().equals("VP"))
+    for (unsigned i = 1; i < ProfileData->getNumOperands(); i += 2) {
+      // The first value is the key of the value profile, which will not change.
+      Vals.push_back(ProfileData->getOperand(i));
+      // Using APInt::div may be expensive, but most cases should fit 64 bits.
+      APInt Val(128,
+                mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(i + 1))
+                    ->getValue()
+                    .getZExtValue());
+      Val *= APS;
+      Vals.push_back(MDB.createConstant(
+          ConstantInt::get(Type::getInt64Ty(getContext()),
+                           Val.udiv(APT).getLimitedValue())));
+    }
+  setMetadata(LLVMContext::MD_prof, MDNode::get(getContext(), Vals));
+}
 
 /// IsConstantOne - Return true only if val is constant int 1
 static bool IsConstantOne(Value *val) {
@@ -503,7 +557,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
   BasicBlock *BB = InsertBefore ? InsertBefore->getParent() : InsertAtEnd;
   Module *M = BB->getParent()->getParent();
   Type *BPTy = Type::getInt8PtrTy(BB->getContext());
-  Value *MallocFunc = MallocF;
+  FunctionCallee MallocFunc = MallocF;
   if (!MallocFunc)
     // prototype malloc as "void *malloc(size_t)"
     MallocFunc = M->getOrInsertFunction("malloc", BPTy, IntPtrTy);
@@ -527,7 +581,7 @@ static Instruction *createMalloc(Instruction *InsertBefore,
     }
   }
   MCall->setTailCall();
-  if (Function *F = dyn_cast<Function>(MallocFunc)) {
+  if (Function *F = dyn_cast<Function>(MallocFunc.getCallee())) {
     MCall->setCallingConv(F->getCallingConv());
     if (!F->returnDoesNotAlias())
       F->setReturnDoesNotAlias();
@@ -600,7 +654,7 @@ static Instruction *createFree(Value *Source,
   Type *VoidTy = Type::getVoidTy(M->getContext());
   Type *IntPtrTy = Type::getInt8PtrTy(M->getContext());
   // prototype free as "void free(void*)"
-  Value *FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy);
+  FunctionCallee FreeFunc = M->getOrInsertFunction("free", VoidTy, IntPtrTy);
   CallInst *Result = nullptr;
   Value *PtrCast = Source;
   if (InsertBefore) {
@@ -613,7 +667,7 @@ static Instruction *createFree(Value *Source,
     Result = CallInst::Create(FreeFunc, PtrCast, Bundles, "");
   }
   Result->setTailCall();
-  if (Function *F = dyn_cast<Function>(FreeFunc))
+  if (Function *F = dyn_cast<Function>(FreeFunc.getCallee()))
     Result->setCallingConv(F->getCallingConv());
 
   return Result;
@@ -697,9 +751,9 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
                                Instruction *InsertPt) {
   std::vector<Value *> Args(II->arg_begin(), II->arg_end());
 
-  auto *NewII = InvokeInst::Create(II->getCalledValue(), II->getNormalDest(),
-                                   II->getUnwindDest(), Args, OpB,
-                                   II->getName(), InsertPt);
+  auto *NewII = InvokeInst::Create(II->getFunctionType(), II->getCalledValue(),
+                                   II->getNormalDest(), II->getUnwindDest(),
+                                   Args, OpB, II->getName(), InsertPt);
   NewII->setCallingConv(II->getCallingConv());
   NewII->SubclassOptionalData = II->SubclassOptionalData;
   NewII->setAttributes(II->getAttributes());
@@ -710,6 +764,76 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
 
 LandingPadInst *InvokeInst::getLandingPadInst() const {
   return cast<LandingPadInst>(getUnwindDest()->getFirstNonPHI());
+}
+
+//===----------------------------------------------------------------------===//
+//                        CallBrInst Implementation
+//===----------------------------------------------------------------------===//
+
+void CallBrInst::init(FunctionType *FTy, Value *Fn, BasicBlock *Fallthrough,
+                      ArrayRef<BasicBlock *> IndirectDests,
+                      ArrayRef<Value *> Args,
+                      ArrayRef<OperandBundleDef> Bundles,
+                      const Twine &NameStr) {
+  this->FTy = FTy;
+
+  assert((int)getNumOperands() ==
+             ComputeNumOperands(Args.size(), IndirectDests.size(),
+                                CountBundleInputs(Bundles)) &&
+         "NumOperands not set up?");
+  NumIndirectDests = IndirectDests.size();
+  setDefaultDest(Fallthrough);
+  for (unsigned i = 0; i != NumIndirectDests; ++i)
+    setIndirectDest(i, IndirectDests[i]);
+  setCalledOperand(Fn);
+
+#ifndef NDEBUG
+  assert(((Args.size() == FTy->getNumParams()) ||
+          (FTy->isVarArg() && Args.size() > FTy->getNumParams())) &&
+         "Calling a function with bad signature");
+
+  for (unsigned i = 0, e = Args.size(); i != e; i++)
+    assert((i >= FTy->getNumParams() ||
+            FTy->getParamType(i) == Args[i]->getType()) &&
+           "Calling a function with a bad signature!");
+#endif
+
+  std::copy(Args.begin(), Args.end(), op_begin());
+
+  auto It = populateBundleOperandInfos(Bundles, Args.size());
+  (void)It;
+  assert(It + 2 + IndirectDests.size() == op_end() && "Should add up!");
+
+  setName(NameStr);
+}
+
+CallBrInst::CallBrInst(const CallBrInst &CBI)
+    : CallBase(CBI.Attrs, CBI.FTy, CBI.getType(), Instruction::CallBr,
+               OperandTraits<CallBase>::op_end(this) - CBI.getNumOperands(),
+               CBI.getNumOperands()) {
+  setCallingConv(CBI.getCallingConv());
+  std::copy(CBI.op_begin(), CBI.op_end(), op_begin());
+  std::copy(CBI.bundle_op_info_begin(), CBI.bundle_op_info_end(),
+            bundle_op_info_begin());
+  SubclassOptionalData = CBI.SubclassOptionalData;
+  NumIndirectDests = CBI.NumIndirectDests;
+}
+
+CallBrInst *CallBrInst::Create(CallBrInst *CBI, ArrayRef<OperandBundleDef> OpB,
+                               Instruction *InsertPt) {
+  std::vector<Value *> Args(CBI->arg_begin(), CBI->arg_end());
+
+  auto *NewCBI = CallBrInst::Create(CBI->getFunctionType(),
+                                    CBI->getCalledValue(),
+                                    CBI->getDefaultDest(),
+                                    CBI->getIndirectDests(),
+                                    Args, OpB, CBI->getName(), InsertPt);
+  NewCBI->setCallingConv(CBI->getCallingConv());
+  NewCBI->SubclassOptionalData = CBI->SubclassOptionalData;
+  NewCBI->setAttributes(CBI->getAttributes());
+  NewCBI->setDebugLoc(CBI->getDebugLoc());
+  NewCBI->NumIndirectDests = CBI->NumIndirectDests;
+  return NewCBI;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1408,6 +1532,10 @@ StringRef AtomicRMWInst::getOperationName(BinOp Op) {
     return "umax";
   case AtomicRMWInst::UMin:
     return "umin";
+  case AtomicRMWInst::FAdd:
+    return "fadd";
+  case AtomicRMWInst::FSub:
+    return "fsub";
   case AtomicRMWInst::BAD_BINOP:
     return "<invalid operation>";
   }
@@ -1664,6 +1792,25 @@ ShuffleVectorInst::ShuffleVectorInst(Value *V1, Value *V2, Value *Mask,
   Op<1>() = V2;
   Op<2>() = Mask;
   setName(Name);
+}
+
+void ShuffleVectorInst::commute() {
+  int NumOpElts = Op<0>()->getType()->getVectorNumElements();
+  int NumMaskElts = getMask()->getType()->getVectorNumElements();
+  SmallVector<Constant*, 16> NewMask(NumMaskElts);
+  Type *Int32Ty = Type::getInt32Ty(getContext());
+  for (int i = 0; i != NumMaskElts; ++i) {
+    int MaskElt = getMaskValue(i);
+    if (MaskElt == -1) {
+      NewMask[i] = UndefValue::get(Int32Ty);
+      continue;
+    }
+    assert(MaskElt >= 0 && MaskElt < 2 * NumOpElts && "Out-of-range mask");
+    MaskElt = (MaskElt < NumOpElts) ? MaskElt + NumOpElts : MaskElt - NumOpElts;
+    NewMask[i] = ConstantInt::get(Int32Ty, MaskElt);
+  }
+  Op<2>() = ConstantVector::get(NewMask);
+  Op<0>().swap(Op<1>());
 }
 
 bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
@@ -3976,6 +4123,14 @@ InvokeInst *InvokeInst::cloneImpl() const {
     return new(getNumOperands(), DescriptorBytes) InvokeInst(*this);
   }
   return new(getNumOperands()) InvokeInst(*this);
+}
+
+CallBrInst *CallBrInst::cloneImpl() const {
+  if (hasOperandBundles()) {
+    unsigned DescriptorBytes = getNumOperandBundles() * sizeof(BundleOpInfo);
+    return new (getNumOperands(), DescriptorBytes) CallBrInst(*this);
+  }
+  return new (getNumOperands()) CallBrInst(*this);
 }
 
 ResumeInst *ResumeInst::cloneImpl() const { return new (1) ResumeInst(*this); }

@@ -1,9 +1,8 @@
 //===- SIInstrInfo.h - SI Instruction Info Interface ------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -121,14 +120,15 @@ private:
   void addUsersToMoveToVALUWorklist(unsigned Reg, MachineRegisterInfo &MRI,
                                     SetVectorType &Worklist) const;
 
-  void
-  addSCCDefUsersToVALUWorklist(MachineInstr &SCCDefInst,
-                               SetVectorType &Worklist) const;
+  void addSCCDefUsersToVALUWorklist(MachineOperand &Op,
+                                    MachineInstr &SCCDefInst,
+                                    SetVectorType &Worklist) const;
 
   const TargetRegisterClass *
   getDestEquivalentVGPRClass(const MachineInstr &Inst) const;
 
-  bool checkInstOffsetsDoNotOverlap(MachineInstr &MIa, MachineInstr &MIb) const;
+  bool checkInstOffsetsDoNotOverlap(const MachineInstr &MIa,
+                                    const MachineInstr &MIb) const;
 
   unsigned findUsedSGPR(const MachineInstr &MI, int OpIndices[3]) const;
 
@@ -173,11 +173,13 @@ public:
                                int64_t &Offset1,
                                int64_t &Offset2) const override;
 
-  bool getMemOperandWithOffset(MachineInstr &LdSt, MachineOperand *&BaseOp,
+  bool getMemOperandWithOffset(const MachineInstr &LdSt,
+                               const MachineOperand *&BaseOp,
                                int64_t &Offset,
                                const TargetRegisterInfo *TRI) const final;
 
-  bool shouldClusterMemOps(MachineOperand &BaseOp1, MachineOperand &BaseOp2,
+  bool shouldClusterMemOps(const MachineOperand &BaseOp1,
+                           const MachineOperand &BaseOp2,
                            unsigned NumLoads) const override;
 
   bool shouldScheduleLoadsNear(SDNode *Load0, SDNode *Load1, int64_t Offset0,
@@ -294,7 +296,8 @@ public:
              unsigned Kind) const override;
 
   bool
-  areMemAccessesTriviallyDisjoint(MachineInstr &MIa, MachineInstr &MIb,
+  areMemAccessesTriviallyDisjoint(const MachineInstr &MIa,
+                                  const MachineInstr &MIb,
                                   AliasAnalysis *AA = nullptr) const override;
 
   bool isFoldableCopy(const MachineInstr &MI) const;
@@ -376,6 +379,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::SOPP;
   }
 
+  static bool isPacked(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::IsPacked;
+  }
+
+  bool isPacked(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::IsPacked;
+  }
+
   static bool isVOP1(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::VOP1;
   }
@@ -449,6 +460,8 @@ public:
   bool isDS(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::DS;
   }
+
+  bool isAlwaysGDS(uint16_t Opcode) const;
 
   static bool isMIMG(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::MIMG;
@@ -623,6 +636,10 @@ public:
   /// Whether we must prevent this instruction from executing with EXEC = 0.
   bool hasUnwantedEffectsWhenEXECEmpty(const MachineInstr &MI) const;
 
+  /// Returns true if the instruction could potentially depend on the value of
+  /// exec. If false, exec dependencies may safely be ignored.
+  bool mayReadEXEC(const MachineRegisterInfo &MRI, const MachineInstr &MI) const;
+
   bool isInlineConstant(const APInt &Imm) const;
 
   bool isInlineConstant(const MachineOperand &MO, uint8_t OperandType) const;
@@ -761,10 +778,6 @@ public:
     return RI.getRegSizeInBits(*getOpRegClass(MI, OpNo)) / 8;
   }
 
-  /// \returns true if it is legal for the operand at index \p OpNo
-  /// to read a VGPR.
-  bool canReadVGPR(const MachineInstr &MI, unsigned OpNo) const;
-
   /// Legalize the \p OpIndex operand of this instruction by inserting
   /// a MOV.  For example:
   /// ADD_I32_e32 VGPR0, 15
@@ -836,7 +849,7 @@ public:
   void insertReturn(MachineBasicBlock &MBB) const;
   /// Return the number of wait states that result from executing this
   /// instruction.
-  unsigned getNumWaitStates(const MachineInstr &MI) const;
+  static unsigned getNumWaitStates(const MachineInstr &MI);
 
   /// Returns the operand named \p Op.  If \p MI does not have an
   /// operand named \c Op, this function returns nullptr.
@@ -956,6 +969,12 @@ TargetInstrInfo::RegSubRegPair getRegSequenceSubReg(MachineInstr &MI,
 MachineInstr *getVRegSubRegDef(const TargetInstrInfo::RegSubRegPair &P,
                                MachineRegisterInfo &MRI);
 
+/// \brief Return true if EXEC mask isnt' changed between the def and
+/// all uses of VReg. Currently if def and uses are in different BBs -
+/// simply return false. Should be run on SSA.
+bool isEXECMaskConstantBetweenDefAndUses(unsigned VReg,
+                                         MachineRegisterInfo &MRI);
+
 namespace AMDGPU {
 
   LLVM_READONLY
@@ -1002,6 +1021,9 @@ namespace AMDGPU {
 
   LLVM_READONLY
   int getGlobalSaddrOp(uint16_t Opcode);
+
+  LLVM_READONLY
+  int getVCMPXNoSDstOp(uint16_t Opcode);
 
   const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
   const uint64_t RSRC_ELEMENT_SIZE_SHIFT = (32 + 19);

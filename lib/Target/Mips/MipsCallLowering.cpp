@@ -1,9 +1,8 @@
 //===- MipsCallLowering.cpp -------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -24,10 +23,10 @@ using namespace llvm;
 MipsCallLowering::MipsCallLowering(const MipsTargetLowering &TLI)
     : CallLowering(&TLI) {}
 
-bool MipsCallLowering::MipsHandler::assign(unsigned VReg,
-                                           const CCValAssign &VA) {
+bool MipsCallLowering::MipsHandler::assign(unsigned VReg, const CCValAssign &VA,
+                                           const EVT &VT) {
   if (VA.isRegLoc()) {
-    assignValueToReg(VReg, VA);
+    assignValueToReg(VReg, VA, VT);
   } else if (VA.isMemLoc()) {
     assignValueToAddress(VReg, VA);
   } else {
@@ -38,9 +37,10 @@ bool MipsCallLowering::MipsHandler::assign(unsigned VReg,
 
 bool MipsCallLowering::MipsHandler::assignVRegs(ArrayRef<unsigned> VRegs,
                                                 ArrayRef<CCValAssign> ArgLocs,
-                                                unsigned ArgLocsStartIndex) {
+                                                unsigned ArgLocsStartIndex,
+                                                const EVT &VT) {
   for (unsigned i = 0; i < VRegs.size(); ++i)
-    if (!assign(VRegs[i], ArgLocs[ArgLocsStartIndex + i]))
+    if (!assign(VRegs[i], ArgLocs[ArgLocsStartIndex + i], VT))
       return false;
   return true;
 }
@@ -72,10 +72,10 @@ bool MipsCallLowering::MipsHandler::handle(
       for (unsigned i = 0; i < SplitLength; ++i)
         VRegs.push_back(MRI.createGenericVirtualRegister(LLT{RegisterVT}));
 
-      if (!handleSplit(VRegs, ArgLocs, ArgLocsIndex, Args[ArgsIndex].Reg))
+      if (!handleSplit(VRegs, ArgLocs, ArgLocsIndex, Args[ArgsIndex].Reg, VT))
         return false;
     } else {
-      if (!assign(Args[ArgsIndex].Reg, ArgLocs[ArgLocsIndex]))
+      if (!assign(Args[ArgsIndex].Reg, ArgLocs[ArgLocsIndex], VT))
         return false;
     }
   }
@@ -89,7 +89,8 @@ public:
       : MipsHandler(MIRBuilder, MRI) {}
 
 private:
-  void assignValueToReg(unsigned ValVReg, const CCValAssign &VA) override;
+  void assignValueToReg(unsigned ValVReg, const CCValAssign &VA,
+                        const EVT &VT) override;
 
   unsigned getStackAddress(const CCValAssign &VA,
                            MachineMemOperand *&MMO) override;
@@ -98,7 +99,7 @@ private:
 
   bool handleSplit(SmallVectorImpl<unsigned> &VRegs,
                    ArrayRef<CCValAssign> ArgLocs, unsigned ArgLocsStartIndex,
-                   unsigned ArgsReg) override;
+                   unsigned ArgsReg, const EVT &VT) override;
 
   virtual void markPhysRegUsed(unsigned PhysReg) {
     MIRBuilder.getMBB().addLiveIn(PhysReg);
@@ -128,34 +129,63 @@ private:
 } // end anonymous namespace
 
 void IncomingValueHandler::assignValueToReg(unsigned ValVReg,
-                                            const CCValAssign &VA) {
+                                            const CCValAssign &VA,
+                                            const EVT &VT) {
+  const MipsSubtarget &STI =
+      static_cast<const MipsSubtarget &>(MIRBuilder.getMF().getSubtarget());
   unsigned PhysReg = VA.getLocReg();
-  switch (VA.getLocInfo()) {
-  case CCValAssign::LocInfo::SExt:
-  case CCValAssign::LocInfo::ZExt:
-  case CCValAssign::LocInfo::AExt: {
-    auto Copy = MIRBuilder.buildCopy(LLT{VA.getLocVT()}, PhysReg);
-    MIRBuilder.buildTrunc(ValVReg, Copy);
-    break;
+  if (VT == MVT::f64 && PhysReg >= Mips::A0 && PhysReg <= Mips::A3) {
+    const MipsSubtarget &STI =
+        static_cast<const MipsSubtarget &>(MIRBuilder.getMF().getSubtarget());
+
+    MIRBuilder
+        .buildInstr(STI.isFP64bit() ? Mips::BuildPairF64_64
+                                    : Mips::BuildPairF64)
+        .addDef(ValVReg)
+        .addUse(PhysReg + (STI.isLittle() ? 0 : 1))
+        .addUse(PhysReg + (STI.isLittle() ? 1 : 0))
+        .constrainAllUses(MIRBuilder.getTII(), *STI.getRegisterInfo(),
+                          *STI.getRegBankInfo());
+    markPhysRegUsed(PhysReg);
+    markPhysRegUsed(PhysReg + 1);
+  } else if (VT == MVT::f32 && PhysReg >= Mips::A0 && PhysReg <= Mips::A3) {
+    MIRBuilder.buildInstr(Mips::MTC1)
+        .addDef(ValVReg)
+        .addUse(PhysReg)
+        .constrainAllUses(MIRBuilder.getTII(), *STI.getRegisterInfo(),
+                          *STI.getRegBankInfo());
+    markPhysRegUsed(PhysReg);
+  } else {
+    switch (VA.getLocInfo()) {
+    case CCValAssign::LocInfo::SExt:
+    case CCValAssign::LocInfo::ZExt:
+    case CCValAssign::LocInfo::AExt: {
+      auto Copy = MIRBuilder.buildCopy(LLT{VA.getLocVT()}, PhysReg);
+      MIRBuilder.buildTrunc(ValVReg, Copy);
+      break;
+    }
+    default:
+      MIRBuilder.buildCopy(ValVReg, PhysReg);
+      break;
+    }
+    markPhysRegUsed(PhysReg);
   }
-  default:
-    MIRBuilder.buildCopy(ValVReg, PhysReg);
-    break;
-  }
-  markPhysRegUsed(PhysReg);
 }
 
 unsigned IncomingValueHandler::getStackAddress(const CCValAssign &VA,
                                                MachineMemOperand *&MMO) {
+  MachineFunction &MF = MIRBuilder.getMF();
   unsigned Size = alignTo(VA.getValVT().getSizeInBits(), 8) / 8;
   unsigned Offset = VA.getLocMemOffset();
-  MachineFrameInfo &MFI = MIRBuilder.getMF().getFrameInfo();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
 
   int FI = MFI.CreateFixedObject(Size, Offset, true);
   MachinePointerInfo MPO =
       MachinePointerInfo::getFixedStack(MIRBuilder.getMF(), FI);
-  MMO = MIRBuilder.getMF().getMachineMemOperand(MPO, MachineMemOperand::MOLoad,
-                                                Size, /* Alignment */ 0);
+
+  const TargetFrameLowering *TFL = MF.getSubtarget().getFrameLowering();
+  unsigned Align = MinAlign(TFL->getStackAlignment(), Offset);
+  MMO = MF.getMachineMemOperand(MPO, MachineMemOperand::MOLoad, Size, Align);
 
   unsigned AddrReg = MRI.createGenericVirtualRegister(LLT::pointer(0, 32));
   MIRBuilder.buildFrameIndex(AddrReg, FI);
@@ -178,8 +208,8 @@ void IncomingValueHandler::assignValueToAddress(unsigned ValVReg,
 bool IncomingValueHandler::handleSplit(SmallVectorImpl<unsigned> &VRegs,
                                        ArrayRef<CCValAssign> ArgLocs,
                                        unsigned ArgLocsStartIndex,
-                                       unsigned ArgsReg) {
-  if (!assignVRegs(VRegs, ArgLocs, ArgLocsStartIndex))
+                                       unsigned ArgsReg, const EVT &VT) {
+  if (!assignVRegs(VRegs, ArgLocs, ArgLocsStartIndex, VT))
     return false;
   setLeastSignificantFirst(VRegs);
   MIRBuilder.buildMerge(ArgsReg, VRegs);
@@ -194,7 +224,8 @@ public:
       : MipsHandler(MIRBuilder, MRI), MIB(MIB) {}
 
 private:
-  void assignValueToReg(unsigned ValVReg, const CCValAssign &VA) override;
+  void assignValueToReg(unsigned ValVReg, const CCValAssign &VA,
+                        const EVT &VT) override;
 
   unsigned getStackAddress(const CCValAssign &VA,
                            MachineMemOperand *&MMO) override;
@@ -203,7 +234,7 @@ private:
 
   bool handleSplit(SmallVectorImpl<unsigned> &VRegs,
                    ArrayRef<CCValAssign> ArgLocs, unsigned ArgLocsStartIndex,
-                   unsigned ArgsReg) override;
+                   unsigned ArgsReg, const EVT &VT) override;
 
   unsigned extendRegister(unsigned ValReg, const CCValAssign &VA);
 
@@ -212,15 +243,47 @@ private:
 } // end anonymous namespace
 
 void OutgoingValueHandler::assignValueToReg(unsigned ValVReg,
-                                            const CCValAssign &VA) {
+                                            const CCValAssign &VA,
+                                            const EVT &VT) {
   unsigned PhysReg = VA.getLocReg();
-  unsigned ExtReg = extendRegister(ValVReg, VA);
-  MIRBuilder.buildCopy(PhysReg, ExtReg);
-  MIB.addUse(PhysReg, RegState::Implicit);
+  const MipsSubtarget &STI =
+      static_cast<const MipsSubtarget &>(MIRBuilder.getMF().getSubtarget());
+
+  if (VT == MVT::f64 && PhysReg >= Mips::A0 && PhysReg <= Mips::A3) {
+    MIRBuilder
+        .buildInstr(STI.isFP64bit() ? Mips::ExtractElementF64_64
+                                    : Mips::ExtractElementF64)
+        .addDef(PhysReg + (STI.isLittle() ? 1 : 0))
+        .addUse(ValVReg)
+        .addImm(1)
+        .constrainAllUses(MIRBuilder.getTII(), *STI.getRegisterInfo(),
+                          *STI.getRegBankInfo());
+    MIRBuilder
+        .buildInstr(STI.isFP64bit() ? Mips::ExtractElementF64_64
+                                    : Mips::ExtractElementF64)
+        .addDef(PhysReg + (STI.isLittle() ? 0 : 1))
+        .addUse(ValVReg)
+        .addImm(0)
+        .constrainAllUses(MIRBuilder.getTII(), *STI.getRegisterInfo(),
+                          *STI.getRegBankInfo());
+  } else if (VT == MVT::f32 && PhysReg >= Mips::A0 && PhysReg <= Mips::A3) {
+    MIRBuilder.buildInstr(Mips::MFC1)
+        .addDef(PhysReg)
+        .addUse(ValVReg)
+        .constrainAllUses(MIRBuilder.getTII(), *STI.getRegisterInfo(),
+                          *STI.getRegBankInfo());
+  } else {
+    unsigned ExtReg = extendRegister(ValVReg, VA);
+    MIRBuilder.buildCopy(PhysReg, ExtReg);
+    MIB.addUse(PhysReg, RegState::Implicit);
+  }
 }
 
 unsigned OutgoingValueHandler::getStackAddress(const CCValAssign &VA,
                                                MachineMemOperand *&MMO) {
+  MachineFunction &MF = MIRBuilder.getMF();
+  const TargetFrameLowering *TFL = MF.getSubtarget().getFrameLowering();
+
   LLT p0 = LLT::pointer(0, 32);
   LLT s32 = LLT::scalar(32);
   unsigned SPReg = MRI.createGenericVirtualRegister(p0);
@@ -236,8 +299,8 @@ unsigned OutgoingValueHandler::getStackAddress(const CCValAssign &VA,
   MachinePointerInfo MPO =
       MachinePointerInfo::getStack(MIRBuilder.getMF(), Offset);
   unsigned Size = alignTo(VA.getValVT().getSizeInBits(), 8) / 8;
-  MMO = MIRBuilder.getMF().getMachineMemOperand(MPO, MachineMemOperand::MOStore,
-                                                Size, /* Alignment */ 0);
+  unsigned Align = MinAlign(TFL->getStackAlignment(), Offset);
+  MMO = MF.getMachineMemOperand(MPO, MachineMemOperand::MOStore, Size, Align);
 
   return AddrReg;
 }
@@ -281,10 +344,10 @@ unsigned OutgoingValueHandler::extendRegister(unsigned ValReg,
 bool OutgoingValueHandler::handleSplit(SmallVectorImpl<unsigned> &VRegs,
                                        ArrayRef<CCValAssign> ArgLocs,
                                        unsigned ArgLocsStartIndex,
-                                       unsigned ArgsReg) {
+                                       unsigned ArgsReg, const EVT &VT) {
   MIRBuilder.buildUnmerge(VRegs, ArgsReg);
   setLeastSignificantFirst(VRegs);
-  if (!assignVRegs(VRegs, ArgLocs, ArgLocsStartIndex))
+  if (!assignVRegs(VRegs, ArgLocs, ArgLocsStartIndex, VT))
     return false;
 
   return true;
@@ -294,6 +357,8 @@ static bool isSupportedType(Type *T) {
   if (T->isIntegerTy())
     return true;
   if (T->isPointerTy())
+    return true;
+  if (T->isFloatingPointTy())
     return true;
   return false;
 }

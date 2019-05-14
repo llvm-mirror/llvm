@@ -15,10 +15,40 @@ THIS_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.join(THIS_DIR, '..', '..', '..')
 
 
+def get_platform():
+    import platform
+    if platform.machine() not in ('AMD64', 'x86_64'):
+        return None
+    if sys.platform.startswith('linux'):
+        return 'linux-amd64'
+    if sys.platform == 'darwin':
+        return 'mac-amd64'
+    if sys.platform == 'win32':
+        return 'windows-amd64'
+
+
+def print_no_gn(mention_get):
+    print('gn binary not found in PATH')
+    if mention_get:
+        print('run llvm/utils/gn/get.py to download a binary and try again, or')
+    print('follow https://gn.googlesource.com/gn/#getting-started')
+    return 1
+
+
 def main():
-    # Find real gn executable. For now, just assume it's on PATH.
-    # FIXME: Probably need to append '.exe' on Windows.
+    # Find real gn executable.
     gn = 'gn'
+    if subprocess.call('gn --version', stdout=open(os.devnull, 'w'),
+                                       stderr=subprocess.STDOUT,
+                                       shell=True) != 0:
+        # Not on path. See if get.py downloaded a prebuilt binary and run that
+        # if it's there, or suggest to run get.py if it isn't.
+        platform = get_platform()
+        if not platform:
+            return print_no_gn(mention_get=False)
+        gn = os.path.join(os.path.dirname(__file__), 'bin', platform, 'gn')
+        if not os.path.exists(gn + ('.exe' if sys.platform == 'win32' else '')):
+            return print_no_gn(mention_get=True)
 
     # Compute --dotfile= and --root= args to add.
     extra_args = []
