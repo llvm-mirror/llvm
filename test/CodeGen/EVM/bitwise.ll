@@ -21,8 +21,4 @@ define i256 @xorop(i256 %a, i256 %b) nounwind {
   ret i256 %1
 }
 
-define i256 @notop(i256 %a, i256 %b) nounwind {
-; CHECK-LABEL: notop:
-; TODO: implement NOT
-}
 
