@@ -53,6 +53,7 @@ def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
 def SDT_EVMArgument : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
 def SDT_EVMMove : SDTypeProfile<0, 2, [SDTCisVT<0, i256>, SDTCisSameAs<0, 1>]>;
 
+def SDT_EVMWrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
 def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
 def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
 
@@ -68,6 +69,9 @@ SDNode<"EVMISD::MOVE", SDT_EVMMove>;
 
 def EVMBrcc :
 SDNode<"EVMISD::BRCC", SDT_EVMBrcc, [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
+
+def EVMWrapper:
+SDNode<"EVMISD::WRAPPER", SDT_EVMWrapper>;
 
 def EVMCall :
 SDNode<"EVMISD::CALL", SDT_EVMCall,

@@ -55,7 +55,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 
 
 
-  // TODO: set type legalization actions
   for (auto VT : { MVT::i1, MVT::i8, MVT::i16, MVT::i32,
                    MVT::i64, MVT::i128, MVT::i256 }) {
     setOperationAction(ISD::SMIN, VT, Expand);
@@ -122,6 +121,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
   setOperationAction(ISD::FrameIndex, MVT::i256, Custom);
+  setOperationAction(ISD::GlobalAddress, MVT::i256, Custom);
 
   // FIXME: DYNAMIC_STACKALLOC
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i256, Custom);
@@ -213,6 +213,25 @@ SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
     return DAG.getTargetFrameIndex(FI, Op.getValueType());
 }
 
+SDValue
+EVMTargetLowering::LowerGlobalAddress(SDValue Op,
+                                      SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  const auto *GA = cast<GlobalAddressSDNode>(Op);
+  EVT VT = Op.getValueType();
+  assert(GA->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic GlobalAddressSDNode");
+
+  if (GA->getAddressSpace() != 0) {
+    llvm_unreachable("unimplemented");
+  }
+
+  return DAG.getNode(EVMISD::WRAPPER, DL, VT,
+                     DAG.getTargetGlobalAddress(GA->getGlobal(),
+                                                DL, VT,
+                                                GA->getOffset()));
+}
+
 
 SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
@@ -268,6 +287,8 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerFrameIndex(Op, DAG);
   case ISD::SIGN_EXTEND_INREG:
     return LowerSIGN_EXTEND_INREG(Op, DAG);
+  case ISD::GlobalAddress:
+    return LowerGlobalAddress(Op, DAG);
   case ISD::SIGN_EXTEND:
     // TODO: `sext` can be efficiently supported.
     // so dont need to expand.
