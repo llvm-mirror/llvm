@@ -587,7 +587,7 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   SmallVector<SDValue, 4> RetOps(1, Chain);
   RetOps.append(OutVals.begin(), OutVals.end());
   // TODO: change it to JUMP related.
-  Chain = DAG.getNode(EVMISD::RETURN, DL, MVT::Other, RetOps);
+  Chain = DAG.getNode(EVMISD::RET_FLAG, DL, MVT::Other, RetOps);
   return Chain;
 }
 

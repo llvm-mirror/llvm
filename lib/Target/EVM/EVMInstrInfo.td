@@ -81,17 +81,9 @@ def EVMReturn :
 SDNode<"EVMISD::RETURN", SDT_EVMReturn,
        [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
-def EVMMod :
-SDNode<"EVMISD::MOD", SDT_EVMArithBinary, []>;
-
-def EVMSmod :
-SDNode<"EVMISD::SMOD", SDT_EVMArithBinary, []>;
-
-def EVMAddMod :
-SDNode<"EVMISD::ADDMOD", SDT_EVMArithTernary, []>;
-
-def EVMExp:
-SDNode<"EVMISD::EXP", SDT_EVMArithBinary, []>;
+def EVMRetflag :
+SDNode<"EVMISD::RET_FLAG", SDTNone,
+       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def EVMSignextend:
 SDNode<"EVMISD::SIGNEXTEND", SDT_EVMSignextend, []>;
@@ -418,9 +410,9 @@ let isCall = 1 in {
 }
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
-defm RETURN : RSInst<(outs), (ins GPR:$val),
-                     [(EVMReturn GPR:$val)],
-                     "RETURN_r\t$val", "RETURN", 0xf3, 0>;
+defm RETURN : RSInst<(outs), (ins),
+                     [(EVMRetflag)],
+                     "RETURN_r", "RETURN", 0xf3, 0>;
 }
 
 let isCall = 1 in {
