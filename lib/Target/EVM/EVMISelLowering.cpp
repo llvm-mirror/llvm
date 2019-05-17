@@ -512,6 +512,8 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                      SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
   auto &Outs = CLI.Outs;
+  auto &Ins = CLI.Ins;
+  auto &OutVals = CLI.OutVals;
   SDLoc DL = CLI.DL;
   SDValue Chain = CLI.Chain;
   SDValue Callee = CLI.Callee;
@@ -540,7 +542,6 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
     break;
   }
 
-  SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
   if (Ins.size() > 1) {
     llvm_unreachable("unimplemented.");
   }
@@ -549,6 +550,11 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   SmallVector<SDValue, 16> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
+
+  for (unsigned i = 0, e = Outs.size();
+       i != e; ++i) {
+    Ops.push_back(OutVals[i]);
+  }
 
   SmallVector<EVT, 8> InTys;
   for (const auto &In : Ins) {
