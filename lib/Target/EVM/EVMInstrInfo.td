@@ -410,8 +410,7 @@ let isCall = 1 in {
 }
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
-defm RETURN : RSInst<(outs), (ins),
-                     [(EVMRetflag)],
+defm RETURN : RSInst<(outs), (ins), [],
                      "RETURN_r", "RETURN", 0xf3, 0>;
 }
 
@@ -465,9 +464,10 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
 def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
 def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
-def pJUMPSUB : EVMPseudo<(outs), (ins), []>;
+def pJUMPSUB : EVMPseudo<(outs), (ins brtarget:$dst), []>;
 def pJUMPSUBV: EVMPseudo<(outs), (ins), []>;
-def pRETURN  : EVMPseudo<(outs), (ins), []>;
+
+def pRETURN  : EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
 }
 
 def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
@@ -537,6 +537,9 @@ def : Pat<(truncstore i256:$lhs, i256:$rhs),
 // FIXME
 def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;
 def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
+
+def : Pat<(EVMCall (EVMWrapper tglobaladdr:$callee)),
+          (pJUMPSUB tglobaladdr:$callee)>;
 
 // copied from other backends.
 def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{

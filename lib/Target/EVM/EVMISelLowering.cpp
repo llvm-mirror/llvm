@@ -551,18 +551,38 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   Ops.push_back(Chain);
   Ops.push_back(Callee);
 
-  for (unsigned i = 0, e = Outs.size();
-       i != e; ++i) {
-    Ops.push_back(OutVals[i]);
+  for (unsigned I = 0; I < Outs.size(); ++I) {
+    const ISD::OutputArg &Out = Outs[I];
+    SDValue &OutVal = OutVals[I];
+    if (Out.Flags.isByVal() && Out.Flags.getByValSize() != 0) {
+      auto &MFI = MF.getFrameInfo();
+      int FI = MFI.CreateStackObject(Out.Flags.getByValSize(),
+          Out.Flags.getByValAlign(),
+          /*isSS=*/false);
+      SDValue SizeNode =
+        DAG.getConstant(Out.Flags.getByValSize(), DL, MVT::i32);
+      SDValue FINode = DAG.getFrameIndex(FI, getPointerTy(Layout));
+      Chain = DAG.getMemcpy(
+          Chain, DL, FINode, OutVal, SizeNode, Out.Flags.getByValAlign(),
+          /*isVolatile*/ false, /*AlwaysInline=*/false,
+          /*isTailCall*/ false, MachinePointerInfo(), MachinePointerInfo());
+      OutVal = FINode;
+    }
+    //Ops.push_back(OutVal);
   }
+
+  // Add all fixed arguments. Note that for non-varargs calls, NumFixedArgs
+  // isn't reliable.
+  Ops.append(OutVals.begin(), OutVals.end());
+
 
   SmallVector<EVT, 8> InTys;
   for (const auto &In : Ins) {
     InTys.push_back(In.VT);
   }
-
   InTys.push_back(MVT::Other);
   SDVTList InTyList = DAG.getVTList(InTys);
+
   SDValue Res =
       DAG.getNode(EVMISD::CALL, DL, InTyList, Ops);
 
