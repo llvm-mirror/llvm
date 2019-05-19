@@ -25,7 +25,9 @@ def getStackOpcode : InstrMapping {
 //===----------------------------------------------------------------------===//
 
 // SDNode properties
-def SDT_EVMCall : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+def SDT_EVMCallVoid : SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>;
+def SDT_EVMCall : SDTypeProfile<1, -1, [SDTCisPtrTy<1>]>;
+
 def SDT_EVMReturn : SDTypeProfile<0, -1, []>;
 
 def SDT_EVMArithBinary :
@@ -74,16 +76,17 @@ def EVMWrapper:
 SDNode<"EVMISD::WRAPPER", SDT_EVMWrapper>;
 
 def EVMCall :
-SDNode<"EVMISD::CALL", SDT_EVMCall,
-       [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue, SDNPVariadic]>;
+SDNode<"EVMISD::CALL", SDT_EVMCall, [SDNPHasChain, SDNPVariadic]>;
+
+def EVMCallVoid :
+SDNode<"EVMISD::CALLVOID", SDT_EVMCallVoid, [SDNPHasChain, SDNPVariadic]>;
 
 def EVMReturn :
 SDNode<"EVMISD::RETURN", SDT_EVMReturn,
        [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def EVMRetflag :
-SDNode<"EVMISD::RET_FLAG", SDTNone,
-       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+SDNode<"EVMISD::RET_FLAG", SDT_EVMReturn, [SDNPHasChain]>;
 
 def EVMSignextend:
 SDNode<"EVMISD::SIGNEXTEND", SDT_EVMSignextend, []>;
@@ -461,13 +464,26 @@ def ADJCALLSTACKUP : EVMPseudo<(outs), (ins i256imm:$amt1, i256imm:$amt2),
 }
 
 let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
-def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
-def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
-def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
-def pJUMPSUB : EVMPseudo<(outs), (ins brtarget:$dst), []>;
-def pJUMPSUBV: EVMPseudo<(outs), (ins), []>;
+  def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
+  def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
+  def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
 
-def pRETURN  : EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
+  // we split jump to subroutine into 2.
+  def pJUMPSUB_VOID :
+    EVMPseudo<(outs), (ins brtarget:$dst, variable_ops),
+      []>;
+  def pJUMPSUB :
+    EVMPseudo<(outs GPR:$rv), (ins brtarget:$dst, variable_ops),
+      []>;
+
+  def pJUMPSUBV: EVMPseudo<(outs), (ins variable_ops), []>;
+
+  let isReturn = 1 in {
+    def pRETURN  : 
+      EVMPseudo<(outs), (ins GPR:$src), [(EVMRetflag i256:$src)]>;
+    def pRETURN_VOID :
+      EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
+  }
 }
 
 def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
@@ -538,8 +554,17 @@ def : Pat<(truncstore i256:$lhs, i256:$rhs),
 def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;
 def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
 
-def : Pat<(EVMCall (EVMWrapper tglobaladdr:$callee)),
+
+def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
           (pJUMPSUB tglobaladdr:$callee)>;
+def : Pat<(i256 (EVMCall (EVMWrapper texternalsym:$callee))),
+          (pJUMPSUB texternalsym:$callee)>;
+
+// VOID version of function call.
+def : Pat<(EVMCallVoid (EVMWrapper tglobaladdr:$callee)),
+          (pJUMPSUB_VOID tglobaladdr:$callee)>;
+def : Pat<(EVMCall (EVMWrapper texternalsym:$callee)),
+          (pJUMPSUB_VOID texternalsym:$callee)>;
 
 // copied from other backends.
 def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{

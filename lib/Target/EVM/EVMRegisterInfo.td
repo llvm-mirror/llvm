@@ -34,7 +34,3 @@ def GPR256 : EVMReg<"%intreg">;
 def GPR : RegisterClass<"EVM", [i256], 32, (add GPR256)>;
 def GPR8bit : RegisterClass<"EVM", [i256], 8, (add FP, SP)>;
 
-// The value stack "register". This is an opaque entity which serves to order
-// uses and defs that must remain in LIFO order.
-def REG_STACK : EVMReg<"Stack_Reg">;
-

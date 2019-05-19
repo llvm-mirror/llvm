@@ -223,7 +223,7 @@ EVMTargetLowering::LowerGlobalAddress(SDValue Op,
          "Unexpected target flags on generic GlobalAddressSDNode");
 
   if (GA->getAddressSpace() != 0) {
-    llvm_unreachable("unimplemented");
+    llvm_unreachable("multiple address space unimplemented");
   }
 
   return DAG.getNode(EVMISD::WRAPPER, DL, VT,
@@ -232,6 +232,20 @@ EVMTargetLowering::LowerGlobalAddress(SDValue Op,
                                                 GA->getOffset()));
 }
 
+SDValue
+EVMTargetLowering::LowerExternalSymbol(SDValue Op,
+                                       SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  const auto *ES = cast<ExternalSymbolSDNode>(Op);
+  EVT VT = Op.getValueType();
+  assert(ES->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic ExternalSymbolSDNode");
+
+  return DAG.getNode(
+      EVMISD::WRAPPER, DL, VT,
+      DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i256));
+
+}
 
 SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
@@ -289,6 +303,8 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerSIGN_EXTEND_INREG(Op, DAG);
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::ExternalSymbol:
+    return LowerExternalSymbol(Op, DAG);
   case ISD::SIGN_EXTEND:
     // TODO: `sext` can be efficiently supported.
     // so dont need to expand.
@@ -506,8 +522,6 @@ bool EVMTargetLowering::IsEligibleForTailCallOptimization(
   return false;
 }
 
-// Lower a call to a callseq_start + CALL + callseq_end chain, and add input
-// and output parameter nodes.
 SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                      SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
@@ -583,8 +597,8 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   InTys.push_back(MVT::Other);
   SDVTList InTyList = DAG.getVTList(InTys);
 
-  SDValue Res =
-      DAG.getNode(EVMISD::CALL, DL, InTyList, Ops);
+  unsigned opc = Ins.empty() ? EVMISD::CALLVOID : EVMISD::CALL;
+  SDValue Res = DAG.getNode(opc, DL, InTyList, Ops);
 
   if (Ins.empty()) {
     Chain = Res;
@@ -610,10 +624,12 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                const SmallVectorImpl<ISD::OutputArg> &Outs,
                                const SmallVectorImpl<SDValue> &OutVals,
                                const SDLoc &DL, SelectionDAG &DAG) const {
+  assert(Outs.size() <= 1 && "EVM can only return up to one value");
+
   SmallVector<SDValue, 4> RetOps(1, Chain);
   RetOps.append(OutVals.begin(), OutVals.end());
-  // TODO: change it to JUMP related.
   Chain = DAG.getNode(EVMISD::RET_FLAG, DL, MVT::Other, RetOps);
+
   return Chain;
 }
 
