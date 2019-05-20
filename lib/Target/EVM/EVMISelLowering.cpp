@@ -537,11 +537,6 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   CallingConv::ID CallConv = CLI.CallConv;
 
-  // Analyze operands of the call, assigning locations to each operand.
-  SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeCallOperands(Outs, CC_EVM);
-
 
   if (IsVarArg) { llvm_unreachable("unimplemented."); }
 
@@ -559,6 +554,16 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (Ins.size() > 1) {
     llvm_unreachable("unimplemented.");
   }
+
+  // Analyze operands of the call, assigning locations to each operand.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(Outs, CC_EVM);
+
+  // Insert callseq start
+  unsigned NumBytes = CCInfo.getNextStackOffset();
+  auto PtrVT = getPointerTy(MF.getDataLayout());
+  Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
   // Compute the operands for the CALLn node.
   SmallVector<SDValue, 16> Ops;
@@ -606,6 +611,13 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
     InVals.push_back(Res);
     Chain = Res.getValue(1);
   }
+
+  Chain = DAG.getCALLSEQ_END(
+            Chain,
+            DAG.getConstant(NumBytes, DL, PtrVT, true),
+            DAG.getConstant(0, DL, PtrVT, true),
+            opc == EVMISD::CALLVOID ? Chain.getValue(0) : Chain.getValue(1),
+            DL);
 
   return Chain;
 }

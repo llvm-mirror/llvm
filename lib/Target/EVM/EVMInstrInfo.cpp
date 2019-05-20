@@ -68,13 +68,15 @@ void EVMInstrInfo::expandJUMPSUB(MachineInstr &MI) const {
   MachineFunction *MF = MI.getMF();
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
 
+  const EVMInstrInfo &TII = *STI.getInstrInfo();
+
   //if (STI.hasEIP615()) {
   //  llvm_unreachable("EIP615 is not implemented");
   //} else {
     // expand it to:
-    // PUSH32_r tgt
-    // JUMP_r
-
+    // retAddr = ADD PC, offset
+    // JUMP_r retAddr, tgt
+    //MI.setDesc(TII.getDesc(EVM::JUMP_r));
   //}
 }
 

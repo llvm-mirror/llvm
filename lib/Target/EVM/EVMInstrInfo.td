@@ -56,8 +56,8 @@ def SDT_EVMArgument : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
 def SDT_EVMMove : SDTypeProfile<0, 2, [SDTCisVT<0, i256>, SDTCisSameAs<0, 1>]>;
 
 def SDT_EVMWrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
-def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
-def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, i256>, SDTCisVT<1, i256>]>;
+def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, iPTR>, SDTCisVT<1, iPTR>]>;
+def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, iPTR>, SDTCisVT<1, iPTR>]>;
 
 // custom SDNodes
 def EVMSelectcc :
@@ -124,10 +124,10 @@ SDNode<"EVMISD::EQ", SDT_EVMArithBinary, []>;
 def EVMIszero:
 SDNode<"EVMISD::ISZERO", SDT_EVMArithBinary, []>;
 
-def EVMCallseq_start : SDNode<"EVMISD::CALLSEQ_START", SDT_EVMCallSeqStart,
+def EVMCallseq_start : SDNode<"ISD::CALLSEQ_START", SDT_EVMCallSeqStart,
                               [SDNPHasChain, SDNPOutGlue]>;
-def EVMCallseq_end : SDNode<"EVMISD::CALLSEQ_END", SDT_EVMCallSeqEnd,
-                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+def EVMCallseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_EVMCallSeqEnd,
+                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
 // custom matching frameindex.
 def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
