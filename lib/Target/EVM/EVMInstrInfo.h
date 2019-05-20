@@ -28,6 +28,8 @@ public:
 
   const EVMRegisterInfo &getRegisterInfo() const { return RI; }
 
+  bool expandPostRAPseudo(MachineInstr &MI) const override;
+
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI, unsigned SrcReg,
                            bool isKill, int FrameIndex,
@@ -38,8 +40,26 @@ public:
                             int FrameIndex, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
+  bool analyzeBranch(MachineBasicBlock &MBB,
+                     MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
+                     SmallVectorImpl<MachineOperand> &Cond,
+                     bool AllowModify) const override;
+
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
+
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
 
 private:
+  void expandJUMPSUB(MachineInstr &MI) const;
+  void expandRETURNSUB(MachineInstr &MI) const;
+  void expandJUMPIF(MachineInstr &MI) const;
+  void expandJUMPTO(MachineInstr &MI) const;
+
   const EVMRegisterInfo RI;
 };
 

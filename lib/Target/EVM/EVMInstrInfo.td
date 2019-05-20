@@ -76,14 +76,12 @@ def EVMWrapper:
 SDNode<"EVMISD::WRAPPER", SDT_EVMWrapper>;
 
 def EVMCall :
-SDNode<"EVMISD::CALL", SDT_EVMCall, [SDNPHasChain, SDNPVariadic]>;
+SDNode<"EVMISD::CALL", SDT_EVMCall,
+  [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def EVMCallVoid :
-SDNode<"EVMISD::CALLVOID", SDT_EVMCallVoid, [SDNPHasChain, SDNPVariadic]>;
-
-def EVMReturn :
-SDNode<"EVMISD::RETURN", SDT_EVMReturn,
-       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+SDNode<"EVMISD::CALLVOID", SDT_EVMCallVoid,
+  [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 def EVMRetflag :
 SDNode<"EVMISD::RET_FLAG", SDT_EVMReturn, [SDNPHasChain]>;
@@ -479,9 +477,9 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
   def pJUMPSUBV: EVMPseudo<(outs), (ins variable_ops), []>;
 
   let isReturn = 1 in {
-    def pRETURN  : 
+    def pRETURNSUB  :
       EVMPseudo<(outs), (ins GPR:$src), [(EVMRetflag i256:$src)]>;
-    def pRETURN_VOID :
+    def pRETURNSUB_VOID :
       EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
   }
 }
