@@ -12,14 +12,14 @@
 
 def CC_EVM : CallingConv<[
   // Promote smaller type args to i256
-  CCIfType<[ i8, i16, i32, i64, i128 ], CCPromoteToType<i256>>,
+  CCIfType<[i8, i16, i32, i64, i128 ], CCPromoteToType<i256>>,
 
   CCIfType<[i256], CCAssignToStack<32, 8>>
 ]>;
 
 def RetCC_EVM : CallingConv<[
   // Promote smaller type args to i256
-  CCIfType<[ i8, i16, i32, i64, i128 ], CCPromoteToType<i256>>,
+  CCIfType<[i8, i16, i32, i64, i128 ], CCPromoteToType<i256>>,
 
   CCIfType<[i256], CCAssignToStack<32, 8>>
 ]>;

@@ -67,32 +67,52 @@ void EVMInstrInfo::expandJUMPSUB(MachineInstr &MI) const {
 
   MachineFunction *MF = MI.getMF();
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
-
   const EVMInstrInfo &TII = *STI.getInstrInfo();
 
-  //if (STI.hasEIP615()) {
-  //  llvm_unreachable("EIP615 is not implemented");
-  //} else {
-    // expand it to:
-    // retAddr = ADD PC, offset
-    // JUMP_r retAddr, tgt
-    //MI.setDesc(TII.getDesc(EVM::JUMP_r));
-  //}
+  unsigned opc = MI.getOpcode();
+
+  if (opc == EVM::pJUMPSUB_VOID) {
+    // pJUMPSUB_VOID opnd
+    // convert to:
+    // fp = MLOAD FPLoc
+    // fp2 = ADD fp 1
+    // retaddr = add pc + x
+    // MSTORE retaddr TO fp2
+    // MSTORE fp2 TO FPLoc
+    // JUMP opnd
+    MI.setDesc(TII.get(EVM::JUMP_r));
+
+    while (MI.getNumOperands() > 1) {
+      MI.RemoveOperand(MI.getNumOperands() - 1);
+    }
+
+  } else {
+    assert(opc == EVM::pJUMPSUB);
+    // rv = pJUMPSUB tgt, variables
+    MI.setDesc(TII.get(EVM::JUMPRet_r));
+    while (MI.getNumOperands() > 2) {
+      MI.RemoveOperand(MI.getNumOperands() - 1);
+    }
+  }
 }
 
 void EVMInstrInfo::expandRETURNSUB(MachineInstr &MI) const {
-  llvm_unreachable("not implemented");
-
   MachineFunction *MF = MI.getMF();
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
+  const EVMInstrInfo &TII = *STI.getInstrInfo();
+
+  MI.setDesc(TII.get(EVM::JUMP_r));
 }
 
 void EVMInstrInfo::expandJUMPTO(MachineInstr &MI) const {
-  llvm_unreachable("not implemented");
 
   MachineFunction *MF = MI.getMF();
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
+  const EVMInstrInfo &TII = *STI.getInstrInfo();
 
+  // convert it to:
+  // JUMP_r addr
+  MI.setDesc(TII.get(EVM::JUMP_r));
 }
 
 void EVMInstrInfo::expandJUMPIF(MachineInstr &MI) const {
@@ -100,7 +120,11 @@ void EVMInstrInfo::expandJUMPIF(MachineInstr &MI) const {
 
   MachineFunction *MF = MI.getMF();
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
+  const EVMInstrInfo &TII = *STI.getInstrInfo();
 
+  // convert it to:
+  // JUMPI_r addr
+  MI.setDesc(TII.get(EVM::JUMPI_r));
 }
 
 bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {

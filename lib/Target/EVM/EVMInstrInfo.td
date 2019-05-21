@@ -324,9 +324,17 @@ defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 
+// We have a second version of JUMP, which will be used in
+// pJUMPSUB, as it returns an value so as to not break the 
+// consistency. The original JUMP instr can be used in
+// pJUMPSUB_VOID.
+defm JUMPRet : RSInst<(outs GPR:$retval), (ins brtarget:$dst),
+                      [], "JUMP_r \t$dst", "JUMP", 0x56, 8>;
+
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],
                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
+
 }
 
 defm PC       : Inst_0_1<"PC",
@@ -468,13 +476,13 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
   // we split jump to subroutine into 2.
   def pJUMPSUB_VOID :
-    EVMPseudo<(outs), (ins brtarget:$dst, variable_ops),
-      []>;
-  def pJUMPSUB :
-    EVMPseudo<(outs GPR:$rv), (ins brtarget:$dst, variable_ops),
-      []>;
+    EVMPseudo<(outs), (ins brtarget:$dst, variable_ops), []>;
 
-  def pJUMPSUBV: EVMPseudo<(outs), (ins variable_ops), []>;
+  def pJUMPSUB :
+    EVMPseudo<(outs GPR:$rv), (ins brtarget:$dst, variable_ops), []>;
+
+  def pJUMPSUBV:
+    EVMPseudo<(outs), (ins variable_ops), []>;
 
   let isReturn = 1 in {
     def pRETURNSUB  :

@@ -66,7 +66,9 @@ bool EVMAddJumpdest::runOnMachineFunction(MachineFunction &MF) {
 
       // the operand is the target MBB.
       const MachineOperand & MO = MI.getOperand(0);
-      assert(MO.isMBB() && "Branch instruction should have only MBB operand.");
+
+      // do not worry about function calls.
+      if (!MO.isMBB()) continue;
 
       MachineBasicBlock * tMBB = MO.getMBB();
 

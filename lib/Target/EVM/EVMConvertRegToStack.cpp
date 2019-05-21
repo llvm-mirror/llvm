@@ -122,11 +122,14 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         // Remove register operands.
         for (unsigned i = 0; i < MI.getNumOperands();) {
           auto &MO = MI.getOperand(i);
-          if ( MO.isReg() || MO.isImm() ) {
+          if ( MO.isReg() || MO.isImm() || MO.isCImm() ) {
             MI.RemoveOperand(i);
-          } else if (MO.isMBB()) {
+          } else if (MO.isMBB() || MO.isGlobal() ||
+                     MO.isSymbol()) {
             // this is special case for jumps.
             ++i;
+          } else {
+            llvm_unreachable("unimplemented");
           }
         }
 
