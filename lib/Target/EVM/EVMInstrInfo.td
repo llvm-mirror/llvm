@@ -324,17 +324,21 @@ defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 
+defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
+                   [(EVMJumpi GPR:$src, bb:$dst)],
+                   "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
+}
+
+let isCall = 1, isBarrier = 1 in {
 // We have a second version of JUMP, which will be used in
 // pJUMPSUB, as it returns an value so as to not break the 
 // consistency. The original JUMP instr can be used in
 // pJUMPSUB_VOID.
-defm JUMPRet : RSInst<(outs GPR:$retval), (ins brtarget:$dst),
+defm CALLRET : RSInst<(outs GPR:$retval), (ins brtarget:$dst),
                       [], "JUMP_r \t$dst", "JUMP", 0x56, 8>;
-
-defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
-                   [(EVMJumpi GPR:$src, bb:$dst)],
-                   "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
-
+defm CALLVOID :
+RSInst<(outs), (ins brtarget:$dst), [],
+       "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 }
 
 defm PC       : Inst_0_1<"PC",

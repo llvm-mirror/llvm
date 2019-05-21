@@ -80,7 +80,7 @@ void EVMInstrInfo::expandJUMPSUB(MachineInstr &MI) const {
     // MSTORE retaddr TO fp2
     // MSTORE fp2 TO FPLoc
     // JUMP opnd
-    MI.setDesc(TII.get(EVM::JUMP_r));
+    MI.setDesc(TII.get(EVM::CALLVOID_r));
 
     while (MI.getNumOperands() > 1) {
       MI.RemoveOperand(MI.getNumOperands() - 1);
@@ -89,7 +89,7 @@ void EVMInstrInfo::expandJUMPSUB(MachineInstr &MI) const {
   } else {
     assert(opc == EVM::pJUMPSUB);
     // rv = pJUMPSUB tgt, variables
-    MI.setDesc(TII.get(EVM::JUMPRet_r));
+    MI.setDesc(TII.get(EVM::CALLRET_r));
     while (MI.getNumOperands() > 2) {
       MI.RemoveOperand(MI.getNumOperands() - 1);
     }
