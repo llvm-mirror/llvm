@@ -396,6 +396,27 @@ defm PUSH29: PUSHInst<0x7c, 3>;
 defm PUSH30: PUSHInst<0x7d, 3>;
 defm PUSH31: PUSHInst<0x7e, 3>;
 
+// swap instructions, only in stack instruction form.
+def SWAP1:  EVMInst<(outs), (ins), [], "true", "SWAP1",  0x90, 3>;
+def SWAP2:  EVMInst<(outs), (ins), [], "true", "SWAP2",  0x91, 3>;
+def SWAP3:  EVMInst<(outs), (ins), [], "true", "SWAP3",  0x92, 3>;
+def SWAP4:  EVMInst<(outs), (ins), [], "true", "SWAP4",  0x93, 3>;
+def SWAP5:  EVMInst<(outs), (ins), [], "true", "SWAP5",  0x94, 3>;
+def SWAP6:  EVMInst<(outs), (ins), [], "true", "SWAP6",  0x95, 3>;
+def SWAP7:  EVMInst<(outs), (ins), [], "true", "SWAP7",  0x96, 3>;
+def SWAP8:  EVMInst<(outs), (ins), [], "true", "SWAP8",  0x97, 3>;
+def SWAP9:  EVMInst<(outs), (ins), [], "true", "SWAP9",  0x98, 3>;
+def SWAP10: EVMInst<(outs), (ins), [], "true", "SWAP10", 0x99, 3>;
+def SWAP11: EVMInst<(outs), (ins), [], "true", "SWAP11", 0x9a, 3>;
+def SWAP12: EVMInst<(outs), (ins), [], "true", "SWAP12", 0x9b, 3>;
+def SWAP13: EVMInst<(outs), (ins), [], "true", "SWAP13", 0x9c, 3>;
+def SWAP14: EVMInst<(outs), (ins), [], "true", "SWAP14", 0x9d, 3>;
+def SWAP15: EVMInst<(outs), (ins), [], "true", "SWAP15", 0x9e, 3>;
+def SWAP16: EVMInst<(outs), (ins), [], "true", "SWAP16", 0x9f, 3>;
+
+
+
+
 
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
@@ -425,6 +446,17 @@ let isCall = 1 in {
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
 defm RETURN : RSInst<(outs), (ins), [],
                      "RETURN_r", "RETURN", 0xf3, 0>;
+
+// this is an alias for the JUMP, which is used 
+defm RETSUB : RSInst<(outs), (ins GPR:$src), [],
+                     "RETSUB_r \t$src",
+                     // we will have to expand RETSUB
+                     // at the very end.
+                     "RETSUB", 0x56, 8>;
+defm RETSUBVOID :
+RSInst<(outs), (ins), [],
+       "RETSUBVOID_r",
+       "JUMP", 0x56, 8>;
 }
 
 let isCall = 1 in {
@@ -491,7 +523,7 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
   let isReturn = 1 in {
     def pRETURNSUB  :
       EVMPseudo<(outs), (ins GPR:$src), [(EVMRetflag i256:$src)]>;
-    def pRETURNSUB_VOID :
+    def pRETURNSUBVOID :
       EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
   }
 }

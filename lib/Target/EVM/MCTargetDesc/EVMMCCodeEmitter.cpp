@@ -19,6 +19,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCInstBuilder.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
 #include <cassert>
@@ -140,8 +141,28 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                          SmallVectorImpl<MCFixup> &Fixups,
                                          const MCSubtargetInfo &STI) const {
   uint64_t Start = OS.tell();
+  uint64_t Binary;
 
-  uint64_t Binary = getBinaryCodeForInstr(MI, Fixups, STI);
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  if (MI.getOpcode() == EVM::RETSUB) {
+    // expand RETSUB into 2 instructions:
+    //  SWAP1
+    //  JUMP
+
+    // SWAP1
+    MCInst Swap1 = MCInstBuilder(EVM::SWAP1);
+    Binary = getBinaryCodeForInstr(Swap1, Fixups, STI);
+    support::endian::write<char>(OS, Binary, support::big);
+
+    // JUMP
+    MCInst Jump = MCInstBuilder(EVM::JUMP);
+    Binary = getBinaryCodeForInstr(Jump, Fixups, STI);
+    support::endian::write<char>(OS, Binary, support::big);
+
+    return;
+  }
+
+  Binary = getBinaryCodeForInstr(MI, Fixups, STI);
   support::endian::write<char>(OS, Binary, support::big);
 
   // emit trailing immediate value for push.

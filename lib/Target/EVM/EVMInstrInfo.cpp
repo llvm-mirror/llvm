@@ -72,20 +72,12 @@ void EVMInstrInfo::expandJUMPSUB(MachineInstr &MI) const {
   unsigned opc = MI.getOpcode();
 
   if (opc == EVM::pJUMPSUB_VOID) {
-    // pJUMPSUB_VOID opnd
-    // convert to:
-    // fp = MLOAD FPLoc
-    // fp2 = ADD fp 1
-    // retaddr = add pc + x
-    // MSTORE retaddr TO fp2
-    // MSTORE fp2 TO FPLoc
-    // JUMP opnd
+    // we set up the framepointer in ADJCALLSTACKUP/DOWN
+    // so do nothing here.
     MI.setDesc(TII.get(EVM::CALLVOID_r));
-
     while (MI.getNumOperands() > 1) {
       MI.RemoveOperand(MI.getNumOperands() - 1);
     }
-
   } else {
     assert(opc == EVM::pJUMPSUB);
     // rv = pJUMPSUB tgt, variables
@@ -101,7 +93,33 @@ void EVMInstrInfo::expandRETURNSUB(MachineInstr &MI) const {
   const auto &STI = MF->getSubtarget<EVMSubtarget>();
   const EVMInstrInfo &TII = *STI.getInstrInfo();
 
-  MI.setDesc(TII.get(EVM::JUMP_r));
+  unsigned opc = MI.getOpcode();
+  if (opc == EVM::pRETURNSUB) {
+    // For an instruction:
+    //   pRETURNSUB %retval
+    // We should generate:
+    //   PUSH_r %retval
+    //   swap1
+    //   JUMP_r
+    // However it will break the convention we
+    // built (PUSH does not have standalone form).
+    // So here we will convert it into:
+    //   RETSUB_r %retval
+    // Which gets stackified into:
+    //   PUSH32 %retval
+    //   RETSUB
+    // And we expand RETSUB in the MCEmitter to:
+    //   SWAP1
+    //   JUMP
+    MI.setDesc(TII.get(EVM::RETSUB_r));
+  } else if (opc == EVM::pRETURNSUBVOID) {
+    // This version does not have the SWAP1,
+    // it is simply translated into a JUMP.
+    MI.setDesc(TII.get(EVM::RETSUBVOID_r));
+  } else {
+    llvm_unreachable("wrong opcode");
+  }
+
 }
 
 void EVMInstrInfo::expandJUMPTO(MachineInstr &MI) const {
@@ -136,6 +154,7 @@ bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       expandJUMPSUB(MI);
       return true;
     case EVM::pRETURNSUB:
+    case EVM::pRETURNSUBVOID:
       expandRETURNSUB(MI);
       return true;
     case EVM::pJUMPTO:

@@ -82,6 +82,22 @@ void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
           llvm_unreachable("unknown operand type");
           break;
         }
+      case MachineOperand::MO_GlobalAddress:
+        {
+          MCOp = MCOperand::createExpr(
+              MCSymbolRefExpr::create(
+                Printer.getSymbol(MO.getGlobal()),
+                Ctx));
+          break;
+        }
+      case MachineOperand::MO_ExternalSymbol:
+        {
+          MCOp = MCOperand::createExpr(
+              MCSymbolRefExpr::create(
+                Printer.GetExternalSymbolSymbol(MO.getSymbolName()),
+                Ctx));
+          break;
+        }
     }
     OutMI.addOperand(MCOp);
   }
