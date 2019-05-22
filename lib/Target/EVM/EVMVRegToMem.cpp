@@ -153,16 +153,11 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         // r1 = MLOAD_r FreeMemoryPointer
         // r2 = SUB_r r1, (index * 32)
         // new_vreg = MLOAD_r r2
-        unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-        unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
         unsigned NewVReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
-               .addImm(ST.getFreeMemoryPointer());
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
-               .addReg(NewReg1).addImm(memindex * 32);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewVReg)
-               .addReg(NewReg2);
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pGETLOCAL_r), NewVReg)
+               .addImm(memindex);
         MO.setReg(NewVReg);
+
         LLVM_DEBUG({ dbgs() << " replacing use with: " << TRI.virtReg2Index(NewVReg)
                     << ", load from: " << memindex << ".\n"; });
 
@@ -179,24 +174,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         unsigned memindex = Reg2Mem[regindex];
 
-        LLVM_DEBUG({ dbgs() << "found regindex def: " << regindex; });
-        // 1. insert after instruction:
+        auto &InsertPt = I;
         // r1 = MLOAD_r FreeMemoryPointer
         // r2 = SUB_r r1, (index * 32)
         // MSTORE_r vreg, r2
-        // 2. vreg should be dead from now on.
-        auto InsertPt = I;
-        unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-        unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
-        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)
-               .addImm(ST.getFreeMemoryPointer());
-        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::SUB_r), NewReg2)
-               .addReg(NewReg1).addImm(memindex * 32);
-        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::MSTORE_r))
-               .addReg(MO.getReg()).addReg(NewReg2);
-
-        LLVM_DEBUG({ dbgs() << ", storing def to location: " << TRI.virtReg2Index(NewReg2)
-                            << ", store to: " << memindex << ".\n"; });
+        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r), MO.getReg())
+               .addImm(memindex);
 
         Changed = true;
       }

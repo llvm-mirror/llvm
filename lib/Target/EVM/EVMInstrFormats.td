@@ -70,7 +70,6 @@ class EVMStackPseudo<dag outs, dag ins, list<dag> pattern>
   let isCodeGenOnly = 1;
 }
 
-
 // The memory size of EVM is 1024 elements with 256 bit each.
 def AddrImm :
 PatLeaf<(i256 imm), [{ return isUInt<10>(N->getZExtValue()); }]>;

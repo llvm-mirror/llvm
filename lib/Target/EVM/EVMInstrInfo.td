@@ -531,8 +531,13 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
   }
 }
 
-def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
-def pPUTLOCAL : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
+// In pre-EIP615 we do a little bit differently (due to the difference).
+// We make the n'th local to be at location FreeMemoryPointer - (n * 32).
+def pGETLOCAL_r : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
+def pGETLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
+
+def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
+def pPUTLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
                             [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
