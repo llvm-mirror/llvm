@@ -88,8 +88,8 @@ TargetPassConfig *EVMTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void EVMPassConfig::addIRPasses() {
-  //addPass(createAtomicExpandPass());
   TargetPassConfig::addIRPasses();
+  addPass(createEVMCallTransformation());
 }
 
 bool EVMPassConfig::addInstSelector() {

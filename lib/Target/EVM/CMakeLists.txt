@@ -22,6 +22,7 @@ add_llvm_target(EVMCodeGen
   EVMSubtarget.cpp
   EVMTargetMachine.cpp
   EVMTargetObjectFile.cpp
+  EVMCallTransformation.cpp
   EVMVRegToMem.cpp
   EVMReplacePhysRegs.cpp
   EVMStackification.cpp
