@@ -76,17 +76,19 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::instr_iterator I = MBB.instr_begin(), E = MBB.instr_end(); I != E;) {
       MachineInstr &MI = *I++;
 
-      // special case for handling cases like: %3:gpr = PUSH32_r 1
-      if (MI.getOpcode() == EVM::PUSH32_r) {
-        assert(MI.getNumOperands() == 2 && "PUSH32_r's number of operands must be 2.");
+      unsigned opc = MI.getOpcode();
 
+      // Convert irregular reg->stack mapping
+      if (opc == EVM::PUSH32_r) {
+        assert(MI.getNumOperands() == 2 && "PUSH32_r's number of operands must be 2.");
         auto &MO = MI.getOperand(1);
         assert(MO.isImm() && "PUSH32_r's use operand must be immediate.");
-
         BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
-        // delete this instruction.
         MI.eraseFromParent();
-
+        continue;
+      } else if (opc == EVM::pSTACKARG_r) {
+        MI.RemoveOperand(0);
+        MI.setDesc(TII.get(EVM::pSTACKARG));
         continue;
       }
 

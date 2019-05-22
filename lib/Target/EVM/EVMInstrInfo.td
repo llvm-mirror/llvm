@@ -534,8 +534,9 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
 def pPUTLOCAL : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
 
-def pSTACKARG : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
-                          [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
+def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
+                            [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
+def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 //===----------------------------------------------------------------------===//
 // Patterns

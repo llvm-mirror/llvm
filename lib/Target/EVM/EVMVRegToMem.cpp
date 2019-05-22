@@ -124,6 +124,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
 
+      unsigned opc = MI.getOpcode();
+      // skip the stack arguments.
+      if (opc == EVM::pSTACKARG_r) {
+        continue;
+      }
+
       for (MachineOperand &MO : MI.explicit_uses()) {
         if (!MO.isReg()) continue;
         unsigned reg = MO.getReg();
@@ -205,7 +211,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
       // r2 = ADD_r INC_imm, r1
       // MSTORE_r LOC_mem r2
       MachineBasicBlock &EntryMBB = MF.front();
-      MachineInstr &MI = EntryMBB.front();
+      MachineBasicBlock::iterator InsertPt = EntryMBB.begin();
+
+      while (InsertPt->getOpcode() == EVM::pSTACKARG_r)
+        ++InsertPt;
+      MachineInstr &MI = *InsertPt;
+
       unsigned NewReg1 = MRI.createVirtualRegister(&EVM::GPRRegClass);
       unsigned NewReg2 = MRI.createVirtualRegister(&EVM::GPRRegClass);
       BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::MLOAD_r), NewReg1)

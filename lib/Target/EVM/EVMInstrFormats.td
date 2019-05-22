@@ -54,8 +54,17 @@ multiclass PUSHInst<bits<8> inst, int cost> {
                      NAME#" \t$src", inst, cost>;
 }
 
+// Register-based pseudo instruction
 class EVMPseudo<dag outs, dag ins, list<dag> pattern>
     : EVMInst<outs, ins, pattern, "false", "", 0>
+{
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+}
+
+// Stack-based pseudo instruction
+class EVMStackPseudo<dag outs, dag ins, list<dag> pattern>
+    : EVMInst<outs, ins, pattern, "true", "", 0>
 {
   let isPseudo = 1;
   let isCodeGenOnly = 1;

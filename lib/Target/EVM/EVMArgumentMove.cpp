@@ -59,7 +59,7 @@ FunctionPass *llvm::createEVMArgumentMove() {
 bool EVMArgumentMove::isStackArg(const MachineInstr &MI) {
   unsigned opc = MI.getOpcode();
 
-  return (opc == EVM::pSTACKARG);
+  return (opc == EVM::pSTACKARG_r);
 }
 
 bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
