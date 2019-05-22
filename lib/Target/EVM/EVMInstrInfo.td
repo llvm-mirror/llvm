@@ -29,6 +29,7 @@ def SDT_EVMCallVoid : SDTypeProfile<0, -1, [SDTCisPtrTy<0>]>;
 def SDT_EVMCall : SDTypeProfile<1, -1, [SDTCisPtrTy<1>]>;
 
 def SDT_EVMReturn : SDTypeProfile<0, -1, []>;
+def SDT_EVMStackArg : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
 
 def SDT_EVMArithBinary :
 SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>]>;
@@ -128,6 +129,8 @@ def EVMCallseq_start : SDNode<"ISD::CALLSEQ_START", SDT_EVMCallSeqStart,
                               [SDNPHasChain, SDNPOutGlue]>;
 def EVMCallseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_EVMCallSeqEnd,
                               [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
+def EVMStackArg : SDNode<"EVMISD::STACKARG", SDT_EVMStackArg, []>;
 
 // custom matching frameindex.
 def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
@@ -530,6 +533,9 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
 def pGETLOCAL : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
 def pPUTLOCAL : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
+
+def pSTACKARG : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
+                          [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
 
 //===----------------------------------------------------------------------===//
 // Patterns

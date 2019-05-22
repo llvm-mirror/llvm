@@ -32,6 +32,7 @@ extern "C" void LLVMInitializeEVMTarget() {
   initializeEVMVRegToMemPass(*PR);
   initializeEVMAddJumpdestPass(*PR);
   initializeEVMShrinkpushPass(*PR);
+  initializeEVMArgumentMovePass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT) {
@@ -94,6 +95,7 @@ bool EVMPassConfig::addInstSelector() {
   TargetPassConfig::addInstSelector();
   addPass(createEVMISelDag(getEVMTargetMachine()));
 
+  addPass(createEVMArgumentMove());
   return false;
 }
 

@@ -484,6 +484,20 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
+  // Instantiate virtual registers for each of the incoming value.
+  // unused register will be set to UNDEF.
+  for (const ISD::InputArg &In : Ins) {
+    const SDValue &idx = DAG.getTargetConstant(InVals.size(),
+                                               DL, MVT::i256);
+    const SDValue &StackArg = In.Used
+      ? DAG.getNode(EVMISD::STACKARG, DL, In.VT, idx)
+      : DAG.getUNDEF(In.VT);
+
+    InVals.push_back(StackArg);
+  }
+
+
+  /*
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
@@ -509,6 +523,7 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
     InVals.push_back(ArgValue);
   }
+  */
 
   return Chain;
 }

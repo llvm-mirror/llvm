@@ -39,6 +39,7 @@ FunctionPass *createEVMReplacePhysRegs();
 FunctionPass *createEVMVRegToMem();
 FunctionPass *createEVMConvertRegToStack();
 FunctionPass *createEVMShrinkpush();
+FunctionPass *createEVMArgumentMove();
 
 void initializeEVMAddJumpdestPass(PassRegistry &);
 void initializeEVMStackificationPass(PassRegistry &);
@@ -46,6 +47,7 @@ void initializeEVMReplacePhysRegsPass(PassRegistry &);
 void initializeEVMVRegToMemPass(PassRegistry &);
 void initializeEVMConvertRegToStackPass(PassRegistry &);
 void initializeEVMShrinkpushPass(PassRegistry &);
+void initializeEVMArgumentMovePass(PassRegistry &);
 
 }
 
