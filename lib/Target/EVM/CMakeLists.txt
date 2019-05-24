@@ -29,6 +29,7 @@ add_llvm_target(EVMCodeGen
   EVMAddJumpdest.cpp
   EVMShrinkPush.cpp
   EVMArgumentMove.cpp
+  EVMExpandPseudos.cpp
   )
 
 add_subdirectory(InstPrinter)

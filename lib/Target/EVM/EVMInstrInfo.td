@@ -539,9 +539,14 @@ def pGETLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
 def pPUTLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
+// This is the placeholder for the incoming arguments.
 def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
                             [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
 def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
+
+// This is used to manually adjust the framepointer in pre-EIP615.
+def pADJFRAMEPOINTER_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
+def pADJFRAMEPOINTER   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 //===----------------------------------------------------------------------===//
 // Patterns

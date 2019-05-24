@@ -33,6 +33,7 @@ extern "C" void LLVMInitializeEVMTarget() {
   initializeEVMAddJumpdestPass(*PR);
   initializeEVMShrinkpushPass(*PR);
   initializeEVMArgumentMovePass(*PR);
+  initializeEVMExpandPseudosPass(*PR);
 }
 
 static std::string computeDataLayout(const Triple &TT) {
