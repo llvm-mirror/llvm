@@ -544,9 +544,12 @@ def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
                             [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
 def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
-// This is used to manually adjust the framepointer in pre-EIP615.
-def pADJFRAMEPOINTER_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
-def pADJFRAMEPOINTER   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
+// These instructions are used to manually adjust the framepointer in pre-EIP615.
+def pADJFPUP_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
+def pADJFPUP   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
+
+def pADJFPDOWN_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
+def pADJFPDOWN   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 //===----------------------------------------------------------------------===//
 // Patterns

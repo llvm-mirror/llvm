@@ -38,6 +38,11 @@ private:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+  void expandLOCAL(MachineInstr* MI) const;
+  void expandADJFP(MachineInstr* MI) const;
+  void expandJUMPSUB(MachineInstr* MI) const;
+  void expandRETURN(MachineInstr* MI) const;
+
 };
 } // end anonymous namespace
 
@@ -48,6 +53,9 @@ INITIALIZE_PASS(EVMExpandPseudos, DEBUG_TYPE,
 
 FunctionPass *llvm::createEVMExpandPseudos() {
   return new EVMExpandPseudos();
+}
+
+void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
 }
 
 bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
@@ -62,6 +70,18 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
 
   for (const MachineBasicBlock & MBB : MF) {
     for (const MachineInstr & MI : MBB) {
+      unsigned opcode = MI.getOpcode();
+
+      switch (opcode) {
+        case EVM::pPUTLOCAL:
+        case EVM::pGETLOCAL:
+          expandLOCAL(MI);
+          break;
+        case EVM::pADJFPUP:
+        case EVM::pADJFPDOWN:
+          expandADJFP(MI);
+          break;
+      }
 
     }
   }
