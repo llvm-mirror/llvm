@@ -113,6 +113,10 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::CTPOP, VT, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Custom);
+
+    setOperationAction(ISD::GlobalAddress, VT, Custom);
+    setOperationAction(ISD::ExternalSymbol, VT, Custom);
+    setOperationAction(ISD::BlockAddress, VT, Custom);
   }
 
   setOperationAction(ISD::BR_CC, MVT::i256, Custom);
@@ -247,6 +251,17 @@ EVMTargetLowering::LowerExternalSymbol(SDValue Op,
 
 }
 
+SDValue
+EVMTargetLowering::LowerBlockAddress(SDValue Op,
+                                     SelectionDAG &DAG) const {
+  SDLoc dl(Op);
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  const BlockAddress *BA = cast<BlockAddressSDNode>(Op)->getBlockAddress();
+  SDValue Result = DAG.getTargetBlockAddress(BA, PtrVT);
+
+  return DAG.getNode(EVMISD::WRAPPER, dl, PtrVT, Result);
+}
+
 SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -305,6 +320,8 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol:
     return LowerExternalSymbol(Op, DAG);
+  case ISD::BlockAddress:
+    return LowerBlockAddress(Op, DAG);
   case ISD::SIGN_EXTEND:
     // TODO: `sext` can be efficiently supported.
     // so dont need to expand.

@@ -616,6 +616,8 @@ def : Pat<(truncstore i256:$lhs, i256:$rhs),
 def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;
 def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
 
+def : Pat<(i256 (EVMWrapper tblockaddress:$dst)),
+          (i256 tblockaddress:$dst)>;
 
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
           (pJUMPSUB tglobaladdr:$callee)>;
