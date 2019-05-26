@@ -58,6 +58,9 @@ FunctionPass *llvm::createEVMExpandPseudos() {
 void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
 }
 
+void EVMExpandPseudos::expandADJFP(MachineInstr* MI) const {
+}
+
 bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Expand pseudo instructions **********\n"
@@ -68,18 +71,18 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
 
   bool Changed = false;
 
-  for (const MachineBasicBlock & MBB : MF) {
-    for (const MachineInstr & MI : MBB) {
+  for (MachineBasicBlock & MBB : MF) {
+    for (MachineInstr & MI : MBB) {
       unsigned opcode = MI.getOpcode();
 
       switch (opcode) {
         case EVM::pPUTLOCAL:
         case EVM::pGETLOCAL:
-          expandLOCAL(MI);
+          expandLOCAL(&MI);
           break;
         case EVM::pADJFPUP:
         case EVM::pADJFPDOWN:
-          expandADJFP(MI);
+          expandADJFP(&MI);
           break;
       }
 
