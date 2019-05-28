@@ -30,7 +30,8 @@ class EVMDAGToDAGISel final : public SelectionDAGISel {
 
 public:
   explicit EVMDAGToDAGISel(EVMTargetMachine &TargetMachine)
-      : SelectionDAGISel(TargetMachine) {}
+      : SelectionDAGISel(TargetMachine) {
+      }
 
   StringRef getPassName() const override {
     return "EVM DAG->DAG Pattern Instruction Selection";
@@ -42,6 +43,7 @@ public:
   }
 
   void PostprocessISelDAG() override;
+  void PreprocessISelDAG() override;
 
   void Select(SDNode *Node) override;
 
@@ -56,7 +58,67 @@ public:
 #include "EVMGenDAGISel.inc"
 
 private:
+  void MutateReturnChain();
 };
+}
+
+void EVMDAGToDAGISel::MutateReturnChain() {
+  DenseMap<const Function*, SDNode*> Fn2RetAddr;
+
+  std::set<SDNode *> AlteredReturnNodes;
+
+  // first iteration: find the return address
+  for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
+                                       E = CurDAG->allnodes_end();
+       I != E;) {
+    SDNode *Node = &*I++;
+
+    unsigned Opcode = Node->getOpcode();
+    if (Opcode == EVMISD::STACKARG) {
+      unsigned idx =Node->getConstantOperandVal(0);
+      if (idx != 0) continue;
+      Fn2RetAddr[FuncInfo->Fn] = Node;
+    }
+  }
+
+  // second iteration: find return instructions and add the return
+  // address to the end of the return node
+  for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
+                                       E = CurDAG->allnodes_end();
+       I != E;) {
+    SDNode *Node = &*I++;
+
+    unsigned Opcode = Node->getOpcode();
+    if (Opcode == EVMISD::RET_FLAG) {
+      // skip already altered return nodes
+      if (AlteredReturnNodes.find(Node) !=
+          AlteredReturnNodes.end())
+        continue;
+
+      SDNode *ArgNode = Fn2RetAddr[FuncInfo->Fn];
+
+      SmallVector<SDValue, 4> RetOps;
+
+      RetOps.append(Node->op_begin(), Node->op_end());
+      RetOps.push_back(SDValue(ArgNode, 0));
+
+
+      SDValue NewNode = CurDAG->getNode(EVMISD::RET_FLAG,
+          SDLoc(Node),
+          MVT::Other, RetOps);
+
+      --I;
+      CurDAG->ReplaceAllUsesWith(Node, &NewNode);
+      ++I;
+      CurDAG->DeleteNode(Node);
+      AlteredReturnNodes.insert(NewNode.getNode());
+    }
+  }
+
+}
+
+void EVMDAGToDAGISel::PreprocessISelDAG() {
+  this->MutateReturnChain();
 }
 
 void EVMDAGToDAGISel::PostprocessISelDAG() {

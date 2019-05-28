@@ -503,44 +503,22 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
   // Instantiate virtual registers for each of the incoming value.
   // unused register will be set to UNDEF.
+  const SDValue *lastChain = &Chain;
   for (const ISD::InputArg &In : Ins) {
-    const SDValue &idx = DAG.getTargetConstant(InVals.size(),
-                                               DL, MVT::i256);
-    const SDValue &StackArg = In.Used
-      ? DAG.getNode(EVMISD::STACKARG, DL, In.VT, idx)
-      : DAG.getUNDEF(In.VT);
+    SmallVector<SDValue, 4> Opnds;
+
+
+    const SDValue &idx = DAG.getConstant(InVals.size(),
+                                         DL, MVT::i256);
+    Opnds.push_back(idx);
+    Opnds.push_back(*lastChain);
+
+    const SDValue &StackArg =
+       DAG.getNode(EVMISD::STACKARG, DL, MVT::i256, Opnds);
 
     InVals.push_back(StackArg);
+    lastChain = &InVals[InVals.size() - 1];
   }
-
-
-  /*
-  // Assign locations to all of the incoming arguments.
-  SmallVector<CCValAssign, 16> ArgLocs;
-  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeFormalArguments(Ins, CC_EVM);
-
-  // For now, arguments are on the stack.
-  for (CCValAssign &VA : ArgLocs) {
-    // sanity check
-    assert(VA.isMemLoc());
-
-    MVT LocVT = VA.getLocVT();
-    int index = VA.getLocMemOffset() / (LocVT.getSizeInBits() / sizeof(char));
-
-    // The stack pointer offset is relative to the caller stack frame.
-    int FI = MFI.CreateFixedObject(LocVT.getSizeInBits() / sizeof(char),
-                                   VA.getLocMemOffset(), true);
-
-    // Create load nodes to retrieve arguments from the stack
-    SDValue FIN = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
-
-    SDValue ArgValue = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
-                                   MachinePointerInfo::getFixedStack(MF, FI));
-
-    InVals.push_back(ArgValue);
-  }
-  */
 
   return Chain;
 }
@@ -672,6 +650,7 @@ EVMTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 
   SmallVector<SDValue, 4> RetOps(1, Chain);
   RetOps.append(OutVals.begin(), OutVals.end());
+
   Chain = DAG.getNode(EVMISD::RET_FLAG, DL, MVT::Other, RetOps);
 
   return Chain;
