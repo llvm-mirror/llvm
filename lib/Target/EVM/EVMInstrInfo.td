@@ -527,9 +527,10 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
   let isReturn = 1 in {
     def pRETURNSUB_r  :
-      EVMPseudo<(outs), (ins GPR:$src), [(EVMRetflag i256:$src)]>;
+      EVMPseudo<(outs), (ins GPR:$src, GPR:$retaddr),
+                [(EVMRetflag i256:$src, i256:$retaddr)]>;
     def pRETURNSUBVOID_r :
-      EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
+      EVMPseudo<(outs), (ins GPR:$retaddr), [(EVMRetflag i256:$retaddr)]>;
   }
 }
 
