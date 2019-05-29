@@ -503,22 +503,24 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
   // Instantiate virtual registers for each of the incoming value.
   // unused register will be set to UNDEF.
-  const SDValue *lastChain = &Chain;
+  SmallVector<SDValue, 16> ArgsChain;
   for (const ISD::InputArg &In : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
 
-    const SDValue &idx = DAG.getConstant(InVals.size(),
-                                         DL, MVT::i256);
+    const SDValue &idx = DAG.getTargetConstant(InVals.size(),
+                                               DL, MVT::i256);
     Opnds.push_back(idx);
-    Opnds.push_back(*lastChain);
+    Opnds.push_back(Chain);
 
     const SDValue &StackArg =
        DAG.getNode(EVMISD::STACKARG, DL, MVT::i256, Opnds);
 
     InVals.push_back(StackArg);
-    lastChain = &InVals[InVals.size() - 1];
+    ArgsChain.push_back(StackArg);
   }
+
+  Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, ArgsChain);
 
   return Chain;
 }
