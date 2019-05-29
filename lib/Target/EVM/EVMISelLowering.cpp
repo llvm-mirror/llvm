@@ -504,6 +504,7 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   // Instantiate virtual registers for each of the incoming value.
   // unused register will be set to UNDEF.
   SmallVector<SDValue, 16> ArgsChain;
+  ArgsChain.push_back(Chain);
   for (const ISD::InputArg &In : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
