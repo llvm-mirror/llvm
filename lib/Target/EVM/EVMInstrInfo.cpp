@@ -94,9 +94,9 @@ void EVMInstrInfo::expandRETURNSUB(MachineInstr &MI) const {
   const EVMInstrInfo &TII = *STI.getInstrInfo();
 
   unsigned opc = MI.getOpcode();
-  if (opc == EVM::pRETURNSUB) {
+  if (opc == EVM::pRETURNSUB_r) {
     // For an instruction:
-    //   pRETURNSUB %retval
+    //   pRETURNSUB_r %retval
     // We should generate:
     //   PUSH_r %retval
     //   swap1
@@ -112,7 +112,7 @@ void EVMInstrInfo::expandRETURNSUB(MachineInstr &MI) const {
     //   SWAP1
     //   JUMP
     MI.setDesc(TII.get(EVM::RETSUB_r));
-  } else if (opc == EVM::pRETURNSUBVOID) {
+  } else if (opc == EVM::pRETURNSUBVOID_r) {
     // This version does not have the SWAP1,
     // it is simply translated into a JUMP.
     MI.setDesc(TII.get(EVM::RETSUBVOID_r));
@@ -146,24 +146,7 @@ void EVMInstrInfo::expandJUMPIF(MachineInstr &MI) const {
 }
 
 bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
-  unsigned opc = MI.getOpcode();
-
-  switch (opc) {
-    case EVM::pJUMPSUB:
-    case EVM::pJUMPSUB_VOID:
-      expandJUMPSUB(MI);
-      return true;
-    case EVM::pRETURNSUB:
-    case EVM::pRETURNSUBVOID:
-      expandRETURNSUB(MI);
-      return true;
-    case EVM::pJUMPTO:
-      expandJUMPTO(MI);
-      return true;
-    case EVM::pJUMPIF:
-      expandJUMPIF(MI);
-      return true;
-  }
+  // We do not use this phase. Instead we use ExpandPseudos pass.
   return false;
 }
 

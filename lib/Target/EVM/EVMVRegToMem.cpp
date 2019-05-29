@@ -196,7 +196,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         ++InsertPt;
       MachineInstr &MI = *InsertPt;
 
-      BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPUP))
+      BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPUP_r))
         .addImm(increment_size);
       LLVM_DEBUG({ dbgs() << "Increment AP at entry: " << increment_size << ".\n"; });
     }
@@ -205,7 +205,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
       // at the end of the function, decrement memory allocator pointer.
       MachineBasicBlock &ExitMBB = MF.back();
       MachineInstr &MI = ExitMBB.back();
-      BuildMI(ExitMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPDOWN))
+      BuildMI(ExitMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPDOWN_r))
         .addImm(increment_size);
       LLVM_DEBUG({ dbgs() << "decrement AP at exit: " << increment_size << ".\n"; });
     }

@@ -90,22 +90,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         MI.RemoveOperand(0);
         MI.setDesc(TII.get(EVM::pSTACKARG));
         continue;
-      } else if (opc == EVM::pGETLOCAL_r) {
-        assert(MI.getNumOperands() == 2 &&
-               "pGETLOCAL_r's number of operands must be 2.");
-        auto &MO = MI.getOperand(1);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pGETLOCAL))
-              .addImm(MO.getImm());
-        MI.eraseFromParent();
-        continue;
-      } else if (opc == EVM::pPUTLOCAL_r) {
-        assert(MI.getNumOperands() == 2 &&
-               "pPUTLOCAL_r's number of operands must be 2.");
-        auto &MO = MI.getOperand(1);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL))
-              .addImm(MO.getImm());
-        MI.eraseFromParent();
-        continue;
       }
 
       for (MachineOperand &MO : reverse(MI.explicit_uses())) {

@@ -399,7 +399,9 @@ defm PUSH29: PUSHInst<0x7c, 3>;
 defm PUSH30: PUSHInst<0x7d, 3>;
 defm PUSH31: PUSHInst<0x7e, 3>;
 
-// swap instructions, only in stack instruction form.
+// swap instructions
+def SWAP_r: EVMPseudo<(outs), (ins i256imm:$num), []>;
+//only in stack instruction form.
 def SWAP1:  EVMInst<(outs), (ins), [], "true", "SWAP1",  0x90, 3>;
 def SWAP2:  EVMInst<(outs), (ins), [], "true", "SWAP2",  0x91, 3>;
 def SWAP3:  EVMInst<(outs), (ins), [], "true", "SWAP3",  0x92, 3>;
@@ -524,9 +526,9 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
     EVMPseudo<(outs), (ins variable_ops), []>;
 
   let isReturn = 1 in {
-    def pRETURNSUB  :
+    def pRETURNSUB_r  :
       EVMPseudo<(outs), (ins GPR:$src), [(EVMRetflag i256:$src)]>;
-    def pRETURNSUBVOID :
+    def pRETURNSUBVOID_r :
       EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
   }
 }
@@ -534,10 +536,7 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 // In pre-EIP615 we do a little bit differently (due to the difference).
 // We make the n'th local to be at location FreeMemoryPointer - (n * 32).
 def pGETLOCAL_r : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
-def pGETLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
-
 def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
-def pPUTLOCAL   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 // This is the placeholder for the incoming arguments.
 def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
@@ -546,10 +545,7 @@ def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 // These instructions are used to manually adjust the framepointer in pre-EIP615.
 def pADJFPUP_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
-def pADJFPUP   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
-
 def pADJFPDOWN_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
-def pADJFPDOWN   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 //===----------------------------------------------------------------------===//
 // Patterns
