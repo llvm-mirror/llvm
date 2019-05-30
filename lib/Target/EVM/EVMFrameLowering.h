@@ -21,7 +21,7 @@ class EVMSubtarget;
 class EVMFrameLowering : public TargetFrameLowering {
 public:
   explicit EVMFrameLowering(const EVMSubtarget &STI)
-      : TargetFrameLowering(StackGrowsDown,
+      : TargetFrameLowering(StackGrowsUp,
                             /*StackAlignment=*/16,
                             /*LocalAreaOffset=*/0),
         STI(STI) {}
@@ -41,6 +41,8 @@ public:
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator MI) const override;
+
+  const char* getTargetNodeName(unsigned Opcode) const;
 
 protected:
   const EVMSubtarget &STI;

@@ -72,3 +72,17 @@ MachineBasicBlock::iterator EVMFrameLowering::eliminateCallFramePseudoInstr(
     MachineBasicBlock::iterator MI) const {
   return MBB.erase(MI);
 }
+
+const char*
+EVMFrameLowering::getTargetNodeName(unsigned Opcode) const {
+  switch (static_cast<EVMISD::NodeType>(Opcode)) {
+  case EVMISD::FIRST_NUMBER:
+    break;
+#define NODE(N)                   \
+  case EVMISD::N:                 \
+    return "EVMISD::" #N;
+#include "EVMISD.def"
+#undef NODE
+  }
+  return nullptr;
+}
