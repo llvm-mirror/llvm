@@ -143,25 +143,6 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   uint64_t Start = OS.tell();
   uint64_t Binary;
 
-  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
-  if (MI.getOpcode() == EVM::RETSUB) {
-    // expand RETSUB into 2 instructions:
-    //  SWAP1
-    //  JUMP
-
-    // SWAP1
-    MCInst Swap1 = MCInstBuilder(EVM::SWAP1);
-    Binary = getBinaryCodeForInstr(Swap1, Fixups, STI);
-    support::endian::write<char>(OS, Binary, support::big);
-
-    // JUMP
-    MCInst Jump = MCInstBuilder(EVM::JUMP);
-    Binary = getBinaryCodeForInstr(Jump, Fixups, STI);
-    support::endian::write<char>(OS, Binary, support::big);
-
-    return;
-  }
-
   Binary = getBinaryCodeForInstr(MI, Fixups, STI);
   support::endian::write<char>(OS, Binary, support::big);
 

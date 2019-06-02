@@ -111,7 +111,9 @@ void EVMPassConfig::addPreEmitPass() {
     //addPass(createEVMStackification());
   }
 
+
   addPass(createEVMVRegToMem());
+  addPass(createEVMExpandPseudos());
   addPass(createEVMConvertRegToStack());
   addPass(createEVMAddJumpdest());
   addPass(createEVMShrinkpush());

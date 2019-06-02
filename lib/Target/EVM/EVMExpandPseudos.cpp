@@ -101,30 +101,49 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
 }
 
 void EVMExpandPseudos::expandADJFP(MachineInstr* MI) const {
+  MachineBasicBlock* MBB = MI->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  unsigned opc = MI->getOpcode();
+
+  unsigned oldFP = this->getNewRegister(MI);
+  unsigned newFP = this->getNewRegister(MI);
+
+  BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), oldFP)
+    .addImm(ST->getFreeMemoryPointer());
+
+  if (opc == EVM::pADJFPUP_r) {
+    BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), newFP)
+      .addReg(oldFP).addImm(MI->getOperand(0).getImm() * 32);
+  } else if (opc == EVM::pADJFPDOWN_r) {
+    BuildMI(*MBB, MI, DL, TII->get(EVM::SUB_r), newFP)
+      .addReg(oldFP).addImm(MI->getOperand(0).getImm() * 32);
+  } else {
+    llvm_unreachable("invalid parameter");
+  }
+
+  BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
+  .addImm(ST->getFreeMemoryPointer()).addReg(newFP);
+
+  MI->eraseFromParent();
 }
 
 void EVMExpandPseudos::expandRETURN(MachineInstr* MI) const {
   MachineBasicBlock* MBB = MI->getParent();
   DebugLoc DL = MI->getDebugLoc();
-
-  // RETSUB will be replaced with:
-  // SWAP1
-  // JUMP <-- note that this return does not have an argument
-
-  // But we could do a bit better by making the return address
-  // (first argument of the function) the argument of the pseudo
-  // instruction operand.
   unsigned opc = MI->getOpcode();
-  
 
-  if (opc == EVM::RETSUB_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::SWAP_r)).addImm(1);
-  } else if (opc == EVM::RETSUBVOID_r) {
-    // TODO: make this JUMP accept no argument
-    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r));
+  unsigned numOpnds = MI->getNumOperands();
+  assert(numOpnds <= 2 &&
+         "Does not support more than 1 return values");
+
+  if (opc == EVM::pRETURNSUB_r) {
+    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP1_r))
+      .add(MI->getOperand(0)).add(MI->getOperand(1));
   } else {
-    llvm_unreachable("invalid parameter");
+    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
+      .add(MI->getOperand(0));
   }
+
   MI->eraseFromParent();
 }
 
@@ -142,23 +161,26 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock & MBB : MF) {
     // TODO: use iterator since we need to remove
     // pseudo instructions
-    for (MachineInstr & MI : MBB) {
-      unsigned opcode = MI.getOpcode();
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+         I != E;) {
+
+      MachineInstr *MI = &*I++; 
+      unsigned opcode = MI->getOpcode();
 
       switch (opcode) {
         case EVM::pPUTLOCAL_r:
         case EVM::pGETLOCAL_r:
-          expandLOCAL(&MI);
+          expandLOCAL(MI);
           Changed = true;
           break;
         case EVM::pADJFPUP_r:
         case EVM::pADJFPDOWN_r:
-          expandADJFP(&MI);
+          expandADJFP(MI);
           Changed = true;
           break;
         case EVM::pRETURNSUB_r:
         case EVM::pRETURNSUBVOID_r:
-          expandRETURN(&MI);
+          expandRETURN(MI);
           Changed = true;
           break;
       }

@@ -327,6 +327,12 @@ defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 
+// This JUMP takes 1 extra operand, it is used to 
+// return from a subroutine
+defm JUMP1 : RSInst<(outs), (ins GPR:$retval, brtarget:$dst),
+                   [],
+                   "JUMP1_r \t$retval, $dst", "JUMP", 0x56, 8>;
+
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],
                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
@@ -442,26 +448,15 @@ defm CREATE : Inst_3_1<"CREATE",
                        0xf0, 32000>;
 }
 
-let isCall = 1 in {
+//let isCall = 1 in {
 // We should compute the cost of CALL separately.
 //defm CALL   : Inst_7_1<"CALL", [], 0xf1, 0>;
 //defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
-}
+//}
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
 defm RETURN : RSInst<(outs), (ins), [],
                      "RETURN_r", "RETURN", 0xf3, 0>;
-
-// this is an alias for the JUMP, which is used 
-defm RETSUB : RSInst<(outs), (ins GPR:$src), [],
-                     "RETSUB_r \t$src",
-                     // we will have to expand RETSUB
-                     // at the very end.
-                     "RETSUB", 0x56, 8>;
-defm RETSUBVOID :
-RSInst<(outs), (ins), [],
-       "RETSUBVOID_r",
-       "JUMP", 0x56, 8>;
 }
 
 let isCall = 1 in {
