@@ -70,6 +70,7 @@ void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     return;
   } else if (Op.isExpr()) {
     printExpr(Op.getExpr(), O);
+    return;
   }
   llvm_unreachable("unimplemented.");
 }

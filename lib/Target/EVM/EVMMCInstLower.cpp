@@ -54,6 +54,14 @@ void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
           MI->print(errs());
           llvm_unreachable("unknown operand type");
         }
+      case MachineOperand::MO_BlockAddress:
+        {
+          MCOp = MCOperand::createExpr(
+              MCSymbolRefExpr::create(
+                Printer.GetBlockAddressSymbol(MO.getBlockAddress()),
+                Ctx));
+          break;
+        }
       case MachineOperand::MO_MachineBasicBlock:
         {
           MCOp = MCOperand::createExpr(
