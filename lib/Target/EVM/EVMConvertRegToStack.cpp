@@ -100,6 +100,27 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
+        if (MO.isBlockAddress()) {
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+                     .addBlockAddress(MO.getBlockAddress());
+          LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
+          continue;
+        }
+
+        if (MO.isGlobal()) {
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+                     .addGlobalAddress(MO.getGlobal());
+          LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
+          continue;
+        }
+
+        if (MO.isMBB()) {
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+                     .addMBB(MO.getMBB());
+          LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
+          continue;
+        }
+
         // register value:
         if (MO.isReg()) {
           // TODO: at this moment we only have FP as physical register. Need special handling.
@@ -125,6 +146,11 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
               RegOpcode == EVM::pRETURNSUBVOID_r) {
             StackOpcode = EVM::pRETURNSUB;
           }
+
+          if (RegOpcode == EVM::pJUMPSUBVOID_r ||
+              RegOpcode == EVM::pJUMPSUB_r) {
+            StackOpcode = EVM::pJUMPSUB;
+          }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 
@@ -133,12 +159,19 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         // Remove register operands.
         for (unsigned i = 0; i < MI.getNumOperands();) {
           auto &MO = MI.getOperand(i);
-          if ( MO.isReg() || MO.isImm() || MO.isCImm() ) {
+          if ( MO.isReg() ||
+               MO.isImm() ||
+               MO.isCImm() ||
+               MO.isBlockAddress() ||
+               MO.isGlobal() ||
+               MO.isMBB() ) {
             MI.RemoveOperand(i);
+          /*
           } else if (MO.isMBB() || MO.isGlobal() ||
                      MO.isSymbol()) {
             // this is special case for jumps.
             ++i;
+          */
           } else {
             llvm_unreachable("unimplemented");
           }

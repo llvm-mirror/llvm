@@ -45,7 +45,6 @@ private:
   bool runOnMachineFunction(MachineFunction &MF) override;
   void expandLOCAL(MachineInstr* MI) const;
   void expandADJFP(MachineInstr* MI) const;
-  void expandJUMPSUB(MachineInstr* MI) const;
   void expandRETURN(MachineInstr* MI) const;
 
 };
@@ -137,8 +136,7 @@ void EVMExpandPseudos::expandRETURN(MachineInstr* MI) const {
          "Does not support more than 1 return values");
 
   if (opc == EVM::pRETURNSUB_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP1_r))
-      .add(MI->getOperand(0)).add(MI->getOperand(1));
+    llvm_unreachable("unimplemented");
   } else {
     BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
       .add(MI->getOperand(0));

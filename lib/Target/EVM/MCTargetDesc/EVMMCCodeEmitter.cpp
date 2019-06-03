@@ -151,11 +151,14 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
     assert(MI.getNumOperands() == 1);
     unsigned push_size = Binary - 0x60 + 1;
     encodeImmediate(OS, MI.getOperand(0), push_size);
-  } else if (is_JUMP(Binary)) {
+  }
+  /*
+  else if (is_JUMP(Binary)) {
     assert(MI.getNumOperands() == 1);
     // TODO: encode fixup.
     OS << MI.getOperand(0);
   }
+  */
 
 }
 

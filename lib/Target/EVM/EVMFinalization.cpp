@@ -76,13 +76,23 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
       // Remove pseudo instruction
       if (opcode == EVM::pSTACKARG) {
         MI->eraseFromParent();
-      } else if (opcode == EVM::pRETURNSUB) {
+        Changed = true;
+      }
+      
+      if (opcode == EVM::pRETURNSUB) {
         // expand it to
         // SWAP1
         // JUMP
         BuildMI(MBB, MI, MI->getDebugLoc(), TII->get(EVM::SWAP1));
         BuildMI(MBB, MI, MI->getDebugLoc(), TII->get(EVM::JUMP));
         MI->eraseFromParent();
+        Changed = true;
+      }
+
+      if (opcode == EVM::pJUMPSUB) {
+        // simply convert it to JUMP
+        MI->setDesc(TII->get(EVM::JUMP));
+        Changed = true;
       }
 
     }

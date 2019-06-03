@@ -43,18 +43,6 @@ void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       printInstruction(MI, STI, O);
       break;
     }
-    // handling for JUMP.
-    // Pre-EIP615 requires us to separate the JUMP(I) operand.
-    case EVM::JUMP:
-    case EVM::JUMPI: {
-      // TODO: we should split this instruction into 2:
-      // 1. PUSH addr_label
-      // 2. JUMP(I)
-      printInstruction(MI, STI, O);
-      O << " \t";
-      printExpr(MI->getOperand(0).getExpr(), O);
-      break;
-    }
   }
 
   printAnnotation(O, Annot);

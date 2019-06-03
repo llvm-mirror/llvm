@@ -102,7 +102,7 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
         LLVM_DEBUG(dbgs() << "Converting: "; MI.dump(););
 
         auto MO = MI.getOperand(0);
-        assert((MO.isImm() || MO.isCImm()) && "Illegal PUSH32 instruction.");
+        //assert((MO.isImm() || MO.isCImm()) && "Illegal PUSH32 instruction.");
 
         if (MO.isImm()) {
           int64_t imm = MO.getImm();
@@ -116,13 +116,22 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
             BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::SIGNEXTEND));
           }
           Changed = true;
-        } else if (MO.isCImm()) {
+        }
+
+        if (MO.isCImm()) {
           const ConstantInt* ci = MO.getCImm();
           unsigned byteWidth = ci->getBitWidth();
           assert(byteWidth <= 256 && "> 256bit constant immediates unsupported");
           // for now, constants with bit width > 64 will all use PUSH32.
           // This is an optimization opportunity.
           LLVM_DEBUG(dbgs() << " (Keeping the width due to size)");
+        }
+
+        // EIP-170
+        if (MO.isMBB() || MO.isGlobal() || MO.isBlockAddress()) {
+          int new_opcode = get_push_opcode(2);
+          MI.setDesc(TII.get(new_opcode));
+          Changed = true;
         }
 
         LLVM_DEBUG( dbgs() << "\tto: "; MI.dump(); );

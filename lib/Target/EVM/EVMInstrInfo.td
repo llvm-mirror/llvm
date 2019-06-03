@@ -327,12 +327,6 @@ defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 
-// This JUMP takes 1 extra operand, it is used to 
-// return from a subroutine
-defm JUMP1 : RSInst<(outs), (ins GPR:$retval, brtarget:$dst),
-                   [],
-                   "JUMP1_r \t$retval, $dst", "JUMP", 0x56, 8>;
-
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],
                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
@@ -342,7 +336,7 @@ let isCall = 1, isBarrier = 1 in {
 // We have a second version of JUMP, which will be used in
 // pJUMPSUB, as it returns an value so as to not break the 
 // consistency. The original JUMP instr can be used in
-// pJUMPSUB_VOID.
+// pJUMPSUBVOID_r.
 defm CALLRET : RSInst<(outs GPR:$retval), (ins brtarget:$dst),
                       [], "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 defm CALLVOID :
@@ -511,13 +505,16 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
   def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
 
   // we split jump to subroutine into 2.
-  def pJUMPSUB_VOID :
+  def pJUMPSUBVOID_r :
     EVMPseudo<(outs), (ins brtarget:$dst, variable_ops), []>;
 
-  def pJUMPSUB :
+  def pJUMPSUB_r :
     EVMPseudo<(outs GPR:$rv), (ins brtarget:$dst, variable_ops), []>;
 
-  def pJUMPSUBV:
+  def pJUMPSUB :
+    EVMStackPseudo<(outs), (ins), []>;
+
+  def pJUMPSUBV_r :
     EVMPseudo<(outs), (ins variable_ops), []>;
 
   let isReturn = 1 in {
@@ -614,15 +611,15 @@ def : Pat<(i256 (EVMWrapper tblockaddress:$dst)),
           (i256 tblockaddress:$dst)>;
 
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
-          (pJUMPSUB tglobaladdr:$callee)>;
+          (pJUMPSUB_r tglobaladdr:$callee)>;
 def : Pat<(i256 (EVMCall (EVMWrapper texternalsym:$callee))),
-          (pJUMPSUB texternalsym:$callee)>;
+          (pJUMPSUB_r texternalsym:$callee)>;
 
 // VOID version of function call.
 def : Pat<(EVMCallVoid (EVMWrapper tglobaladdr:$callee)),
-          (pJUMPSUB_VOID tglobaladdr:$callee)>;
+          (pJUMPSUBVOID_r tglobaladdr:$callee)>;
 def : Pat<(EVMCall (EVMWrapper texternalsym:$callee)),
-          (pJUMPSUB_VOID texternalsym:$callee)>;
+          (pJUMPSUBVOID_r texternalsym:$callee)>;
 
 // copied from other backends.
 def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{
