@@ -419,7 +419,24 @@ def SWAP14: EVMInst<(outs), (ins), [], "true", "SWAP14", 0x9d, 3>;
 def SWAP15: EVMInst<(outs), (ins), [], "true", "SWAP15", 0x9e, 3>;
 def SWAP16: EVMInst<(outs), (ins), [], "true", "SWAP16", 0x9f, 3>;
 
-
+def DUP_r: EVMPseudo<(outs), (ins i256imm:$num), []>;
+//only in stack instruction form.
+def DUP1:  EVMInst<(outs), (ins), [], "true", "DUP1",  0x80, 3>;
+def DUP2:  EVMInst<(outs), (ins), [], "true", "DUP2",  0x81, 3>;
+def DUP3:  EVMInst<(outs), (ins), [], "true", "DUP3",  0x82, 3>;
+def DUP4:  EVMInst<(outs), (ins), [], "true", "DUP4",  0x83, 3>;
+def DUP5:  EVMInst<(outs), (ins), [], "true", "DUP5",  0x84, 3>;
+def DUP6:  EVMInst<(outs), (ins), [], "true", "DUP6",  0x85, 3>;
+def DUP7:  EVMInst<(outs), (ins), [], "true", "DUP7",  0x86, 3>;
+def DUP8:  EVMInst<(outs), (ins), [], "true", "DUP8",  0x87, 3>;
+def DUP9:  EVMInst<(outs), (ins), [], "true", "DUP9",  0x88, 3>;
+def DUP10: EVMInst<(outs), (ins), [], "true", "DUP10", 0x88, 3>;
+def DUP11: EVMInst<(outs), (ins), [], "true", "DUP11", 0x8a, 3>;
+def DUP12: EVMInst<(outs), (ins), [], "true", "DUP12", 0x8b, 3>;
+def DUP13: EVMInst<(outs), (ins), [], "true", "DUP13", 0x8c, 3>;
+def DUP14: EVMInst<(outs), (ins), [], "true", "DUP14", 0x8d, 3>;
+def DUP15: EVMInst<(outs), (ins), [], "true", "DUP15", 0x8e, 3>;
+def DUP16: EVMInst<(outs), (ins), [], "true", "DUP16", 0x8f, 3>;
 
 
 

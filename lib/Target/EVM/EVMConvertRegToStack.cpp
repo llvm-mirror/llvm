@@ -43,12 +43,17 @@ private:
     return "EVM Convert register to stacks";
   }
 
+  const TargetInstrInfo* TII;
+
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+  void convertSWAP(MachineInstr* MI) const;
+  void convertDUP(MachineInstr* MI) const;
 };
 } // end anonymous namespace
 
@@ -61,6 +66,68 @@ FunctionPass *llvm::createEVMConvertRegToStack() {
   return new EVMConvertRegToStack();
 }
 
+static unsigned getSWAPOpcode(unsigned idx) {
+  switch (idx) {
+    case 1 : return EVM::SWAP1;
+    case 2 : return EVM::SWAP2;
+    case 3 : return EVM::SWAP3;
+    case 4 : return EVM::SWAP4;
+    case 5 : return EVM::SWAP5;
+    case 6 : return EVM::SWAP6;
+    case 7 : return EVM::SWAP7;
+    case 8 : return EVM::SWAP8;
+    case 9 : return EVM::SWAP9;
+    case 10: return EVM::SWAP10;
+    case 11: return EVM::SWAP11;
+    case 12: return EVM::SWAP12;
+    case 13: return EVM::SWAP13;
+    case 14: return EVM::SWAP14;
+    case 15: return EVM::SWAP15;
+    case 16: return EVM::SWAP16;
+    default:
+      llvm_unreachable("invalid index");
+  }
+}
+
+static unsigned getDUPOpcode(unsigned idx) {
+  switch (idx) {
+    case 1 : return EVM::DUP1;
+    case 2 : return EVM::DUP2;
+    case 3 : return EVM::DUP3;
+    case 4 : return EVM::DUP4;
+    case 5 : return EVM::DUP5;
+    case 6 : return EVM::DUP6;
+    case 7 : return EVM::DUP7;
+    case 8 : return EVM::DUP8;
+    case 9 : return EVM::DUP9;
+    case 10: return EVM::DUP10;
+    case 11: return EVM::DUP11;
+    case 12: return EVM::DUP12;
+    case 13: return EVM::DUP13;
+    case 14: return EVM::DUP14;
+    case 15: return EVM::DUP15;
+    case 16: return EVM::DUP16;
+    default:
+      llvm_unreachable("invalid index");
+  }
+}
+
+void EVMConvertRegToStack::convertSWAP(MachineInstr* MI) const {
+  unsigned swapIdx = MI->getOperand(0).getImm();
+  assert(swapIdx <= 16 && "invalid SWAP");
+
+  unsigned opc = getSWAPOpcode(swapIdx);
+  MI->setDesc(TII->get(opc));
+}
+
+void EVMConvertRegToStack::convertDUP(MachineInstr* MI) const {
+  unsigned dupIdx = MI->getOperand(0).getImm();
+  assert(dupIdx <= 16 && "invalid DUP");
+
+  unsigned opc = getDUPOpcode(dupIdx);
+  MI->setDesc(TII->get(opc));
+}
+
 bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Convert register to stack **********\n"
@@ -68,9 +135,8 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
   });
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
+  TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
-  bool Changed = false;
 
   for (MachineBasicBlock & MBB : MF) {
     for (MachineBasicBlock::instr_iterator I = MBB.instr_begin(), E = MBB.instr_end(); I != E;) {
@@ -83,39 +149,52 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         assert(MI.getNumOperands() == 2 && "PUSH32_r's number of operands must be 2.");
         auto &MO = MI.getOperand(1);
         assert(MO.isImm() && "PUSH32_r's use operand must be immediate.");
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
+        BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32)).addImm(MO.getImm());
         MI.eraseFromParent();
         continue;
-      } else if (opc == EVM::pSTACKARG_r) {
+      }
+
+      if (opc == EVM::pSTACKARG_r) {
         MI.RemoveOperand(0);
-        MI.setDesc(TII.get(EVM::pSTACKARG));
+        MI.setDesc(TII->get(EVM::pSTACKARG));
+        continue;
+      }
+
+      // expand SWAP
+      if (opc == EVM::SWAP_r) {
+        convertSWAP(&MI);
+        continue;
+      }
+
+      if (opc == EVM::DUP_r) {
+        convertDUP(&MI);
         continue;
       }
 
       for (MachineOperand &MO : reverse(MI.explicit_uses())) {
         // Immediate value: insert `PUSH32 Imm` before instruction.
         if (MO.isImm()) {
-          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32)).addImm(MO.getImm());
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32)).addImm(MO.getImm());
           LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
           continue;
         }
 
         if (MO.isBlockAddress()) {
-          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32))
                      .addBlockAddress(MO.getBlockAddress());
           LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
           continue;
         }
 
         if (MO.isGlobal()) {
-          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32))
                      .addGlobalAddress(MO.getGlobal());
           LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
           continue;
         }
 
         if (MO.isMBB()) {
-          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::PUSH32))
+          auto &MIB = BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32))
                      .addMBB(MO.getMBB());
           LLVM_DEBUG({ dbgs() << "********** Inserting new instruction:"; MIB.getInstr()->dump(); });
           continue;
@@ -154,7 +233,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 
-        MI.setDesc(TII.get(StackOpcode));
+        MI.setDesc(TII->get(StackOpcode));
 
         // Remove register operands.
         for (unsigned i = 0; i < MI.getNumOperands();) {
@@ -197,5 +276,5 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
   }
 #endif
 
-  return Changed;
+  return true;
 }
