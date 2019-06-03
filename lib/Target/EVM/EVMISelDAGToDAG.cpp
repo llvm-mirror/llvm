@@ -118,7 +118,8 @@ void EVMDAGToDAGISel::MutateReturnChain() {
 }
 
 void EVMDAGToDAGISel::PreprocessISelDAG() {
-  this->MutateReturnChain();
+  // disable it since it is not working.
+  //this->MutateReturnChain();
 }
 
 void EVMDAGToDAGISel::PostprocessISelDAG() {

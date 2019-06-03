@@ -117,6 +117,15 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
       {
         auto RegOpcode = MI.getOpcode();
         auto StackOpcode = llvm::EVM::getStackOpcode(RegOpcode);
+
+        if (StackOpcode == -1) {
+          // special handling for return pseudo, as we will expand
+          // it at the finalization pass.
+          if (RegOpcode == EVM::pRETURNSUB_r ||
+              RegOpcode == EVM::pRETURNSUBVOID_r) {
+            StackOpcode = EVM::pRETURNSUB;
+          }
+        }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 
         MI.setDesc(TII.get(StackOpcode));
