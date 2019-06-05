@@ -548,18 +548,23 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
 // In pre-EIP615 we do a little bit differently (due to the difference).
 // We make the n'th local to be at location FreeMemoryPointer - (n * 32).
+let mayLoad = 1 in {
 def pGETLOCAL_r : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
-def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
+}
 
+let mayStore = 1 in {
+def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
+}
 // This is the placeholder for the incoming arguments.
 def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
                             [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
 def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 // These instructions are used to manually adjust the framepointer in pre-EIP615.
+let mayStore = 1 in {
 def pADJFPUP_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
 def pADJFPDOWN_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
-
+}
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//
