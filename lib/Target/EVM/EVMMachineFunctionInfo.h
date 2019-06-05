@@ -40,16 +40,25 @@ private:
   ///   - defined and used in LIFO order with other stack registers
   BitVector VRegStackified;
 
-public:
-  //  EVMMachineFunctionInfo() = default;
+  unsigned FrameIndexSize;
 
-  EVMMachineFunctionInfo(MachineFunction &MF) : MF(MF) {}
+public:
+  EVMMachineFunctionInfo(MachineFunction &MF)
+    : MF(MF), FrameIndexSize(0)
+  {}
 
   int getVarArgsFrameIndex() const { return VarArgsFrameIndex; }
   void setVarArgsFrameIndex(int Index) { VarArgsFrameIndex = Index; }
 
   unsigned getVarArgsSaveSize() const { return VarArgsSaveSize; }
   void setVarArgsSaveSize(int Size) { VarArgsSaveSize = Size; }
+
+  unsigned getFrameIndexSize() const { return FrameIndexSize; }
+  void setFrameIndexSize(unsigned newFI) {
+    assert(newFI > FrameIndexSize
+           && "new frameindex should be greater than previous one.");
+    FrameIndexSize = newFI;
+  }
 
   void stackifyVReg(unsigned VReg) {
     assert(MF.getRegInfo().getUniqueVRegDef(VReg));

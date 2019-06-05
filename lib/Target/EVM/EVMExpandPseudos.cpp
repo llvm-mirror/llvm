@@ -92,7 +92,8 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   if (opc == EVM::pGETLOCAL_r) {
     BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), localReg).addReg(addrReg);
   } else if (opc == EVM::pPUTLOCAL_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r)).addReg(localReg).addReg(addrReg);
+    // MSTORE_r offset value
+    BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r)).addReg(addrReg).addReg(localReg);
   } else {
     llvm_unreachable("invalid parameter");
   }

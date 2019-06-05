@@ -71,13 +71,16 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   });
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+  unsigned fiSize = MFI.getFrameIndexSize();
+  
   const EVMSubtarget &ST = MF.getSubtarget<EVMSubtarget>();
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
   bool Changed = false;
 
   DenseMap<unsigned, unsigned> Reg2Mem;
-  unsigned index = 1;
+  unsigned index = 0;
 
   // first, find all the virtual register defs.
   for (const MachineBasicBlock & MBB : MF) {
@@ -145,17 +148,27 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
           LLVM_DEBUG({ dbgs() << "skipping reg index in use: " << regindex << "\n"; });
           continue;
         }
-        unsigned memindex = Reg2Mem[regindex];
+        unsigned memindex = Reg2Mem[regindex] + fiSize;
 
         LLVM_DEBUG({ dbgs() << "found regindex use: " << regindex << ","; });
 
         // insert before instruction:
-        // r1 = MLOAD_r FreeMemoryPointer
-        // r2 = SUB_r r1, (index * 32)
-        // new_vreg = MLOAD_r r2
         unsigned NewVReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-        BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pGETLOCAL_r), NewVReg)
-               .addImm(memindex);
+        // when instantiating the pGETLOCAL, make sure it is generated
+        // before the frame adjustment.
+        if (MI.getOpcode() == EVM::pRETURNSUB_r) {
+          MachineBasicBlock::iterator PI = MachineBasicBlock::iterator(MI);
+          --PI;
+          assert(PI->getOpcode() == EVM::pADJFPDOWN_r &&
+                 "ADJFPDOWN_r should follow pRETURNSUB_r");
+          MachineInstr &PrevInstr = *PI;
+          BuildMI(MBB, PrevInstr, PrevInstr.getDebugLoc(),
+                  TII.get(EVM::pGETLOCAL_r), NewVReg)
+                 .addImm(memindex);
+        } else {
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pGETLOCAL_r), NewVReg)
+                 .addImm(memindex);
+        }
         MO.setReg(NewVReg);
 
         LLVM_DEBUG({ dbgs() << " replacing use with: " << TRI.virtReg2Index(NewVReg)
@@ -172,59 +185,46 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
-        unsigned memindex = Reg2Mem[regindex];
+        unsigned memindex = Reg2Mem[regindex] + fiSize;
 
         auto &InsertPt = I;
-        // r1 = MLOAD_r FreeMemoryPointer
-        // r2 = SUB_r r1, (index * 32)
-        // MSTORE_r vreg, r2
-        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r), MO.getReg())
-               .addImm(memindex);
+        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r))
+        .addReg(MO.getReg())
+        .addImm(memindex);
 
         Changed = true;
       }
     }
   }
 
+  // Patch the frame pointer in the prologue and epilogue.
   if (!Reg2Mem.empty()) {
-    {
-      // at the beginning of the function, increment memory allocator pointer.
-      MachineBasicBlock &EntryMBB = MF.front();
-      MachineBasicBlock::iterator InsertPt = EntryMBB.begin();
+    int fiSize = -1;
+    // iterate over instructions, find pADJFP(UP/DOWN)_r,
+    // patch the value --- we can't know the value beforehand.
+    for (MachineBasicBlock &MBB : MF) {
+      for (MachineInstr &MI : MBB) {
+        unsigned opc = MI.getOpcode();
+        if (opc == EVM::pADJFPUP_r ||
+            opc == EVM::pADJFPDOWN_r) {
+          unsigned s = MI.getOperand(0).getImm(); 
+          
+          // simple check
+          if (fiSize != -1) {
+            assert(s == fiSize &&
+                   "FrameSize not the same in a same function");
+          } else {
+            fiSize = s;
+          }
 
-      while (InsertPt->getOpcode() == EVM::pSTACKARG_r)
-        ++InsertPt;
-      MachineInstr &MI = *InsertPt;
-
-      BuildMI(EntryMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPUP_r))
-        .addImm(increment_size);
-      LLVM_DEBUG({ dbgs() << "Increment AP at entry: " << increment_size << ".\n"; });
-    }
-
-    {
-      // at the end of the function, decrement memory allocator pointer.
-      MachineBasicBlock &ExitMBB = MF.back();
-      MachineInstr &MI = ExitMBB.back();
-      BuildMI(ExitMBB, MI, MI.getDebugLoc(), TII.get(EVM::pADJFPDOWN_r))
-        .addImm(increment_size);
-      LLVM_DEBUG({ dbgs() << "decrement AP at exit: " << increment_size << ".\n"; });
-    }
-  }
-
-#ifndef NDEBUG
-  // Assert that no use of vregs are across basic block.
-  for (const MachineBasicBlock &MBB : MF) {
-    for (const MachineInstr &MI : MBB) {
-      if (MI.isDebugInstr() || MI.isLabel())
-        continue;
-      for (const MachineOperand &MO : MI.defs()) {
-        // find all uses.
-        // TODO
+          //add the local variable spilling size
+          unsigned newSize = s + Reg2Mem.size();
+          MI.getOperand(0).setImm(newSize);
+        }
 
       }
     }
   }
-#endif
 
   return Changed;
 }

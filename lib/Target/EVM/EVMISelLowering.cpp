@@ -214,6 +214,15 @@ static EVMISD::NodeType getReverseCmpOpcode(ISD::CondCode CC) {
 SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
                                            SelectionDAG &DAG) const {
     int FI = cast<FrameIndexSDNode>(Op)->getIndex();
+
+    // Record the FI so that we know how many frame slots are allocated to
+    // frames.
+    MachineFunction &MF = DAG.getMachineFunction();
+    EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+    if ((FI + 1) > MFI.getFrameIndexSize()) {
+      MFI.setFrameIndexSize(FI + 1);
+    }
+
     return DAG.getTargetFrameIndex(FI, Op.getValueType());
 }
 

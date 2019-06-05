@@ -29,9 +29,6 @@ public:
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
 
-  int getFrameIndexReference(const MachineFunction &MF, int FI,
-                             unsigned &FrameReg) const override;
-
   void processFunctionBeforeFrameFinalized(MachineFunction &MF,
                                            RegScavenger *RS) const override;
 
@@ -48,10 +45,7 @@ protected:
   const EVMSubtarget &STI;
 
 private:
-  void determineFrameLayout(MachineFunction &MF) const;
-  void adjustReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
-                 const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
-                 int64_t Val, MachineInstr::MIFlag Flag) const;
+  unsigned calculateFrameSize(MachineFunction &MF);
 };
 }
 #endif

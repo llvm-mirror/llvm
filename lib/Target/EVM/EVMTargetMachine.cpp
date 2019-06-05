@@ -107,13 +107,14 @@ void EVMPassConfig::addPreEmitPass() {
 
   //addPass(createEVMReplacePhysRegs());
 
+
+  addPass(createEVMVRegToMem());
+  addPass(createEVMExpandPseudos());
+
   if (getOptLevel() != CodeGenOpt::None) {
     //addPass(createEVMStackification());
   }
 
-
-  addPass(createEVMVRegToMem());
-  addPass(createEVMExpandPseudos());
   addPass(createEVMConvertRegToStack());
   //addPass(createEVMAddJumpdest());
   addPass(createEVMShrinkpush());
@@ -121,7 +122,6 @@ void EVMPassConfig::addPreEmitPass() {
 }
 
 void EVMPassConfig::addPreRegAlloc() {
-
 }
 
 void EVMPassConfig::addPostRegAlloc() {

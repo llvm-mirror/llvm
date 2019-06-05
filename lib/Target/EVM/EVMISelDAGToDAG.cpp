@@ -47,8 +47,6 @@ public:
 
   void Select(SDNode *Node) override;
 
-  bool SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset);
-
   bool SelectLOAD(SDNode *Node);
 
   // custom selecting
@@ -179,31 +177,9 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
       if (SelectLOAD(Node)) return;
       break;
     }
-    case ISD::FrameIndex: {
-      int FI = cast<FrameIndexSDNode>(Node)->getIndex();
-      EVT VT = Node->getValueType(0);
-      SDValue TFI = CurDAG->getTargetFrameIndex(FI, VT);
-      unsigned Opc = EVM::MLOAD_r;
-      if (Node->hasOneUse()) {
-        CurDAG->SelectNodeTo(Node, Opc, VT, TFI);
-        return;
-      }
-      ReplaceNode(Node, CurDAG->getMachineNode(Opc, SDLoc(Node), VT, TFI));
-      return;
-    }
   }
 
   SelectCode(Node);
-}
-
-bool EVMDAGToDAGISel::SelectAddrFI(SDValue Addr, SDValue &Base, SDValue &Offset) {
-  if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
-    Base = CurDAG->getTargetFrameIndex(
-        FIN->getIndex(), TLI->getPointerTy(CurDAG->getDataLayout()));
-    Offset = CurDAG->getTargetConstant(0, SDLoc(Addr), MVT::i256);
-    return true;
-  }
-  return false;
 }
 
 // This pass converts a legalized DAG into a EVM-specific DAG, ready

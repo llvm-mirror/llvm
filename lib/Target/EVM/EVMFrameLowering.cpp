@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVMFrameLowering.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
@@ -30,29 +31,37 @@ bool EVMFrameLowering::hasFP(const MachineFunction &MF) const {
          MFI.isFrameAddressTaken();
 }
 
-// Determines the size of the frame and maximum call frame size.
-void EVMFrameLowering::determineFrameLayout(MachineFunction &MF) const {
-}
-
-void EVMFrameLowering::adjustReg(MachineBasicBlock &MBB,
-                                 MachineBasicBlock::iterator MBBI,
-                                 const DebugLoc &DL, unsigned DestReg,
-                                 unsigned SrcReg, int64_t Val,
-                                 MachineInstr::MIFlag Flag) const {
-}
-
 void EVMFrameLowering::emitPrologue(MachineFunction &MF,
-                                      MachineBasicBlock &MBB) const {
-  // TODO: emit a JUMPDEST?
+                                    MachineBasicBlock &MBB) const {
+  EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+  unsigned fiSize = MFI.getFrameIndexSize();
+
+  const EVMInstrInfo *TII =
+    static_cast<const EVMInstrInfo *>(MF.getSubtarget().getInstrInfo());
+  // we insert ADJFPUP_r, and later we will alter the paramter
+  MachineBasicBlock::iterator MBBI = MBB.getFirstNonDebugInstr();
+
+  // skip pSTACKARGs.
+  while (MBBI->getOpcode() == EVM::pSTACKARG_r) {
+    ++MBBI;
+  }
+  DebugLoc DL = MBBI->getDebugLoc();
+
+  BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPUP_r)).addImm(fiSize);
 }
 
 void EVMFrameLowering::emitEpilogue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
-}
+  EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+  unsigned fiSize = MFI.getFrameIndexSize();
+  const EVMInstrInfo *TII =
+    static_cast<const EVMInstrInfo *>(MF.getSubtarget().getInstrInfo());
 
-int EVMFrameLowering::getFrameIndexReference(const MachineFunction &MF,
-                                               int FI,
-                                               unsigned &FrameReg) const {
+  // we insert ADJFPDOWN_r, and later we will alter the paramter
+  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
+  DebugLoc DL = MBBI->getDebugLoc();
+
+  BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPDOWN_r)).addImm(fiSize);
 }
 
 void EVMFrameLowering::processFunctionBeforeFrameFinalized(
