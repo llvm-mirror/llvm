@@ -322,12 +322,14 @@ defm SSTORE : Inst_2_0<"SSTORE",
                        0x55, 200000>;
 }
 
-
-let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
+let isBranch = 1, isBarrier = 1 in {
 defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
+}
 
+
+let isTerminator = 1, isBranch = 1, isBarrier = 1 in {
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],
                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
@@ -517,11 +519,7 @@ def ADJCALLSTACKUP : EVMPseudo<(outs), (ins i256imm:$amt1, i256imm:$amt2),
                             [(EVMCallseq_end timm:$amt1, timm:$amt2)]>;
 }
 
-let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
-  def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
-  def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
-  def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
-
+let isCall = 1 in {
   // we split jump to subroutine into 2.
   def pJUMPSUBVOID_r :
     EVMPseudo<(outs), (ins brtarget:$dst, variable_ops), []>;
@@ -534,6 +532,12 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
   def pJUMPSUBV_r :
     EVMPseudo<(outs), (ins variable_ops), []>;
+}
+
+let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
+  def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
+  def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
+  def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
 
   let isReturn = 1 in {
     def pRETURNSUB_r  :
