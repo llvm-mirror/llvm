@@ -69,6 +69,7 @@ private:
   void verifyInstructionPredicates(const MCInst &MI,
                                    uint64_t AvailableFeatures) const;
   void encodeImmediate(raw_ostream &OS, const MCOperand& opnd, unsigned push_size) const;
+  void encodeExpr(raw_ostream &OS, const MCOperand& opnd, unsigned push_size) const;
 };
 
 } // end anonymous namespace
@@ -100,15 +101,16 @@ static bool is_JUMP(uint64_t binary) {
   return false;
 }
 
+void EVMMCCodeEmitter::encodeExpr(raw_ostream &OS,
+                                  const MCOperand& opnd,
+                                  unsigned push_size) const {
+    
+
+}
 
 void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
                                        const MCOperand& opnd,
                                        unsigned push_size) const {
-  if (push_size > 8 && push_size != 32) {
-    // this is a reminder check for implementing proper encoding.
-    llvm_unreachable("unimplemented encoding size for push.");
-  }
-
   // ugly padding the top bits for now. We will have to properly support
   // 256 bit operands and remove this.
   if (opnd.isImm()) {
@@ -121,7 +123,7 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
       support::endian::write<char>(OS, byte, support::big);
     }
   } else if (opnd.isCImm()) {
-    assert(push_size > 8 && "unimplemented push size ofr CImmediate type");
+    assert(push_size > 8 && "unimplemented push size of CImmediate type");
     //if it is a CImmediate type, it is a value more than 64bit.
     const ConstantInt* ci = opnd.getCImm();
     const APInt& apint = ci->getValue();
@@ -150,16 +152,21 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
   if (is_PUSH(Binary)) {
     assert(MI.getNumOperands() == 1);
     unsigned push_size = Binary - 0x60 + 1;
-    encodeImmediate(OS, MI.getOperand(0), push_size);
-  }
-  /*
-  else if (is_JUMP(Binary)) {
-    assert(MI.getNumOperands() == 1);
-    // TODO: encode fixup.
-    OS << MI.getOperand(0);
-  }
-  */
+    if (push_size > 8 && push_size != 32) {
+      // this is a reminder check for implementing proper encoding.
+      llvm_unreachable("unimplemented encoding size for Push.");
+    }
 
+    auto &opnd = MI.getOperand(0);
+    if (opnd.isImm() || opnd.isCImm()) {
+      encodeImmediate(OS, opnd, push_size);
+    } else {
+      assert(push_size == 2 && "Static Jump operands are 2 bytes");
+      assert(opnd.isExpr() && "PUSH operand should be either Imm or Expr");
+      MCFixupKind Kind = MCFixupKind(FK_Data_2);
+      Fixups.push_back(MCFixup::create(0, opnd.getExpr(), Kind, MI.getLoc()));
+    }
+  }
 }
 
 // Encode EVM Memory Operand
