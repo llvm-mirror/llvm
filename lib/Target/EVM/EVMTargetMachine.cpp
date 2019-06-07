@@ -27,7 +27,6 @@ extern "C" void LLVMInitializeEVMTarget() {
   RegisterTargetMachine<EVMTargetMachine> Y(getTheEVMTarget());
   auto PR = PassRegistry::getPassRegistry();
 
-  initializeEVMReplacePhysRegsPass(*PR);
   initializeEVMConvertRegToStackPass(*PR);
   initializeEVMVRegToMemPass(*PR);
   initializeEVMAddJumpdestPass(*PR);
@@ -104,8 +103,6 @@ bool EVMPassConfig::addInstSelector() {
 
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
-
-  //addPass(createEVMReplacePhysRegs());
 
 
   addPass(createEVMVRegToMem());
