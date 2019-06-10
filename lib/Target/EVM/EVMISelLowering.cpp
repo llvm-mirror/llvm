@@ -521,16 +521,17 @@ SDValue EVMTargetLowering::LowerFormalArguments(
     const SDValue &idx = DAG.getTargetConstant(InVals.size(),
                                                DL, MVT::i256);
     Opnds.push_back(idx);
-    Opnds.push_back(Chain);
+    //Opnds.push_back(Chain);
 
     const SDValue &StackArg =
        DAG.getNode(EVMISD::STACKARG, DL, MVT::i256, Opnds);
 
     InVals.push_back(StackArg);
-    ArgsChain.push_back(StackArg);
+    //ArgsChain.push_back(StackArg);
   }
 
-  Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, ArgsChain);
+  //ArgsChain.push_back(Chain);
+  //Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, ArgsChain);
 
   return Chain;
 }
