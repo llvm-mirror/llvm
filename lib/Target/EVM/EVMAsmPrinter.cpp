@@ -44,11 +44,9 @@ public:
   void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &OS);
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                       unsigned AsmVariant, const char *ExtraCode,
-                       raw_ostream &OS) override;
+                       const char *ExtraCode, raw_ostream &OS) override;
   bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
-                             unsigned AsmVariant, const char *ExtraCode,
-                             raw_ostream &OS) override;
+                             const char *ExtraCode, raw_ostream &OS) override;
 
   //void EmitToStreamer(MCStreamer &S, const MCInst &Inst);
   bool emitPseudoExpansionLowering(MCStreamer &OutStreamer,
@@ -90,18 +88,17 @@ void EVMAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
 }
 
 bool EVMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                       unsigned AsmVariant, const char *ExtraCode,
-                       raw_ostream &OS) {
+                                    const char *ExtraCode, raw_ostream &OS) {
   printOperand(MI, OpNo, OS);
   return true;
 }
 
 bool EVMAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
-                                            unsigned OpNo, unsigned AsmVariant,
+                                            unsigned OpNo,
                                             const char *ExtraCode,
                                             raw_ostream &OS) {
 
-  return AsmPrinter::PrintAsmMemoryOperand(MI, OpNo, AsmVariant, ExtraCode, OS);
+  return AsmPrinter::PrintAsmMemoryOperand(MI, OpNo, ExtraCode, OS);
 }
 
 // Force static initialization.

@@ -79,6 +79,11 @@ public:
 
   FunctionPass *createTargetRegisterAllocator(bool) override;
 
+  // No reg alloc
+  bool addRegAssignmentFast() override { return false; }
+
+  // No reg alloc
+  bool addRegAssignmentOptimized() override { return false; }
 };
 }
 

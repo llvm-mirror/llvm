@@ -64,8 +64,12 @@ public:
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const override;
 
+  void
+  verifyInstructionPredicates(const MCInst &MI,
+                              const FeatureBitset &AvailableFeatures) const;
+
 private:
-  uint64_t computeAvailableFeatures(const FeatureBitset &FB) const;
+  FeatureBitset computeAvailableFeatures(const FeatureBitset &FB) const;
   void verifyInstructionPredicates(const MCInst &MI,
                                    uint64_t AvailableFeatures) const;
   void encodeImmediate(raw_ostream &OS, const MCOperand& opnd, unsigned push_size) const;
