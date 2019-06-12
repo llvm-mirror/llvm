@@ -28,10 +28,8 @@ private:
   int VarArgsFrameIndex = 0;
   /// Size of the save area used for varargs
   int VarArgsSaveSize = 0;
-  /// FrameIndex used for transferring values between 64-bit FPRs and a pair
-  /// of 32-bit GPRs via the stack.
-  int MoveF64FrameIndex = -1;
 
+  /// Copied from WebAssembly backend.
   /// A mapping from CodeGen vreg index to a boolean value indicating whether
   /// the given register is considered to be "stackified", meaning it has been
   /// determined or made to meet the stack requirements:
@@ -66,12 +64,6 @@ public:
     if (I >= VRegStackified.size())
       VRegStackified.resize(I + 1);
     VRegStackified.set(I);
-  }
-
-  int getMoveF64FrameIndex() {
-    if (MoveF64FrameIndex == -1)
-      MoveF64FrameIndex = MF.getFrameInfo().CreateStackObject(8, 8, false);
-    return MoveF64FrameIndex;
   }
 
   bool isVRegStackified(unsigned VReg) const {

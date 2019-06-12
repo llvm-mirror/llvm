@@ -53,6 +53,24 @@ FunctionPass *llvm::createEVMStackification() {
   return new EVMStackification();
 }
 
+// Identify the definition for this register at this point. This is a
+// generalization of MachineRegisterInfo::getUniqueVRegDef that uses
+// LiveIntervals to handle complex cases.
+static MachineInstr *getVRegDef(unsigned Reg, const MachineInstr *Insert,
+                                const MachineRegisterInfo &MRI,
+                                const LiveIntervals &LIS) {
+  // Most registers are in SSA form here so we try a quick MRI query first.
+  if (MachineInstr *Def = MRI.getUniqueVRegDef(Reg))
+    return Def;
+
+  // MRI doesn't know what the Def is. Try asking LIS.
+  if (const VNInfo *ValNo = LIS.getInterval(Reg).getVNInfoBefore(
+          LIS.getInstructionIndex(*Insert)))
+    return LIS.getInstructionFromIndex(ValNo->def);
+
+  return nullptr;
+}
+
 bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Stackification **********\n"
@@ -80,12 +98,14 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
 
       // Don't nest anything inside an inline asm, because we don't have
       // constraints for $push inputs.
-      if (Insert->isInlineAsm())
-        continue;
+      if (Insert->isInlineAsm()) {
+        llvm_unreachable("unimplemented");
+      }
 
       // Ignore debugging intrinsics.
-      if (Insert->isDebugValue())
-        continue;
+      if (Insert->isDebugValue()) {
+        llvm_unreachable("unimplemented");
+      }
 
       // Iterate through the inputs in reverse order, since we'll be pulling
       // operands off the stack in LIFO order.
@@ -93,6 +113,7 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
       TreeWalkerState TreeWalker(Insert);
       while (!TreeWalker.done()) {
         MachineOperand &Op = TreeWalker.pop();
+      
 
         // We're only interested in explicit virtual register operands.
         if (!Op.isReg())
@@ -102,6 +123,30 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
         assert(Op.isUse() && "explicit_uses() should only iterate over uses");
         assert(!Op.isImplicit() &&
                "explicit_uses() should only iterate over explicit operands");
+        assert(!TargetRegisterInfo::isPhysicalRegister(Reg) &&
+               "Should not have any physical registers");
+
+        MachineInstr *Def = getVRegDef(Reg, Insert, MRI, LIS);
+        if (!Def) {
+          llvm_unreachable("cannot find def instruction, needs implementing");
+        }
+
+        if (Def->isInlineAsm()) {
+          llvm_unreachable("unimplemented");
+        }
+
+        // Do not change arguments coming from the stack.
+        if (Def->getOpcode() == EVM::pSTACKARG_r) {
+          continue;
+        }
+
+        bool SameBlock = Def->getParent() == &MBB;
+        // TODO: implement isSafeToMove.
+        // isSafeToMove is very complicated. This approach is best to be part of the 
+        // PostRA scheduler.
+        bool CanMove = SameBlock && /*isSafeToMove(Def, Insert, AA, MRI) &&*/
+                       !TreeWalker.isOnStack(Reg);
+
       }
 
     }

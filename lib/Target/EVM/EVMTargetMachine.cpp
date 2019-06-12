@@ -110,15 +110,25 @@ void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
 
-  addPass(createEVMVRegToMem());
-  addPass(createEVMExpandPseudos());
 
   if (getOptLevel() != CodeGenOpt::None) {
+    // This is the major pass we will use to stackify registers
     //addPass(createEVMStackification());
   }
 
+  // In this pass we assign un-stackified registers
+  // with an explicit memory location for storage.
+  addPass(createEVMVRegToMem());
+
+  // We use a custom pass to expand pseudos at a later pahse
+  addPass(createEVMExpandPseudos());
+
+  // the pass we use to explicitly convert instructions in the reg-based
+  // form to stack-based form.
   addPass(createEVMConvertRegToStack());
+
   //addPass(createEVMAddJumpdest());
+
   addPass(createEVMShrinkpush());
   addPass(createEVMFinalization());
 }
