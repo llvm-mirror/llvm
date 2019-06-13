@@ -96,7 +96,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SRA_PARTS, VT, Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
 
-    setOperationAction(ISD::SETCC, VT, Expand);
+    //setOperationAction(ISD::SETCC, VT, Custom);
     setOperationAction(ISD::SELECT, VT, Expand);
 
     setOperationAction(ISD::SELECT_CC, VT, Custom);
@@ -338,7 +338,9 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
 void EVMTargetLowering::ReplaceNodeResults(SDNode *N,
                                            SmallVectorImpl<SDValue> &Results,
                                            SelectionDAG &DAG) const {
-  llvm_unreachable("unimplemented.");
+  SDLoc DL(N);
+
+  llvm_unreachable("not implemented");
 }
 
 MachineBasicBlock *

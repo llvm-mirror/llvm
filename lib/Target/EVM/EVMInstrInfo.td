@@ -176,7 +176,9 @@ defm LT     : ComparisonInst<SETULT, "LT",    0x10, 3>;
 defm GT     : ComparisonInst<SETUGT, "GT",    0x11, 3>;
 defm SLT    : ComparisonInst<SETLT, "SLT",    0x12, 3>;
 defm SGT    : ComparisonInst<SETGT, "SGT",    0x13, 3>;
-defm EQ     : ComparisonInst<SETEQ, "SEQ",    0x14, 3>;
+  let isCommutable = 1 in {
+  defm EQ     : ComparisonInst<SETEQ, "SEQ",    0x14, 3>;
+  }
 defm ISZERO : Inst_1_1<"ISZERO",
                        [(set GPR:$dst, (setcc GPR:$src, 0, SETEQ))],
                        0x15, 3>;
@@ -184,13 +186,14 @@ defm ISZERO : Inst_1_1<"ISZERO",
 // Bitwise instructions ///////////////////////////////////////////////////////
 let isCommutable = 1 in {
 defm AND : BinaryInst<and, "AND", 0x16, 3>;
-defm OR  : BinaryInst<or,  "OR",  0x17, 3>;
+defm OR  : BinaryInst<or,   "OR",  0x17, 3>;
 defm XOR : BinaryInst<xor, "XOR", 0x18, 3>;
 }
 
 // LLVM does not generate "NOT" nodes.
 let isCompare = 1 in {
-defm NOT  :  Inst_1_1<"NOT" , [(set GPR:$dst, (setcc GPR:$src, 0, SETEQ))], 0x19, 3>;
+defm NOT  :  Inst_1_1<"NOT" ,
+                      [(set GPR:$dst, (setcc GPR:$src, 0, SETNE))], 0x19, 3>;
 }
 
 // bitwise opcodes -- EIP#145
@@ -661,12 +664,6 @@ def : Pat<(EVMCallVoid (EVMWrapper tglobaladdr:$callee)),
           (pJUMPSUBVOID_r tglobaladdr:$callee)>;
 def : Pat<(EVMCall (EVMWrapper texternalsym:$callee)),
           (pJUMPSUBVOID_r texternalsym:$callee)>;
-
-// copied from other backends.
-//def frameindex_to_targetframeindex : SDNodeXForm<frameindex, [{
-//  auto FI = cast<FrameIndexSDNode>(N);
-//  return CurDAG->getTargetFrameIndex(FI->getIndex(), MVT::i256);
-//}]>;
 
 //===----------------------------------------------------------------------===//
 // Standard extensions

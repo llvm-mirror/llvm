@@ -12,7 +12,7 @@ define i256 @icmpneop(i256 %a, i256 %b) nounwind {
 ; CHECK-LABEL: icmpneop__:
   %1 = icmp ne i256 %a, %b
 ; CHECK: EQ
-; CHECK-NEXT: ISZERO
+; CHECK: ISZERO
   %2 = zext i1 %1 to i256
   ret i256 %2
 }
@@ -29,7 +29,7 @@ define i256 @icmpugeop(i256 %a, i256 %b) nounwind {
 ; CHECK-LABEL: icmpugeop__:
   %1 = icmp uge i256 %a, %b
 ; CHECK: LT
-; CHECK-NEXT: ISZERO
+; CHECK: ISZERO
   %2 = zext i1 %1 to i256
   ret i256 %2
 }
@@ -47,7 +47,7 @@ define i256 @icmpuleop(i256 %a, i256 %b) nounwind {
 ; CHECK-LABEL: icmpuleop__:
   %1 = icmp ule i256 %a, %b
 ; CHECK: GT
-; CHECK-NEXT: ISZERO
+; CHECK: ISZERO
   %2 = zext i1 %1 to i256
   ret i256 %2
 }
@@ -64,7 +64,7 @@ define i256 @icmpsgeop(i256 %a, i256 %b) nounwind {
 ; CHECK-LABEL: icmpsgeop__:
   %1 = icmp sge i256 %a, %b
 ; CHECK: SLT
-; CHECK-NEXT: ISZERO
+; CHECK: ISZERO
   %2 = zext i1 %1 to i256
   ret i256 %2
 }
@@ -81,7 +81,7 @@ define i256 @icmpsleop(i256 %a, i256 %b) nounwind {
 ; CHECK-LABEL: icmpsleop__:
   %1 = icmp sle i256 %a, %b
 ; CHECK: SGT
-; CHECK-NEXT: ISZERO
+; CHECK: ISZERO
   %2 = zext i1 %1 to i256
   ret i256 %2
 }

@@ -177,6 +177,9 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
           expandADJFP(MI);
           Changed = true;
           break;
+        case EVM::pMOVE_r:
+          llvm_unreachable("MOVE instructions should be eliminated");
+          break;
         // suspend it and expand at finalization time
         //case EVM::pRETURNSUB_r:
         //case EVM::pRETURNSUBVOID_r:

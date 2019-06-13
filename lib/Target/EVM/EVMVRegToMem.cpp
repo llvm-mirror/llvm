@@ -85,8 +85,9 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   unsigned index = 0;
 
   // iterate over the instrs, find regs we should ignore.
-  for (const MachineBasicBlock & MBB : MF) {
-    for (const MachineInstr & MI : MBB) {
+  for (MachineBasicBlock & MBB : MF) {
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
+      MachineInstr &MI = *I++;
       unsigned opc = MI.getOpcode();
 
       // we should ignore those registers that are passed down on stack
