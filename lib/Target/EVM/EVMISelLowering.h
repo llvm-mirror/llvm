@@ -79,48 +79,46 @@ public:
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
 
-  MachineBasicBlock *
-  EmitInstrWithCustomInserter(MachineInstr &MI,
-                              MachineBasicBlock *BB) const override;
+  MachineBasicBlock *EmitInstrWithCustomInserter(
+      MachineInstr & MI, MachineBasicBlock * BB) const override;
 
-  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
-                         EVT VT) const override;
+  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context, EVT VT)
+      const override;
 
-  SDValue getEVMCmp(SDValue LHS, SDValue RHS, ISD::CondCode CC, SDValue &AVRcc,
-                    SelectionDAG &DAG, SDLoc dl) const;
+  SDValue getEVMCmp(SDValue LHS, SDValue RHS, ISD::CondCode CC,
+                    SDValue & AVRcc, SelectionDAG & DAG, SDLoc dl) const;
 
   bool shouldInsertFencesForAtomic(const Instruction *I) const override {
     return isa<LoadInst>(I) || isa<StoreInst>(I);
   }
-  Instruction *emitLeadingFence(IRBuilder<> &Builder, Instruction *Inst,
+  Instruction *emitLeadingFence(IRBuilder<> & Builder, Instruction * Inst,
                                 AtomicOrdering Ord) const override;
-  Instruction *emitTrailingFence(IRBuilder<> &Builder, Instruction *Inst,
+  Instruction *emitTrailingFence(IRBuilder<> & Builder, Instruction * Inst,
                                  AtomicOrdering Ord) const override;
 
 private:
   // Lower incoming arguments, copy physregs into vregs
-  SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
-                               bool IsVarArg,
-                               const SmallVectorImpl<ISD::InputArg> &Ins,
-                               const SDLoc &DL, SelectionDAG &DAG,
-                               SmallVectorImpl<SDValue> &InVals) const override;
+  SDValue LowerFormalArguments(
+      SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
+      const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
+      SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const override;
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
-                      const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
-                      SelectionDAG &DAG) const override;
-  SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
-                    SmallVectorImpl<SDValue> &InVals) const override;
-  bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
-                                         Type *Ty) const override {
+                      const SmallVectorImpl<SDValue> &OutVals,
+                      const SDLoc &DL, SelectionDAG &DAG) const override;
+  SDValue LowerCall(TargetLowering::CallLoweringInfo & CLI,
+                    SmallVectorImpl<SDValue> & InVals) const override;
+  bool shouldConvertConstantLoadToIntImm(const APInt &Imm, Type *Ty)
+      const override {
     return true;
   }
 
-  bool IsEligibleForTailCallOptimization(CCState &CCInfo,
-    CallLoweringInfo &CLI, MachineFunction &MF,
-    const SmallVector<CCValAssign, 16> &ArgLocs) const;
+  bool IsEligibleForTailCallOptimization(
+      CCState & CCInfo, CallLoweringInfo & CLI, MachineFunction & MF,
+      const SmallVector<CCValAssign, 16> &ArgLocs) const;
 
-  MachineBasicBlock *
-  insertSELECTCC(MachineInstr &MI, MachineBasicBlock *BB) const;
+  MachineBasicBlock *insertSELECTCC(MachineInstr & MI, MachineBasicBlock * BB)
+      const;
 };
 }
 

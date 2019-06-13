@@ -63,11 +63,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::UMAX, VT, Expand);
     setOperationAction(ISD::ABS,  VT, Expand);
 
-    // we don't have shifting operations.
-    setOperationAction(ISD::SHL,  VT, Expand);
-    setOperationAction(ISD::SRA,  VT, Expand);
-    setOperationAction(ISD::SRL,  VT, Expand);
-
     // we don't have complex operations.
     setOperationAction(ISD::ADDC, VT, Expand);
     setOperationAction(ISD::SUBC, VT, Expand);
