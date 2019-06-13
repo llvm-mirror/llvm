@@ -513,12 +513,11 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns
 //===----------------------------------------------------------------------===//
-let usesCustomInserter = 1 in {
-def PseudoSelectcc :
+let usesCustomInserter = 1, isCodeGenOnly = 1 in {
+def Selectcc :
 EVMPseudo<(outs GPR:$dst),
           (ins GPR:$src, GPR:$src2, i256imm:$cc),
           [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
-
 }
 
 let Defs = [SP], Uses = [SP] in {
@@ -580,6 +579,10 @@ let mayStore = 1 in {
 def pADJFPUP_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
 def pADJFPDOWN_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
 }
+
+// Pseudo MOVE instruction
+def pMOVE_r : EVMPseudo<(outs GPR:$dst), (ins GPR:$src), []>;
+
 //===----------------------------------------------------------------------===//
 // Patterns
 //===----------------------------------------------------------------------===//

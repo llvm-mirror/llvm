@@ -32,6 +32,14 @@ EVMInstrInfo::EVMInstrInfo()
     : EVMGenInstrInfo(EVM::ADJCALLSTACKDOWN, EVM::ADJCALLSTACKUP), RI() {
 }
 
+void EVMInstrInfo::copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
+                   bool KillSrc) const {
+  // replace the copy with pMOVE_r
+  BuildMI(MBB, I, DL, get(EVM::pMOVE_r), DestReg)
+        .addReg(SrcReg, getKillRegState(KillSrc));
+}
+
 void EVMInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                        MachineBasicBlock::iterator I,
                                        unsigned SrcReg, bool IsKill, int FI,
@@ -42,9 +50,7 @@ void EVMInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   // fo = ADD fr FI
   // ch = MSTORE fo SrcReg
 
-
-
-
+  llvm_unreachable("unimplemented");
 }
 void EVMInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                         MachineBasicBlock::iterator MI, unsigned DestReg,
@@ -59,8 +65,7 @@ void EVMInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
 
   assert(RC == &EVM::GPRRegClass && "Invalid register class");
 
-
-
+  llvm_unreachable("unimplemented");
 }
 
 bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {

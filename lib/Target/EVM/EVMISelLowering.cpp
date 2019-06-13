@@ -367,14 +367,15 @@ EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
     BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(FallThrough);
   }
 
+  // create two MBBs to handle true and false
   MachineBasicBlock *trueMBB = MF->CreateMachineBasicBlock(LLVM_BB);
   MachineBasicBlock *falseMBB = MF->CreateMachineBasicBlock(LLVM_BB);
 
   MachineFunction::iterator I;
   for (I = MF->begin(); I != MF->end() && &(*I) != MBB; ++I);
   if (I != MF->end()) ++I;
-  MF->insert(I, trueMBB);
   MF->insert(I, falseMBB);
+  MF->insert(I, trueMBB);
 
   // Transfer remaining instructions and all successors of the current
   // block to the block which will contain the Phi node for the
@@ -383,10 +384,9 @@ EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
                   std::next(MachineBasicBlock::iterator(MI)), MBB->end());
   trueMBB->transferSuccessorsAndUpdatePHIs(MBB);
 
-    unsigned LHS = MI.getOperand(0).getReg();
-    unsigned RHS = MI.getOperand(1).getReg();
-    //unsigned TrueV = MI.getOperand(2);
-    //unsigned FalseV = MI.getOperand(3);
+    unsigned SelectedValue = MI.getOperand(0).getReg();
+    unsigned LHS   = MI.getOperand(1).getReg();
+    unsigned RHS   = MI.getOperand(2).getReg();
 
   // construct conditional jump
   {
@@ -451,24 +451,25 @@ EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
         break;
     }
 
-    BuildMI(MBB, dl, TII.get(EVM::JUMPI_r), rvreg).addMBB(trueMBB);
+    BuildMI(MBB, dl, TII.get(EVM::JUMPI_r)).addReg(rvreg).addMBB(trueMBB);
   }
 
-
+  // Finally, add branch to falseMBB 
   BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(falseMBB);
+
   MBB->addSuccessor(falseMBB);
   MBB->addSuccessor(trueMBB);
 
   // Unconditionally flow back to the true block
-  BuildMI(falseMBB, dl, TII.get(EVM::JUMP_r)).addMBB(trueMBB);
-  falseMBB->addSuccessor(trueMBB);
+  {
+    BuildMI(falseMBB, dl, TII.get(EVM::JUMP_r)).addMBB(trueMBB);
+    falseMBB->addSuccessor(trueMBB);
+  }
 
   // Set up the Phi node to determine where we came from
-  BuildMI(*trueMBB, trueMBB->begin(), dl, TII.get(EVM::PHI), MI.getOperand(0).getReg())
-    .addReg(MI.getOperand(1).getReg())
-    .addMBB(MBB)
-    .addReg(MI.getOperand(2).getReg())
-    .addMBB(falseMBB) ;
+  BuildMI(*trueMBB, trueMBB->begin(), dl, TII.get(EVM::PHI), SelectedValue)
+    .addReg(LHS).addMBB(MBB)
+    .addReg(RHS).addMBB(falseMBB);
 
   MI.eraseFromParent(); // The pseudo instruction is gone now.
   return trueMBB;
@@ -480,7 +481,7 @@ EVMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   int Opc = MI.getOpcode();
 
   switch (Opc) {
-    case EVMISD::SELECTCC :
+    case EVM::Selectcc :
       return insertSELECTCC(MI, MBB);
     default:
       llvm_unreachable("unimplemented.");

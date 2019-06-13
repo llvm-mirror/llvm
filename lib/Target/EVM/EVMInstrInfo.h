@@ -54,6 +54,10 @@ public:
                         const DebugLoc &DL,
                         int *BytesAdded = nullptr) const override;
 
+  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
+                   bool KillSrc) const override;
+
 private:
   void expandJUMPSUB(MachineInstr &MI) const;
   void expandRETURNSUB(MachineInstr &MI) const;
