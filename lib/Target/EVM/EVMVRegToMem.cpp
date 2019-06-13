@@ -138,6 +138,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         if ( !MO.isReg() || MO.isImplicit() ) continue;
 
         unsigned r = MO.getReg();
+
+        // if the Register is stackified, ignore it
+        if (MFI.isVRegStackified(r)) {
+          llvm_unreachable("unimplemented");
+        }
+
         // up till now, all physical registers are gone.
         assert(!TargetRegisterInfo::isPhysicalRegister(r));
         unsigned reg = TRI.virtReg2Index(r);

@@ -41,6 +41,8 @@ private:
   const EVMSubtarget* ST;
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+  bool shouldInsertJUMPDEST(MachineBasicBlock &MBB) const;
 };
 } // end anonymous namespace
 
@@ -51,6 +53,17 @@ INITIALIZE_PASS(EVMFinalization, DEBUG_TYPE,
 
 FunctionPass *llvm::createEVMFinalization() {
   return new EVMFinalization();
+}
+
+bool EVMFinalization::shouldInsertJUMPDEST(MachineBasicBlock &MBB) const {
+
+  // Entry MBB needs a basic block.
+  if (&MBB == &MBB.getParent()->front()) {
+    return true;
+  }
+
+  // for now we will add a JUMPDEST anyway.
+  return true;
 }
 
 bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
@@ -65,8 +78,14 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   for (MachineBasicBlock & MBB : MF) {
-    // TODO: use iterator since we need to remove
-    // pseudo instructions
+    // Insert JUMPDEST at the beginning of the MBB is necessary
+
+    if (shouldInsertJUMPDEST(MBB)) {
+      MachineBasicBlock::iterator begin = MBB.begin();
+      BuildMI(MBB, begin, begin->getDebugLoc(), TII->get(EVM::JUMPDEST));
+    }
+
+    // use iterator since we need to remove pseudo instructions
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E;) {
 

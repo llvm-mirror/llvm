@@ -41,6 +41,8 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+private:
+  bool isSingleDefSingleUse(const MachineRegisterInfo &MRI, unsigned RegNo);
 };
 } // end anonymous namespace
 
@@ -69,6 +71,11 @@ static MachineInstr *getVRegDef(unsigned Reg, const MachineInstr *Insert,
     return LIS.getInstructionFromIndex(ValNo->def);
 
   return nullptr;
+}
+
+bool EVMStackification::isSingleDefSingleUse(const MachineRegisterInfo &MRI,
+                                             unsigned RegNo) {
+  return (MRI.hasOneUse(RegNo) && MRI.hasOneDef(RegNo));
 }
 
 bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {

@@ -29,7 +29,6 @@ extern "C" void LLVMInitializeEVMTarget() {
 
   initializeEVMConvertRegToStackPass(*PR);
   initializeEVMVRegToMemPass(*PR);
-  initializeEVMAddJumpdestPass(*PR);
   initializeEVMShrinkpushPass(*PR);
   initializeEVMArgumentMovePass(*PR);
   initializeEVMExpandPseudosPass(*PR);
@@ -126,8 +125,6 @@ void EVMPassConfig::addPreEmitPass() {
   // the pass we use to explicitly convert instructions in the reg-based
   // form to stack-based form.
   addPass(createEVMConvertRegToStack());
-
-  //addPass(createEVMAddJumpdest());
 
   addPass(createEVMShrinkpush());
   addPass(createEVMFinalization());
