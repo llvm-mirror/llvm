@@ -11,26 +11,20 @@ entry:
 define i256 @int_sha3(i256 %a, i256 %b, i256 %c) {
 entry:
   %rv = call i256 @llvm.evm.sha3(i256 %a, i256 %b, i256 %c)
-; CHECK-LABEL: int_exp
+; CHECK-LABEL: int_sha3
 ; CHECK: SHA3
   ret i256 %rv
 }
 
-define i256 @int_address() {
-entry:
-  %rv = call i256 @llvm.evm.exp()
-; CHECK-LABEL: int_address
-; CHECK: ADDRESS
-  ret i256 %rv
-}
-
 define i256 @int_balance(i256 %addr) {
+; CHECK-LABEL: int_balance
 entry:
   %rv = call i256 @llvm.evm.balance(i256 %addr)
-; CHECK-LABEL: int_balance
 ; CHECK: BALANCE
   ret i256 %rv
 }
+
+
 
 define i256 @int_origin() {
 entry:
@@ -47,6 +41,8 @@ entry:
 ; CHECK: CALLER
   ret i256 %rv
 }
+
+
 
 define i256 @int_callvalue() {
 entry:
@@ -77,6 +73,7 @@ entry:
   call void @llvm.evm.calldatacopy(i256 %destoffset, i256 %offset, i256 %len)
 ; CHECK-LABEL: int_calldatacopy
 ; CHECK: CALLDATACOPY
+  ret void
 }
 
 define i256 @int_codesize() {
@@ -92,6 +89,7 @@ entry:
   call void @llvm.evm.codecopy(i256 %destoffset, i256 %offset, i256 %len)
 ; CHECK-LABEL: int_codecopy
 ; CHECK: CODECOPY
+  ret void
 }
 
 define i256 @int_gasprice() {
@@ -115,6 +113,7 @@ entry:
   call void @llvm.evm.extcodecopy(i256 %destoffset, i256 %offset, i256 %len)
 ; CHECK-LABEL: int_extcodecopy
 ; CHECK: EXTCODECOPY
+  ret void
 }
 
 define i256 @int_returndatasize() {
@@ -130,6 +129,7 @@ entry:
   call void @llvm.evm.returndatacopy(i256 %destoffset, i256 %offset, i256 %len)
 ; CHECK-LABEL: int_returndatacopy
 ; CHECK: RETURNDATACOPY
+  ret void
 }
 
 define i256 @int_blockhash(i256 %addr) {
@@ -185,7 +185,7 @@ entry:
   %rv = call i256 @llvm.evm.sload(i256 %addr)
 ; CHECK-LABEL: int_sload
 ; CHECK: SLOAD
-  ret i256 rv
+  ret i256 %rv
 }
 
 define void @int_sstore(i256 %addr, i256 %val) {
@@ -193,6 +193,7 @@ entry:
   %rv = call i256 @llvm.evm.sstore(i256 %addr, i256 %val)
 ; CHECK-LABEL: int_sstore
 ; CHECK: SSTORE
+  ret void
 }
 
 define i256 @int_getpc() {
@@ -217,5 +218,13 @@ entry:
 ; CHECK-LABEL: int_gas
 ; CHECK: GAS
   ret i256 %rv
+}
+
+define void @int_log0(i256 %a, i256 %b) {
+; CHECK-LABEL: int_log0
+entry:
+  call void @llvm.evm.log0(i256 %a, i256 %b)
+; CHECK: log0
+  ret void
 }
 
