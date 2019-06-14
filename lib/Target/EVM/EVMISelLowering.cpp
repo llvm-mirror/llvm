@@ -159,13 +159,6 @@ bool EVMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
   llvm_unreachable("unimplemented.");
 }
 
-bool EVMTargetLowering::isLegalAddressingMode(const DataLayout &DL,
-                                                const AddrMode &AM, Type *Ty,
-                                                unsigned AS,
-                                                Instruction *I) const {
-  llvm_unreachable("unimplemented.");
-}
-
 bool EVMTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
   return true;
 }

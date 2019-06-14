@@ -158,10 +158,6 @@ bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
       ReplaceNode(Node, div);
       return true;
     }
-    case ISD::EXTLOAD:
-    case ISD::NON_EXTLOAD:
-      llvm_unreachable("not checked");
-      break;
   }
   return false;
 }
