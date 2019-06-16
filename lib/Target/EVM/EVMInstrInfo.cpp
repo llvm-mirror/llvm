@@ -82,7 +82,16 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                  bool AllowModify) const {
   
   bool HaveCond = false;
-  for (MachineInstr &MI : MBB.terminators()) {
+  bool lastJump = false;
+  MachineBasicBlock::iterator I = MBB.terminators().begin();
+  while (I != MBB.terminators().end()) {
+    MachineInstr &MI = *I++;
+    
+    if (AllowModify && lastJump) {
+      MI.eraseFromParent();
+      continue;
+    }
+
     switch (MI.getOpcode()) {
     default:
       // Unhandled instruction; bail out.
@@ -91,6 +100,7 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       MachineBasicBlock *TMBB = MI.getOperand(0).getMBB();
       if (!HaveCond) TBB = TMBB;
       else           FBB = TMBB;
+      lastJump = true;
       break;
       }
     case EVM::JUMPI_r: {
@@ -119,9 +129,7 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
   if (Cond.empty()) {
-    if (!TBB)
-      return 0;
-
+    assert(!FBB && "Unconditional branch with multiple successors!");
     BuildMI(&MBB, DL, get(EVM::JUMP_r)).addMBB(TBB);
     return 1;
   }
@@ -146,19 +154,20 @@ unsigned EVMInstrInfo::removeBranch(MachineBasicBlock &MBB,
                                     int *BytesRemoved) const {
   assert(!BytesRemoved && "code size not handled");
 
-  MachineBasicBlock::iterator I = MBB.end();
   unsigned Count = 0;
 
-  while (I != MBB.begin()) {
-    --I;
-    if (I->isDebugInstr())
+  MachineBasicBlock::iterator I = MBB.terminators().begin();
+  while (I != MBB.terminators().end()) {
+    MachineInstr &MI = *I++;
+    if (MI.isDebugInstr())
       continue;
-    if (I->getOpcode() != EVM::JUMP_r)
-      break;
-    // Remove the branch.
-    I->eraseFromParent();
-    I = MBB.end();
-    ++Count;
+
+    if (MI.getOpcode() == EVM::JUMP_r ||
+        MI.getOpcode() == EVM::JUMPI_r) {
+      MI.eraseFromParent();
+      I = MBB.terminators().begin();
+      ++Count;
+    }
   }
 
   return Count;
