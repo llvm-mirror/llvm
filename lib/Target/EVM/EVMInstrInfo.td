@@ -334,9 +334,12 @@ defm SSTORE : Inst_2_0<"SSTORE",
 }
 
 let isBranch = 1, isTerminator = 1 in {
+
+let isBarrier = 1 in {
 defm JUMP : RSInst<(outs), (ins brtarget:$dst),
                    [(br bb:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
+}
 
 defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
                    [(EVMJumpi GPR:$src, bb:$dst)],

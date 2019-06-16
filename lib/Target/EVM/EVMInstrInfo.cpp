@@ -80,51 +80,28 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                  MachineBasicBlock *&FBB,
                                  SmallVectorImpl<MachineOperand> &Cond,
                                  bool AllowModify) const {
-  // Start from the bottom of the block and work up, examining the
-  // terminator instructions.
-  MachineBasicBlock::iterator I = MBB.end();
-  while (I != MBB.begin()) {
-    --I;
-    if (I->isDebugInstr())
-      continue;
-
-    // Working from the bottom, when we see a non-terminator
-    // instruction, we're done.
-    if (!isUnpredicatedTerminator(*I))
-      break;
-
-    // A terminator that isn't a branch can't easily be handled
-    // by this analysis.
-    if (!I->isBranch())
+  
+  bool HaveCond = false;
+  for (MachineInstr &MI : MBB.terminators()) {
+    switch (MI.getOpcode()) {
+    default:
+      // Unhandled instruction; bail out.
       return true;
-
-    // Handle unconditional branches.
-    if (I->getOpcode() == EVM::JUMP_r) {
-      if (!AllowModify) {
-        TBB = I->getOperand(0).getMBB();
-        continue;
+    case EVM::JUMP_r: {
+      MachineBasicBlock *TMBB = MI.getOperand(0).getMBB();
+      if (!HaveCond) TBB = TMBB;
+      else           FBB = TMBB;
+      break;
       }
-
-      // If the block has any instructions after a J, delete them.
-      while (std::next(I) != MBB.end())
-        std::next(I)->eraseFromParent();
-      Cond.clear();
-      FBB = nullptr;
-
-      // Delete the J if it's equivalent to a fall-through.
-      if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
-        TBB = nullptr;
-        I->eraseFromParent();
-        I = MBB.end();
-        continue;
+    case EVM::JUMPI_r: {
+      if (HaveCond) return true;
+      Cond.push_back(MachineOperand::CreateImm(true));
+      Cond.push_back(MI.getOperand(0));
+      TBB = MI.getOperand(1).getMBB();
+      HaveCond = true;
+      break;
       }
-
-      // TBB is used to indicate the unconditinal destination.
-      TBB = I->getOperand(0).getMBB();
-      continue;
     }
-    // Cannot handle conditional branches
-    return true;
   }
 
   return false;
@@ -142,13 +119,27 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
   if (Cond.empty()) {
-    // Unconditional branch
-    assert(!FBB && "Unconditional branch with multiple successors!");
+    if (!TBB)
+      return 0;
+
     BuildMI(&MBB, DL, get(EVM::JUMP_r)).addMBB(TBB);
     return 1;
   }
 
-  llvm_unreachable("Unexpected conditional branch");
+  assert(Cond.size() == 2 && "Expected a flag and a successor block");
+
+  MachineFunction &MF = *MBB.getParent();
+  auto &MRI = MF.getRegInfo();
+
+  assert(Cond[0].getImm() && "insertBranch does not accept false parameter");
+
+  BuildMI(&MBB, DL, get(EVM::JUMPI_r)).add(Cond[1]).addMBB(TBB);
+
+  if (!FBB)
+    return 1;
+
+  BuildMI(&MBB, DL, get(EVM::JUMP_r)).addMBB(FBB);
+  return 2;
 }
 
 unsigned EVMInstrInfo::removeBranch(MachineBasicBlock &MBB,

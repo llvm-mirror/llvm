@@ -174,7 +174,7 @@ EVMCallTransformation::rebuildFunction(FunctionType* NewFuncTy, Function* OldFun
   Function* NewFunc = Function::Create(NewFuncTy,
                                        OldFunc->getLinkage(),
                                        OldFunc->getAddressSpace(),
-                                       OldFunc->getName() + "__",
+                                       OldFunc->getName(),
                                        OldFunc->getParent());
 
   ValueToValueMapTy VMap;
