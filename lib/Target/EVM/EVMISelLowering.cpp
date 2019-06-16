@@ -95,8 +95,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SRL_PARTS, VT, Expand);
     setOperationAction(ISD::SRA_PARTS, VT, Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
-
-    //setOperationAction(ISD::SETCC, VT, Custom);
     setOperationAction(ISD::SELECT, VT, Expand);
 
     setOperationAction(ISD::SELECT_CC, VT, Custom);

@@ -105,6 +105,14 @@ void EVMExpandPseudos::expandADJFP(MachineInstr* MI) const {
   DebugLoc DL = MI->getDebugLoc();
   unsigned opc = MI->getOpcode();
 
+  // Small optimization: if there is no frame adjustment needed,
+  // remove the instruction.
+  unsigned index = MI->getOperand(0).getImm();
+  if (index == 0) {
+    MI->eraseFromParent();
+    return;
+  }
+
   unsigned oldFP = this->getNewRegister(MI);
   unsigned newFP = this->getNewRegister(MI);
 

@@ -187,15 +187,13 @@ defm ISZERO : Inst_1_1<"ISZERO",
 // Bitwise instructions ///////////////////////////////////////////////////////
 let isCommutable = 1 in {
 defm AND : BinaryInst<and, "AND", 0x16, 3>;
-defm OR  : BinaryInst<or,   "OR",  0x17, 3>;
+defm OR  : BinaryInst<or,   "OR", 0x17, 3>;
 defm XOR : BinaryInst<xor, "XOR", 0x18, 3>;
+// In EVM, the NOT is a bitwise operation.
+// LLVM does not generate "NOT" nodes.
+defm NOT  :  Inst_1_1<"NOT" , [], 0x19, 3>;
 }
 
-// LLVM does not generate "NOT" nodes.
-let isCompare = 1 in {
-defm NOT  :  Inst_1_1<"NOT" ,
-                      [(set GPR:$dst, (setcc GPR:$src, 0, SETNE))], 0x19, 3>;
-}
 
 // bitwise opcodes -- EIP#145
 defm SHL : BinaryInst<shl,  "SHL", 0x1b, 3>;

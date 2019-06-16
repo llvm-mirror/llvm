@@ -99,9 +99,7 @@ bool EVMPassConfig::addInstSelector() {
   TargetPassConfig::addInstSelector();
   addPass(createEVMISelDag(getEVMTargetMachine()));
 
-  // we now uses a chain to make sure that the
-  // STACKARGs are staying at the beginning of the code
-  //addPass(createEVMArgumentMove());
+  addPass(createEVMArgumentMove());
   return false;
 }
 
