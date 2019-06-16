@@ -50,8 +50,9 @@ SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
 def SDT_EVMSignextend :
 SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
 
-def SDT_EVMSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
-                                    SDTCisSameAs<1, 2>, SDTCisVT<3, i256>]>;
+def SDT_EVMSelectCC     : SDTypeProfile<1, 5, [SDTCisSameAs<1, 2>,
+                                               SDTCisSameAs<0, 4>,
+                                               SDTCisSameAs<4, 5>]>;
 
 def SDT_EVMArgument : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
 def SDT_EVMMove : SDTypeProfile<0, 2, [SDTCisVT<0, i256>, SDTCisSameAs<0, 1>]>;
@@ -516,8 +517,9 @@ defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
 let usesCustomInserter = 1, isCodeGenOnly = 1 in {
 def Selectcc :
 EVMPseudo<(outs GPR:$dst),
-          (ins GPR:$src, GPR:$src2, i256imm:$cc),
-          [(set i256:$dst, (EVMSelectcc i256:$src, i256:$src2, imm:$cc))]>;
+          (ins GPR:$lhs, GPR:$rhs, i256imm:$cc, GPR:$src, GPR:$src2),
+          [(set i256:$dst,
+            (EVMSelectcc i256:$lhs, i256:$rhs, imm:$cc, i256:$src, i256:$src2))]>;
 }
 
 let Defs = [SP], Uses = [SP] in {

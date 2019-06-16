@@ -165,6 +165,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         // take a look at its def
         MachineInstr *Def = MRI.getVRegDef(r);
+        assert(Def && "Unimplemented case for no definition");
 
         unsigned opc = Def->getOpcode();
         assert (opc != EVM::pSTACKARG_r);
