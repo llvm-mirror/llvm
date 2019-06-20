@@ -40,6 +40,7 @@ class EVMVRegToMem final : public MachineFunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid
   EVMVRegToMem() : MachineFunctionPass(ID) {}
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
   StringRef getPassName() const override {
@@ -51,7 +52,11 @@ private:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  bool runOnMachineFunction(MachineFunction &MF) override;
+  bool initializeMemSlots(MachineFunction &MF);
+  DenseMap<unsigned, unsigned> Reg2Local;
+  unsigned getLocalId(unsigned Reg);
+
+  unsigned CurLocal;
 };
 } // end anonymous namespace
 
@@ -62,6 +67,59 @@ INITIALIZE_PASS(EVMVRegToMem, DEBUG_TYPE,
 
 FunctionPass *llvm::createEVMVRegToMem() {
   return new EVMVRegToMem();
+}
+
+/// Return a local id number for the given register, assigning it a new one
+/// if it doesn't yet have one.
+unsigned EVMVRegToMem::getLocalId(unsigned Reg) {
+  auto P = Reg2Local.insert(std::make_pair(Reg, CurLocal));
+  if (P.second)
+    ++CurLocal;
+  return P.first->second;
+}
+
+/// insert STACKARG and frameslots into the Reg2Mem.
+/// The frame is formatted as follows:
+/// | Frame Slots | STACKARGs | variables |
+bool EVMVRegToMem::initializeMemSlots(MachineFunction &MF) {
+  EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+
+  bool Changed = false;
+  
+  // We have to set up the frame index and the incoming arguments.
+  unsigned stackSlots = MF.getFrameInfo().getNumObjects();
+
+  // initialize the slot allocator
+  CurLocal = stackSlots;
+
+  LLVM_DEBUG({
+    dbgs() << "Pre-alloc stack slots: " << stackSlots <<"\n";
+  });
+  
+  for (MachineBasicBlock::iterator I = MF.begin()->begin(),
+                                   E = MF.begin()->end();
+       I != E;) {
+    MachineInstr &MI = *I++;
+    if (MI.getOpcode() != EVM::pSTACKARG_r)
+      break;
+    unsigned Reg = MI.getOperand(0).getReg();
+
+    // skip stackified instructions
+    if (MFI.isVRegStackified(Reg)) {
+      continue;
+    }
+
+    // assign a slot to the STACKARG
+    unsigned slot = getLocalId(Reg);
+    unsigned idx = MI.getOperand(1).getImm();
+    LLVM_DEBUG({
+      dbgs() << "Allocating stack arg " << idx << " to slot: " << slot << "\n";
+    });
+    //MI.eraseFromParent();
+    Changed = true;
+  }
+
+  return Changed;
 }
 
 bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
@@ -84,51 +142,95 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   DenseMap<unsigned, unsigned> Reg2Mem;
   unsigned index = 0;
 
-  // iterate over the instrs, find regs we should ignore.
-  for (MachineBasicBlock & MBB : MF) {
+  // We have to set up the frame index and the incoming arguments.
+  unsigned stackSlots = MF.getFrameInfo().getNumObjects();
+  
+  LLVM_DEBUG({ dbgs() << "== Start initializing memory slot map.\n"; });
+  Changed |= initializeMemSlots(MF);
+
+  LLVM_DEBUG({ dbgs() << "== Start scanning registers.\n"; });
+
+  // Precompute the set of registers that are unused, so that we can insert
+  // drops to their defs.
+  BitVector UseEmpty(MRI.getNumVirtRegs());
+  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I)
+    UseEmpty[I] = MRI.use_empty(TargetRegisterInfo::index2VirtReg(I));
+  
+  // Visit each instruction in the function.
+  for (MachineBasicBlock &MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
-      unsigned opc = MI.getOpcode();
-
-      // we should ignore those registers that are passed down on stack
-      if (opc == EVM::pSTACKARG_r) {
-        unsigned reg = MI.getOperand(0).getReg();
-        unsigned regIndex = TRI.virtReg2Index(reg);
-        IgnoredRegs.push_back(reg);
-        LLVM_DEBUG({
-            dbgs() << "Adding vreg: " << reg << ", index: " << regIndex
-                   << " to ignore list.\n";
-        });
-      }
-
-      // predefined memory locations needs to be noted down
-      if (opc == EVM::pPUTLOCAL_r) {
-        unsigned memIndex = MI.getOperand(1).getImm();
-        unsigned reg = MI.getOperand(0).getReg();
-        unsigned regIndex = TRI.virtReg2Index(reg);
-
-        // pre-generated GETLOCAL should have regIndex already in the ignore list
-        assert(std::find(IgnoredRegs.begin(), IgnoredRegs.end(), reg) !=
-               IgnoredRegs.end());
-      }
-
-      if (opc == EVM::pGETLOCAL_r) {
-        unsigned memIndex = MI.getOperand(1).getImm();
-        unsigned reg = MI.getOperand(0).getReg();
-        unsigned regIndex = TRI.virtReg2Index(reg);
-
-        Reg2Mem[regIndex] = memIndex;
-        LLVM_DEBUG({
-            dbgs() << "Found map: vreg: " << regIndex << ", mem index: " 
-                   << memIndex << "\n";
-        });
-
+  
+      if (MI.isDebugInstr() || MI.isLabel())
         continue;
+
+
+      // Insert local.sets for any defs that aren't stackified yet. Currently
+      // we handle at most one def.
+      assert(MI.getDesc().getNumDefs() <= 1);
+      if (MI.getDesc().getNumDefs() == 1) {
+        unsigned OldReg = MI.getOperand(0).getReg();
+
+        if (MFI.isVRegStackified(OldReg)) {
+          llvm_unreachable("unimplemented");
+        }
+
+        const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
+        unsigned NewReg = MRI.createVirtualRegister(RC);
+        auto InsertPt = std::next(MI.getIterator());
+
+        if (UseEmpty[TargetRegisterInfo::virtReg2Index(OldReg)]) {
+          MachineInstr *Drop =
+              BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::POP))
+                  .addReg(NewReg);
+          // After the drop instruction, this reg operand will not be used
+          Drop->getOperand(0).setIsKill();
+        } else {
+          unsigned LocalId = getLocalId(OldReg);
+          BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r))
+              .addImm(LocalId)
+              .addReg(NewReg);
+        }
+
+        MI.getOperand(0).setReg(NewReg);
+        // This register operand of the original instruction is now being used
+        // by the inserted drop or local.set instruction, so make it not dead
+        // yet.
+        MI.getOperand(0).setIsDead(false);
+        MFI.stackifyVReg(NewReg);
+        Changed = true;
       }
+       
+      MachineInstr *InsertPt = &MI;
+      for (MachineOperand &MO : reverse(MI.explicit_uses())) {
+        if (!MO.isReg())
+          continue;
+
+        unsigned OldReg = MO.getReg();
+
+        unsigned LocalId = getLocalId(OldReg);
+        const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
+        unsigned NewReg = MRI.createVirtualRegister(RC);
+        InsertPt = BuildMI(MBB, InsertPt, MI.getDebugLoc(),
+                           TII.get(EVM::pGETLOCAL_r), NewReg)
+                       .addImm(LocalId);
+        MO.setReg(NewReg);
+        MFI.stackifyVReg(NewReg);
+        Changed = true;
+      }
+
+      // Coalesce and eliminate COPY instructions.
+      if (MI.getOpcode() == EVM::pMOVE_r) {
+        MRI.replaceRegWith(MI.getOperand(1).getReg(),
+                           MI.getOperand(0).getReg());
+        MI.eraseFromParent();
+        Changed = true;
+      }
+
     }
   }
 
-  LLVM_DEBUG({ dbgs() << "== Start scanning registers.\n"; });
+  return Changed;
 
   // first, find all the virtual register defs.
   for (const MachineBasicBlock & MBB : MF) {

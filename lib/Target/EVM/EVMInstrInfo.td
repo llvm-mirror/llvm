@@ -307,7 +307,7 @@ defm GASLIMIT   : Inst_0_1<"GASLIMIT",
                            [(set GPR:$dst, (int_evm_gaslimit))],
                            0x45, 2>;
 
-
+defm POP        : Inst_1_0<"POP", [], 0x50, 2>;
 
 let mayLoad = 1 in {
 defm MLOAD : RSInst<(outs GPR:$dst), (ins GPR:$src),

@@ -82,7 +82,6 @@ void EVMRegisterInfo::eliminateFrameIndex(
 
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) * 32;
 
-  /*
   // convert the MLOAD/MSTORE into 
   if (MI.getOpcode() == EVM::MLOAD_r ||
       MI.getOpcode() == EVM::MSTORE_r) {
@@ -96,7 +95,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
       } else if (Offset < 0) {
         opc = EVM::SUB_r;
       }
-      BuildMI(MBB, ++II, DL, TII->get(opc), fiReg)
+      BuildMI(MBB, MI, DL, TII->get(opc), fiReg)
           .addReg(FrameReg)
           .addImm(Offset);
     }
@@ -104,8 +103,8 @@ void EVMRegisterInfo::eliminateFrameIndex(
     MI.getOperand(i).ChangeToRegister(fiReg, false);
     return;
   }
-  */
 
+/*
   // replace the MLOAD/MSTORE with pPUTOLCAL/pGETLOCAL
   unsigned opc = MI.getOpcode();
   assert(opc == EVM::MLOAD_r || opc == EVM::MSTORE_r);
@@ -132,6 +131,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
     MI.getOperand(0).ChangeToRegister(reg, false);
     MI.getOperand(1).ChangeToImmediate(frIdx);
   }
+*/
 }
 
 unsigned
