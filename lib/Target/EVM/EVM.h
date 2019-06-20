@@ -36,6 +36,7 @@ FunctionPass *createEVMISelDag(EVMTargetMachine &TM);
 ModulePass   *createEVMCallTransformation();
 FunctionPass *createEVMStackification();
 FunctionPass *createEVMVRegToMem();
+FunctionPass *createEVMPrepareForLiveIntervals();
 FunctionPass *createEVMConvertRegToStack();
 FunctionPass *createEVMShrinkpush();
 FunctionPass *createEVMArgumentMove();
@@ -44,6 +45,7 @@ FunctionPass *createEVMFinalization();
 
 void initializeEVMStackificationPass(PassRegistry &);
 void initializeEVMVRegToMemPass(PassRegistry &);
+void initializeEVMPrepareForLiveIntervalsPass(PassRegistry &);
 void initializeEVMConvertRegToStackPass(PassRegistry &);
 void initializeEVMShrinkpushPass(PassRegistry &);
 void initializeEVMArgumentMovePass(PassRegistry &);
