@@ -167,8 +167,8 @@ defm EXP    : Inst_2_1<"EXP",
                        0x0a, 10>;
 
 defm SIGNEXTEND :
-  RSInst<(outs GPR:$dst), (ins GPR:$src, I256Imm:$sft),
-         [(set GPR:$dst, (EVMSignextend GPR:$src, imm:$sft))],
+  RSInst<(outs GPR:$dst), (ins GPR:$src, GPR:$sft),
+         [(set GPR:$dst, (EVMSignextend GPR:$src, GPR:$sft))],
          "SIGNEXTEND\t$dst, $src, $sft", "SIGNEXTEND", 0x0b, 5>;
 
 // Comparison instructions ////////////////////////////////////////////////////
