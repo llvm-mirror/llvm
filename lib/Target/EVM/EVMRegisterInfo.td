@@ -31,6 +31,5 @@ def SP : EVMReg<"%SP">;
 // These are also used a "types" in the generated assembly matcher.
 def GPR256 : EVMReg<"%intreg">;
 
-def GPR : RegisterClass<"EVM", [i256], 32, (add GPR256)>;
-def GPR8bit : RegisterClass<"EVM", [i256], 8, (add FP, SP)>;
+def GPR : RegisterClass<"EVM", [i256], 32, (add GPR256, FP)>;
 

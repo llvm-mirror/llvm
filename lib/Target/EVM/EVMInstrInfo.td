@@ -452,8 +452,6 @@ def DUP14: EVMInst<(outs), (ins), [], "true", "DUP14", 0x8d, 3>;
 def DUP15: EVMInst<(outs), (ins), [], "true", "DUP15", 0x8e, 3>;
 def DUP16: EVMInst<(outs), (ins), [], "true", "DUP16", 0x8f, 3>;
 
-
-
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
 /*
@@ -463,8 +461,6 @@ defm JUMPIF : // TODO: argument type is 4 bytes.
              "JUMPIF\t$dst, $src1, $src2", "JUMPIF", 0xb1, 10>;
 */
 }
-
-//}
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm CREATE : Inst_3_1<"CREATE",

@@ -95,9 +95,12 @@ void EVMRegisterInfo::eliminateFrameIndex(
       } else if (Offset < 0) {
         opc = EVM::SUB_r;
       }
+      unsigned offsetReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
+      BuildMI(MBB, MI, DL, TII->get(EVM::PUSH32_r), offsetReg)
+          .addImm(Offset);
       BuildMI(MBB, MI, DL, TII->get(opc), fiReg)
           .addReg(FrameReg)
-          .addImm(Offset);
+          .addReg(offsetReg);
     }
 
     MI.getOperand(i).ChangeToRegister(fiReg, false);
