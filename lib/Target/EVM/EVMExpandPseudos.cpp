@@ -47,6 +47,8 @@ private:
   void expandADJFP(MachineInstr* MI) const;
   void expandRETURN(MachineInstr* MI) const;
 
+  bool handleFramePointer(MachineInstr *MI);
+
 };
 } // end anonymous namespace
 
@@ -57,6 +59,36 @@ INITIALIZE_PASS(EVMExpandPseudos, DEBUG_TYPE,
 
 FunctionPass *llvm::createEVMExpandPseudos() {
   return new EVMExpandPseudos();
+}
+
+/// eliminate frame pointer.
+bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
+  bool Changed = false;
+  for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
+    MachineOperand &MO = MI->getOperand(i);
+    if (!MO.isReg()) continue;
+
+    unsigned Reg = MO.getReg();
+    if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
+      assert(Reg == EVM::FP);
+
+      MachineBasicBlock *MBB = MI->getParent();
+      DebugLoc DL = MI->getDebugLoc();
+
+      // $fp = MLOAD 64
+      unsigned fpReg = this->getNewRegister(MI);
+      BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
+          .addImm(ST->getFreeMemoryPointer());
+      LLVM_DEBUG({
+        dbgs() << "Expanding $fp to %"
+               << TargetRegisterInfo::virtReg2Index(fpReg) << " in instruction: ";
+        MI->dump();
+      });
+      MI->getOperand(i).setReg(fpReg);
+      Changed = true; 
+    }
+  }
+  return Changed;
 }
 
 unsigned EVMExpandPseudos::getNewRegister(MachineInstr* MI) const {
@@ -173,6 +205,8 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
 
       MachineInstr *MI = &*I++; 
       unsigned opcode = MI->getOpcode();
+
+      Changed |= handleFramePointer(MI);
 
       switch (opcode) {
         case EVM::pPUTLOCAL_r:

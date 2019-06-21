@@ -73,12 +73,17 @@ FunctionPass *llvm::createEVMVRegToMem() {
 /// if it doesn't yet have one.
 unsigned EVMVRegToMem::getLocalId(unsigned Reg) {
   auto P = Reg2Local.insert(std::make_pair(Reg, CurLocal));
-  if (P.second)
+  if (P.second){
+    LLVM_DEBUG({
+      dbgs() << "Allocating vreg: %" << TargetRegisterInfo::virtReg2Index(Reg)
+             << " to slot: " << CurLocal << "\n";
+    });
     ++CurLocal;
+  }
   return P.first->second;
 }
 
-/// insert STACKARG and frameslots into the Reg2Mem.
+/// insert STACKARG and frameslots into the Reg2Local.
 /// The frame is formatted as follows:
 /// | Frame Slots | STACKARGs | variables |
 bool EVMVRegToMem::initializeMemSlots(MachineFunction &MF) {
@@ -115,7 +120,6 @@ bool EVMVRegToMem::initializeMemSlots(MachineFunction &MF) {
     LLVM_DEBUG({
       dbgs() << "Allocating stack arg " << idx << " to slot: " << slot << "\n";
     });
-    //MI.eraseFromParent();
     Changed = true;
   }
 
@@ -136,25 +140,20 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
   bool Changed = false;
 
-  // this records the registers we should ignore
-  SmallVector<unsigned, 16> IgnoredRegs;
-
-  DenseMap<unsigned, unsigned> Reg2Mem;
-  unsigned index = 0;
-
   // We have to set up the frame index and the incoming arguments.
   unsigned stackSlots = MF.getFrameInfo().getNumObjects();
   
-  LLVM_DEBUG({ dbgs() << "== Start initializing memory slot map.\n"; });
+  LLVM_DEBUG({ dbgs() << "== Start initializing memory slot map ==\n"; });
   Changed |= initializeMemSlots(MF);
 
-  LLVM_DEBUG({ dbgs() << "== Start scanning registers.\n"; });
+  LLVM_DEBUG({ dbgs() << "== Start scanning registers ==\n"; });
 
   // Precompute the set of registers that are unused, so that we can insert
   // drops to their defs.
   BitVector UseEmpty(MRI.getNumVirtRegs());
-  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I)
+  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I){
     UseEmpty[I] = MRI.use_empty(TargetRegisterInfo::index2VirtReg(I));
+  }
   
   // Visit each instruction in the function.
   for (MachineBasicBlock &MBB : MF) {
@@ -175,6 +174,9 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
           llvm_unreachable("unimplemented");
         }
 
+        // we do not define Physical Register
+        assert(!TargetRegisterInfo::isPhysicalRegister(OldReg));
+
         const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
         unsigned NewReg = MRI.createVirtualRegister(RC);
         auto InsertPt = std::next(MI.getIterator());
@@ -188,8 +190,8 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         } else {
           unsigned LocalId = getLocalId(OldReg);
           BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r))
-              .addImm(LocalId)
-              .addReg(NewReg);
+              .addReg(NewReg)
+              .addImm(LocalId);
         }
 
         MI.getOperand(0).setReg(NewReg);
@@ -208,7 +210,14 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         unsigned OldReg = MO.getReg();
 
+        if (TargetRegisterInfo::isPhysicalRegister(OldReg)) {
+          assert(OldReg == EVM::FP);
+          // skip FramePointer as we will later expand it.
+          continue;
+        }
+
         unsigned LocalId = getLocalId(OldReg);
+
         const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
         unsigned NewReg = MRI.createVirtualRegister(RC);
         InsertPt = BuildMI(MBB, InsertPt, MI.getDebugLoc(),
@@ -230,149 +239,8 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
-  return Changed;
-
-  // first, find all the virtual register defs.
-  for (const MachineBasicBlock & MBB : MF) {
-    for (const MachineInstr & MI : MBB) {
-      for (const MachineOperand &MO : MI.explicit_uses()) {
-
-        // only cares about registers.
-        if ( !MO.isReg() || MO.isImplicit() ) continue;
-
-        unsigned r = MO.getReg();
-
-        // if the Register is stackified, ignore it
-        if (MFI.isVRegStackified(r)) {
-          llvm_unreachable("unimplemented");
-        }
-
-        // up till now, all physical registers are gone.
-        assert(!TargetRegisterInfo::isPhysicalRegister(r));
-        unsigned reg = TRI.virtReg2Index(r);
-
-        if (std::find(IgnoredRegs.begin(), IgnoredRegs.end(), r) !=
-            IgnoredRegs.end()) {
-          // ignore registers that should stay on the stack
-          LLVM_DEBUG({
-            dbgs() << "Ignore allocating space for register: " << reg << "\n";
-          });
-          continue;
-        }
-
-        if (Reg2Mem.find(reg) != Reg2Mem.end()) {
-          // we've visited this register.
-          continue;
-        }
-
-        // take a look at its def
-        MachineInstr *Def = MRI.getVRegDef(r);
-        assert(Def && "Unimplemented case for no definition");
-
-        unsigned opc = Def->getOpcode();
-        assert (opc != EVM::pSTACKARG_r);
-        assert (opc != EVM::pGETLOCAL_r);
-
-        LLVM_DEBUG({
-            dbgs() << "Find def for vreg: " << reg << ": ";
-            if (Def != NULL) Def->dump();
-            else dbgs() << "NULL\n";
-        });
-
-        LLVM_DEBUG({dbgs() << "Find vreg index def: " << reg <<
-                           ", assigning location: " << index << "\n"; });
-
-        Reg2Mem.insert(std::make_pair(reg, index));
-        index ++;
-      }
-    }
-  }
-
-  // the increment size is the actual number that the framepointer
-  // should adjust. we need to improve it to involve register liveness
-  // analysis to reduce it.
-  unsigned increment_size = Reg2Mem.size();
-
-  LLVM_DEBUG({
-      dbgs() << "Total Number of virtual register slots: "
-             << increment_size << '\n';
-  });
-  // increment_size is the number we will patch at the prologue and epilogue.
-
-  for (MachineBasicBlock & MBB : MF) {
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
-      MachineInstr &MI = *I++;
-
-      for (MachineOperand &MO : MI.explicit_uses()) {
-        if (!MO.isReg()) continue;
-        unsigned reg = MO.getReg();
-        unsigned regindex = TRI.virtReg2Index(MO.getReg());
-
-        // ignore ...
-        if(std::find(IgnoredRegs.begin(), IgnoredRegs.end(), reg)
-               != IgnoredRegs.end()) {
-          continue;
-        }
-
-        assert(Reg2Mem.find(regindex) != Reg2Mem.end());
-        unsigned memindex = Reg2Mem[regindex];
-
-        LLVM_DEBUG({ dbgs() << "found regindex use: " << regindex << ","; });
-
-        // insert before instruction:
-        unsigned NewVReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-
-        // when instantiating the pGETLOCAL, make sure it is generated
-        // before the frame adjustment.
-        if (MI.getOpcode() == EVM::pRETURNSUB_r) {
-          MachineBasicBlock::iterator PI = MachineBasicBlock::iterator(MI);
-          --PI;
-          assert(PI->getOpcode() == EVM::pADJFPDOWN_r &&
-                 "ADJFPDOWN_r should follow pRETURNSUB_r");
-          MachineInstr &PrevInstr = *PI;
-          BuildMI(MBB, PrevInstr, PrevInstr.getDebugLoc(),
-                  TII.get(EVM::pGETLOCAL_r), NewVReg)
-                 .addImm(memindex);
-        } else {
-          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(EVM::pGETLOCAL_r), NewVReg)
-                 .addImm(memindex);
-        }
-
-        MO.setReg(NewVReg);
-
-        LLVM_DEBUG({ dbgs() << " replacing use with: " << TRI.virtReg2Index(NewVReg)
-                    << ", load from: " << memindex << ".\n"; });
-
-        Changed = true;
-      }
-
-      for (MachineOperand &MO : MI.defs()) {
-        assert(MO.isReg());
-
-        unsigned reg = MO.getReg();
-        unsigned regindex = TRI.virtReg2Index(reg);
-
-        // if we should ignore this ...
-        if(std::find(IgnoredRegs.begin(), IgnoredRegs.end(), reg)
-               != IgnoredRegs.end()) {
-          continue;
-        }
-        assert(Reg2Mem.find(regindex) != Reg2Mem.end());
-
-        unsigned memindex = Reg2Mem[regindex];
-
-        auto &InsertPt = I;
-        BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r))
-        .addReg(reg)
-        .addImm(memindex);
-
-        Changed = true;
-      }
-    }
-  }
-
   // Patch the frame pointer in the prologue and epilogue.
-  if (!Reg2Mem.empty()) {
+  if (!Reg2Local.empty()) {
     // iterate over instructions, find pADJFP(UP/DOWN)_r,
     // patch the value --- we can't know the value beforehand.
     for (MachineBasicBlock &MBB : MF) {
@@ -380,7 +248,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         unsigned opc = MI.getOpcode();
         if (opc == EVM::pADJFPUP_r ||
             opc == EVM::pADJFPDOWN_r) {
-          MI.getOperand(0).setImm(Reg2Mem.size());
+          MI.getOperand(0).setImm(Reg2Local.size());
         }
 
       }
