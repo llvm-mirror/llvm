@@ -29,6 +29,8 @@ private:
   /// Size of the save area used for varargs
   int VarArgsSaveSize = 0;
 
+  unsigned NumStackArgs = 0;
+
   /// Copied from WebAssembly backend.
   /// A mapping from CodeGen vreg index to a boolean value indicating whether
   /// the given register is considered to be "stackified", meaning it has been
@@ -44,6 +46,9 @@ public:
   EVMMachineFunctionInfo(MachineFunction &MF)
     : MF(MF), FrameIndexSize(0)
   {}
+
+  void setNumStackArgs(unsigned size) { NumStackArgs = size; }
+  unsigned getNumStackArgs() {return NumStackArgs; }
 
   int getVarArgsFrameIndex() const { return VarArgsFrameIndex; }
   void setVarArgsFrameIndex(int Index) { VarArgsFrameIndex = Index; }

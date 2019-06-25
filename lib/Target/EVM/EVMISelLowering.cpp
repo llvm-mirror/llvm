@@ -499,10 +499,18 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
 
+
   // Instantiate virtual registers for each of the incoming value.
   // unused register will be set to UNDEF.
   SmallVector<SDValue, 16> ArgsChain;
   ArgsChain.push_back(Chain);
+
+  // record the number of stack args.
+  {
+    EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+    MFI.setNumStackArgs(Ins.size());
+  }
+
   for (const ISD::InputArg &In : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
