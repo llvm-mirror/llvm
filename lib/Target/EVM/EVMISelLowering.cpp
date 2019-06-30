@@ -503,7 +503,6 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   for (const ISD::InputArg &In __attribute__((unused)) : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
-
     const SDValue &idx = DAG.getTargetConstant(InVals.size(),
                                                DL, MVT::i256);
     Opnds.push_back(idx);
