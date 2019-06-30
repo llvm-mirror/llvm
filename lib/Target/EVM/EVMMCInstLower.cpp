@@ -43,7 +43,6 @@ void llvm::LowerEVMMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
 void EVMMCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(MI->getOpcode());
 
-  const MCInstrDesc &Desc = MI->getDesc();
   for (unsigned I = 0, E = MI->getNumOperands(); I != E; ++I) {
     const MachineOperand &MO = MI->getOperand(I);
 

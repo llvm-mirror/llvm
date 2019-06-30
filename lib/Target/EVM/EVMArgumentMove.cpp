@@ -93,9 +93,9 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       MachineBasicBlock::iterator insertPt = EntryMBB.begin();
 
       unsigned destReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-      MachineInstr *MI = BuildMI(EntryMBB, insertPt, insertPt->getDebugLoc(),
-                                 TII.get(EVM::pSTACKARG_r), destReg)
-                             .addImm(i);
+      BuildMI(EntryMBB, insertPt, insertPt->getDebugLoc(),
+              TII.get(EVM::pSTACKARG_r), destReg)
+          .addImm(i);
 
       if (i != 0) {
         EntryMBB.begin()->getOperand(0).setIsKill();

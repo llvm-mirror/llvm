@@ -50,15 +50,6 @@ static MCSubtargetInfo *createEVMMCSubtargetInfo(const Triple &TT,
   return createEVMMCSubtargetInfoImpl(TT, CPU, FS);
 }
 
-static MCStreamer *createEVMMCStreamer(const Triple &T, MCContext &Ctx,
-                                       std::unique_ptr<MCAsmBackend> &&MAB,
-                                       std::unique_ptr<MCObjectWriter> &&OW,
-                                       std::unique_ptr<MCCodeEmitter> &&Emitter,
-                                       bool RelaxAll) {
-  return createELFStreamer(Ctx, std::move(MAB), std::move(OW), std::move(Emitter),
-                           RelaxAll);
-}
-
 static MCInstPrinter *createEVMMCInstPrinter(const Triple &T,
                                              unsigned SyntaxVariant,
                                              const MCAsmInfo &MAI,

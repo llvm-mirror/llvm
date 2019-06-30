@@ -28,5 +28,5 @@ EVMTargetStreamer::EVMTargetStreamer(MCStreamer &S)
 
 EVMTargetAsmStreamer::EVMTargetAsmStreamer(
     MCStreamer &S, formatted_raw_ostream &OS)
-    : EVMTargetStreamer(S), OS(OS) {}
+    : EVMTargetStreamer(S) {}
 

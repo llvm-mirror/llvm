@@ -136,7 +136,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
   TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
-  const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
 
   for (MachineBasicBlock & MBB : MF) {
     for (MachineBasicBlock::instr_iterator I = MBB.instr_begin(), E = MBB.instr_end(); I != E;) {

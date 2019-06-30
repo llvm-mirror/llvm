@@ -158,6 +158,9 @@ bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
       ReplaceNode(Node, div);
       return true;
     }
+    case ISD::NON_EXTLOAD:
+    case ISD::EXTLOAD:
+      break;
   }
   return false;
 }

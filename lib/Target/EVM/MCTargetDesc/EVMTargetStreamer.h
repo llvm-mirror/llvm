@@ -32,7 +32,6 @@ public:
 
 /// This part is for ascii assembly output
 class EVMTargetAsmStreamer final : public EVMTargetStreamer {
-  formatted_raw_ostream &OS;
 
 public:
   EVMTargetAsmStreamer(MCStreamer &S, formatted_raw_ostream &OS);

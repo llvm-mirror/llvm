@@ -136,9 +136,6 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   assert(Cond.size() == 2 && "Expected a flag and a successor block");
 
-  MachineFunction &MF = *MBB.getParent();
-  auto &MRI = MF.getRegInfo();
-
   assert(Cond[0].getImm() && "insertBranch does not accept false parameter");
 
   BuildMI(&MBB, DL, get(EVM::JUMPI_r)).add(Cond[1]).addMBB(TBB);

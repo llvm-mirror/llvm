@@ -132,16 +132,12 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  bool Changed = false;
+
   MachineRegisterInfo &MRI = MF.getRegInfo();
   EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
   
-  const EVMSubtarget &ST = MF.getSubtarget<EVMSubtarget>();
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
-  const auto &TRI = *MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
-  bool Changed = false;
-
-  // We have to set up the frame index and the incoming arguments.
-  unsigned stackSlots = MF.getFrameInfo().getNumObjects();
   
   LLVM_DEBUG({ dbgs() << "== Start initializing memory slot map ==\n"; });
   Changed |= initializeMemSlots(MF);

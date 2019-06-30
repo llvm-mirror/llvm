@@ -233,7 +233,6 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   // Remove all old functions.
   for (const auto &FuncPair : FuncMap) {
     Function* OldFunc = FuncPair.first;
-    Function* NewFunc = FuncPair.second;
 
     OldFunc->replaceAllUsesWith(UndefValue::get(OldFunc->getType()));
     OldFunc->eraseFromParent();

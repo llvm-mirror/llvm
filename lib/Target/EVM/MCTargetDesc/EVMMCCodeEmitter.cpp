@@ -98,18 +98,10 @@ static bool is_PUSH(uint64_t binary) {
   return false;
 }
 
-static bool is_JUMP(uint64_t binary) {
-  if (binary == 0x56 || binary == 0x57) {
-    return true;
-  }
-  return false;
-}
-
 void EVMMCCodeEmitter::encodeExpr(raw_ostream &OS,
                                   const MCOperand& opnd,
                                   unsigned push_size) const {
     
-
 }
 
 void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
@@ -146,7 +138,6 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
 void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                          SmallVectorImpl<MCFixup> &Fixups,
                                          const MCSubtargetInfo &STI) const {
-  uint64_t Start = OS.tell();
   uint64_t Binary;
 
   Binary = getBinaryCodeForInstr(MI, Fixups, STI);

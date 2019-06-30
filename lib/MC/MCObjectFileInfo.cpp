@@ -839,6 +839,9 @@ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple, bool PIC,
     Env = IsELF;
     initELFMCObjectFileInfo(TT, LargeCodeModel);
     break;
+  case Triple::EVMJson:
+    report_fatal_error("EVMJson is unimplemented.");
+    break;
   case Triple::Wasm:
     Env = IsWasm;
     initWasmMCObjectFileInfo(TT);
@@ -863,6 +866,7 @@ MCSection *MCObjectFileInfo::getDwarfComdatSection(const char *Name,
   case Triple::COFF:
   case Triple::Wasm:
   case Triple::XCOFF:
+  case Triple::EVMJson:
   case Triple::UnknownObjectFormat:
     report_fatal_error("Cannot get DWARF comdat section for this object file "
                        "format: not implemented.");

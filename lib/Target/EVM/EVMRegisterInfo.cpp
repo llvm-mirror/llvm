@@ -77,7 +77,6 @@ void EVMRegisterInfo::eliminateFrameIndex(
   }
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
   unsigned FrameReg = getFrameRegister(MF);
 
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) * 32;
@@ -87,7 +86,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
       MI.getOpcode() == EVM::MSTORE_r) {
     unsigned fiReg = FrameReg;
     if (Offset != 0) {
-      unsigned opc;
+      unsigned opc = 0;
       fiReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
 
       if (Offset > 0) {
