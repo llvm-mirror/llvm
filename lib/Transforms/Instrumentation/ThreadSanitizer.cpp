@@ -301,7 +301,7 @@ static bool isVtableAccess(Instruction *I) {
 }
 
 // Do not instrument known races/"benign races" that come from compiler
-// instrumentatin. The user has no way of suppressing them.
+// instrumentation. The user has no way of suppressing them.
 static bool shouldInstrumentReadWriteFromAddress(const Module *M, Value *Addr) {
   // Peel off GEPs and BitCasts.
   Addr = Addr->stripInBoundsOffsets();
@@ -322,7 +322,7 @@ static bool shouldInstrumentReadWriteFromAddress(const Module *M, Value *Addr) {
       return false;
   }
 
-  // Do not instrument acesses from different address spaces; we cannot deal
+  // Do not instrument accesses from different address spaces; we cannot deal
   // with them.
   if (Addr) {
     Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
