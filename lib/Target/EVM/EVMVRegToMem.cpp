@@ -55,6 +55,7 @@ private:
   bool initializeMemSlots(MachineFunction &MF);
   DenseMap<unsigned, unsigned> Reg2Local;
   unsigned getLocalId(unsigned Reg);
+  EVMMachineFunctionInfo *MFI;
 
   unsigned CurLocal;
 };
@@ -135,7 +136,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   bool Changed = false;
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
+  MFI = MF.getInfo<EVMMachineFunctionInfo>();
   
   const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   
@@ -166,7 +167,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
       if (MI.getDesc().getNumDefs() == 1) {
         unsigned OldReg = MI.getOperand(0).getReg();
 
-        if (MFI.isVRegStackified(OldReg)) {
+        if (MFI->isVRegStackified(OldReg)) {
           llvm_unreachable("unimplemented");
         }
 
@@ -184,7 +185,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
           // After the drop instruction, this reg operand will not be used
           Drop->getOperand(0).setIsKill();
         } else {
-          unsigned LocalId = getLocalId(OldReg);
+          unsigned LocalId = MFI->allocate_memory_index(OldReg);;
           BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::pPUTLOCAL_r))
               .addReg(NewReg)
               .addImm(LocalId);
@@ -195,7 +196,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         // by the inserted drop or local.set instruction, so make it not dead
         // yet.
         MI.getOperand(0).setIsDead(false);
-        MFI.stackifyVReg(NewReg);
+        MFI->stackifyVReg(NewReg);
         Changed = true;
       }
        
@@ -212,7 +213,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
           continue;
         }
 
-        unsigned LocalId = getLocalId(OldReg);
+        unsigned LocalId = MFI->get_memory_index(OldReg);
 
         const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
         unsigned NewReg = MRI.createVirtualRegister(RC);
@@ -220,7 +221,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
                            TII.get(EVM::pGETLOCAL_r), NewReg)
                        .addImm(LocalId);
         MO.setReg(NewReg);
-        MFI.stackifyVReg(NewReg);
+        MFI->stackifyVReg(NewReg);
         Changed = true;
       }
 

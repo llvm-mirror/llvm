@@ -39,6 +39,7 @@ private:
   ///   - single def (per path)
   ///   - defined and used in LIFO order with other stack registers
   BitVector VRegStackified;
+  DenseMap<unsigned, unsigned> reg2index;
 
   unsigned FrameIndexSize;
 
@@ -72,10 +73,26 @@ public:
   }
 
   bool isVRegStackified(unsigned VReg) const {
+    if (TargetRegisterInfo::isPhysicalRegister(VReg)) {
+      return false;
+    }
+
     auto I = TargetRegisterInfo::virtReg2Index(VReg);
     if (I >= VRegStackified.size())
       return false;
     return VRegStackified.test(I);
+  }
+
+  unsigned allocate_memory_index(unsigned reg) {
+    assert(reg2index.find(reg) != reg2index.end());
+    unsigned index = reg2index.size();
+    reg2index.insert(std::pair<unsigned, unsigned>(reg, index));
+    return index;
+  }
+
+  unsigned get_memory_index(unsigned reg) const {
+    assert(reg2index.find(reg) != reg2index.end());
+    return reg2index.lookup(reg);
   }
 };
 

@@ -99,19 +99,17 @@ bool EVMPassConfig::addInstSelector() {
   TargetPassConfig::addInstSelector();
   addPass(createEVMISelDag(getEVMTargetMachine()));
 
-  addPass(createEVMArgumentMove());
+  //addPass(createEVMArgumentMove());
   return false;
 }
 
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
+  // This is the major pass we will use to stackify registers
 
-
-  if (getOptLevel() != CodeGenOpt::None) {
-    // This is the major pass we will use to stackify registers
-    //addPass(createEVMStackification());
-  }
+  addPass(createEVMPrepareStackification());
+  addPass(createEVMStackification());
 
   // In this pass we assign un-stackified registers
   // with an explicit memory location for storage.

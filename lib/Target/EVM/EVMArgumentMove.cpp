@@ -134,6 +134,9 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  // do not preserve SSA form starting from now.
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
   bool Changed = false;
   MachineBasicBlock &EntryMBB = MF.front();
   MachineBasicBlock::iterator InsertPt = EntryMBB.end();

@@ -34,6 +34,7 @@ bool LowerEVMMachineOperandToMCOperand(const MachineOperand &MO,
 FunctionPass *createEVMISelDag(EVMTargetMachine &TM);
 
 ModulePass   *createEVMCallTransformation();
+FunctionPass *createEVMPrepareStackification();
 FunctionPass *createEVMStackification();
 FunctionPass *createEVMVRegToMem();
 FunctionPass *createEVMPrepareForLiveIntervals();
@@ -43,6 +44,7 @@ FunctionPass *createEVMArgumentMove();
 FunctionPass *createEVMExpandPseudos();
 FunctionPass *createEVMFinalization();
 
+void initializeEVMPrepareStackificationPass(PassRegistry &);
 void initializeEVMStackificationPass(PassRegistry &);
 void initializeEVMVRegToMemPass(PassRegistry &);
 void initializeEVMPrepareForLiveIntervalsPass(PassRegistry &);
