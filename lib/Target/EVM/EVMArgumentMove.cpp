@@ -77,7 +77,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
 
   for (MachineInstr &MI : EntryMBB) {
     if (!EVMArgumentMove::isStackArg(MI)) {
-      break;
+      continue;
     }
 
     MachineOperand &MO = MI.getOperand(1);
@@ -97,9 +97,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
               TII.get(EVM::pSTACKARG_r), destReg)
           .addImm(i);
 
-      if (i != 0) {
-        EntryMBB.begin()->getOperand(0).setIsKill();
-      } else {
+      if (i == 0) {
         returnAddrReg = destReg;
       }
 
