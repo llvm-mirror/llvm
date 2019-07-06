@@ -144,6 +144,9 @@ void EVMPassConfig::addPostRegAlloc() {
   disablePass(&PatchableFunctionID);
   disablePass(&ShrinkWrapID);
 
+  // disable branch folding as it invalidates liveness
+  disablePass(&BranchFolderPassID);
+
   TargetPassConfig::addPostRegAlloc();
 }
 
