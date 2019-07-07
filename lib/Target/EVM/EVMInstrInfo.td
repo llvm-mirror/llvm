@@ -654,11 +654,7 @@ def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;
 def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
 
 // Memory accesses
-def : Pat<(store (EVMWrapper tglobaladdr:$off), i256:$val),
-          (MSTORE_r tglobaladdr:$off, i256:$val)>;
-def : Pat<(i256 (load (EVMWrapper tglobaladdr:$off))),
-          (MLOAD_r tglobaladdr:$off)>;
-
+def : Pat<(EVMWrapper tglobaladdr:$in), (PUSH32_r tglobaladdr:$in)>;
 def : Pat<(i256 (EVMWrapper tblockaddress:$dst)),
           (i256 tblockaddress:$dst)>;
 
