@@ -499,7 +499,6 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
   // record the number of stack args.
   MFI->setNumStackArgs(Ins.size());
-  MF.getRegInfo().addLiveIn(EVM::ARGUMENTS);
 
   for (const ISD::InputArg &In __attribute__((unused)) : Ins) {
     SmallVector<SDValue, 4> Opnds;

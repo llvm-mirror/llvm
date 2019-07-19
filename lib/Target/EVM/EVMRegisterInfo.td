@@ -30,7 +30,6 @@ def SP : EVMReg<"%SP">;
 // classes since we otherwise don't need a physical register in those classes.
 // These are also used a "types" in the generated assembly matcher.
 def GPR256 : EVMReg<"%intreg">;
-def ARGUMENTS : EVMReg<"ARGUMENTS">;
 
 def GPR : RegisterClass<"EVM", [i256], 32, (add GPR256, FP)>;
 

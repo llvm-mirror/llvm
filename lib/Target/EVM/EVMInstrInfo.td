@@ -573,7 +573,7 @@ let mayStore = 1 in {
 def pPUTLOCAL_r : EVMPseudo<(outs), (ins GPR:$src, i256imm:$idx), []>;
 }
 // This is the placeholder for the incoming arguments.
-let hasSideEffects = 1, Uses = [ARGUMENTS], Defs = []<Register>, isCodeGenOnly = 1 in {
+let hasSideEffects = 1 in {
 def pSTACKARG_r : EVMPseudo<(outs GPR:$reg), (ins i256imm:$idx),
                             [(set (i256 GPR:$reg), (EVMStackArg timm:$idx))]>;
 def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
