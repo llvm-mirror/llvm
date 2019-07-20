@@ -168,7 +168,6 @@ private:
   DenseMap<unsigned, unsigned> reg2index;
 
   const EVMInstrInfo* TII;
-  MachineDominatorTree *MDT;
   MachineRegisterInfo *MRI;
   LiveIntervals *LIS;
   EVMMachineFunctionInfo *MFI;
@@ -278,21 +277,19 @@ static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) 
 
 void EVMStackification::insertSwapBefore(unsigned index, MachineInstr &MI) {
   MachineBasicBlock *MBB = MI.getParent();
-  MachineFunction &MF = *MBB->getParent();
   BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::SWAP_r)).addImm(index);
 }
 
 void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &MI) {
   MachineBasicBlock *MBB = MI.getParent();
-  MachineFunction &MF = *MBB->getParent();
 
-  if (TargetRegisterInfo::isPhysicalRegister(reg)) {
-    // deal with physical register.
-  } else {
-    unsigned index = MFI->get_memory_index(reg);
-    BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::pGETLOCAL_r), reg)
-        .addImm(reg);
-  }
+  assert(!TargetRegisterInfo::isPhysicalRegister(reg) &&
+         "$fp has already been eliminated.");
+
+  // deal with physical register.
+  unsigned index = MFI->get_memory_index(reg);
+  BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::pGETLOCAL_r), reg)
+      .addImm(index);
 }
 
 void EVMStackification::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI) {
@@ -483,8 +480,11 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     if (firstDepthFromTop != 1 && secondDepthFromTop != 0) {
       // either registers are not in place.
 
-      insertSwapBefore(firstDepthFromTop, MI);
-      ss.swap(firstDepthFromTop);
+      // if first arg is not already on top, bring it to top
+      if (firstDepthFromTop != 0) {
+        insertSwapBefore(firstDepthFromTop, MI);
+        ss.swap(firstDepthFromTop);
+      }
 
       result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
       assert(result);
@@ -516,9 +516,6 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   MachineOperand& def = *MI.defs().begin();
   assert(def.isReg() && def.isDef());
   unsigned defReg = def.getReg();
-
-  // Look up register slot to determine
-  SlotIndex defIdx = LIS->getInstructionIndex(MI).getRegSlot();
 
   // insert pop if it does not have def.
   bool IsDead = MRI->use_empty(defReg);
@@ -577,9 +574,6 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
 
   bool Changed = false;
   TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
-  const auto *TRI = MF.getSubtarget<EVMSubtarget>().getRegisterInfo();
-
-
 
   for (MachineBasicBlock & MBB : MF) {
     // at the beginning of each block iteration, the stack status should be zero.

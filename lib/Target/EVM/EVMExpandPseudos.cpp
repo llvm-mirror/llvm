@@ -44,7 +44,6 @@ private:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
   void expandLOCAL(MachineInstr* MI) const;
-  void expandADJFP(MachineInstr* MI) const;
   void expandRETURN(MachineInstr* MI) const;
 
   bool handleFramePointer(MachineInstr *MI);
@@ -75,10 +74,14 @@ bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
       MachineBasicBlock *MBB = MI->getParent();
       DebugLoc DL = MI->getDebugLoc();
 
-      // $fp = MLOAD 64
+      // $reg = PUSH32_r 64
+      // $fp = MLOAD $reg
       unsigned fpReg = this->getNewRegister(MI);
-      BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
+      unsigned reg = this->getNewRegister(MI);
+      BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
           .addImm(ST->getFreeMemoryPointer());
+      BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
+          .addReg(reg);
       LLVM_DEBUG({
         dbgs() << "Expanding $fp to %"
                << TargetRegisterInfo::virtReg2Index(fpReg) << " in instruction: ";
@@ -102,7 +105,9 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   DebugLoc DL = MI->getDebugLoc();
 
   // GETLOCAL:
-  // fp    = MLOAD FP
+  // reg   = PUSH32 FP
+  // fp    = MLOAD reg
+  // index = PUSH32 index
   // addr  = ADD fp index
   // local = MLOAD addr
 
@@ -112,58 +117,31 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   // MSTORE addr
   unsigned opc = MI->getOpcode();
 
+  unsigned reg    = this->getNewRegister(MI);
   unsigned fpReg    = this->getNewRegister(MI);
+  unsigned immReg   = this->getNewRegister(MI);
   unsigned addrReg  = this->getNewRegister(MI);
-  unsigned localReg = MI->getOperand(0).getReg();
 
+
+  BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
+      .addImm(ST->getFreeMemoryPointer());
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
-    .addImm(ST->getFreeMemoryPointer());
+    .addReg(reg);
+  BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), immReg)
+      .addImm(MI->getOperand(1).getImm());
   BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), addrReg)
-    .addReg(fpReg).addImm(MI->getOperand(1).getImm());
+    .addReg(fpReg).addReg(immReg);
+
+  unsigned localReg = MI->getOperand(0).getReg();
 
   if (opc == EVM::pGETLOCAL_r) {
     BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), localReg).addReg(addrReg);
   } else if (opc == EVM::pPUTLOCAL_r) {
-    // MSTORE_r offset value
+    // MSTORE_r addrReg value
     BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r)).addReg(addrReg).addReg(localReg);
   } else {
     llvm_unreachable("invalid parameter");
   }
-  MI->eraseFromParent();
-}
-
-void EVMExpandPseudos::expandADJFP(MachineInstr* MI) const {
-  MachineBasicBlock* MBB = MI->getParent();
-  DebugLoc DL = MI->getDebugLoc();
-  unsigned opc = MI->getOpcode();
-
-  // Small optimization: if there is no frame adjustment needed,
-  // remove the instruction.
-  unsigned index = MI->getOperand(0).getImm();
-  if (index == 0) {
-    MI->eraseFromParent();
-    return;
-  }
-
-  unsigned oldFP = this->getNewRegister(MI);
-  unsigned newFP = this->getNewRegister(MI);
-
-  BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), oldFP)
-    .addImm(ST->getFreeMemoryPointer());
-
-  if (opc == EVM::pADJFPUP_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), newFP)
-      .addReg(oldFP).addImm(MI->getOperand(0).getImm() * 32);
-  } else if (opc == EVM::pADJFPDOWN_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::SUB_r), newFP)
-      .addReg(oldFP).addImm(MI->getOperand(0).getImm() * 32);
-  } else {
-    llvm_unreachable("invalid parameter");
-  }
-
-  BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
-  .addImm(ST->getFreeMemoryPointer()).addReg(newFP);
-
   MI->eraseFromParent();
 }
 
@@ -214,13 +192,9 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
           expandLOCAL(MI);
           Changed = true;
           break;
-        case EVM::pADJFPUP_r:
-        case EVM::pADJFPDOWN_r:
-          expandADJFP(MI);
-          Changed = true;
-          break;
         case EVM::pMOVE_r:
-          llvm_unreachable("MOVE instructions should be eliminated");
+          llvm_unreachable(
+              "MOVE instructions should have been eliminated already.");
           break;
         // suspend it and expand at finalization time
         //case EVM::pRETURNSUB_r:

@@ -581,8 +581,14 @@ def pSTACKARG   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
 
 // These instructions are used to manually adjust the framepointer in pre-EIP615.
 let mayStore = 1 in {
+let BaseName = "pADJFPUP" in {
 def pADJFPUP_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
+def pADJFPUP   : EVMStackPseudo<(outs), (ins i256imm:$idx), []>;
+}
+let BaseName = "pADJFPDOWN" in {
 def pADJFPDOWN_r : EVMPseudo<(outs), (ins i256imm:$size), []>;
+def pADJFPDOWN : EVMStackPseudo<(outs), (ins i256imm:$size), []>;
+}
 }
 
 // Pseudo MOVE instruction

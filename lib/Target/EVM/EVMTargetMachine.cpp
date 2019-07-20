@@ -108,6 +108,9 @@ void EVMPassConfig::addPreEmitPass() {
 
   addPass(createEVMArgumentMove());
 
+  // We use a custom pass to expand pseudos at a later pahse
+  addPass(createEVMExpandPseudos());
+
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(createEVMPrepareStackification());
     // This is the major pass we will use to stackify registers
@@ -117,9 +120,6 @@ void EVMPassConfig::addPreEmitPass() {
     // with an explicit memory location for storage.
     addPass(createEVMVRegToMem());
   }
-
-  // We use a custom pass to expand pseudos at a later pahse
-  addPass(createEVMExpandPseudos());
 
   // the pass we use to explicitly convert instructions in the reg-based
   // form to stack-based form.

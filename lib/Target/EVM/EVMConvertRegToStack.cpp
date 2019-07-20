@@ -153,6 +153,18 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
+      if (opc == EVM::pADJFPUP_r) {
+        assert(MI.getNumOperands() == 1 && "pADJFPUP_r's number of operands must be 1.");
+        MI.setDesc(TII->get(EVM::pADJFPUP));
+        continue;
+      }
+
+      if (opc == EVM::pADJFPDOWN_r) {
+        assert(MI.getNumOperands() == 1 && "pADJFPDOWN_r's number of operands must be 1.");
+        MI.setDesc(TII->get(EVM::pADJFPDOWN));
+        continue;
+      }
+
       if (opc == EVM::pSTACKARG_r) {
         MI.RemoveOperand(0);
         MI.setDesc(TII->get(EVM::pSTACKARG));
