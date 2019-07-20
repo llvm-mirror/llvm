@@ -106,14 +106,17 @@ bool EVMPassConfig::addInstSelector() {
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
-  // This is the major pass we will use to stackify registers
+  addPass(createEVMArgumentMove());
 
-  addPass(createEVMPrepareStackification());
-  addPass(createEVMStackification());
-
-  // In this pass we assign un-stackified registers
-  // with an explicit memory location for storage.
-  addPass(createEVMVRegToMem());
+  if (getOptLevel() != CodeGenOpt::None) {
+    addPass(createEVMPrepareStackification());
+    // This is the major pass we will use to stackify registers
+    addPass(createEVMStackification());
+  } else {
+    // In this pass we assign un-stackified registers
+    // with an explicit memory location for storage.
+    addPass(createEVMVRegToMem());
+  }
 
   // We use a custom pass to expand pseudos at a later pahse
   addPass(createEVMExpandPseudos());
@@ -122,7 +125,11 @@ void EVMPassConfig::addPreEmitPass() {
   // form to stack-based form.
   addPass(createEVMConvertRegToStack());
 
+  // so far we are only generating PUSH32 instructions, now we will use a
+  // shorter version if possible.
   addPass(createEVMShrinkpush());
+
+  // some peepohole at the very end.
   addPass(createEVMFinalization());
 }
 

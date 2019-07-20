@@ -334,7 +334,6 @@ void EVMStackification::moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI
 }
 
 void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
-
   // TODO: do not support more than 2 uses in an MI. We need scheduler to help
   // us make sure that the registers are on stack top.
  

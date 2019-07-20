@@ -102,7 +102,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       }
 
       LLVM_DEBUG({
-        dbgs() << "Inserting Removed stackarg index:" << i << "\n";
+        dbgs() << "Inserting Removed stackarg index: " << i << "\n";
       });
     }
   }
@@ -143,6 +143,18 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
 
   arrangeStackArgs(MF);
 
+  DenseMap<unsigned, MachineInstr*> index2mi;
+
+  for (MachineInstr &MI : EntryMBB) {
+    if (EVMArgumentMove::isStackArg(MI)) {
+      MachineOperand &MO = MI.getOperand(1);
+      unsigned index = MO.getImm();
+      index2mi.insert(std::pair<unsigned, MachineInstr *>(index, &MI));
+    }
+  }
+
+  unsigned numArgs = index2mi.size();
+
   // Look for the first NonArg instruction.
   for (MachineInstr &MI : EntryMBB) {
     if (!EVMArgumentMove::isStackArg(MI)) {
@@ -150,6 +162,13 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
       break;
     }
   }
+
+  for (unsigned i = 0; i < numArgs; ++i) {
+    assert(index2mi.find(i) != index2mi.end());
+    EntryMBB.insert(InsertPt, index2mi[i]->removeFromParent());
+    Changed = true;
+  }
+
 
   // Now move any argument instructions later in the block
   // to before our first NonArg instruction.

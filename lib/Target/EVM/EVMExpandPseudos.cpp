@@ -64,7 +64,7 @@ FunctionPass *llvm::createEVMExpandPseudos() {
 /// eliminate frame pointer.
 bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
   bool Changed = false;
-  for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
+  for (unsigned i = 0; i < MI->getNumExplicitOperands(); ++i) {
     MachineOperand &MO = MI->getOperand(i);
     if (!MO.isReg()) continue;
 
