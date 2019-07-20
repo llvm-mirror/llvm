@@ -117,6 +117,7 @@ void EVMConvertRegToStack::convertSWAP(MachineInstr* MI) const {
   assert(swapIdx <= 16 && "invalid SWAP");
 
   unsigned opc = getSWAPOpcode(swapIdx);
+  MI->RemoveOperand(0);
   MI->setDesc(TII->get(opc));
 }
 

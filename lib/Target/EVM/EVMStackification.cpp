@@ -450,7 +450,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     // idea case, we don't need to do anything
     if (firstDepthFromTop == 1 && secondDepthFromTop == 0) {
       // do nothing
-    }
+    } else
     
     // first in position, second not in.
     if (firstDepthFromTop == 1 && secondDepthFromTop != 0) {
@@ -475,16 +475,21 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       insertSwapBefore(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
     } else
+
+    // special case: 
+    if (firstDepthFromTop == 0 && secondDepthFromTop > 1) {
+      // move the first operand to the correct position.
+      insertSwapBefore(1, MI);
+      ss.swap(1);
+      
+      // then move the second operand on to the top
+      insertSwapBefore(secondDepthFromTop, MI);
+      ss.swap(secondDepthFromTop);
+    } else
     
     // all other situations.
     if (firstDepthFromTop != 1 && secondDepthFromTop != 0) {
       // either registers are not in place.
-
-      // if first arg is not already on top, bring it to top
-      if (firstDepthFromTop != 0) {
-        insertSwapBefore(firstDepthFromTop, MI);
-        ss.swap(firstDepthFromTop);
-      }
 
       result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
       assert(result);
@@ -492,6 +497,8 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
       insertSwapBefore(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
+    } else {
+      llvm_unreachable("missing cases for handling.");
     }
 
     ss.pop();
@@ -550,6 +557,12 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   });
 
   ss.push(defReg);
+
+  unsigned numUses = std::distance(MRI->use_begin(defReg), MRI->use_end());
+  for (unsigned i = 1; i < numUses; ++i) {
+    insertDupAfter(1, MI);
+    ss.dup(1);
+  }
 
 }
 
