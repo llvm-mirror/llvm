@@ -157,7 +157,7 @@ private:
   bool canStackifyReg(unsigned reg, MachineInstr &MI) const;
   unsigned findNumOfUses(unsigned reg) const;
 
-  void insertPopAfter(unsigned index, MachineInstr &MI);
+  void insertPopAfter(MachineInstr &MI);
   void insertDupAfter(unsigned index, MachineInstr &MI);
   void insertSwapBefore(unsigned index, MachineInstr &MI);
 
@@ -244,10 +244,10 @@ unsigned EVMStackification::findNumOfUses(unsigned reg) const {
   return numUses;
 }
 
-void EVMStackification::insertPopAfter(unsigned index, MachineInstr& MI) {
+void EVMStackification::insertPopAfter(MachineInstr& MI) {
   MachineBasicBlock *MBB = MI.getParent();
   MachineFunction &MF = *MBB->getParent();
-  MachineInstrBuilder pop = BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::POP_r)).addImm(index);
+  MachineInstrBuilder pop = BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::POP_r));
   MBB->insertAfter(MachineBasicBlock::iterator(MI), pop);
 }
 
@@ -350,13 +350,17 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
     // handle vreg unstackfied case
     if (!MFI->isVRegStackified(reg)) {
+      LLVM_DEBUG(dbgs() << "  Operand is not stackified.\n";);
       insertLoadFromMemoryBefore(reg, MI);
       ss.push(reg);
     } else {
+
       // handle vreg stackified case
       unsigned depthFromTop = 0;
       bool result = findRegDepthOnStack(ss, reg, &depthFromTop);
       assert(result);
+      LLVM_DEBUG(dbgs() << "  Operand is on the stack at depth: "
+                        << depthFromTop << "\n";);
 
       // check if it is on top of the stack.
       if (depthFromTop != 0) {
@@ -516,6 +520,14 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   // Look up register slot to determine
   SlotIndex defIdx = LIS->getInstructionIndex(MI).getRegSlot();
 
+  // insert pop if it does not have def.
+  bool IsDead = MRI->use_empty(defReg);
+  if (IsDead) {
+    LLVM_DEBUG({ dbgs() << "  Def's use is empty, insert POP after.\n"; });
+    insertPopAfter(MI);
+    return;
+  }
+
   if (!canStackifyReg(defReg, MI)) {
     LLVM_DEBUG({
       if (TargetRegisterInfo::isPhysicalRegister(defReg)) {
@@ -525,6 +537,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
         dbgs() << "  Cannot stackify %" << ridx << "\n";
       }
     });
+
     insertStoreToMemoryAfter(defReg, MI);
     return;
   }
@@ -540,20 +553,6 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   });
 
   ss.push(defReg);
-
-  /*
-  unsigned numOfUses = findNumOfUses(defReg);
-  ss.remainingUses[defReg] = numOfUses;
-
-  if (numOfUses == 0) {
-    // issue POP immediate after.
-    insertPopAfter(1, MI);
-  } else if (numOfUses > 1) {
-    for (unsigned i = 1; i < numOfUses; ++i) {
-      insertDupAfter(1, MI);
-    }
-  }
-  */
 
 }
 
