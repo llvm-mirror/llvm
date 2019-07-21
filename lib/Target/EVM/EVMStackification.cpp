@@ -66,14 +66,7 @@ void StackStatus::swap(unsigned depth) {
     LLVM_DEBUG({
       unsigned first = stackElements.rbegin()[0];
       unsigned second = stackElements.rbegin()[depth];
-
-      std::string f = TargetRegisterInfo::isPhysicalRegister(first)
-          ? "%fp" : "%" + std::to_string(TargetRegisterInfo::virtReg2Index(first));
-
-      std::string s = TargetRegisterInfo::isPhysicalRegister(second)
-          ? "%fp" : "%" + std::to_string(TargetRegisterInfo::virtReg2Index(second));
-
-      dbgs() << "  Swapping " << f << " and " << s << "\n";
+      dbgs() << "  Swapping %" << first << " and %" << second << "\n";
     });
     std::iter_swap(stackElements.rbegin(), stackElements.rbegin() + depth);
 }
@@ -83,12 +76,8 @@ void StackStatus::dup(unsigned depth) {
   unsigned elem = *(stackElements.rbegin() + depth);
 
   LLVM_DEBUG({
-    if (TargetRegisterInfo::isPhysicalRegister(elem)) {
-      dbgs() << "  Duplicating %fp.\n";
-    } else {
-      unsigned idx = TargetRegisterInfo::virtReg2Index(elem);
-      dbgs() << "  Duplicating %" << idx << " at depth " << depth << "\n";
-    }
+    unsigned idx = TargetRegisterInfo::virtReg2Index(elem);
+    dbgs() << "  Duplicating %" << idx << " at depth " << depth << "\n";
   });
 
   stackElements.push_back(elem);
@@ -97,24 +86,16 @@ void StackStatus::dup(unsigned depth) {
 void StackStatus::pop() {
   LLVM_DEBUG({
     unsigned reg = stackElements.back();
-    if (TargetRegisterInfo::isPhysicalRegister(reg)) {
-      dbgs() << "  Popping %fp to top of stack.\n";
-    } else {
-      unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
-      dbgs() << "  Popping %" << idx << " from stack.\n";
-    }
+    unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
+    dbgs() << "  Popping %" << idx << " from stack.\n";
   });
   stackElements.pop_back();
 }
 
 void StackStatus::push(unsigned reg) {
   LLVM_DEBUG({
-    if (TargetRegisterInfo::isPhysicalRegister(reg)) {
-      dbgs() << "  Pushing %fp to top of stack.\n";
-    } else {
-      unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
-      dbgs() << "  Pushing %" << idx << " to top of stack.\n";
-    }
+    unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
+    dbgs() << "  Pushing %" << idx << " to top of stack.\n";
   });
   stackElements.push_back(reg);
 }
@@ -210,13 +191,10 @@ MachineInstr *EVMStackification::getVRegDef(unsigned Reg,
 // The following are the criteria for deciding whether to stackify the register
 // or not:
 // 1. This reg has only one def
-// 2. is not physical register  ($fp in this case)
-// 3. the uses of the reg is in the same basicblock
+// 2. the uses of the reg is in the same basicblock
 */
 bool EVMStackification::canStackifyReg(unsigned reg, MachineInstr& MI) const {
-  if (TargetRegisterInfo::isPhysicalRegister(reg)) {
-    return false;
-  }
+  assert(!TargetRegisterInfo::isPhysicalRegister(reg));
 
   const LiveInterval &LI = LIS->getInterval(reg);
   
@@ -283,9 +261,6 @@ void EVMStackification::insertSwapBefore(unsigned index, MachineInstr &MI) {
 void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &MI) {
   MachineBasicBlock *MBB = MI.getParent();
 
-  assert(!TargetRegisterInfo::isPhysicalRegister(reg) &&
-         "$fp has already been eliminated.");
-
   // deal with physical register.
   unsigned index = MFI->get_memory_index(reg);
   BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::pGETLOCAL_r), reg)
@@ -296,7 +271,7 @@ void EVMStackification::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI)
   MachineBasicBlock *MBB = MI.getParent();
   MachineFunction &MF = *MBB->getParent();
 
-  unsigned index = MFI->allocate_memory_index(reg);
+  unsigned index = MFI->get_memory_index(reg);
   MachineInstrBuilder putlocal =
       BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r)).addReg(reg).addImm(index);
   MBB->insertAfter(MachineBasicBlock::iterator(MI), putlocal);
@@ -536,19 +511,17 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   }
 
   if (!canStackifyReg(defReg, MI)) {
+    assert(!TargetRegisterInfo::isPhysicalRegister(defReg));
+
     LLVM_DEBUG({
-      if (TargetRegisterInfo::isPhysicalRegister(defReg)) {
-        dbgs() << "  Skip stackifying %fp\n";
-      } else {
-        unsigned ridx = TargetRegisterInfo::virtReg2Index(defReg);
-        dbgs() << "  Cannot stackify %" << ridx << "\n";
-      }
+      unsigned ridx = TargetRegisterInfo::virtReg2Index(defReg);
+      dbgs() << "  Cannot stackify %" << ridx << "\n";
     });
 
+    MFI->allocate_memory_index(defReg);
     insertStoreToMemoryAfter(defReg, MI);
     return;
   }
-
 
   // stackify the register
   assert(!MFI->isVRegStackified(defReg));

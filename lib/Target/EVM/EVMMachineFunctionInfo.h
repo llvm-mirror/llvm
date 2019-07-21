@@ -84,7 +84,7 @@ public:
   }
 
   unsigned allocate_memory_index(unsigned reg) {
-    assert(reg2index.find(reg) != reg2index.end());
+    assert(reg2index.find(reg) == reg2index.end());
     unsigned index = reg2index.size();
     reg2index.insert(std::pair<unsigned, unsigned>(reg, index));
     return index;
