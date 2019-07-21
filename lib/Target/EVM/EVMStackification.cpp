@@ -304,7 +304,6 @@ void EVMStackification::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI)
 
 /// organize the stack to prepare for the instruction.
 void EVMStackification::moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI) {
-
   for (const MachineOperand &MO : MI.explicit_uses()) {
     if (!MO.isReg() || MO.isImplicit()) {
       return;
@@ -507,6 +506,10 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   }
 
   moveOperandsToStackTop(ss, MI);
+  for (unsigned i = 0; i < numUsesInMI; ++i) {
+    ss.pop();
+  }
+  return;
 }
 
 void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {

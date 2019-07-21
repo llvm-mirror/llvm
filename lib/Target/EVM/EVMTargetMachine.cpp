@@ -106,6 +106,7 @@ bool EVMPassConfig::addInstSelector() {
 void EVMPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
 
+  // construct stack arguments and move them to the correct location.
   addPass(createEVMArgumentMove());
 
   // We use a custom pass to expand pseudos at a later pahse
@@ -121,8 +122,9 @@ void EVMPassConfig::addPreEmitPass() {
     addPass(createEVMVRegToMem());
   }
 
-  // the pass we use to explicitly convert instructions in the reg-based
-  // form to stack-based form.
+  // This is the the pass we use to explicitly convert instructions in the
+  // reg-based form to stack-based form. Note that this pass neither alters the
+  // order nor insert additional instructions.
   addPass(createEVMConvertRegToStack());
 
   // so far we are only generating PUSH32 instructions, now we will use a
