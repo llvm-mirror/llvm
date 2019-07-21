@@ -114,8 +114,8 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       if (MI.getOpcode() == EVM::pRETURNSUB_TEMP_r) {
         BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                 TII.get(EVM::pRETURNSUB_r))
-            .addReg(returnAddrReg)
-            .addReg(MI.getOperand(0).getReg());
+            .addReg(MI.getOperand(0).getReg())
+            .addReg(returnAddrReg);
         MI.eraseFromParent();
       }
       if (MI.getOpcode() == EVM::pRETURNSUBVOID_TEMP_r) {
@@ -133,9 +133,6 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
     dbgs() << "********** Argument Move **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
-
-  // do not preserve SSA form starting from now.
-  MachineRegisterInfo &MRI = MF.getRegInfo();
 
   bool Changed = false;
   MachineBasicBlock &EntryMBB = MF.front();
