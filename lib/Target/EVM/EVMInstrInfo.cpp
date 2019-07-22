@@ -73,6 +73,29 @@ bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   return false;
 }
 
+MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr& MI) const {
+  MachineBasicBlock* MBB = MI.getParent();
+  MachineFunction *MF = MBB->getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+
+  unsigned reg = MI.getOperand(0).getReg();
+
+  // make sure we only ahve one def, otherwise we bailout.
+  if (!MRI.hasOneDef(reg)) {
+    return nullptr;
+  }
+  MachineInstr *DefMI = MRI.getUniqueVRegDef(reg);
+
+  assert(DefMI->getOpcode() == EVM::PUSH32_r);
+  MachineOperand &MO = DefMI->getOperand(1);
+
+  // We do not do indirect jump as well.
+  if (!MO.isMBB()) {
+    return nullptr;
+  }
+  return MO.getMBB();
+}
+
 // We copied it from BPF backend. It seems to be quite incompleted,
 // but let's bear with it for now.
 bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
@@ -80,6 +103,9 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                  MachineBasicBlock *&FBB,
                                  SmallVectorImpl<MachineOperand> &Cond,
                                  bool AllowModify) const {
+
+  MachineFunction *MF = MBB.getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
   
   bool HaveCond = false;
   bool lastJump = false;
@@ -97,7 +123,20 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       // Unhandled instruction; bail out.
       return true;
     case EVM::JUMP_r: {
-      MachineBasicBlock *TMBB = MI.getOperand(0).getMBB();
+      MachineBasicBlock *TMBB;
+      if (MI.getOperand(0).isReg()) {
+        MachineBasicBlock* jumpTarget = findJumpTarget(MI);
+
+        // bailout if we cannot find it.
+        if (jumpTarget) {
+          TMBB = jumpTarget;
+        } else {
+          return true;
+        }
+      } else {
+        TMBB = MI.getOperand(0).getMBB();
+      }
+
       if (!HaveCond) TBB = TMBB;
       else           FBB = TMBB;
       lastJump = true;
@@ -107,7 +146,17 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       if (HaveCond) return true;
       Cond.push_back(MachineOperand::CreateImm(true));
       Cond.push_back(MI.getOperand(0));
-      TBB = MI.getOperand(1).getMBB();
+
+      if (MI.getOperand(1).isReg()) {
+        MachineBasicBlock *jumpTarget = findJumpTarget(MI);
+        if (jumpTarget) {
+          TBB = jumpTarget;
+        } else {
+          return true;
+        }
+      } else {
+        TBB = MI.getOperand(1).getMBB();
+      }
       HaveCond = true;
       break;
       }

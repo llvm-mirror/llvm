@@ -64,6 +64,8 @@ private:
   void expandJUMPIF(MachineInstr &MI) const;
   void expandJUMPTO(MachineInstr &MI) const;
 
+  MachineBasicBlock *findJumpTarget(MachineInstr& MI) const;
+
   const EVMRegisterInfo RI;
 };
 

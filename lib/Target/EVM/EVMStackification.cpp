@@ -314,7 +314,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   // Case 1: only 1 use
   if (numUsesInMI == 1) {
     MachineOperand& MO = *MI.explicit_uses().begin(); 
-    if (!MO.isReg() || MO.isImplicit()) {
+    if (!MO.isReg()) {
       return;
     }
     unsigned reg = MO.getReg();
@@ -349,8 +349,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     MachineOperand& MO1 = *MI.explicit_uses().begin(); 
     MachineOperand& MO2 = *(MI.explicit_uses().begin() + 1); 
 
-    assert(!MO1.isImplicit() && MO1.isReg() &&
-           !MO2.isImplicit() && MO2.isReg());
+    assert(MO1.isReg() && MO2.isReg());
 
     unsigned firstReg  = MO1.getReg();
     unsigned secondReg = MO2.getReg();
