@@ -45,7 +45,7 @@ def SDT_EVMCondJump :
 SDTypeProfile<0, 2, [SDTCisVT<1, OtherVT>]>;
 
 def SDT_EVMBrcc :
-SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisVT<3, OtherVT>]>;
+SDTypeProfile<0, 4, [SDTCisSameAs<0, 1>, SDTCisPtrTy<3>]>;
 
 def SDT_EVMSignextend :
 SDTypeProfile<1, 2, [SDTCisVT<2, i256>]>;
@@ -58,6 +58,10 @@ def SDT_EVMArgument : SDTypeProfile<1, 1, [SDTCisVT<1, i256>]>;
 def SDT_EVMMove : SDTypeProfile<0, 2, [SDTCisVT<0, i256>, SDTCisSameAs<0, 1>]>;
 
 def SDT_EVMWrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
+
+// an wrapper to convert BB into a register
+def SDT_EVMBBWrapper : SDTypeProfile<1, 1, [SDTCisPtrTy<0>, SDTCisVT<1, OtherVT>]>;
+
 def SDT_EVMCallSeqStart : SDCallSeqStart<[SDTCisVT<0, iPTR>, SDTCisVT<1, iPTR>]>;
 def SDT_EVMCallSeqEnd   : SDCallSeqEnd  <[SDTCisVT<0, iPTR>, SDTCisVT<1, iPTR>]>;
 
@@ -76,6 +80,9 @@ SDNode<"EVMISD::BRCC", SDT_EVMBrcc, [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
 
 def EVMWrapper:
 SDNode<"EVMISD::WRAPPER", SDT_EVMWrapper>;
+
+def EVMBBWrapper:
+SDNode<"EVMISD::BBWRAPPER", SDT_EVMBBWrapper>;
 
 def EVMCall :
 SDNode<"EVMISD::CALL", SDT_EVMCall,
@@ -333,17 +340,15 @@ defm SSTORE : Inst_2_0<"SSTORE",
                        0x55, 200000>;
 }
 
-let isBranch = 1, isTerminator = 1 in {
-
+let isBranch = 1, isTerminator = 1, isIndirectBranch = 1 in {
 let isBarrier = 1 in {
-defm JUMP : RSInst<(outs), (ins brtarget:$dst),
-                   [(br bb:$dst)],
+defm JUMP : RSInst<(outs), (ins GPR:$dst),
+                   [],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
-}
 
-defm JUMPI : RSInst<(outs), (ins GPR:$src, brtarget:$dst),
-                   [(EVMJumpi GPR:$src, bb:$dst)],
+defm JUMPI : RSInst<(outs), (ins GPR:$src, GPR:$dst), [],
                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
+}
 }
 
 let isCall = 1, isBarrier = 1 in {
@@ -375,7 +380,10 @@ let BaseName = "PUSH32" in {
 let isCodeGenOnly = 1 in {
 def PUSH32_r :
   EVMInst<(outs GPR:$dst), (ins I256Imm:$src), [(set GPR:$dst, imm:$src)],
-          "false", "PUSH32_r \t$src", 0x7f, 3>;
+          "false", "PUSH32_r \t$dst, $src", 0x7f, 3>;
+def PUSHBB_r :
+  EVMInst<(outs GPR:$dst), (ins brtarget:$src), [],
+          "false", "PUSHBB_r \t$dst, $src", 0x7f, 3>;
 }
 def PUSH32 :
   EVMInst<(outs), (ins I256Imm:$src), [], "true", "PUSH32 \t$src", 0x7f, 3>;
@@ -620,28 +628,28 @@ def EVM_CC_LE  : PatLeaf<(i256 imm),
                          [{return (N->getZExtValue() == ISD::SETULE);}]>;
 
 // matching BRCC
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, bb:$BrDst),
-          (JUMPI_r (SLT_r i256:$dst, i256:$src), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, bb:$BrDst),
-          (JUMPI_r (ISZERO_r (SGT_r i256:$dst, i256:$src)), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, bb:$BrDst),
-          (JUMPI_r (LT_r i256:$dst, i256:$src), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, bb:$BrDst),
-          (JUMPI_r (ISZERO_r (GT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (SLT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (ISZERO_r (SGT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (LT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (ISZERO_r (GT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
 
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, bb:$BrDst),
-          (JUMPI_r (SGT_r i256:$dst, i256:$src), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, bb:$BrDst),
-          (JUMPI_r (ISZERO_r (SLT_r i256:$dst, i256:$src)), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, bb:$BrDst),
-          (JUMPI_r (GT_r i256:$dst, i256:$src), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, bb:$BrDst),
-          (JUMPI_r (ISZERO_r (LT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (SGT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (ISZERO_r (SLT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (GT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (ISZERO_r (LT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
 
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
-          (JUMPI_r (EQ_r i256:$dst, i256:$src), bb:$BrDst)>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
-          (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (EQ_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, (EVMWrapper tblockaddress:$BrDst)),
+          (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
 
 // bitwise
 def : Pat<(i256 (shl i256:$lhs, i256:$rhs)),
@@ -661,8 +669,8 @@ def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
 
 // Memory accesses
 def : Pat<(EVMWrapper tglobaladdr:$in), (PUSH32_r tglobaladdr:$in)>;
-def : Pat<(i256 (EVMWrapper tblockaddress:$dst)),
-          (i256 tblockaddress:$dst)>;
+def : Pat<(EVMWrapper tblockaddress:$blk), (PUSH32_r tblockaddress:$blk)>;
+def : Pat<(brind i256:$dst), (JUMP_r i256:$dst)>;
 
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
           (pJUMPSUB_r tglobaladdr:$callee)>;

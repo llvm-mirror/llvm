@@ -107,12 +107,13 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 
     setOperationAction(ISD::GlobalAddress, VT, Custom);
     setOperationAction(ISD::ExternalSymbol, VT, Custom);
-    setOperationAction(ISD::BlockAddress, VT, Custom);
+    setOperationAction(ISD::BlockAddress, VT, Expand);
   }
-
   setOperationAction(ISD::BR_CC, MVT::i256, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
-  //setOperationAction(ISD::BRIND, MVT::Other, Expand);
+
+  // custom lowering the branch 
+  setOperationAction(ISD::BR, MVT::Other, Custom);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
 
   setOperationAction(ISD::FrameIndex, MVT::i256, Custom);
@@ -243,7 +244,6 @@ EVMTargetLowering::LowerExternalSymbol(SDValue Op,
   return DAG.getNode(
       EVMISD::WRAPPER, DL, VT,
       DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i256));
-
 }
 
 SDValue
@@ -265,9 +265,32 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
   SDLoc DL(Op);
 
-  return DAG.getNode(EVMISD::BRCC, DL, Op.getValueType(), Chain, LHS, RHS,
-                     DAG.getConstant(CC, DL, LHS.getValueType()), Dest);
+  // get the blockaddress
+  BasicBlockSDNode* bbsd = cast<BasicBlockSDNode>(Dest);
+  const BasicBlock *bb = bbsd->getBasicBlock()->getBasicBlock();
+  const BlockAddress *ba = BlockAddress::get(const_cast<BasicBlock *>(bb));
+  SDValue tba = DAG.getTargetBlockAddress(ba, MVT::i256);
 
+  return DAG.getNode(
+      EVMISD::BRCC, DL, Op.getValueType(), Chain, LHS, RHS,
+      DAG.getConstant(CC, DL, LHS.getValueType()),
+      DAG.getNode(EVMISD::WRAPPER, DL, getPointerTy(DAG.getDataLayout()), tba));
+}
+
+SDValue EVMTargetLowering::LowerBR(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Dest = Op.getOperand(1);
+  SDLoc DL(Op);
+
+  // get the blockaddress
+  BasicBlockSDNode* bbsd = cast<BasicBlockSDNode>(Dest);
+  const BasicBlock *bb = bbsd->getBasicBlock()->getBasicBlock();
+  const BlockAddress *ba = BlockAddress::get(const_cast<BasicBlock *>(bb));
+
+  SDValue tba = DAG.getTargetBlockAddress(ba, MVT::i256);
+  return DAG.getNode(
+      ISD::BRIND, DL, Op.getValueType(), Chain,
+      DAG.getNode(EVMISD::WRAPPER, DL, getPointerTy(DAG.getDataLayout()), tba));
 }
 
 SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
@@ -302,8 +325,9 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   default:
     llvm_unreachable("unimplemented lowering operation,");
+  case ISD::BR:
+    return LowerBR(Op, DAG);
   case ISD::BR_CC:
-    // TODO: this can be used to expand.
     return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
     return LowerSELECT_CC(Op, DAG);
