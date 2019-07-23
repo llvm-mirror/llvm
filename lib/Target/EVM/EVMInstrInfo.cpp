@@ -73,7 +73,7 @@ bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   return false;
 }
 
-MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr& MI) const {
+MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr &MI) const {
   MachineBasicBlock* MBB = MI.getParent();
   MachineFunction *MF = MBB->getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
@@ -90,10 +90,23 @@ MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr& MI) const {
   MachineOperand &MO = DefMI->getOperand(1);
 
   // We do not do indirect jump as well.
-  if (!MO.isMBB()) {
+  if (!MO.isBlockAddress()) {
     return nullptr;
   }
-  return MO.getMBB();
+
+  // we are going to use a very naive way to map BasicBlock to MachineBasicBlock
+  // -- let me know if you can find a better way
+  const BasicBlock* bb = MO.getBlockAddress()->getBasicBlock();
+
+  for (MachineFunction::iterator i = MF->begin(); i != MF->end(); ++i) {
+    MachineBasicBlock &MBBB = *i;
+    const BasicBlock* bbb = MBBB.getBasicBlock();
+    if (bb == bbb) {
+      return &MBBB;
+    }
+  }
+
+  return nullptr;
 }
 
 // We copied it from BPF backend. It seems to be quite incompleted,
@@ -124,17 +137,15 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       return true;
     case EVM::JUMP_r: {
       MachineBasicBlock *TMBB;
-      if (MI.getOperand(0).isReg()) {
-        MachineBasicBlock* jumpTarget = findJumpTarget(MI);
+      assert(MI.getOperand(0).isReg());
 
-        // bailout if we cannot find it.
-        if (jumpTarget) {
-          TMBB = jumpTarget;
-        } else {
-          return true;
-        }
+      MachineBasicBlock *jumpTarget = findJumpTarget(MI);
+
+      // bailout if we cannot find it.
+      if (jumpTarget) {
+        TMBB = jumpTarget;
       } else {
-        TMBB = MI.getOperand(0).getMBB();
+        return true;
       }
 
       if (!HaveCond) TBB = TMBB;
@@ -147,15 +158,12 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       Cond.push_back(MachineOperand::CreateImm(true));
       Cond.push_back(MI.getOperand(0));
 
-      if (MI.getOperand(1).isReg()) {
-        MachineBasicBlock *jumpTarget = findJumpTarget(MI);
-        if (jumpTarget) {
-          TBB = jumpTarget;
-        } else {
-          return true;
-        }
+      assert(MI.getOperand(1).isReg());
+      MachineBasicBlock *jumpTarget = findJumpTarget(MI);
+      if (jumpTarget) {
+        TBB = jumpTarget;
       } else {
-        TBB = MI.getOperand(1).getMBB();
+        return true;
       }
       HaveCond = true;
       break;

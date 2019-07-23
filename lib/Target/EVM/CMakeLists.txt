@@ -31,6 +31,7 @@ add_llvm_target(EVMCodeGen
   EVMPrepareForLiveIntervals.cpp
   EVMArgumentMove.cpp
   EVMExpandPseudos.cpp
+  EVMExpandFramePointer.cpp
   EVMFinalization.cpp
   )
 

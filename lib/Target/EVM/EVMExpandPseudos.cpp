@@ -184,8 +184,6 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
       MachineInstr *MI = &*I++; 
       unsigned opcode = MI->getOpcode();
 
-      Changed |= handleFramePointer(MI);
-
       switch (opcode) {
         case EVM::pPUTLOCAL_r:
         case EVM::pGETLOCAL_r:

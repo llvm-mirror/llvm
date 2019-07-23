@@ -109,8 +109,9 @@ void EVMPassConfig::addPreEmitPass() {
   // construct stack arguments and move them to the correct location.
   addPass(createEVMArgumentMove());
 
-  // We use a custom pass to expand pseudos at a later pahse
-  addPass(createEVMExpandPseudos());
+  // we are going to eliminate $fp at this point, so subsequent passes only
+  // deals with virtual registers.
+  addPass(createEVMExpandFramePointer());
 
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(createEVMPrepareStackification());
@@ -121,6 +122,9 @@ void EVMPassConfig::addPreEmitPass() {
     // with an explicit memory location for storage.
     addPass(createEVMVRegToMem());
   }
+
+  // We use a custom pass to expand pseudos at a later pahse
+  addPass(createEVMExpandPseudos());
 
   // This is the the pass we use to explicitly convert instructions in the
   // reg-based form to stack-based form. Note that this pass neither alters the
