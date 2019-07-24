@@ -134,6 +134,8 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
   bool Changed = false;
   MachineBasicBlock &EntryMBB = MF.front();
   MachineBasicBlock::iterator InsertPt = EntryMBB.end();
@@ -147,6 +149,14 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
       MachineOperand &MO = MI.getOperand(1);
       unsigned index = MO.getImm();
       index2mi.insert(std::pair<unsigned, MachineInstr *>(index, &MI));
+
+      unsigned reg = MI.getOperand(0).getReg();
+
+      LLVM_DEBUG({
+        bool IsDead = MRI.use_empty(reg);
+        assert(!IsDead &&
+               "The case of stack argument not being used is unimplemented");
+      });
     }
   }
 
