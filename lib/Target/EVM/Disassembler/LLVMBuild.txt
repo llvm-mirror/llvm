@@ -1,4 +1,4 @@
-;===- ./lib/Target/EVM/LLVMBuild.txt -------------------------*- Conf -*--===;
+;===- ./lib/Target/AVR/Disassembler/LLVMBuild.txt --------------*- Conf -*--===;
 ;
 ; Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 ; See https://llvm.org/LICENSE.txt for license information.
@@ -14,19 +14,9 @@
 ;
 ;===------------------------------------------------------------------------===;
 
-[common]
-subdirectories = InstPrinter TargetInfo MCTargetDesc Disassembler
-
 [component_0]
-type = TargetGroup
-name = EVM
-parent = Target
-has_asmprinter = 1
-
-[component_1]
 type = Library
-name = EVMCodeGen
-parent = EVM
-required_libraries = AsmPrinter Core CodeGen MC EVMAsmPrinter EVMDesc
-  EVMInfo SelectionDAG Support Target
+name = EVMDisassembler
+parent =EVM 
+required_libraries = MCDisassembler EVMInfo Support
 add_to_library_groups = EVM
