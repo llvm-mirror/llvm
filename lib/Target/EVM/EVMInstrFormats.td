@@ -21,6 +21,7 @@ class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
     : StackRel, Instruction {
 
   field bits<8> Inst = inst;
+  field bits<64> SoftFail = 0;
   string StackBased = stack;
   string BaseName    = NAME;
   dag OutOperandList = oops;
@@ -29,6 +30,7 @@ class EVMInst<dag oops, dag iops, list<dag> pattern, string stack,
   let Namespace      = "EVM";
   let AsmString      = asmstr;
   let Pattern        = pattern;
+  let Size           = 1;
 
   let mayLoad        = 0;
   let mayStore       = 0;

@@ -356,11 +356,8 @@ let isCall = 1, isBarrier = 1 in {
 // pJUMPSUB, as it returns an value so as to not break the 
 // consistency. The original JUMP instr can be used in
 // pJUMPSUBVOID_r.
-defm CALLRET : RSInst<(outs GPR:$retval), (ins brtarget:$dst),
-                      [], "JUMP_r \t$dst", "JUMP", 0x56, 8>;
-defm CALLVOID :
-RSInst<(outs), (ins brtarget:$dst), [],
-       "JUMP_r \t$dst", "JUMP", 0x56, 8>;
+def CALLRET : EVMPseudo<(outs GPR:$retval), (ins brtarget:$dst), []>;
+def CALLVOID : EVMPseudo<(outs), (ins brtarget:$dst), []>;
 }
 
 defm PC       : Inst_0_1<"PC",
@@ -452,7 +449,7 @@ def DUP6:  EVMInst<(outs), (ins), [], "true", "DUP6",  0x85, 3>;
 def DUP7:  EVMInst<(outs), (ins), [], "true", "DUP7",  0x86, 3>;
 def DUP8:  EVMInst<(outs), (ins), [], "true", "DUP8",  0x87, 3>;
 def DUP9:  EVMInst<(outs), (ins), [], "true", "DUP9",  0x88, 3>;
-def DUP10: EVMInst<(outs), (ins), [], "true", "DUP10", 0x88, 3>;
+def DUP10: EVMInst<(outs), (ins), [], "true", "DUP10", 0x89, 3>;
 def DUP11: EVMInst<(outs), (ins), [], "true", "DUP11", 0x8a, 3>;
 def DUP12: EVMInst<(outs), (ins), [], "true", "DUP12", 0x8b, 3>;
 def DUP13: EVMInst<(outs), (ins), [], "true", "DUP13", 0x8c, 3>;
