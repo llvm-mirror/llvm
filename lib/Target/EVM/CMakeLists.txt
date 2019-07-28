@@ -1,5 +1,6 @@
 set(LLVM_TARGET_DEFINITIONS EVM.td)
 
+tablegen(LLVM EVMGenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM EVMGenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM EVMGenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM EVMGenInstrInfo.inc -gen-instr-info)
@@ -36,6 +37,8 @@ add_llvm_target(EVMCodeGen
   EVMFinalization.cpp
   )
 
+
+add_subdirectory(AsmParser)
 add_subdirectory(InstPrinter)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)

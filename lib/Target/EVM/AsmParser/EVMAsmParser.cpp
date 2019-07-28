@@ -8,8 +8,6 @@
 
 #include "EVM.h"
 #include "EVMRegisterInfo.h"
-#include "MCTargetDesc/EVMMCELFStreamer.h"
-#include "MCTargetDesc/EVMMCExpr.h"
 #include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "TargetInfo/EVMTargetInfo.h"
 
@@ -76,6 +74,32 @@ public:
   MCAsmLexer &getLexer() const { return Parser.getLexer(); }
 };
 
+bool EVMAsmParser::ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
+                                 SMLoc &EndLoc) {
+  return false;
+}
+
+bool EVMAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                                    SMLoc NameLoc, OperandVector &Operands) {
+  return false;
+}
+
+bool EVMAsmParser::ParseDirective(AsmToken DirectiveID) {
+  return false;
+}
+
+bool EVMAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
+                                           OperandVector &Operands,
+                                           MCStreamer &Out, uint64_t &ErrorInfo,
+                                           bool MatchingInlineAsm) {
+  return false;
+}
+
+unsigned EVMAsmParser::validateTargetOperandClass(MCParsedAsmOperand &Op,
+                                                  unsigned Kind) {
+  return 0;
+}
+
 /// An parsed EVM assembly operand.
 class EVMOperand : public MCParsedAsmOperand {
   typedef MCParsedAsmOperand Base;
@@ -104,53 +128,12 @@ public:
 
 public:
   void addRegOperands(MCInst &Inst, unsigned N) const {
-    assert(Kind == k_Register && "Unexpected operand kind");
-    assert(N == 1 && "Invalid number of operands!");
-
-    Inst.addOperand(MCOperand::createReg(getReg()));
   }
 
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
-    // Add as immediate when possible
-    if (!Expr)
-      Inst.addOperand(MCOperand::createImm(0));
-    else if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr))
-      Inst.addOperand(MCOperand::createImm(CE->getValue()));
-    else
-      Inst.addOperand(MCOperand::createExpr(Expr));
   }
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
-    assert(Kind == k_Immediate && "Unexpected operand kind");
-    assert(N == 1 && "Invalid number of operands!");
-
-    const MCExpr *Expr = getImm();
-    addExpr(Inst, Expr);
-  }
-
-  /// Adds the contained reg+imm operand to an instruction.
-  void addMemriOperands(MCInst &Inst, unsigned N) const {
-    assert(Kind == k_Memri && "Unexpected operand kind");
-    assert(N == 2 && "Invalid number of operands");
-
-    Inst.addOperand(MCOperand::createReg(getReg()));
-    addExpr(Inst, getImm());
-  }
-
-  void addImmCom8Operands(MCInst &Inst, unsigned N) const {
-    assert(N == 1 && "Invalid number of operands!");
-    // The operand is actually a imm8, but we have its bitwise
-    // negation in the assembly source, so twiddle it here.
-    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
-    Inst.addOperand(MCOperand::createImm(~(uint8_t)CE->getValue()));
-  }
-
-  bool isImmCom8() const {
-    if (!isImm()) return false;
-    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
-    if (!CE) return false;
-    int64_t Value = CE->getValue();
-    return isUInt<8>(Value);
   }
 
   bool isReg() const { return Kind == k_Register; }
@@ -241,5 +224,13 @@ public:
 
 } // end anonymous namespace.
 
+extern "C" void LLVMInitializeEVMAsmParser() {
+  RegisterMCAsmParser<EVMAsmParser> X(getTheEVMTarget());
+}
+
 // Auto-generated Match Functions
+#define GET_REGISTER_MATCHER
+#define GET_MATCHER_IMPLEMENTATION
+#include "EVMGenAsmMatcher.inc"
+
 
