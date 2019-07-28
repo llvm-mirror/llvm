@@ -1,0 +1,101 @@
+import("//llvm/utils/TableGen/tablegen.gni")
+
+tablegen("EVMGenCallingConv") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-callingconv" ]
+  td_file = "EVM.td"
+}
+
+tablegen("EVMGenDAGISel") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-dag-isel" ]
+  td_file = "EVM.td"
+}
+
+tablegen("EVMGenFastISel") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-fast-isel" ]
+  td_file = "EVM.td"
+}
+
+tablegen("EVMGenGlobalISel") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-global-isel" ]
+  td_file = "EVM.td"
+}
+
+tablegen("EVMGenMCPseudoLowering") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-pseudo-lowering" ]
+  td_file = "EVM.td"
+}
+
+tablegen("EVMGenRegisterBank") {
+  visibility = [ ":LLVMEVMCodeGen" ]
+  args = [ "-gen-register-bank" ]
+  td_file = "EVM.td"
+}
+
+static_library("LLVMEVMCodeGen") {
+  deps = [
+    ":EVMGenCallingConv",
+    ":EVMGenDAGISel",
+    ":EVMGenFastISel",
+    ":EVMGenGlobalISel",
+    ":EVMGenMCPseudoLowering",
+    ":EVMGenRegisterBank",
+    "MCTargetDesc",
+    "TargetInfo",
+    "//llvm/include/llvm/Config:llvm-config",
+    "//llvm/lib/Analysis",
+    "//llvm/lib/CodeGen",
+    "//llvm/lib/CodeGen/AsmPrinter",
+    "//llvm/lib/CodeGen/GlobalISel",
+    "//llvm/lib/CodeGen/SelectionDAG",
+    "//llvm/lib/IR",
+    "//llvm/lib/MC",
+    "//llvm/lib/Support",
+    "//llvm/lib/Target",
+  ]
+  include_dirs = [ "." ]
+  sources = [
+    "EVMAsmPrinter.cpp",
+    "EVMFrameLowering.cpp",
+    "EVMInstrInfo.cpp",
+    "EVMISelDAGToDAG.cpp",
+    "EVMISelLowering.cpp",
+    "EVMMCInstLower.cpp",
+    "EVMRegisterInfo.cpp",
+    "EVMSubtarget.cpp",
+    "EVMTargetMachine.cpp",
+    "EVMTargetObjectFile.cpp",
+    "EVMCallTransformation.cpp",
+    "EVMVRegToMem.cpp",
+    "EVMPrepareStackification.cpp",
+    "EVMStackification.cpp",
+    "EVMConvertRegToStack.cpp",
+    "EVMShrinkPush.cpp",
+    "EVMPrepareForLiveIntervals.cpp",
+    "EVMArgumentMove.cpp",
+    "EVMExpandPseudos.cpp",
+    "EVMExpandFramePointer.cpp",
+    "EVMFinalization.cpp",
+  ]
+}
+
+# This is a bit different from most build files: Due to this group
+# having the directory's name, "//llvm/lib/Target/EVM" will refer to this
+# target, which pulls in the code in this directory *and all subdirectories*.
+# For most other directories, "//llvm/lib/Foo" only pulls in the code directly
+# in "llvm/lib/Foo". The forwarding targets in //llvm/lib/Target expect this
+# different behavior.
+group("EVM") {
+  deps = [
+    ":LLVMEVMCodeGen",
+    "AsmParser",
+    "Disassembler",
+    "MCTargetDesc",
+    "TargetInfo",
+    "InstPrinter",
+  ]
+}

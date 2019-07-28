@@ -1,0 +1,23 @@
+import("//llvm/utils/TableGen/tablegen.gni")
+
+tablegen("EVMGenAsmMatcher") {
+  visibility = [ ":AsmParser" ]
+  args = [ "-gen-asm-matcher" ]
+  td_file = "../EVM.td"
+}
+
+static_library("AsmParser") {
+  output_name = "LLVMEVMAsmParser"
+  deps = [
+    ":EVMGenAsmMatcher",
+    "//llvm/lib/MC",
+    "//llvm/lib/MC/MCParser",
+    "//llvm/lib/Support",
+    "//llvm/lib/Target/EVM/MCTargetDesc",
+    "//llvm/lib/Target/EVM/TargetInfo",
+  ]
+  include_dirs = [ ".." ]
+  sources = [
+    "EVMAsmParser.cpp",
+  ]
+}
