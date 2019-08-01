@@ -76,7 +76,7 @@ public:
 
 bool EVMAsmParser::ParseRegister(unsigned &RegNo, SMLoc &StartLoc,
                                  SMLoc &EndLoc) {
-  return false;
+  llvm_unreachable("EVM does not have registers.");
 }
 
 bool EVMAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,

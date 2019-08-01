@@ -87,9 +87,18 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   if (opcode >= 0x60 && opcode <= 0x7f) {
     unsigned length = opcode - 0x60 + 1;
     unsigned opcode = get_push_opcode(length);
-     
-    for (unsigned i = 0; i < length; ++i) {
+    Size = 1 + length;
 
+    auto &Op = Instr.getOperand(1);
+    if (length > 8) {
+      // we will have to use a larger container than 64bit.
+      llvm_unreachable("PUSH operand too large, unimplemented");
+    } else {
+      uint64_t imm = 0;
+      for (unsigned i = 0; i < length; ++i) {
+        imm = (imm << i) + Bytes[1 + i];
+      }
+      Op.setImm(imm);
     }
 
     return DecodeStatus::Success;
