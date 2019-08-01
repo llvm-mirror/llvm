@@ -70,21 +70,6 @@ unsigned get_imm_size(int64_t imm) {
 
 }
 
-static int get_push_opcode(unsigned s) {
-  switch (s) {
-    default:
-      llvm_unreachable("incorrect size or unimplemented");
-    case 1: return EVM::PUSH1;
-    case 2: return EVM::PUSH2;
-    case 3: return EVM::PUSH3;
-    case 4: return EVM::PUSH4;
-    case 5: return EVM::PUSH5;
-    case 6: return EVM::PUSH6;
-    case 7: return EVM::PUSH7;
-    case 8: return EVM::PUSH8;
-  }
-}
-
 bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Shrink PUSH **********\n"
@@ -107,7 +92,7 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
         if (MO.isImm()) {
           int64_t imm = MO.getImm();
           unsigned s = get_imm_size(imm);
-          int new_opcode = get_push_opcode(s);
+          int new_opcode = EVMSubtarget::get_push_opcode(s);
           MI.setDesc(TII.get(new_opcode));
           if (imm < 0) {
             // append SIGNEXTEND after MI.
@@ -129,7 +114,7 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
 
         // EIP-170
         if (MO.isMBB() || MO.isGlobal() || MO.isBlockAddress()) {
-          int new_opcode = get_push_opcode(2);
+          int new_opcode = EVMSubtarget::get_push_opcode(2);
           MI.setDesc(TII.get(new_opcode));
           Changed = true;
         }

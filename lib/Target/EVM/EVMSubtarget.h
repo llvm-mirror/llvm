@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMSUBTARGET_H
 #define LLVM_LIB_TARGET_EVM_EVMSUBTARGET_H
 
+#include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVMFrameLowering.h"
 #include "EVMISelLowering.h"
 #include "EVMInstrInfo.h"
@@ -72,6 +73,29 @@ public:
 
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
+  }
+
+  static unsigned get_push_opcode(unsigned length) {
+    switch (length) {
+    default:
+      llvm_unreachable("incorrect size or unimplemented");
+    case 1:
+      return EVM::PUSH1;
+    case 2:
+      return EVM::PUSH2;
+    case 3:
+      return EVM::PUSH3;
+    case 4:
+      return EVM::PUSH4;
+    case 5:
+      return EVM::PUSH5;
+    case 6:
+      return EVM::PUSH6;
+    case 7:
+      return EVM::PUSH7;
+    case 8:
+      return EVM::PUSH8;
+    }
   }
 
   // Memory layout
