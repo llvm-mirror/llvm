@@ -72,6 +72,7 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   if (opcode >= 0x60 && opcode <= 0x7f) {
     unsigned length = opcode - 0x60 + 1;
     unsigned opcode = EVMSubtarget::get_push_opcode(length);
+    Instr.setOpcode(opcode);
     Size = 1 + length;
 
     auto &Op = Instr.getOperand(1);
@@ -89,7 +90,7 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
     return DecodeStatus::Success;
   }
 
-  //Result = decodeInstruction(DecoderTable8, MI, Insn, Address, this, STI);
+  Result = decodeInstruction(DecoderTable8, Instr, Bytes[0], Address, this, STI);
   LLVM_DEBUG({
     if (Result != DecodeStatus::Success) {
       dbgs() << "Unsuccessfully decoding at: " << Address << "\n";
