@@ -450,11 +450,11 @@ defm CREATE : Inst_3_1<"CREATE",
                        0xf0, 32000>;
 }
 
-//let isCall = 1 in {
-// We should compute the cost of CALL separately.
-//defm CALL   : Inst_7_1<"CALL", [], 0xf1, 0>;
-//defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
-//}
+let isCall = 1 in {
+// TODO: We should compute the cost of CALL separately.
+defm CALL   : Inst_7_1<"CALL", [], 0xf1, 0>;
+defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
+}
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
 defm RETURN : RSInst<(outs), (ins), [],
@@ -462,9 +462,9 @@ defm RETURN : RSInst<(outs), (ins), [],
 }
 
 let isCall = 1 in {
-//defm DELEGATECALL : Inst_6_1<"DELEGATECALL", [], 0xf4, 0>;
-//defm CALLBLACKBOX : Inst_6_1<"CALLBLACKBLOX", [], 0xf5, 0>;
-//defm STATICCALL : Inst_7_1<"STATICCALL", [], 0xfa, 40>;
+defm DELEGATECALL : Inst_6_1<"DELEGATECALL", [], 0xf4, 0>;
+defm CALLBLACKBOX : Inst_6_1<"CALLBLACKBLOX", [], 0xf5, 0>;
+defm STATICCALL : Inst_7_1<"STATICCALL", [], 0xfa, 40>;
 }
 
 let hasSideEffects = 1 in {

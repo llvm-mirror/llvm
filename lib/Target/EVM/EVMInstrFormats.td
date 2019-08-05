@@ -156,4 +156,17 @@ multiclass Inst_3_1<string name, list<dag> pattern, bits<8> inst, int cost>
              name, inst, cost>;
 
 // delta = 6, alpha = 1
-// TODO
+multiclass Inst_6_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2, GPR:$src3,
+                                   GPR:$src4, GPR:$src5, GPR:$src6),
+             pattern,
+             !strconcat(name, " \t$dst = $src1, $src2, $src3, $src4, $src5, $src6"),
+             name, inst, cost>;
+
+// delta = 7, alpha = 1
+multiclass Inst_7_1<string name, list<dag> pattern, bits<8> inst, int cost>
+    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2, GPR:$src3,
+                                   GPR:$src4, GPR:$src5, GPR:$src6, GPR:$src7),
+             pattern,
+             !strconcat(name, " \t$dst = $src1, $src2, $src3, $src4, $src5, $src6, $src7"),
+             name, inst, cost>;
