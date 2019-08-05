@@ -57,23 +57,22 @@ FunctionPass *llvm::createEVMPrepareStackification() {
   return new EVMPrepareStackification();
 }
 
+/*
 static bool hasArgumentDef(unsigned Reg, const MachineRegisterInfo &MRI) {
   for (const auto &Def : MRI.def_instructions(Reg))
     if (Def.getOpcode() == EVM::pSTACKARG_r)
       return true;
   return false;
 }
+*/
 
 bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Prepare Stackification **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
-  bool Changed = false;
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
-  MachineBasicBlock &Entry = *MF.begin();
 
   // We don't preserve SSA form.
   MRI.leaveSSA();

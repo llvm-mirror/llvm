@@ -116,10 +116,6 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                  MachineBasicBlock *&FBB,
                                  SmallVectorImpl<MachineOperand> &Cond,
                                  bool AllowModify) const {
-
-  MachineFunction *MF = MBB.getParent();
-  MachineRegisterInfo &MRI = MF->getRegInfo();
-  
   bool HaveCond = false;
   bool lastJump = false;
   MachineBasicBlock::iterator I = MBB.terminators().begin();

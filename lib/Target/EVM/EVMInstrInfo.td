@@ -101,17 +101,6 @@ SDNode<"EVMISD::SIGNEXTEND", SDT_EVMSignextend, []>;
 def EVMByte :
 SDNode<"EVMISD::BYTE", SDT_EVMArithBinary, []>;
 
-def EVMJump :
-SDNode<"EVMISD::JUMP", SDTNone, [SDNPHasChain]>;
-
-def EVMJumpi :
-SDNode<"EVMISD::JUMPI", SDT_EVMCondJump,
-       [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
-
-def EVMJumpif :
-SDNode<"EVMISD::JUMPIF", SDT_EVMCondJump,
-       [SDNPHasChain, SDNPOutGlue, SDNPInGlue]>;
-
 def EVMSwap :
 SDNode<"EVMISD::SWAP", SDT_EVMTwoOpnd, []>;
 
@@ -351,15 +340,6 @@ defm JUMPI : RSInst<(outs), (ins GPR:$src, GPR:$dst), [],
 }
 }
 
-let isCall = 1, isBarrier = 1 in {
-// We have a second version of JUMP, which will be used in
-// pJUMPSUB, as it returns an value so as to not break the 
-// consistency. The original JUMP instr can be used in
-// pJUMPSUBVOID_r.
-def CALLRET : EVMPseudo<(outs GPR:$retval), (ins brtarget:$dst), []>;
-def CALLVOID : EVMPseudo<(outs), (ins brtarget:$dst), []>;
-}
-
 defm PC       : Inst_0_1<"PC",
                          [(set GPR:$dst, (int_evm_getpc))],
                          0x58, 2>;
@@ -373,14 +353,10 @@ defm GAS      : Inst_0_1<"GAS",
 defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
 
 let BaseName = "PUSH32" in {
-
 let isCodeGenOnly = 1 in {
 def PUSH32_r :
   EVMInst<(outs GPR:$dst), (ins I256Imm:$src), [(set GPR:$dst, imm:$src)],
           "false", "PUSH32_r \t$dst, $src", 0x7f, 3>;
-def PUSHBB_r :
-  EVMInst<(outs GPR:$dst), (ins brtarget:$src), [],
-          "false", "PUSHBB_r \t$dst, $src", 0x7f, 3>;
 }
 def PUSH32 :
   EVMInst<(outs), (ins I256Imm:$src), [], "true", "PUSH32 \t$src", 0x7f, 3>;
