@@ -181,9 +181,13 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
   // Shouldn't be a fall through.
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
+  MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
+  unsigned tbbReg = RegInfo.createVirtualRegister(&EVM::GPRRegClass);
+
+  BuildMI(&MBB, DL, get(EVM::PUSH32_r), tbbReg).addMBB(TBB);
   if (Cond.empty()) {
     assert(!FBB && "Unconditional branch with multiple successors!");
-    BuildMI(&MBB, DL, get(EVM::JUMP_r)).addMBB(TBB);
+    BuildMI(&MBB, DL, get(EVM::JUMP_r)).addReg(tbbReg);
     return 1;
   }
 
@@ -191,12 +195,13 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   assert(Cond[0].getImm() && "insertBranch does not accept false parameter");
 
-  BuildMI(&MBB, DL, get(EVM::JUMPI_r)).add(Cond[1]).addMBB(TBB);
+  BuildMI(&MBB, DL, get(EVM::JUMPI_r)).add(Cond[1]).addReg(tbbReg);
 
   if (!FBB)
     return 1;
 
-  BuildMI(&MBB, DL, get(EVM::JUMP_r)).addMBB(FBB);
+  unsigned fbbReg = RegInfo.createVirtualRegister(&EVM::GPRRegClass);
+  BuildMI(&MBB, DL, get(EVM::JUMP_r)).addReg(fbbReg);
   return 2;
 }
 

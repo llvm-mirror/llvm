@@ -39,11 +39,6 @@ private:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  const TargetInstrInfo* TII;
-  const EVMSubtarget* ST;
-
-  unsigned getNewRegister(MachineInstr* MI) const;
-
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
 } // end anonymous namespace
