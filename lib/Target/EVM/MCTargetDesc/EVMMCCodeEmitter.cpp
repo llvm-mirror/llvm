@@ -158,7 +158,7 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
     } else {
       assert(push_size == 2 && "Static Jump operands are 2 bytes");
       assert(opnd.isExpr() && "PUSH operand should be either Imm or Expr");
-      MCFixupKind Kind = MCFixupKind(FK_Data_2);
+      MCFixupKind Kind = MCFixupKind(FK_SecRel_2);
       Fixups.push_back(MCFixup::create(0, opnd.getExpr(), Kind, MI.getLoc()));
     }
   }
