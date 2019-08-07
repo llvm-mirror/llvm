@@ -25,9 +25,9 @@ protected:
 public:
   virtual ~MCEVMObjectTargetWriter();
 
-  virtual Triple::ObjectFormatType getFormat() const { return Triple::EVM; }
+  virtual Triple::ObjectFormatType getFormat() const { return Triple::EVMBinary; }
   static bool classof(const MCObjectTargetWriter *W) {
-    return W->getFormat() == Triple::EVM;
+    return W->getFormat() == Triple::EVMBinary;
   }
 
   virtual unsigned getRelocType(const MCValue &Target,

@@ -55,6 +55,10 @@ unsigned EVMObjectWriter::getRelocType(const MCValue &Target,
   llvm_unreachable("getRelocType implementation unfinished");
 }
 
-std::unique_ptr<MCObjectTargetWriter> llvm::createEVMObjectWriter() {
-  return llvm::make_unique<EVMObjectWriter>();
+/*
+std::unique_ptr<MCObjectWriter>
+llvm::createEVMObjectWriter(std::unique_ptr<MCEVMObjectTargetWriter> MOTW,
+                             raw_pwrite_stream &OS) {
+  return llvm::make_unique<EVMObjectWriter>(std::move(MOTW), OS);
 }
+*/
