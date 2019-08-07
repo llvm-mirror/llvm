@@ -167,6 +167,8 @@ ObjectFile::createObjectFile(MemoryBufferRef Object, file_magic Type) {
     return createXCOFFObjectFile(Object, Binary::ID_XCOFF64);
   case file_magic::wasm_object:
     return createWasmObjectFile(Object);
+  case file_magic::evm_executable:
+    llvm_unreachable("evm_executable not implemented");
   }
   llvm_unreachable("Unexpected Object File Type");
 }
