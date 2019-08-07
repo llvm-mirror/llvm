@@ -314,6 +314,7 @@ const unsigned EVM_SYMBOL_UNDEFINED = 0x10;
 const unsigned EVM_SYMBOL_EXPORTED = 0x20;
 const unsigned EVM_SYMBOL_EXPLICIT_NAME = 0x40;
 
+/* // removed to make it compile.
 #define EVM_RELOC(name, value) name = value,
 
 enum : unsigned {
@@ -321,6 +322,7 @@ enum : unsigned {
 };
 
 #undef EVM_RELOC
+*/
 
 // Subset of types that a value can have
 enum class ValType {

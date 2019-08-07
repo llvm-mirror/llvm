@@ -4,4 +4,5 @@ add_llvm_library(LLVMEVMDesc
   EVMMCCodeEmitter.cpp
   EVMTargetStreamer.cpp
   EVMELFObjectWriter.cpp
+  EVMObjectWriter.cpp
   )
