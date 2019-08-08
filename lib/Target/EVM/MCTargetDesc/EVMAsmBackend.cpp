@@ -70,7 +70,9 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
 
 std::unique_ptr<MCObjectTargetWriter>
 EVMAsmBackend::createObjectTargetWriter() const {
-  return createEVMELFObjectWriter(0);
+  llvm_unreachable("Replace ELF with EVM's own Object");
+  //return createEVMELFObjectWriter(0);
+  return createEVMObjectWriter();
 }
 
 MCAsmBackend *llvm::createEVMAsmBackend(const Target &T,

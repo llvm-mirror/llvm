@@ -17,6 +17,7 @@
 #include "llvm/Support/DataTypes.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 
 #include <memory>
 
@@ -50,6 +51,7 @@ MCAsmBackend *createEVMAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                   const MCTargetOptions &Options);
 
 std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI);
+std::unique_ptr<MCObjectTargetWriter> createEVMObjectWriter();
 
 MCTargetStreamer *
 createEVMObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI);
