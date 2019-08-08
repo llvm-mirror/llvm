@@ -47,6 +47,8 @@ add_llvm_component_library(LLVMMC
   MCValue.cpp
   MCWasmObjectTargetWriter.cpp
   MCWasmStreamer.cpp
+  MCEVMObjectTargetWriter.cpp
+  MCEVMStreamer.cpp
   MCWin64EH.cpp
   MCWinCOFFStreamer.cpp
   MCWinEH.cpp
