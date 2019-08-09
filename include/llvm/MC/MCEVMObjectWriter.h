@@ -41,7 +41,7 @@ public:
 /// \returns The constructed object writer.
 std::unique_ptr<MCObjectWriter>
 createEVMObjectWriter(std::unique_ptr<MCEVMObjectTargetWriter> MOTW,
-                       raw_pwrite_stream &OS);
+                      raw_pwrite_stream &OS);
 
 } // namespace llvm
 

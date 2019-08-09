@@ -56,6 +56,6 @@ unsigned EVMObjectWriter::getRelocType(const MCValue &Target,
 }
 
 std::unique_ptr<MCObjectTargetWriter>
-createEVMObjectWriter() {
+llvm::createEVMObjectWriter() {
   return llvm::make_unique<EVMObjectWriter>();
 }
