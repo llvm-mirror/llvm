@@ -38,10 +38,9 @@ namespace {
 class EVMBinaryObjectWriter : public MCObjectWriter {
 public:
   EVMBinaryObjectWriter(std::unique_ptr<MCEVMObjectTargetWriter> MOTW,
-                   raw_pwrite_stream &OS) {}
+                   raw_pwrite_stream &OS) : W(OS, support::big) {}
 
 private:
-
   void recordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
                         const MCFragment *Fragment, const MCFixup &Fixup,
                         MCValue Target, uint64_t &FixedValue) override;
@@ -51,6 +50,7 @@ private:
 
   uint64_t writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
 
+  support::endian::Writer W;
 };
 
 } // end anonymous namespace
@@ -66,11 +66,21 @@ void EVMBinaryObjectWriter::recordRelocation(MCAssembler &Asm,
                                         const MCFragment *Fragment,
                                         const MCFixup &Fixup, MCValue Target,
                                         uint64_t &FixedValue) {
-  llvm_unreachable("unimplemented");
+  MCAsmBackend &Backend = Asm.getBackend();
+  bool IsPCRel = Backend.getFixupKindInfo(Fixup.getKind()).Flags &
+                 MCFixupKindInfo::FKF_IsPCRel;
+  if (IsPCRel){
+    llvm_unreachable("unimplemented");
+  }
+
 }
 
 uint64_t EVMBinaryObjectWriter::writeObject(MCAssembler &Asm,
                                        const MCAsmLayout &Layout) {
+  uint64_t StartOffset = 0;
+
+
+
   llvm_unreachable("unimplemented");
 }
 

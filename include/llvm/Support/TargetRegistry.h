@@ -518,6 +518,9 @@ public:
     case Triple::XCOFF:
       S = createXCOFFStreamer(Ctx, std::move(TAB), std::move(OW),
                               std::move(Emitter), RelaxAll);
+    case Triple::EVMBinary:
+        S = createEVMStreamer(Ctx, std::move(TAB), std::move(OW),
+                               std::move(Emitter), RelaxAll);
       break;
     }
     if (ObjectTargetStreamerCtorFn)
