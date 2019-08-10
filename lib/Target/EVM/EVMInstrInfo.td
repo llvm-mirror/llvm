@@ -136,6 +136,8 @@ def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 // Instructions
 //===----------------------------------------------------------------------===//
 
+defm STOP : Inst_0_0<"STOP", [], 0x00, 0>;
+
 // Arithmetic instructions ////////////////////////////////////////////////////
 let isCommutable = 1 in {
 defm ADD  : BinaryInst<add,  "ADD",  0x01, 3>;

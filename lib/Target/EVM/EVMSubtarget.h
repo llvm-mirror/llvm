@@ -99,12 +99,12 @@ public:
   }
 
   // Memory layout
-  unsigned getFreeMemoryPointer() const { return 64; }
+  unsigned getFreeMemoryPointer() const { return 0x40; }
   unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
   unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
   unsigned getIdentityContractAddress() const { return 4; }
   
-  // TODO: make sure this will not collide with out values.
+  // TODO: make sure this will not collide with our values.
   unsigned getFramePointerLocation() const { return 32; }
 
   // Constants

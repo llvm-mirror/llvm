@@ -52,12 +52,21 @@ public:
                         MCInst &Res) const override {}
 
   bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+
+private:
+  // Writes the smart contract initialization code. Reference:
+  // https://blog.openzeppelin.com/deconstructing-a-solidity-contract-part-ii-creation-vs-runtime-6b9d60ecb44c/
+  void appendHeader(raw_ostream &OS, uint64_t Count) const;
 };
 
 } // end anonymous namespace
 
 bool EVMAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
   return true;
+}
+
+void EVMAsmBackend::appendHeader(raw_ostream &OS, uint64_t Count) const {
+
 }
 
 void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
@@ -70,7 +79,6 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
 
 std::unique_ptr<MCObjectTargetWriter>
 EVMAsmBackend::createObjectTargetWriter() const {
-  //llvm_unreachable("Replace ELF with EVM's own Object");
   //return createEVMELFObjectWriter(0);
   return createEVMObjectWriter();
 }
