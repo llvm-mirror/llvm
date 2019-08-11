@@ -64,16 +64,34 @@ public:
     return LowerEVMMachineOperandToMCOperand(MO, MCOp, *this);
     }
 
+private:
   void emitInitFreeMemoryPointer() const;
-  void emitNonpayableCheck() const;
+  void emitNonPayableCheck(const Function &F, MCSymbol *CallDataUnpackerLabel) const;
   void emitRetrieveConstructorParameters() const;
   void emitConstructorBody() const;
   void emitCopyRuntimeCodeToMemory() const;
   void emitReturnRuntimeCode() const;
   void emitContractParameters() const;
   void emitShortCalldataCheck() const;
-  void emitFunctionSelector(Module* M) const;
+  void emitFunctionSelector(Module &M);
+
+  void emitFunctionWrapper(const Function &F);
+  void emitCallDataUnpacker(const Function &F,
+                            MCSymbol *CallDataUnpackerLabel);
+  void genearteFunctionBodyLabels(Module &M);
+
+  DenseMap<const Function*, MCSymbol *> funcWrapperMap;
+  DenseMap<const Function*, MCSymbol *> funcBodyMap;
 };
+}
+
+void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
+  for (const auto &F : M) {
+    MCSymbol *funcBodyLabel =
+      MMI->getContext().getOrCreateSymbol(F.getName() + "_funcbody");
+    this->funcBodyMap.insert(
+        std::pair<const Function *, MCSymbol *>(&F, funcBodyLabel));
+  }
 }
 
 void EVMAsmPrinter::emitInitFreeMemoryPointer() const {
@@ -84,14 +102,19 @@ void EVMAsmPrinter::emitInitFreeMemoryPointer() const {
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), STI);
 }
 
-void EVMAsmPrinter::emitNonpayableCheck() const {
+void EVMAsmPrinter::emitNonPayableCheck(const Function &F,
+                                        MCSymbol *CallDataUnpackerLabel) const {
   auto &STI = getSubtargetInfo();
 
   // Non-payable check
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLVALUE), STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::ISZERO), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x0010), STI);
+
+  const MCExpr *cdulabel =
+      MCSymbolRefExpr::create(CallDataUnpackerLabel,MMI->getContext());
+
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(cdulabel), STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
@@ -145,8 +168,10 @@ void EVMAsmPrinter::emitConstructorBody() const {
   // we might want to 
 }
 
-void EVMAsmPrinter::emitFunctionSelector(Module* M) const {
+void EVMAsmPrinter::emitFunctionSelector(Module &M) {
   auto &STI = getSubtargetInfo();
+
+  genearteFunctionBodyLabels(M);
 
   // extract first 4 bytes of calldata
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(0xffffffff), STI);
@@ -161,7 +186,7 @@ void EVMAsmPrinter::emitFunctionSelector(Module* M) const {
 
   // Try to match function name
   unsigned index = 0;
-  for (const auto &F : *M) {
+  for (const auto &F : M) {
     if (index != 0) {
       OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
     }
@@ -171,8 +196,17 @@ void EVMAsmPrinter::emitFunctionSelector(Module* M) const {
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), STI);
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::EQ), STI);
 
-    MCExpr* funcTag; // TODO
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(funcTag), STI);
+    // create a symbol for each function wrapper
+    MCSymbol *funcWrapperLabel =
+      MMI->getContext().getOrCreateSymbol(F.getName() + "_wrapper");
+    const MCExpr* funcWrapperLabelExpr = 
+      MCSymbolRefExpr::create(funcWrapperLabel, MMI->getContext());
+
+    this->funcWrapperMap.insert(
+        std::pair<const Function *, MCSymbol *>(&F, funcWrapperLabel));
+
+    OutStreamer->EmitInstruction(
+        MCInstBuilder(EVM::PUSH2).addExpr(funcWrapperLabelExpr), STI);
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), STI);
 
     ++ index;
@@ -209,13 +243,49 @@ void EVMAsmPrinter::emitContractParameters() const {
   // TODO
 }
 
+void EVMAsmPrinter::emitCallDataUnpacker(const Function &F,
+                                         MCSymbol *CallDataUnpackerLabel) {
+  auto &STI = getSubtargetInfo();
+
+  OutStreamer->EmitLabel(CallDataUnpackerLabel);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), STI);
+
+  // Call data unpacker needs to push parameters on to stack
+  for (auto &arg : F.args()) {
+    // TODO: special handling for addres types (masking out unnecessary bits)
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), STI);
+  }
+  
+  MCSymbol *funcBodyLabel = this->funcBodyMap[&F];
+  const MCExpr* funcBodyTag =
+      MCSymbolRefExpr::create(funcBodyLabel, MMI->getContext());
+
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(funcBodyTag), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMP), STI);
+}
+
+void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
+
+  MCSymbol *funcWrapperLabel = this->funcWrapperMap[&F];
+  OutStreamer->EmitLabel(funcWrapperLabel);
+
+  // This is used for inner jumping (between nonpayable check and unpacker)
+  MCSymbol *S =
+      MMI->getContext().getOrCreateSymbol(F.getName() + "_calldataunpacker");
+
+  emitNonPayableCheck(F, S);
+  emitCallDataUnpacker(F, S);
+}
+
 void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // Emit the skeleton of the asm file in text section.
   OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
   emitInitFreeMemoryPointer();
 
-  emitNonpayableCheck();
+  //emitNonPayableCheck();
   
   emitRetrieveConstructorParameters();
 
@@ -225,6 +295,11 @@ void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
 
   emitReturnRuntimeCode();
 
+  emitFunctionSelector(M);
+
+  for (const auto &F : M) {
+    emitFunctionWrapper(F);
+  }
 }
 
 //void EVMAsmPrinter::EmitEndOfAsmFile(Module &M) { }
@@ -252,10 +327,11 @@ void EVMAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
   case MachineOperand::MO_MachineBasicBlock:
     OS << *MO.getMBB()->getSymbol();
     break;
-  case MachineOperand::MO_BlockAddress:
+  case MachineOperand::MO_BlockAddress: {
     MCSymbol *Sym = GetBlockAddressSymbol(MO.getBlockAddress());
     Sym->print(OS, MAI);
     break;
+  }
   default:
     llvm_unreachable("Not implemented yet!");
   }
