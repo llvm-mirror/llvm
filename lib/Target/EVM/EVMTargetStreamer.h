@@ -14,12 +14,21 @@
 namespace llvm {
 
 class EVMTargetStreamer : public MCTargetStreamer {
+  void EmitInstruction(MCInst &Inst) {
+    // Scan for values.
+    for (unsigned i = Inst.getNumOperands(); i--;)
+      if (Inst.getOperand(i).isExpr())
+        visitUsedExpr(*Inst.getOperand(i).getExpr());
+  }
+}
+
+class EVMTargetStreamer : public EVMTargetStreamer {
 public:
   EVMTargetStreamer(MCStreamer &S);
   ~EVMTargetStreamer() override;
 };
 
-class EVMJsonTargetStreamer : public MCTargetStreamer {
+class EVMJsonTargetStreamer : public EVMTargetStreamer {
 public:
   EVMJsonTargetStreamer(MCStreamer &S);
   ~EVMJsonTargetStreamer() override;

@@ -44,6 +44,8 @@ public:
   void EmitStartOfAsmFile(Module &M) override;
   //void EmitEndOfAsmFile(Module &M) override;
 
+  //void EmitFunctionEntryLabel() override;
+
   StringRef getPassName() const override { return "EVM Assembly Printer"; }
 
   void EmitInstruction(const MachineInstr *MI) override;
@@ -63,9 +65,10 @@ public:
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp) const {
     return LowerEVMMachineOperandToMCOperand(MO, MCOp, *this);
     }
+  //bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
-  void emitInitFreeMemoryPointer() const;
+  void emitFreeMemoryPointer() const;
   void emitNonPayableCheck(const Function &F, MCSymbol *CallDataUnpackerLabel) const;
   void emitRetrieveConstructorParameters() const;
   void emitConstructorBody() const;
@@ -78,11 +81,45 @@ private:
   void emitFunctionWrapper(const Function &F);
   void emitCallDataUnpacker(const Function &F,
                             MCSymbol *CallDataUnpackerLabel);
+  void emitMemoryReturner(const Function &F) const;
   void genearteFunctionBodyLabels(Module &M);
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
+  MCSubtargetInfo *STI;
 };
+}
+
+/*
+bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+  // emit the function body label before we emit the function.
+  MCSymbol* funcBodySymbol = this->funcBodyMap[&MF.getFunction()];
+  OutStreamer->EmitLabel(funcBodySymbol);
+
+  return AsmPrinter::runOnMachineFunction(MF);
+}
+*/
+
+void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
+  // if the function does not return anything, skip.
+  Type* retType = F.getReturnType();
+  if (retType->isVoidTy()) {
+    return;
+  }
+
+  auto &STI = getSubtargetInfo();
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
+
+  emitFreeMemoryPointer();
+
+  // TODO:
+
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SUB), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x20), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ADD), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), STI);
 }
 
 void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
@@ -94,7 +131,7 @@ void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
   }
 }
 
-void EVMAsmPrinter::emitInitFreeMemoryPointer() const {
+void EVMAsmPrinter::emitFreeMemoryPointer() const {
     auto &STI = getSubtargetInfo();
     // Initialize the Free memory pointer
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x80), STI);
@@ -280,10 +317,12 @@ void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
 }
 
 void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
+  AsmPrinter::EmitStartOfAsmFile(M);
+  return;
   // Emit the skeleton of the asm file in text section.
   OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
-  emitInitFreeMemoryPointer();
+  emitFreeMemoryPointer();
 
   //emitNonPayableCheck();
   
