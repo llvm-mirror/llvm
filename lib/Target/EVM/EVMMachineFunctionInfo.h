@@ -66,18 +66,18 @@ public:
 
   void stackifyVReg(unsigned VReg) {
     assert(MF.getRegInfo().getUniqueVRegDef(VReg));
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    auto I = Register::virtReg2Index(VReg);
     if (I >= VRegStackified.size())
       VRegStackified.resize(I + 1);
     VRegStackified.set(I);
   }
 
   bool isVRegStackified(unsigned VReg) const {
-    if (TargetRegisterInfo::isPhysicalRegister(VReg)) {
+    if (Register::isPhysicalRegister(VReg)) {
       return false;
     }
 
-    auto I = TargetRegisterInfo::virtReg2Index(VReg);
+    auto I = Register::virtReg2Index(VReg);
     if (I >= VRegStackified.size())
       return false;
     return VRegStackified.test(I);

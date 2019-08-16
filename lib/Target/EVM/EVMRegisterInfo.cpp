@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
@@ -77,7 +78,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
   }
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
-  unsigned FrameReg = getFrameRegister(MF);
+  Register FrameReg = getFrameRegister(MF);
 
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) * 32;
 
@@ -136,7 +137,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
 */
 }
 
-unsigned
+Register
 EVMRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   // This will eventually be expaned
   return EVM::FP;

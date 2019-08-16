@@ -76,7 +76,7 @@ unsigned EVMVRegToMem::getLocalId(unsigned Reg) {
   auto P = Reg2Local.insert(std::make_pair(Reg, CurLocal));
   if (P.second){
     LLVM_DEBUG({
-      dbgs() << "Allocating vreg: %" << TargetRegisterInfo::virtReg2Index(Reg)
+      dbgs() << "Allocating vreg: %" << Register::virtReg2Index(Reg)
              << " to slot: " << CurLocal << "\n";
     });
     ++CurLocal;
@@ -149,7 +149,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
   // drops to their defs.
   BitVector UseEmpty(MRI.getNumVirtRegs());
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I){
-    UseEmpty[I] = MRI.use_empty(TargetRegisterInfo::index2VirtReg(I));
+    UseEmpty[I] = MRI.use_empty(Register::index2VirtReg(I));
   }
   
   // Visit each instruction in the function.
@@ -172,13 +172,13 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
         }
 
         // we do not define Physical Register
-        assert(!TargetRegisterInfo::isPhysicalRegister(OldReg));
+        assert(!Register::isPhysicalRegister(OldReg));
 
         const TargetRegisterClass *RC = MRI.getRegClass(OldReg);
         unsigned NewReg = MRI.createVirtualRegister(RC);
         auto InsertPt = std::next(MI.getIterator());
 
-        if (UseEmpty[TargetRegisterInfo::virtReg2Index(OldReg)]) {
+        if (UseEmpty[Register::virtReg2Index(OldReg)]) {
           MachineInstr *Drop =
               BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(EVM::POP))
                   .addReg(NewReg);
@@ -207,7 +207,7 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
 
         unsigned OldReg = MO.getReg();
 
-        if (TargetRegisterInfo::isPhysicalRegister(OldReg)) {
+        if (Register::isPhysicalRegister(OldReg)) {
           assert(OldReg == EVM::FP);
           // skip FramePointer as we will later expand it.
           continue;

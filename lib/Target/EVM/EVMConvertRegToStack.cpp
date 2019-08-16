@@ -184,7 +184,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
       for (MachineOperand &MO : reverse(MI.explicit_uses())) {
         // register value:
         if (MO.isReg()) {
-          assert(!TargetRegisterInfo::isPhysicalRegister(MO.getReg()) &&
+          assert(!Register::isPhysicalRegister(MO.getReg()) &&
                  "There should be no physical registers at this point.");
         }
       }

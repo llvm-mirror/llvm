@@ -80,7 +80,7 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   // TODO: This is fairly heavy-handed; find a better approach.
   /*
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    unsigned Reg = Register::index2VirtReg(I);
 
     // Skip unused registers.
     if (MRI.use_nodbg_empty(Reg))
@@ -114,7 +114,7 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   auto &LIS = getAnalysis<LiveIntervals>();
   dbgs() << "Before:\n\n";
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    unsigned Reg = Register::index2VirtReg(I);
 
     const LiveInterval &LI = LIS.getInterval(Reg);
     LI.dump();
@@ -123,7 +123,7 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   // Split multiple-VN LiveIntervals into multiple LiveIntervals.
   SmallVector<LiveInterval *, 4> SplitLIs;
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    unsigned Reg = Register::index2VirtReg(I);
     if (MRI.reg_nodbg_empty(Reg))
       continue;
 
@@ -134,7 +134,7 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   dbgs() << "after:\n\n";
 
   for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    unsigned Reg = Register::index2VirtReg(I);
 
     const LiveInterval &LI = LIS.getInterval(Reg);
     LI.dump();

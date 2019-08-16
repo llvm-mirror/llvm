@@ -68,7 +68,7 @@ bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
     if (!MO.isReg()) continue;
 
     unsigned Reg = MO.getReg();
-    if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
+    if (Register::isPhysicalRegister(Reg)) {
       assert(Reg == EVM::FP);
 
       MachineBasicBlock *MBB = MI->getParent();
@@ -84,7 +84,7 @@ bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
           .addReg(reg);
       LLVM_DEBUG({
         dbgs() << "Expanding $fp to %"
-               << TargetRegisterInfo::virtReg2Index(fpReg) << " in instruction: ";
+               << Register::virtReg2Index(fpReg) << " in instruction: ";
         MI->dump();
       });
       MI->getOperand(i).setReg(fpReg);

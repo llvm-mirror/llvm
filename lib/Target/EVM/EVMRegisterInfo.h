@@ -13,6 +13,8 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMREGISTERINFO_H
 #define LLVM_LIB_TARGET_EVM_EVMREGISTERINFO_H
 
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+
 #define GET_REGINFO_HEADER
 #include "EVMGenRegisterInfo.inc"
 
@@ -38,7 +40,7 @@ public:
                            RegScavenger *RS = nullptr) const override;
 
   // Debug information queries.
-  unsigned getFrameRegister(const MachineFunction &MF) const override;
+  Register getFrameRegister(const MachineFunction &MF) const override;
 
   const uint32_t *getNoPreservedMask() const override { return nullptr; }
 };

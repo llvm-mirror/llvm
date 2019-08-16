@@ -76,7 +76,7 @@ void StackStatus::dup(unsigned depth) {
   unsigned elem = *(stackElements.rbegin() + depth);
 
   LLVM_DEBUG({
-    unsigned idx = TargetRegisterInfo::virtReg2Index(elem);
+    unsigned idx = Register::virtReg2Index(elem);
     dbgs() << "  Duplicating %" << idx << " at depth " << depth << "\n";
   });
 
@@ -86,7 +86,7 @@ void StackStatus::dup(unsigned depth) {
 void StackStatus::pop() {
   LLVM_DEBUG({
     unsigned reg = stackElements.back();
-    unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
+    unsigned idx = Register::virtReg2Index(reg);
     dbgs() << "  Popping %" << idx << " from stack.\n";
   });
   stackElements.pop_back();
@@ -94,7 +94,7 @@ void StackStatus::pop() {
 
 void StackStatus::push(unsigned reg) {
   LLVM_DEBUG({
-    unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
+    unsigned idx = Register::virtReg2Index(reg);
     dbgs() << "  Pushing %" << idx << " to top of stack.\n";
   });
   stackElements.push_back(reg);
@@ -105,7 +105,7 @@ void StackStatus::dump() const {
   LLVM_DEBUG({
     dbgs() << "  Dumping stackstatus: \n    ";
     for (auto i = stackElements.begin(), e = stackElements.end(); i != e; ++i) {
-      unsigned idx = TargetRegisterInfo::virtReg2Index(*i);
+      unsigned idx = Register::virtReg2Index(*i);
       dbgs() << "%" << idx << ", ";
     }
   });
@@ -194,7 +194,7 @@ MachineInstr *EVMStackification::getVRegDef(unsigned Reg,
 // 2. the uses of the reg is in the same basicblock
 */
 bool EVMStackification::canStackifyReg(unsigned reg, MachineInstr& MI) const {
-  assert(!TargetRegisterInfo::isPhysicalRegister(reg));
+  assert(!Register::isPhysicalRegister(reg));
 
   const LiveInterval &LI = LIS->getInterval(reg);
   
@@ -243,7 +243,7 @@ static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) 
     if (stackReg == reg) {
       *depth = d;
       LLVM_DEBUG({
-        unsigned idx = TargetRegisterInfo::virtReg2Index(reg);
+        unsigned idx = Register::virtReg2Index(reg);
         dbgs() << "Found %" << idx << " at depth: " << *depth << "\n";
       });
       return true;
@@ -510,10 +510,10 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   }
 
   if (!canStackifyReg(defReg, MI)) {
-    assert(!TargetRegisterInfo::isPhysicalRegister(defReg));
+    assert(!Register::isPhysicalRegister(defReg));
 
     LLVM_DEBUG({
-      unsigned ridx = TargetRegisterInfo::virtReg2Index(defReg);
+      unsigned ridx = Register::virtReg2Index(defReg);
       dbgs() << "  Cannot stackify %" << ridx << "\n";
     });
 
@@ -527,7 +527,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   MFI->stackifyVReg(defReg);
 
   LLVM_DEBUG({
-    unsigned ridx = TargetRegisterInfo::virtReg2Index(defReg);
+    unsigned ridx = Register::virtReg2Index(defReg);
     dbgs() << "  Reg %" << ridx << " is stackified.\n";
   });
 
@@ -554,7 +554,7 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
   this->LIS = &getAnalysis<LiveIntervals>();
 
   for (unsigned I = 0, E = MRI->getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    unsigned Reg = Register::index2VirtReg(I);
 
     const LiveInterval &LI = LIS->getInterval(Reg);
     LI.dump();
