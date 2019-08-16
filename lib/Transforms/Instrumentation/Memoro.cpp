@@ -175,7 +175,7 @@ void Memoro::initializeCallbacks(Module &M) {
       M.getOrInsertFunction("memset", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
                             IRB.getInt32Ty(), IntptrTy));
 
-//llvm:EnableStatistics();
+//lsEnableStatistics();
 }
 
 void Memoro::createDestructor(Module &M) {
@@ -208,18 +208,34 @@ bool Memoro::initOnModule(Module &M) {
   return true;
 }
 
-// Memory reference to alloca'ed region need not be instrumented since it is
-// not in the heap.
+// Find memory reference that definitely do not access the heap and ignore them.
 bool Memoro::shouldIgnoreMemoryAccess(Instruction *I) {
   SmallVector<Value *, 4> Objs;
-  for (Value *V : I->operand_values()) {
-    getUnderlyingObjectsForCodeGen(V, Objs, I->getModule()->getDataLayout());
+  DataLayout DL = I->getModule()->getDataLayout();
+  if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
+    getUnderlyingObjectsForCodeGen(LI->getPointerOperand(), Objs, DL);
+  } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
+    getUnderlyingObjectsForCodeGen(SI->getPointerOperand(), Objs, DL);
+  } else if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(I)) {
+    getUnderlyingObjectsForCodeGen(RMW->getPointerOperand(), Objs, DL);
+  } else if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(I)) {
+    getUnderlyingObjectsForCodeGen(XCHG->getPointerOperand(), Objs, DL);
   }
+  else {
+    return false;
+  }
+
+  if (Objs.empty()) {
+    return false;   // Don't know what it references
+  }
+
+  // Alloca and global variables are not in the heap. Anything else?
   for (Value *V : Objs) {
-    if (!isa<AllocaInst>(V)) {
+    if (!isa<AllocaInst>(V) && !isa<GlobalVariable>(V)) {
       return false;
     }
   }
+
   NumAllocaReferencesSkipped++;
   return true;
 }
@@ -353,8 +369,8 @@ bool Memoro::runOnFunction(Function &F, Module &M, raw_fd_ostream &type_file) {
   for (auto &BB : F) {
     for (auto &Inst : BB) {
       if ((isa<LoadInst>(Inst) || isa<StoreInst>(Inst) ||
-           isa<AtomicRMWInst>(Inst) || isa<AtomicCmpXchgInst>(Inst)) &&
-          !shouldIgnoreMemoryAccess(&Inst))
+           isa<AtomicRMWInst>(Inst) || isa<AtomicCmpXchgInst>(Inst))
+          && !shouldIgnoreMemoryAccess(&Inst))
         LoadsAndStores.push_back(&Inst);
       else if (isa<MemIntrinsic>(Inst))
         MemIntrinCalls.push_back(&Inst);
