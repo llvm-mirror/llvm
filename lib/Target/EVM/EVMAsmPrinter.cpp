@@ -86,7 +86,7 @@ private:
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
-  MCSubtargetInfo *STI;
+  std::unique_ptr<MCSubtargetInfo> STI;
 };
 }
 
@@ -107,19 +107,18 @@ void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
     return;
   }
 
-  auto &STI = getSubtargetInfo();
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
 
   emitFreeMemoryPointer();
 
   // TODO:
 
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SUB), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x20), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ADD), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SUB), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x20), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ADD), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), *STI);
 }
 
 void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
@@ -132,106 +131,99 @@ void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
 }
 
 void EVMAsmPrinter::emitFreeMemoryPointer() const {
-    auto &STI = getSubtargetInfo();
     // Initialize the Free memory pointer
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x80), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x80), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), *STI);
 }
 
 void EVMAsmPrinter::emitNonPayableCheck(const Function &F,
                                         MCSymbol *CallDataUnpackerLabel) const {
-  auto &STI = getSubtargetInfo();
 
   // Non-payable check
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLVALUE), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ISZERO), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLVALUE), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ISZERO), *STI);
 
   const MCExpr *cdulabel =
       MCSymbolRefExpr::create(CallDataUnpackerLabel,MMI->getContext());
 
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(cdulabel), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(cdulabel), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
 }
 
 void EVMAsmPrinter::emitShortCalldataCheck() const {
-  auto &STI = getSubtargetInfo();
-
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATASIZE), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::LT), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x0056), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATASIZE), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::LT), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x0056), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
 }
 
 void EVMAsmPrinter::emitRetrieveConstructorParameters() const {
-  auto &STI = getSubtargetInfo();
-
   // this reads 
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MLOAD), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x20), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MLOAD), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x20), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
 
   // this PUSH2 should read in the beginning of data section (data section is
   // after text section) and in data section we store contract operands
   // TODO:
   
-  MCExpr* params; // TODO
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(params), STI);
+  // TODO: enable PUSH2
+  //MCExpr* params; // TODO
+  //OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(params), *STI);
 
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP4), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CODECOPY), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ADD), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MLOAD), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP4), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CODECOPY), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ADD), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x40), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MLOAD), *STI);
 }
 
 void EVMAsmPrinter::emitConstructorBody() const {
-  auto &STI = getSubtargetInfo();
-
   // TODO: fill in Constructor Body
   // we might want to 
 }
 
 void EVMAsmPrinter::emitFunctionSelector(Module &M) {
-  auto &STI = getSubtargetInfo();
-
   genearteFunctionBodyLabels(M);
 
   // extract first 4 bytes of calldata
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(0xffffffff), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(0xffffffff), *STI);
 
-  // PUSH29 0x0100000..... 
-  MCOperand opnd; // TODO
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH29).addOperand(opnd), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DIV), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::AND), STI);
+  // TODO: PUSH29 0x0100000..... 
+  //MCOperand opnd; // TODO
+  //OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH29).addOperand(opnd), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DIV), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::AND), *STI);
 
   // Try to match function name
   unsigned index = 0;
   for (const auto &F : M) {
     if (index != 0) {
-      OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
+      OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
     }
 
-    unsigned signature; // TODO
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(signature), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::EQ), STI);
+    // TODO: enable signature
+    //unsigned signature; // TODO
+    //OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(signature), *STI);
+
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::EQ), *STI);
 
     // create a symbol for each function wrapper
     MCSymbol *funcWrapperLabel =
@@ -243,64 +235,56 @@ void EVMAsmPrinter::emitFunctionSelector(Module &M) {
         std::pair<const Function *, MCSymbol *>(&F, funcWrapperLabel));
 
     OutStreamer->EmitInstruction(
-        MCInstBuilder(EVM::PUSH2).addExpr(funcWrapperLabelExpr), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), STI);
+        MCInstBuilder(EVM::PUSH2).addExpr(funcWrapperLabelExpr), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
 
     ++ index;
   }
 
   // No match
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
 }
 
 void EVMAsmPrinter::emitCopyRuntimeCodeToMemory() const {
-  auto &STI = getSubtargetInfo();
-
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x01d1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x0046), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CODECOPY), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x01d1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addImm(0x0046), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CODECOPY), *STI);
 }
 
 void EVMAsmPrinter::emitReturnRuntimeCode() const {
-  auto &STI = getSubtargetInfo();
-
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::STOP), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::STOP), *STI);
 }
 
 void EVMAsmPrinter::emitContractParameters() const {
-  auto &STI = getSubtargetInfo();
-
   // TODO
 }
 
 void EVMAsmPrinter::emitCallDataUnpacker(const Function &F,
                                          MCSymbol *CallDataUnpackerLabel) {
-  auto &STI = getSubtargetInfo();
-
   OutStreamer->EmitLabel(CallDataUnpackerLabel);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), *STI);
 
   // Call data unpacker needs to push parameters on to stack
   for (auto &arg : F.args()) {
     // TODO: special handling for addres types (masking out unnecessary bits)
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), *STI);
   }
   
   MCSymbol *funcBodyLabel = this->funcBodyMap[&F];
   const MCExpr* funcBodyTag =
       MCSymbolRefExpr::create(funcBodyLabel, MMI->getContext());
 
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(funcBodyTag), STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMP), STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(funcBodyTag), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMP), *STI);
 }
 
 void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
@@ -317,8 +301,11 @@ void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
 }
 
 void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
-  AsmPrinter::EmitStartOfAsmFile(M);
-  return;
+  STI = std::unique_ptr<MCSubtargetInfo>(TM.getTarget().createMCSubtargetInfo(
+      TM.getTargetTriple().str(), TM.getTargetCPU(),
+      TM.getTargetFeatureString()));
+  //AsmPrinter::EmitStartOfAsmFile(M);
+  //return;
   // Emit the skeleton of the asm file in text section.
   OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
