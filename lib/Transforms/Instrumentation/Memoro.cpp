@@ -37,6 +37,7 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include <cxxabi.h>
 #include <fstream>
 #include <llvm/IR/DebugInfoMetadata.h>
@@ -60,6 +61,8 @@ STATISTIC(NumInstrumentedStores, "Number of instrumented stores");
 STATISTIC(NumInstructions, "Number of instructions");
 STATISTIC(NumAccessesWithIrregularSize,
           "Number of accesses with a size outside our targeted callout sizes");
+STATISTIC(NumAllocaReferencesSkipped,
+          "Number of load/store instructions that reference an alloca region");
 
 static const uint64_t MemoroCtorAndDtorPriority = 0;
 static const char *const MemoroModuleCtorName = "memoro.module_ctor";
@@ -171,6 +174,8 @@ void Memoro::initializeCallbacks(Module &M) {
   MemsetFn = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("memset", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
                             IRB.getInt32Ty(), IntptrTy));
+
+//llvm:EnableStatistics();
 }
 
 void Memoro::createDestructor(Module &M) {
@@ -203,9 +208,20 @@ bool Memoro::initOnModule(Module &M) {
   return true;
 }
 
+// Memory reference to alloca'ed region need not be instrumented since it is
+// not in the heap.
 bool Memoro::shouldIgnoreMemoryAccess(Instruction *I) {
-  // don't ignore anything for now
-  return false;
+  SmallVector<Value *, 4> Objs;
+  for (Value *V : I->operand_values()) {
+    getUnderlyingObjectsForCodeGen(V, Objs, I->getModule()->getDataLayout());
+  }
+  for (Value *V : Objs) {
+    if (!isa<AllocaInst>(V)) {
+      return false;
+    }
+  }
+  NumAllocaReferencesSkipped++;
+  return true;
 }
 
 bool Memoro::runOnModule(Module &M) {
