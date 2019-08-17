@@ -20,6 +20,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
+
+#include "llvm/IR/Constants.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "evm-asm-printer"
@@ -70,6 +72,9 @@ void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     return;
   } else if (Op.isExpr()) {
     printExpr(Op.getExpr(), O);
+    return;
+  } else if (Op.isCImm()) {
+    O << Op.getCImm()->getValue();
     return;
   }
   llvm_unreachable("unimplemented.");
