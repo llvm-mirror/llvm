@@ -68,7 +68,7 @@ public:
   //bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
-  void emitFreeMemoryPointer() const;
+  void emitInitializeFreeMemoryPointer() const;
   void emitNonPayableCheck(const Function &F, MCSymbol *CallDataUnpackerLabel) const;
   void emitRetrieveConstructorParameters() const;
   void emitConstructorBody() const;
@@ -83,6 +83,14 @@ private:
                             MCSymbol *CallDataUnpackerLabel);
   void emitMemoryReturner(const Function &F) const;
   void genearteFunctionBodyLabels(Module &M);
+
+  void appendDelegatecallCheck(Module& M);
+  void initializeContext(Module& M);
+  void appendFunctionSelector(Module& M);
+  void appendMissingFunctions(Module& M);
+  void appendCallValueCheck(Module &M);
+  void emitCallDataCheck(Module &M, MCSymbol *notFoundTag);
+  void appendConditionalJumpTo(MCSymbol* jumpTag);
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
@@ -100,6 +108,81 @@ bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 }
 */
 
+void EVMAsmPrinter::appendMissingFunctions(Module &M) {
+  llvm_unreachable("unimplemented");
+}
+
+
+void EVMAsmPrinter::appendConditionalJumpTo(MCSymbol *S) {
+  const MCExpr *se =
+      MCSymbolRefExpr::create(S, MMI->getContext());
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH2).addExpr(se), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
+}
+
+void EVMAsmPrinter::appendFunctionSelector(Module &M) {
+  bool needToAddCallValueCheck = true;
+  if (!EVMSubtarget::hasPayableFunctions(M) &&
+      !EVMSubtarget::hasInterfaceFunctions(M) &&
+      !EVMSubtarget::moduleIsLibrary(M)) {
+        appendCallValueCheck(M);
+        needToAddCallValueCheck = false;
+  }
+
+  MCSymbol *notFoundTag = MMI->getContext().getOrCreateSymbol("NotFound");
+  emitCallDataCheck(M, notFoundTag);
+
+  if (EVMSubtarget::hasInterfaceFunctions(M)) {
+    OutStreamer->AddComment("Retrieve function signature hash");
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
+    // TODO
+    // Load from memory:
+    // 		CompilerUtils(m_context).loadFromMemory(0,
+    // IntegerType(CompilerUtils::dataStartOffset * 8), true);
+
+    // collect DataUnpackerEntryPoints.
+
+    // appendInternalSelector
+
+    llvm_unreachable("unimplemented");
+  }
+
+  OutStreamer->EmitLabel(notFoundTag);
+
+  Function* fallback = EVMSubtarget::getFallbackFunction(M);
+  if (fallback != nullptr) {
+    assert(!EVMSubtarget::moduleIsLibrary(M) && "");
+
+    OutStreamer->AddComment("Fallback function");
+    if (!EVMSubtarget::isPayableFunction(fallback) && needToAddCallValueCheck) {
+      appendCallValueCheck(M);
+    }
+
+    // TODO: dump fallback function here
+    llvm_unreachable("need to implement emit of fallback function");
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::STOP), *STI);
+  } else {
+    OutStreamer->AddComment("no fallback function, revert.");
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+    OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
+  }
+
+  // TODO: emit interface functions
+
+}
+
+void EVMAsmPrinter::emitCallDataCheck(Module &M, MCSymbol *notFoundTag) {
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATASIZE), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::LT), *STI);
+  appendConditionalJumpTo(notFoundTag);
+}
+
+void EVMAsmPrinter::appendCallValueCheck(Module &M) {
+  llvm_unreachable("unimplemented");
+}
+
 void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
   // if the function does not return anything, skip.
   Type* retType = F.getReturnType();
@@ -109,7 +192,7 @@ void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
 
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
 
-  emitFreeMemoryPointer();
+  emitInitializeFreeMemoryPointer();
 
   // TODO:
 
@@ -130,7 +213,7 @@ void EVMAsmPrinter::genearteFunctionBodyLabels(Module &M) {
   }
 }
 
-void EVMAsmPrinter::emitFreeMemoryPointer() const {
+void EVMAsmPrinter::emitInitializeFreeMemoryPointer() const {
   OutStreamer->AddComment("Free memory pointer");
   // Initialize the Free memory pointer
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x80), *STI);
@@ -312,6 +395,16 @@ void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
   emitCallDataUnpacker(F, S);
 }
 
+void EVMAsmPrinter::initializeContext(Module &M) {
+  // TODO: check Solidity:
+  // libsolidity/codegen/ContractCompiler.cpp
+  emitInitializeFreeMemoryPointer();
+}
+
+void EVMAsmPrinter::appendDelegatecallCheck(Module &M) {
+  llvm_unreachable("unimplemented");
+}
+
 void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   STI = std::unique_ptr<MCSubtargetInfo>(TM.getTarget().createMCSubtargetInfo(
       TM.getTargetTriple().str(), TM.getTargetCPU(),
@@ -321,23 +414,19 @@ void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // Emit the skeleton of the asm file in text section.
   OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
-  emitFreeMemoryPointer();
+  OutStreamer->AddComment("Contract creation");
 
-  //emitNonPayableCheck();
-  
-  emitRetrieveConstructorParameters();
-
-  emitConstructorBody();
-
-  emitCopyRuntimeCodeToMemory();
-
-  emitReturnRuntimeCode();
-
-  emitFunctionSelector(M);
-
-  for (const auto &F : M) {
-    emitFunctionWrapper(F);
+  // TODO
+  bool isLibrary = false;
+  if (isLibrary) {
+    appendDelegatecallCheck(M);
   }
+
+  initializeContext(M);
+
+  appendFunctionSelector(M);
+
+  appendMissingFunctions(M);
 }
 
 //void EVMAsmPrinter::EmitEndOfAsmFile(Module &M) { }

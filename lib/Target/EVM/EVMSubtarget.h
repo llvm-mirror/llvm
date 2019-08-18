@@ -95,6 +95,54 @@ public:
       return EVM::PUSH7;
     case 8:
       return EVM::PUSH8;
+    case 9:
+      return EVM::PUSH9;
+    case 10:
+      return EVM::PUSH10;
+    case 11:
+      return EVM::PUSH11;
+    case 12:
+      return EVM::PUSH12;
+    case 13:
+      return EVM::PUSH13;
+    case 14:
+      return EVM::PUSH14;
+    case 15:
+      return EVM::PUSH15;
+    case 16:
+      return EVM::PUSH16;
+    case 17:
+      return EVM::PUSH17;
+    case 18:
+      return EVM::PUSH18;
+    case 19:
+      return EVM::PUSH19;
+    case 20:
+      return EVM::PUSH20;
+    case 21:
+      return EVM::PUSH21;
+    case 22:
+      return EVM::PUSH22;
+    case 23:
+      return EVM::PUSH23;
+    case 24:
+      return EVM::PUSH24;
+    case 25:
+      return EVM::PUSH25;
+    case 26:
+      return EVM::PUSH26;
+    case 27:
+      return EVM::PUSH27;
+    case 28:
+      return EVM::PUSH28;
+    case 29:
+      return EVM::PUSH29;
+    case 30:
+      return EVM::PUSH30;
+    case 31:
+      return EVM::PUSH31;
+    case 32:
+      return EVM::PUSH32;
     }
   }
 
@@ -103,9 +151,17 @@ public:
   unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
   unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
   unsigned getIdentityContractAddress() const { return 4; }
-  
+  unsigned getDataStartOffset() const { return 4; }
+
   // TODO: make sure this will not collide with our values.
   unsigned getFramePointerLocation() const { return 32; }
+
+  static Function* getFallbackFunction(Module &M);
+  static bool hasPayableFunctions(Module& M);
+  static bool moduleIsLibrary(Module& M);
+  static bool hasInterfaceFunctions(Module &M);
+  static bool isPayableFunction(Function *F);
+
 
   // Constants
 };
