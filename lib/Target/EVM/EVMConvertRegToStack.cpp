@@ -19,7 +19,6 @@
 #include "EVM.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
-#include "EVMTreeWalker.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
