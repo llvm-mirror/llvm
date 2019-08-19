@@ -15,13 +15,17 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMUTILITIES_H
 #define LLVM_LIB_TARGET_EVM_EVMUTILITIES_H
 
-#include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Type.h"
 
 namespace llvm {
 
 namespace EVM {
 
+uint32_t getFunctionSignature(Function* F);
 
+std::string getCanonicalName(Type* input);
 
 } // end namespace WebAssembly
 

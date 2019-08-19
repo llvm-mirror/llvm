@@ -76,8 +76,6 @@ private:
   void emitReturnRuntimeCode() const;
   void emitContractParameters() const;
   void emitShortCalldataCheck() const;
-  void emitFunctionSelector(Module &M);
-
   void emitFunctionWrapper(const Function &F);
   void emitCallDataUnpacker(const Function &F,
                             MCSymbol *CallDataUnpackerLabel);
@@ -91,6 +89,7 @@ private:
   void appendCallValueCheck(Module &M);
   void emitCallDataCheck(Module &M, MCSymbol *notFoundTag);
   void appendConditionalJumpTo(MCSymbol* jumpTag);
+  void appendInternalSelector(Module &M);
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
@@ -136,13 +135,14 @@ void EVMAsmPrinter::appendFunctionSelector(Module &M) {
     OutStreamer->AddComment("Retrieve function signature hash");
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
     // TODO
+
     // Load from memory:
     // 		CompilerUtils(m_context).loadFromMemory(0,
     // IntegerType(CompilerUtils::dataStartOffset * 8), true);
 
-    // collect DataUnpackerEntryPoints.
+    // TOOD: collect DataUnpackerEntryPoints.
 
-    // appendInternalSelector
+    // appendInternalSelector(callDataUnpackerEntryPoints, sortedIDs, notFoundTag);
 
     llvm_unreachable("unimplemented");
   }
@@ -158,7 +158,7 @@ void EVMAsmPrinter::appendFunctionSelector(Module &M) {
       appendCallValueCheck(M);
     }
 
-    // TODO: dump fallback function here
+    // TODO: emit fallback function here
     llvm_unreachable("need to implement emit of fallback function");
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::STOP), *STI);
   } else {
@@ -180,7 +180,24 @@ void EVMAsmPrinter::emitCallDataCheck(Module &M, MCSymbol *notFoundTag) {
 }
 
 void EVMAsmPrinter::appendCallValueCheck(Module &M) {
-  llvm_unreachable("unimplemented");
+  OutStreamer->AddComment("Callvalue check");
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLVALUE), *STI);
+
+  MCSymbol *fallthrough_tag =
+      MMI->getContext().getOrCreateSymbol("cv_check_false");
+
+  OutStreamer->EmitInstruction(
+      MCInstBuilder(EVM::PUSH2)
+          .addExpr(MCSymbolRefExpr::create(fallthrough_tag, MMI->getContext())),
+      *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
+
+  // revert(0, 0)
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
+
+  OutStreamer->EmitLabel(fallthrough_tag);
 }
 
 void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
@@ -284,58 +301,6 @@ void EVMAsmPrinter::emitConstructorBody() const {
   OutStreamer->AddComment("Constructor body");
   // TODO: fill in Constructor Body
   // we might want to look for the constructor body in the function list. 
-}
-
-void EVMAsmPrinter::emitFunctionSelector(Module &M) {
-  genearteFunctionBodyLabels(M);
-
-  OutStreamer->AddComment("Function Selector");
-  // extract first 4 bytes of calldata
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(0xffffffff), *STI);
-  ConstantInt *cimm = ConstantInt::get(
-      M.getContext(), APInt(29 * 8, "10000000000000000000000000000", 16));
-  OutStreamer->EmitInstruction(
-      MCInstBuilder(EVM::PUSH29).addOperand(MCOperand::createCImm(cimm)), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATALOAD), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DIV), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::AND), *STI);
-
-  // Try to match function name
-  unsigned index = 0;
-  for (const auto &F : M) {
-    if (index != 0) {
-      OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
-    }
-
-    // TODO: enable signature
-    //unsigned signature; // TODO
-    //OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(signature), *STI);
-
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP2), *STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::EQ), *STI);
-
-    // create a symbol for each function wrapper
-    MCSymbol *funcWrapperLabel =
-      MMI->getContext().getOrCreateSymbol(F.getName() + "_wrapper");
-    const MCExpr* funcWrapperLabelExpr = 
-      MCSymbolRefExpr::create(funcWrapperLabel, MMI->getContext());
-
-    this->funcWrapperMap.insert(
-        std::pair<const Function *, MCSymbol *>(&F, funcWrapperLabel));
-
-    OutStreamer->EmitInstruction(
-        MCInstBuilder(EVM::PUSH2).addExpr(funcWrapperLabelExpr), *STI);
-    OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
-
-    ++ index;
-  }
-
-  // No match
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x00), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
 }
 
 void EVMAsmPrinter::emitCopyRuntimeCodeToMemory() const {
