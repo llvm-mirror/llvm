@@ -15,6 +15,7 @@
 #include "EVMMCInstLower.h"
 #include "InstPrinter/EVMInstPrinter.h"
 #include "EVMTargetMachine.h"
+#include "EVMUtils.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -65,7 +66,7 @@ public:
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp) const {
     return LowerEVMMachineOperandToMCOperand(MO, MCOp, *this);
     }
-  //bool runOnMachineFunction(MachineFunction &MF) override;
+  bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
   void emitInitializeFreeMemoryPointer() const;
@@ -77,8 +78,7 @@ private:
   void emitContractParameters() const;
   void emitShortCalldataCheck() const;
   void emitFunctionWrapper(const Function &F);
-  void emitCallDataUnpacker(const Function &F,
-                            MCSymbol *CallDataUnpackerLabel);
+  void emitCallDataUnpacker(const Function &F, MCSymbol *CallDataUnpackerLabel);
   void emitMemoryReturner(const Function &F) const;
   void genearteFunctionBodyLabels(Module &M);
 
@@ -89,7 +89,9 @@ private:
   void appendCallValueCheck(Module &M);
   void emitCallDataCheck(Module &M, MCSymbol *notFoundTag);
   void appendConditionalJumpTo(MCSymbol* jumpTag);
-  void appendInternalSelector(Module &M);
+  void appendInternalSelector(Module &M, MCSymbol *notFoundTag);
+  void appendLoadFromMemory(Module &M);
+  void collectDataUnpackerEntryPoints();
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
@@ -97,20 +99,30 @@ private:
 };
 }
 
-/*
+void EVMAsmPrinter::collectDataUnpackerEntryPoints() {
+  llvm_unreachable("unimplemented");
+}
+
 bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   // emit the function body label before we emit the function.
   MCSymbol* funcBodySymbol = this->funcBodyMap[&MF.getFunction()];
+  assert(funcBodySymbol != nullptr);
   OutStreamer->EmitLabel(funcBodySymbol);
 
   return AsmPrinter::runOnMachineFunction(MF);
 }
-*/
+
+void EVMAsmPrinter::appendInternalSelector(Module &M, MCSymbol *notFoundTag) {
+  llvm_unreachable("unimplemented");
+}
 
 void EVMAsmPrinter::appendMissingFunctions(Module &M) {
   llvm_unreachable("unimplemented");
 }
 
+void EVMAsmPrinter::appendLoadFromMemory(Module &M) {
+  llvm_unreachable("unimplemented");
+}
 
 void EVMAsmPrinter::appendConditionalJumpTo(MCSymbol *S) {
   const MCExpr *se =
@@ -134,17 +146,13 @@ void EVMAsmPrinter::appendFunctionSelector(Module &M) {
   if (EVMSubtarget::hasInterfaceFunctions(M)) {
     OutStreamer->AddComment("Retrieve function signature hash");
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
-    // TODO
-
-    // Load from memory:
-    // 		CompilerUtils(m_context).loadFromMemory(0,
-    // IntegerType(CompilerUtils::dataStartOffset * 8), true);
+    appendLoadFromMemory(M);
 
     // TOOD: collect DataUnpackerEntryPoints.
+    collectDataUnpackerEntryPoints();
 
     // appendInternalSelector(callDataUnpackerEntryPoints, sortedIDs, notFoundTag);
-
-    llvm_unreachable("unimplemented");
+    appendInternalSelector(M, notFoundTag);
   }
 
   OutStreamer->EmitLabel(notFoundTag);
@@ -168,8 +176,10 @@ void EVMAsmPrinter::appendFunctionSelector(Module &M) {
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
   }
 
-  // TODO: emit interface functions
-
+  // TODO: emit interface functions. At this moment we see all functions as
+  // interface functions.
+  // consider not generating static-linked functions (and see them as internal
+  // functions)
 }
 
 void EVMAsmPrinter::emitCallDataCheck(Module &M, MCSymbol *notFoundTag) {

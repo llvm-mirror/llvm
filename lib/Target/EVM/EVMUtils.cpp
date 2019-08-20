@@ -157,6 +157,10 @@ inline void hash(
 }
 
 using namespace llvm;
+
+// forward declarations
+std::string getFunctionStringSignature(const FunctionType* F);
+
 uint32_t calculateSignature(std::string input) {
   uint8_t output[256];
 	// The 0x01 is the specific padding for keccak (sha3 uses 0x06) and
@@ -208,13 +212,23 @@ std::string EVM::getCanonicalName(Type* ty) {
     return os.str();
   }
   case Type::FunctionTyID: {
-    llvm_unreachable("Unimplemented Struct Type");
+    const FunctionType *FTy = cast<const FunctionType>(ty);
+		return getFunctionStringSignature(FTy);
   }
-
   }
 }
 
 std::string getFunctionStringSignature(Function* F) {
+	return getFunctionStringSignature(F->getFunctionType());
+}
+
+std::string getFunctionStringSignature(const FunctionType* F) {
+  std::ostringstream os;
+	os << "function(";
+	// TODO: implement function string
+
+	os << ")";
+	return os.str();
   llvm_unreachable("Unimplemented");
 }
 
@@ -223,3 +237,4 @@ uint32_t EVM::getFunctionSignature(Function* F) {
   std::string sig = getFunctionStringSignature(F);
   return calculateSignature(sig);
 }
+
