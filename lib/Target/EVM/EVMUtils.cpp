@@ -14,6 +14,8 @@
 #include "EVMUtils.h"
 #include "llvm/IR/DerivedTypes.h"
 
+#include <sstream>
+
 namespace
 {
 
@@ -167,23 +169,48 @@ uint32_t calculateSignature(std::string input) {
 }
 
 /// Used for calculating the signature of a function
+/// Refer: https://solidity.readthedocs.io/en/latest/abi-spec.html
 std::string EVM::getCanonicalName(Type* ty) {
+  // TODO: this is imcompleted:
+  // Need to add "string", "tuple", function, etc.
   switch (ty->getTypeID()) {
   default:
     llvm_unreachable("Unsupported Type");
   case Type::ArrayTyID: {
-    llvm_unreachable("Unimplemented Array Type");
+    std::ostringstream os;
+    const ArrayType *ATy = cast<const ArrayType>(ty);
+    Type* elemType = ATy->getElementType();
+    unsigned elemSize = ATy->getNumElements();
+    os << "<" << getCanonicalName(elemType) << ">[" << elemSize << "]";
+    return os.str();
   }
   case Type::StructTyID: {
     llvm_unreachable("Unimplemented Struct Type");
   }
+  case Type::PointerTyID: {
+    std::ostringstream os;
+    const PointerType *ATy = cast<const PointerType>(ty);
+    Type* elemType = ATy->getElementType();
+
+    os << "<" << getCanonicalName(elemType) << ">[]";
+    return os.str();
+  }
   case Type::IntegerTyID: {
     unsigned bitWidth = cast<IntegerType>(ty)->getBitWidth();
-    switch (bitWidth) {
-      default:
-        llvm_unreachable("Unimplemented integer type");
+    std::ostringstream os;
+    // TODO: might need to handle specifically 
+    if (bitWidth == 1 || bitWidth == 8) {
+      return "bool";
+    } else if (bitWidth == 160) {
+      return "address";
     }
+    os << "uint<" << bitWidth << ">";
+    return os.str();
   }
+  case Type::FunctionTyID: {
+    llvm_unreachable("Unimplemented Struct Type");
+  }
+
   }
 }
 
