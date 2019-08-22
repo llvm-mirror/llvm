@@ -54,9 +54,9 @@ bool EVMSubtarget::hasPayableFunctions(Module &M) {
 }
 
 bool EVMSubtarget::isPayableFunction(Function *F) {
-  return false; 
+  return true; 
 }
 
 bool EVMSubtarget::hasInterfaceFunctions(Module& M) {
-  return false; 
+  return true; 
 }

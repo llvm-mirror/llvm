@@ -176,7 +176,7 @@ defm GT     : ComparisonInst<SETUGT, "GT",    0x11, 3>;
 defm SLT    : ComparisonInst<SETLT, "SLT",    0x12, 3>;
 defm SGT    : ComparisonInst<SETGT, "SGT",    0x13, 3>;
   let isCommutable = 1 in {
-  defm EQ     : ComparisonInst<SETEQ, "SEQ",    0x14, 3>;
+  defm EQ     : ComparisonInst<SETEQ, "EQ",    0x14, 3>;
   }
 defm ISZERO : Inst_1_1<"ISZERO",
                        [(set GPR:$dst, (setcc GPR:$src, 0, SETEQ))],

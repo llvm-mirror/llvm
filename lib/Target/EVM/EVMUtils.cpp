@@ -219,6 +219,9 @@ std::string EVM::getCanonicalName(Type* ty) {
 }
 
 std::string getFunctionStringSignature(Function* F) {
+	return F->getName();
+
+	// TODO: enable actual function signature
 	return getFunctionStringSignature(F->getFunctionType());
 }
 
