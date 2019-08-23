@@ -241,3 +241,7 @@ uint32_t EVM::getFunctionSignature(Function* F) {
   return calculateSignature(sig);
 }
 
+unsigned EVM::getEncodedSize(Function &F) {
+	// for now we just use a place holder
+	return 32;
+}

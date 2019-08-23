@@ -25,6 +25,8 @@ namespace EVM {
 
 uint32_t getFunctionSignature(Function* F);
 
+unsigned getEncodedSize(Function &F);
+
 std::string getCanonicalName(Type* input);
 
 } // end namespace WebAssembly
