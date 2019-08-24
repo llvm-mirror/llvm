@@ -85,7 +85,7 @@ private:
   void appendFunctionSelector(Module& M);
   void appendMissingFunctions(Module& M);
   void appendCallValueCheck(Module &M);
-  void emitCallDataCheck(Module &M, MCSymbol *notFoundTag);
+  void emitCallDataSizeCheck(Module &M, MCSymbol *notFoundTag);
   void appendInternalSelector(Module &M, MCSymbol *notFoundTag);
   void appendCalldataLoad(Module &M);
   void collectDataUnpackerEntryPoints(Module &M);
@@ -99,15 +99,23 @@ private:
   void appendConditionalJumpTo(MCSymbol* jumpTag) const;
   void appendJumpTo(MCSymbol* jumpTag) const;
   void appendRevert() const;
+  void appendConditionalRevert(MCSymbol *S) const;
 
   void appendLabel(std::string name) const;
   void pushSymbol(MCSymbol *s) const;
+  MCSymbol* createSymbol(std::string name) const;
 
   DenseMap<const Function*, MCSymbol *> funcWrapperMap;
   DenseMap<const Function*, uint32_t> funcHashMap;
   DenseMap<const Function*, MCSymbol *> funcBodyMap;
   std::unique_ptr<MCSubtargetInfo> STI;
+  MCContext* ctx;
 };
+}
+
+MCSymbol* EVMAsmPrinter::createSymbol(std::string name) const {
+  assert(!ctx->lookupSymbol(name));
+  return ctx->getOrCreateSymbol(name);
 }
 
 void EVMAsmPrinter::collectDataUnpackerEntryPoints(Module &M) {
@@ -115,7 +123,6 @@ void EVMAsmPrinter::collectDataUnpackerEntryPoints(Module &M) {
     uint32_t funcSig = EVM::getFunctionSignature(&F);
     funcHashMap.insert(std::pair<const Function *, uint32_t>(&F, funcSig));
   }
-  //llvm_unreachable("unimplemented");
 }
 
 bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
@@ -129,34 +136,33 @@ bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 }
 
 void EVMAsmPrinter::appendLabel(std::string name) const {
-  MCSymbol *symbol = MMI->getContext().getOrCreateSymbol(name);
+  MCSymbol *symbol = createSymbol(name);
   OutStreamer->EmitLabel(symbol);
 }
 
 void EVMAsmPrinter::appendReturnValuePacker(Function &F) {
+  OutStreamer->AddComment("return value packer");
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
   // TODO: more cases
   Type* ty = F.getReturnType();
 
+  // we do not support aggregated return types, yet.
+  assert(!ty->isAggregateType());
+
   // empty types, will simply return
   if (ty->getTypeID() == Type::VoidTyID) {
-    OutStreamer->AddComment("no return values");
+    OutStreamer->AddComment("there are no return values");
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::STOP), *STI);
     return;
   }
 
-  OutStreamer->AddComment("pack return results");
+  OutStreamer->AddComment("handle return results");
+  // TODO: we will simply use 0-32bytes memory to return the results.
   // fetch free memory pointer
-  OutStreamer->EmitInstruction(
-      MCInstBuilder(EVM::PUSH2).addImm(EVMSubtarget::getFreeMemoryPointer()),
-      *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MLOAD), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::MSTORE), *STI);
 
-  // toSizeAfterFreeMemoryPointer
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP2), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SUB), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::SWAP1), *STI);
-
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(32), *STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::RETURN), *STI);
 }
 
@@ -168,11 +174,9 @@ void EVMAsmPrinter::appendFunctionWrapper(Function &F) {
   OutStreamer->EmitLabel(funcWrapperMap[&F]);
 
   // Return tag is used to jump out of the function
-  MCSymbol *returnTag =
-      MMI->getContext().getOrCreateSymbol(F.getName() + "_wrapper_return");
+  MCSymbol *returnTag = createSymbol(F.getName().str() + "_wrapper_return");
 
   bool hasArguments = std::distance(F.arg_begin(), F.arg_end()) != 0;
-
   if (hasArguments) {
     OutStreamer->AddComment("handle arguments");
 
@@ -209,8 +213,7 @@ void EVMAsmPrinter::appendABIDecode(Function &F) const {
                                *STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::LT), *STI);
 
-  MCSymbol *abidecodeTag =
-      MMI->getContext().getOrCreateSymbol(F.getName() + "_abidecode_pass");
+  MCSymbol *abidecodeTag = createSymbol(F.getName().str() + "_abidecode_pass");
   appendConditionalJumpTo(abidecodeTag);
 
   appendRevert();
@@ -227,7 +230,7 @@ void EVMAsmPrinter::appendABIDecode(Function &F) const {
 
   // Return tag is used to jump out of the function
   MCSymbol *returnTag =
-      MMI->getContext().getOrCreateSymbol(F.getName() + "_function_return");
+      createSymbol(F.getName().str() + "_function_return");
 
   // TODO: iterate over function parameters
   unsigned argCounter = 0;
@@ -254,8 +257,7 @@ void EVMAsmPrinter::appendInternalSelector(Module &M, MCSymbol *notFoundTag) {
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH4).addImm(hash), *STI);
     OutStreamer->EmitInstruction(MCInstBuilder(EVM::EQ), *STI);
 
-    MCSymbol *funcWrapperSymbol =
-        MMI->getContext().getOrCreateSymbol(F.getName() + "_wrapper");
+    MCSymbol *funcWrapperSymbol = createSymbol(F.getName().str() + "_wrapper");
     funcWrapperMap.insert(std::pair<Function *, MCSymbol *>(&F, funcWrapperSymbol));
     appendConditionalJumpTo(funcWrapperSymbol);
   }
@@ -305,30 +307,41 @@ void EVMAsmPrinter::appendRevert() const {
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
 }
 
+void EVMAsmPrinter::appendConditionalRevert(MCSymbol *S) const {
+  pushSymbol(S);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
+  
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
+  OutStreamer->EmitLabel(S);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), *STI);
+}
+
 void EVMAsmPrinter::appendFunctionSelector(Module &M) {
-  MCSymbol *selectorTag = MMI->getContext().getOrCreateSymbol("function_selector");
-  OutStreamer->EmitLabel(selectorTag);
+  OutStreamer->EmitLabel(createSymbol("function_selector"));
 
   bool needToAddCallValueCheck = true;
   if (!EVMSubtarget::hasPayableFunctions(M) &&
-      !EVMSubtarget::hasInterfaceFunctions(M) &&
-      !EVMSubtarget::moduleIsLibrary(M)) {
+       EVMSubtarget::hasInterfaceFunctions(M)
+      ) {
         appendCallValueCheck(M);
         needToAddCallValueCheck = false;
   }
 
-  MCSymbol *notFoundTag = MMI->getContext().getOrCreateSymbol("not_found");
-  emitCallDataCheck(M, notFoundTag);
+  MCSymbol *notFoundTag = createSymbol("not_found");
+  emitCallDataSizeCheck(M, notFoundTag);
 
   if (EVMSubtarget::hasInterfaceFunctions(M)) {
-    OutStreamer->AddComment("Retrieve function signature hash");
-    //OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
-    appendCalldataLoad(M);
-
-    // TOOD: collect DataUnpackerEntryPoints.
+    // this function does not add anything onto stack.
     collectDataUnpackerEntryPoints(M);
-    // stack now is: <can-call-non-view-functions>? <funhash>
 
+    OutStreamer->AddComment("Retrieve function signature hash");
+    appendCalldataLoad(M);
+    // now we have the function id at TOS.
+
+    // stack now is: <can-call-non-view-functions>? <funhash>
     appendInternalSelector(M, notFoundTag);
   }
 
@@ -363,7 +376,7 @@ void EVMAsmPrinter::appendFunctionSelector(Module &M) {
   }
 }
 
-void EVMAsmPrinter::emitCallDataCheck(Module &M, MCSymbol *notFoundTag) {
+void EVMAsmPrinter::emitCallDataSizeCheck(Module &M, MCSymbol *notFoundTag) {
   OutStreamer->AddComment("call data check");
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x04), *STI);
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLDATASIZE), *STI);
@@ -374,18 +387,14 @@ void EVMAsmPrinter::emitCallDataCheck(Module &M, MCSymbol *notFoundTag) {
 }
 
 void EVMAsmPrinter::appendCallValueCheck(Module &M) {
-  OutStreamer->AddComment("Callvalue check");
+  OutStreamer->AddComment("callvalue check");
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::CALLVALUE), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
+  OutStreamer->EmitInstruction(MCInstBuilder(EVM::ISZERO), *STI);
 
-  MCSymbol *fallthrough_tag =
-      MMI->getContext().getOrCreateSymbol("cv_check_false");
-
-  appendConditionalJumpTo(fallthrough_tag);
-
-  appendRevert();
-
-  OutStreamer->EmitLabel(fallthrough_tag);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
+  MCSymbol *cvpass = createSymbol("cvcheck_pass");
+  OutStreamer->AddComment("if fails, revert");
+  appendConditionalRevert(cvpass);
 }
 
 void EVMAsmPrinter::emitMemoryReturner(const Function &F) const {
@@ -513,8 +522,7 @@ void EVMAsmPrinter::emitFunctionWrapper(const Function &F) {
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
 
   // This is used for inner jumping (between nonpayable check and unpacker)
-  MCSymbol *S =
-      MMI->getContext().getOrCreateSymbol(F.getName() + "_calldataunpacker");
+  MCSymbol *S = createSymbol(F.getName().str() + "_calldataunpacker");
 
   emitNonPayableCheck(F, S);
   emitCallDataUnpacker(F, S);
@@ -534,13 +542,13 @@ void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   STI = std::unique_ptr<MCSubtargetInfo>(TM.getTarget().createMCSubtargetInfo(
       TM.getTargetTriple().str(), TM.getTargetCPU(),
       TM.getTargetFeatureString()));
+  ctx = &MMI->getContext();
   //AsmPrinter::EmitStartOfAsmFile(M);
   //return;
   // Emit the skeleton of the asm file in text section.
   OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
 
-  OutStreamer->EmitLabel(
-      MMI->getContext().getOrCreateSymbol("contract_creation"));
+  OutStreamer->EmitLabel(createSymbol("contract_creation"));
 
   // TODO
   bool isLibrary = false;

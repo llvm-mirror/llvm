@@ -147,6 +147,7 @@ public:
   }
 
   // Memory layout
+  // see https://solidity.readthedocs.io/en/latest/miscellaneous.html#layout-of-state-variables-in-storage
   unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
   unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
   static unsigned getIdentityContractAddress() { return 4; }

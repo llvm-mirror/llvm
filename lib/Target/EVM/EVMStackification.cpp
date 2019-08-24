@@ -65,8 +65,10 @@ void StackStatus::swap(unsigned depth) {
     assert(stackElements.size() >= 2);
     LLVM_DEBUG({
       unsigned first = stackElements.rbegin()[0];
+      unsigned fst_idx = Register::virtReg2Index(first);
       unsigned second = stackElements.rbegin()[depth];
-      dbgs() << "  Swapping %" << first << " and %" << second << "\n";
+      unsigned snd_idx = Register::virtReg2Index(second);
+      dbgs() << "  Swapping %" << fst_idx << " and %" << snd_idx << "\n";
     });
     std::iter_swap(stackElements.rbegin(), stackElements.rbegin() + depth);
 }
