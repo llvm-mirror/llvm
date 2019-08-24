@@ -72,7 +72,6 @@ void StackStatus::swap(unsigned depth) {
 }
 
 void StackStatus::dup(unsigned depth) {
-  assert(depth != 0);
   unsigned elem = *(stackElements.rbegin() + depth);
 
   LLVM_DEBUG({
@@ -536,7 +535,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   unsigned numUses = std::distance(MRI->use_begin(defReg), MRI->use_end());
   for (unsigned i = 1; i < numUses; ++i) {
     insertDupAfter(1, MI);
-    ss.dup(1);
+    ss.dup(0);
   }
 
 }
