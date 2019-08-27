@@ -111,6 +111,7 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock & MBB : MF) {
     // Insert JUMPDEST at the beginning of the MBB is necessary
 
+    MBB.setHasAddressTaken();
     if (shouldInsertJUMPDEST(MBB)) {
       MachineBasicBlock::iterator begin = MBB.begin();
       BuildMI(MBB, begin, begin->getDebugLoc(), TII->get(EVM::JUMPDEST));
