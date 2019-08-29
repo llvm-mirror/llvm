@@ -129,13 +129,19 @@ void EVMCallTransformation::scanFunction(Function& F,
     SmallVector<Value*, 16> Opnds;
 
     // make the fallthrough BB the first operand
-    Opnds.push_back(BlockAddress::get(newBB));
+    Value *newBBAddr = BlockAddress::get(newBB);   
+    Opnds.push_back(newBBAddr);
 
     for (unsigned i = 0, e = numOpnds; i < e; ++i) {
       Opnds.push_back(CI->getArgOperand(i));
     }
 
     Function* CalledFunction = CI->getCalledFunction();
+
+    // Skip external functions
+    if (CalledFunction->isDeclaration()) {
+      continue;
+    }
     
     // TODO: We have to change it to accmondate more situations.
     auto NewFuncIter = FuncMap.find(CalledFunction);
@@ -205,7 +211,7 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   for (Function& F : M) {
     // TODO: we should also change function decls.
     if (F.isDeclaration()) {
-      llvm_unreachable("External functions are not yet implemented");
+      continue;
     }
 
     FuncVector.push_back(&F);
