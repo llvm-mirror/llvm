@@ -60,16 +60,22 @@ private:
   Function* rebuildFunction(FunctionType* FuncTy, Function* OldFunc);
   void scanFunction(Function& F, FuncMapType &FuncMap) const;
 
+  static bool shouldSkipFunction(Function *F);
 };
 
 
 } // end anonymous namespace
 
+bool
+EVMCallTransformation::shouldSkipFunction(Function *F) {
+  return (F->isDeclaration() || F->getName() == StringRef("main"));
+}
+
 FunctionType*
 EVMCallTransformation::rebuildFunctionType(FunctionType *OrigType) const {
   Type* RetType = OrigType->getReturnType();
 
-  LLVM_DEBUG({ dbgs() << "Original FunctionType:     "; OrigType->dump(); });
+  LLVM_DEBUG({ dbgs() << "    Original FunctionType:     "; OrigType->dump(); });
 
   // construct the first operand to be a pointer type...
 
@@ -85,7 +91,7 @@ EVMCallTransformation::rebuildFunctionType(FunctionType *OrigType) const {
   FunctionType* FT = FunctionType::get(RetType, ParamTypesVector,
                                        OrigType->isVarArg());
 
-  LLVM_DEBUG({ dbgs() << "Creating new FunctionType: "; FT->dump(); });
+  LLVM_DEBUG({ dbgs() << "    Creating new FunctionType: "; FT->dump(); });
   return FT;
 }
 
@@ -138,8 +144,7 @@ void EVMCallTransformation::scanFunction(Function& F,
 
     Function* CalledFunction = CI->getCalledFunction();
 
-    // Skip external functions
-    if (CalledFunction->isDeclaration()) {
+    if (EVMCallTransformation::shouldSkipFunction(CalledFunction)) {
       continue;
     }
     
@@ -150,6 +155,10 @@ void EVMCallTransformation::scanFunction(Function& F,
     Function* NewFunc = NewFuncIter->second;
 
     FunctionType* OldFuncTy = CalledFunction->getFunctionType();
+
+    LLVM_DEBUG({
+      dbgs() << "Rebuilding Function:" << CalledFunction->getName() << "\n";
+    });
     FunctionType* CallTy = rebuildFunctionType(OldFuncTy);
 
     Instruction* NewCI = CallInst::Create(CallTy, NewFunc, Opnds);
@@ -177,11 +186,16 @@ EVMCallTransformation::rebuildFunction(FunctionType* NewFuncTy, Function* OldFun
   // Another way to implement it is to look at:
   // /lib/Transforms/IPO/DeadArgumentElimination.cpp
 
+  // change the name so it 
+  StringRef funcName = OldFunc->getName();
+  OldFunc->setName(OldFunc->getName() + "_old");
+
   Function* NewFunc = Function::Create(NewFuncTy,
                                        OldFunc->getLinkage(),
                                        OldFunc->getAddressSpace(),
-                                       OldFunc->getName(),
+                                       funcName,
                                        OldFunc->getParent());
+  LLVM_DEBUG({ dbgs() << "    New function: " << NewFunc->getName() << "\n"; });
 
   ValueToValueMapTy VMap;
   auto NewFArgIt = NewFunc->arg_begin();
@@ -210,10 +224,14 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   // Record old functions.
   for (Function& F : M) {
     // TODO: we should also change function decls.
-    if (F.isDeclaration()) {
+    if (shouldSkipFunction(&F)) {
+      LLVM_DEBUG({
+        dbgs() << "Skipping Function:     " << F.getName() << "\n";
+      });
       continue;
     }
 
+    LLVM_DEBUG({ dbgs() << "Analyzing Function:     " << F.getName() << "\n"; });
     FuncVector.push_back(&F);
   }
   
