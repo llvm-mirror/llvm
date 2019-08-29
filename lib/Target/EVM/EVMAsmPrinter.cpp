@@ -42,8 +42,7 @@ public:
                            std::unique_ptr<MCStreamer> Streamer)
       : AsmPrinter(TM, std::move(Streamer)) {}
 
-  void EmitStartOfAsmFile(Module &M) override;
-  //void EmitEndOfAsmFile(Module &M) override;
+  //void EmitStartOfAsmFile(Module &M) override;
 
   //void EmitFunctionEntryLabel() override;
 
@@ -66,7 +65,7 @@ public:
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp) const {
     return LowerEVMMachineOperandToMCOperand(MO, MCOp, *this);
     }
-  bool runOnMachineFunction(MachineFunction &MF) override;
+  //bool runOnMachineFunction(MachineFunction &MF) override;
 
 private:
   void emitInitializeFreeMemoryPointer() const;
@@ -125,6 +124,7 @@ void EVMAsmPrinter::collectDataUnpackerEntryPoints(Module &M) {
   }
 }
 
+/*
 bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   return AsmPrinter::runOnMachineFunction(MF);
   // emit the function body label before we emit the function.
@@ -134,6 +134,7 @@ bool EVMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   return AsmPrinter::runOnMachineFunction(MF);
 }
+*/
 
 void EVMAsmPrinter::appendLabel(std::string name) const {
   MCSymbol *symbol = createSymbol(name);
@@ -538,6 +539,7 @@ void EVMAsmPrinter::appendDelegatecallCheck(Module &M) {
   llvm_unreachable("unimplemented");
 }
 
+/*
 void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   STI = std::unique_ptr<MCSubtargetInfo>(TM.getTarget().createMCSubtargetInfo(
       TM.getTargetTriple().str(), TM.getTargetCPU(),
@@ -564,8 +566,7 @@ void EVMAsmPrinter::EmitStartOfAsmFile(Module &M) {
 
   appendLabel("function_bodies");
 }
-
-//void EVMAsmPrinter::EmitEndOfAsmFile(Module &M) { }
+*/
 
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   EVMMCInstLower MCInstLowering(OutContext, *this);
