@@ -55,7 +55,6 @@ void EVMRegisterInfo::eliminateFrameIndex(
     RegScavenger * /*RS*/) const {
   assert(SPAdj == 0 && "Unexpected");
 
-  unsigned i = 0;
   MachineInstr &MI = *II;
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
@@ -72,69 +71,67 @@ void EVMRegisterInfo::eliminateFrameIndex(
         break;
       }
 
+  /*
+  unsigned i = 0;
   while (!MI.getOperand(i).isFI()) {
     ++i;
     assert(i < MI.getNumOperands() && "Instr doesn't have FrameIndex operand!");
   }
+  */
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   Register FrameReg = getFrameRegister(MF);
 
   int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) * 32;
 
-  // convert the MLOAD/MSTORE into 
-  if (MI.getOpcode() == EVM::MLOAD_r ||
-      MI.getOpcode() == EVM::MSTORE_r) {
-    unsigned fiReg = FrameReg;
-    if (Offset != 0) {
-      unsigned opc = 0;
-      fiReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
+  unsigned fiReg = FrameReg;
+  if (Offset != 0) {
+    unsigned opc = 0;
+    fiReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
 
-      if (Offset > 0) {
-        opc = EVM::ADD_r;
-      } else if (Offset < 0) {
-        opc = EVM::SUB_r;
-      }
-      unsigned offsetReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-      BuildMI(MBB, MI, DL, TII->get(EVM::PUSH32_r), offsetReg)
-          .addImm(Offset);
-      BuildMI(MBB, MI, DL, TII->get(opc), fiReg)
-          .addReg(FrameReg)
-          .addReg(offsetReg);
+    if (Offset > 0) {
+      opc = EVM::ADD_r;
+    } else if (Offset < 0) {
+      opc = EVM::SUB_r;
     }
-
-    MI.getOperand(i).ChangeToRegister(fiReg, false);
-    return;
+    unsigned offsetReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
+    BuildMI(MBB, MI, DL, TII->get(EVM::PUSH32_r), offsetReg).addImm(Offset);
+    BuildMI(MBB, MI, DL, TII->get(opc), fiReg)
+        .addReg(FrameReg)
+        .addReg(offsetReg);
   }
 
-/*
-  // replace the MLOAD/MSTORE with pPUTOLCAL/pGETLOCAL
-  unsigned opc = MI.getOpcode();
-  assert(opc == EVM::MLOAD_r || opc == EVM::MSTORE_r);
-  if (opc == EVM::MLOAD_r) {
-    opc = EVM::pGETLOCAL_r;
+  MI.getOperand(FIOperandNum).ChangeToRegister(fiReg, false);
+  return;
 
-    MachineOperand &MO = MI.getOperand(1);
-    assert(MO.isFI());
-    unsigned frIdx = MO.getIndex();
+  /*
+    // replace the MLOAD/MSTORE with pPUTOLCAL/pGETLOCAL
+    unsigned opc = MI.getOpcode();
+    assert(opc == EVM::MLOAD_r || opc == EVM::MSTORE_r);
+    if (opc == EVM::MLOAD_r) {
+      opc = EVM::pGETLOCAL_r;
 
-    MI.setDesc(TII->get(opc));
-    MI.getOperand(1).ChangeToImmediate(frIdx);
-  } 
-  if (opc == EVM::MSTORE_r) {
-    opc = EVM::pPUTLOCAL_r;
+      MachineOperand &MO = MI.getOperand(1);
+      assert(MO.isFI());
+      unsigned frIdx = MO.getIndex();
 
-    MachineOperand &MO = MI.getOperand(0);
-    assert(MO.isFI());
-    unsigned frIdx = MO.getIndex();
+      MI.setDesc(TII->get(opc));
+      MI.getOperand(1).ChangeToImmediate(frIdx);
+    }
+    if (opc == EVM::MSTORE_r) {
+      opc = EVM::pPUTLOCAL_r;
 
-    MI.setDesc(TII->get(opc));
-    // MSTORE offset value
-    unsigned reg = MI.getOperand(1).getReg();
-    MI.getOperand(0).ChangeToRegister(reg, false);
-    MI.getOperand(1).ChangeToImmediate(frIdx);
-  }
-*/
+      MachineOperand &MO = MI.getOperand(0);
+      assert(MO.isFI());
+      unsigned frIdx = MO.getIndex();
+
+      MI.setDesc(TII->get(opc));
+      // MSTORE offset value
+      unsigned reg = MI.getOperand(1).getReg();
+      MI.getOperand(0).ChangeToRegister(reg, false);
+      MI.getOperand(1).ChangeToImmediate(frIdx);
+    }
+  */
 }
 
 Register
