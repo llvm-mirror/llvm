@@ -65,7 +65,6 @@ void EVMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 
   if (Op.isReg()) {
     llvm_unreachable("Should not have registers");
-    printRegName(O, Op.getReg());
     return;
   } else if (Op.isImm()) {
     O << Op.getImm();

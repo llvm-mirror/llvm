@@ -22,6 +22,7 @@ class Target;
 class EVMMCAsmInfo : public MCAsmInfo {
 public:
   explicit EVMMCAsmInfo(const Triple &TT) {
+    StackGrowsUp = true;
   }
 };
 }

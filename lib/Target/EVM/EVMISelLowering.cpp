@@ -310,10 +310,10 @@ SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(EVMISD::SELECTCC, DL, VTs, Ops);
 }
 
-SDValue EVMTargetLowering::LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const {
+SDValue EVMTargetLowering::LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const {
   SDValue Op0 = Op.getOperand(0);
   SDLoc dl(Op);
-  assert(Op.getValueType() == MVT::i256 && "Unhandled target sign_extend_inreg.");
+  assert(Op.getValueType() == MVT::i256 && "Unhandled target sign_extend.");
 
   unsigned Width = cast<VTSDNode>(Op.getOperand(1))->getVT().getSizeInBits() / 8;
 
@@ -334,19 +334,15 @@ SDValue EVMTargetLowering::LowerOperation(SDValue Op,
     return LowerSELECT_CC(Op, DAG);
   case ISD::FrameIndex:
     return LowerFrameIndex(Op, DAG);
+  case ISD::SIGN_EXTEND:
   case ISD::SIGN_EXTEND_INREG:
-    return LowerSIGN_EXTEND_INREG(Op, DAG);
+    return LowerSIGN_EXTEND(Op, DAG);
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol:
     return LowerExternalSymbol(Op, DAG);
   case ISD::BlockAddress:
     return LowerBlockAddress(Op, DAG);
-  case ISD::SIGN_EXTEND:
-    // TODO: `sext` can be efficiently supported.
-    // so dont need to expand.
-    // consider to use EVMISD::SIGNEXTEND since we need shift value.
-    llvm_unreachable("Needs implementation.");
   }
 }
 
