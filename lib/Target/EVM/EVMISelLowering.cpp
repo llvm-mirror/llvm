@@ -108,6 +108,9 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::GlobalAddress, VT, Custom);
     setOperationAction(ISD::ExternalSymbol, VT, Custom);
     setOperationAction(ISD::BlockAddress, VT, Expand);
+
+    // FIXME: DYNAMIC_STACKALLOC
+    setOperationAction(ISD::DYNAMIC_STACKALLOC, VT, Expand);
   }
   setOperationAction(ISD::BR_CC, MVT::i256, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
@@ -119,8 +122,6 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FrameIndex, MVT::i256, Custom);
   setOperationAction(ISD::GlobalAddress, MVT::i256, Custom);
 
-  // FIXME: DYNAMIC_STACKALLOC
-  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i256, Custom);
   setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
 
