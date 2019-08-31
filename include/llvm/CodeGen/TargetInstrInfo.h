@@ -205,8 +205,18 @@ public:
   /// that is set up between the frame setup and destroy pseudo instructions.
   int64_t getFrameSize(const MachineInstr &I) const {
     assert(isFrameInstr(I) && "Not a frame instruction");
-    assert(I.getOperand(0).getImm() >= 0);
-    return I.getOperand(0).getImm();
+    const MachineOperand &MO = I.getOperand(0);
+    // we are doing a little bit hack here. If we see an CImm, we are going to 
+    // convert it into int64_t.
+    if (MO.isCImm()) {
+      const APInt &AP = MO.getCImm()->getValue();
+      assert(!AP.isNegative());
+      assert(AP.getActiveBits() < 64);
+      return AP.getSExtValue();
+    } else {
+      assert(I.getOperand(0).getImm() >= 0);
+      return I.getOperand(0).getImm();
+    }
   }
 
   /// Returns the total frame size, which is made up of the space set up inside
