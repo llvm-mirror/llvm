@@ -526,7 +526,7 @@ SDValue EVMTargetLowering::LowerFormalArguments(
 
 
     const SDValue &idx = DAG.getTargetConstant(InVals.size(),
-                                               DL, MVT::i256);
+                                               DL, MVT::i64);
     Opnds.push_back(idx);
     //Opnds.push_back(Chain);
 

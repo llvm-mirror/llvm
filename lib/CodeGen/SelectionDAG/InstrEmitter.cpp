@@ -369,7 +369,12 @@ void InstrEmitter::AddOperand(MachineInstrBuilder &MIB,
     AddRegisterOperand(MIB, Op, IIOpNum, II, VRBaseMap,
                        IsDebug, IsClone, IsCloned);
   } else if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(Op)) {
-    MIB.addImm(C->getSExtValue());
+    unsigned bits = C->getConstantIntValue()->getBitWidth();
+    if (bits > 64) {
+      MIB.addCImm(C->getConstantIntValue());
+    } else {
+      MIB.addImm(C->getSExtValue());
+    }
   } else if (ConstantFPSDNode *F = dyn_cast<ConstantFPSDNode>(Op)) {
     MIB.addFPImm(F->getConstantFPValue());
   } else if (RegisterSDNode *R = dyn_cast<RegisterSDNode>(Op)) {
