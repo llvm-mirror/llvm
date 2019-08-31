@@ -48,6 +48,8 @@ public:
   static bool isStackArg(const MachineInstr &MI);
 private:
   void arrangeStackArgs(MachineFunction &MF) const;
+  std::vector<unsigned> unusedArgs;
+  const EVMInstrInfo *TII;
 };
 } // end anonymous namespace
 
@@ -67,7 +69,6 @@ bool EVMArgumentMove::isStackArg(const MachineInstr &MI) {
 
 void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
   EVMMachineFunctionInfo *MFI = MF.getInfo<EVMMachineFunctionInfo>();
-  const auto &TII = *MF.getSubtarget<EVMSubtarget>().getInstrInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   unsigned numStackArgs = MFI->getNumStackArgs();
@@ -94,7 +95,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
 
       unsigned destReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
       BuildMI(EntryMBB, insertPt, insertPt->getDebugLoc(),
-              TII.get(EVM::pSTACKARG_r), destReg)
+              TII->get(EVM::pSTACKARG_r), destReg)
           .addImm(i);
 
       if (i == 0) {
@@ -113,14 +114,14 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       MachineInstr &MI = *I++;
       if (MI.getOpcode() == EVM::pRETURNSUB_TEMP_r) {
         BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII.get(EVM::pRETURNSUB_r))
+                TII->get(EVM::pRETURNSUB_r))
             .addReg(MI.getOperand(0).getReg())
             .addReg(returnAddrReg);
         MI.eraseFromParent();
       }
       if (MI.getOpcode() == EVM::pRETURNSUBVOID_TEMP_r) {
         BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII.get(EVM::pRETURNSUBVOID_r))
+                TII->get(EVM::pRETURNSUBVOID_r))
             .addReg(returnAddrReg);
         MI.eraseFromParent();
       }
@@ -133,6 +134,8 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
     dbgs() << "********** Argument Move **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
+
+  TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
@@ -152,11 +155,14 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
 
       unsigned reg = MI.getOperand(0).getReg();
 
-      LLVM_DEBUG({
-        bool IsDead = MRI.use_empty(reg);
-        assert(!IsDead &&
-               "The case of stack argument not being used is unimplemented");
-      });
+      bool IsDead = MRI.use_empty(reg);
+      if (IsDead) {
+        LLVM_DEBUG({
+          dbgs() << "Stack argument: " << Register::virtReg2Index(reg)
+                 << " is unused.\n";
+        });
+        unusedArgs.push_back(reg);
+      }
     }
   }
 
@@ -170,10 +176,22 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
+  // arrange stackargs to top of MBB
   for (unsigned i = 0; i < numArgs; ++i) {
     assert(index2mi.find(i) != index2mi.end());
     EntryMBB.insert(InsertPt, index2mi[i]->removeFromParent());
     Changed = true;
+  }
+
+  // insert pops afterwards
+  for (std::vector<unsigned>::iterator rit = unusedArgs.begin();
+       rit != unusedArgs.end(); ++rit) {
+    LLVM_DEBUG({
+      dbgs() << "Inserting POP instruction to remove reg "
+             << Register::virtReg2Index(*rit) << "\n";
+    });
+    BuildMI(EntryMBB, InsertPt, InsertPt->getDebugLoc(),
+            TII->get(EVM::POP_r)).addReg(*rit);
   }
 
 
@@ -181,8 +199,7 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
   // to before our first NonArg instruction.
   for (MachineInstr &MI : llvm::make_range(InsertPt, EntryMBB.end())) {
     if (EVMArgumentMove::isStackArg(MI)) {
-      EntryMBB.insert(InsertPt, MI.removeFromParent());
-      Changed = true;
+      llvm_unreachable("there shouldn't be another stack args unmoved.");
     }
   }
 
