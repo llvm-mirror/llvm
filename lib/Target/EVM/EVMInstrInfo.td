@@ -648,6 +648,7 @@ def : Pat<(EVMWrapper tblockaddress:$blk), (PUSH32_r tblockaddress:$blk)>;
 def : Pat<(brind i256:$dst), (JUMP_r i256:$dst)>;
 
 // Function calls
+/*
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
           (pJUMPSUB_r tglobaladdr:$callee)>;
 def : Pat<(i256 (EVMCall (EVMWrapper texternalsym:$callee))),
@@ -658,6 +659,7 @@ def : Pat<(EVMCallVoid (EVMWrapper tglobaladdr:$callee)),
           (pJUMPSUBVOID_r tglobaladdr:$callee)>;
 def : Pat<(EVMCall (EVMWrapper texternalsym:$callee)),
           (pJUMPSUBVOID_r texternalsym:$callee)>;
+          */
 
 //===----------------------------------------------------------------------===//
 // Standard extensions

@@ -200,6 +200,10 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
               RegOpcode == EVM::pRETURNSUBVOID_r) {
             StackOpcode = EVM::JUMP;
           }
+
+          if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
+            StackOpcode = EVM::JUMP;
+          }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
 

@@ -138,12 +138,6 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
         Changed = true;
       }
 
-      if (opcode == EVM::pJUMPSUB) {
-        // simply convert it to JUMP
-        MI->setDesc(TII->get(EVM::JUMP));
-        Changed = true;
-      }
-
       // TODO: add stack-version of these 2 pseudos
       if (opcode == EVM::pADJFPUP ||
           opcode == EVM::pADJFPDOWN) {
