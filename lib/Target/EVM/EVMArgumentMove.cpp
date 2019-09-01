@@ -135,6 +135,8 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
            << "********** Function: " << MF.getName() << '\n';
   });
 
+  unusedArgs.clear();
+
   TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
