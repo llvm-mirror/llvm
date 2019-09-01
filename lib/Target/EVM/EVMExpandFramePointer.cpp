@@ -45,13 +45,14 @@ private:
   bool runOnMachineFunction(MachineFunction &MF) override;
 
   bool handleFramePointer(MachineInstr *MI);
+  bool handleStackPointer(MachineInstr *MI);
 
 };
 } // end anonymous namespace
 
 char EVMExpandFramePointer::ID = 0;
 INITIALIZE_PASS(EVMExpandFramePointer, DEBUG_TYPE,
-                "Replace $fp with virtual registers", false, false)
+                "Replace $fp, $sp with virtual registers", false, false)
 
 FunctionPass *llvm::createEVMExpandFramePointer() {
   return new EVMExpandFramePointer();
@@ -65,9 +66,7 @@ bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
     if (!MO.isReg()) continue;
 
     unsigned Reg = MO.getReg();
-    if (Register::isPhysicalRegister(Reg)) {
-      assert(Reg == EVM::FP);
-
+    if (Reg == EVM::FP) {
       MachineBasicBlock *MBB = MI->getParent();
       DebugLoc DL = MI->getDebugLoc();
 
@@ -90,6 +89,64 @@ bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
   }
   return Changed;
 }
+bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
+  bool Changed = false;
+
+  for (unsigned i = 0; i < MI->getNumExplicitOperands(); ++i) {
+    MachineOperand &MO = MI->getOperand(i);
+    if (!MO.isReg()) continue;
+
+    unsigned reg = MO.getReg();
+    if (reg != EVM::SP) {
+      continue;
+    }
+    MachineBasicBlock *MBB = MI->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+
+    if (MO.isDef()) {
+      assert(MI->getOpcode() == EVM::pMOVE_r);
+
+      // expand def, and remove MOVE
+      // fmp = PUSH FMP
+      // MSTORE fmp src
+      unsigned fmpReg = this->getNewRegister(MI);
+
+      BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
+          .addImm(ST->getFreeMemoryPointer());
+      BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
+          .addReg(fmpReg).add(MI->getOperand(1));
+    }
+
+    if (MO.isUse()) {
+      // load SP value on to a new register, and replace this use occurrence with the 
+      unsigned fmpReg = this->getNewRegister(MI);
+      unsigned reg = this->getNewRegister(MI);
+
+      // fmp = PUSH FMP
+      // reg = MLOAD fmp
+      BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
+          .addImm(ST->getFreeMemoryPointer());
+      BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), reg)
+          .addReg(fmpReg);
+
+      LLVM_DEBUG({
+        dbgs() << "Expanding $sp to %"
+               <<Register::virtReg2Index(reg) << " in instruction: ";
+        MI->dump();
+      });
+      MI->getOperand(i).setReg(reg);
+    }
+  }
+
+  // remove MOVE
+  if (MI->getOpcode() == EVM::pMOVE_r) {
+    LLVM_DEBUG({
+      dbgs() << "Remove MOVE instruction: ";
+      MI->dump();
+    });
+    MI->eraseFromParent();
+  }
+}
 
 unsigned EVMExpandFramePointer::getNewRegister(MachineInstr* MI) const {
     MachineFunction *F = MI->getParent()->getParent();
@@ -98,7 +155,7 @@ unsigned EVMExpandFramePointer::getNewRegister(MachineInstr* MI) const {
 }
 bool EVMExpandFramePointer::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
-    dbgs() << "********** Expand pseudo instructions **********\n"
+    dbgs() << "********** Expand physical registers  **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
 
@@ -117,6 +174,8 @@ bool EVMExpandFramePointer::runOnMachineFunction(MachineFunction &MF) {
       unsigned opcode = MI->getOpcode();
 
       Changed |= handleFramePointer(MI);
+      Changed |= handleStackPointer(MI);
+
     }
   }
 

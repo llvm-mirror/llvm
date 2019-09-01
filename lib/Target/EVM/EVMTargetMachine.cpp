@@ -109,8 +109,8 @@ void EVMPassConfig::addPreEmitPass() {
   // construct stack arguments and move them to the correct location.
   addPass(createEVMArgumentMove());
 
-  // we are going to eliminate $fp at this point, so subsequent passes only
-  // deals with virtual registers.
+  // we are going to eliminate $fp and $sp at this point, so subsequent passes
+  // only deals with virtual registers.
   addPass(createEVMExpandFramePointer());
 
   if (getOptLevel() != CodeGenOpt::None) {

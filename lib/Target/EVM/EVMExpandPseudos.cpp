@@ -29,7 +29,7 @@ public:
 
 private:
   StringRef getPassName() const override {
-    return "EVM add Jumpdest";
+    return "EVM expand pseudos";
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -47,8 +47,6 @@ private:
   void expandRETURN(MachineInstr* MI) const;
   void expandJUMPSUB(MachineInstr* MI) const;
 
-  bool handleFramePointer(MachineInstr *MI);
-
 };
 } // end anonymous namespace
 
@@ -59,40 +57,6 @@ INITIALIZE_PASS(EVMExpandPseudos, DEBUG_TYPE,
 
 FunctionPass *llvm::createEVMExpandPseudos() {
   return new EVMExpandPseudos();
-}
-
-/// eliminate frame pointer.
-bool EVMExpandPseudos::handleFramePointer(MachineInstr *MI) {
-  bool Changed = false;
-  for (unsigned i = 0; i < MI->getNumExplicitOperands(); ++i) {
-    MachineOperand &MO = MI->getOperand(i);
-    if (!MO.isReg()) continue;
-
-    unsigned Reg = MO.getReg();
-    if (Register::isPhysicalRegister(Reg)) {
-      assert(Reg == EVM::FP);
-
-      MachineBasicBlock *MBB = MI->getParent();
-      DebugLoc DL = MI->getDebugLoc();
-
-      // $reg = PUSH32_r 64
-      // $fp = MLOAD $reg
-      unsigned fpReg = this->getNewRegister(MI);
-      unsigned reg = this->getNewRegister(MI);
-      BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
-          .addImm(ST->getFreeMemoryPointer());
-      BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
-          .addReg(reg);
-      LLVM_DEBUG({
-        dbgs() << "Expanding $fp to %"
-               << Register::virtReg2Index(fpReg) << " in instruction: ";
-        MI->dump();
-      });
-      MI->getOperand(i).setReg(fpReg);
-      Changed = true; 
-    }
-  }
-  return Changed;
 }
 
 unsigned EVMExpandPseudos::getNewRegister(MachineInstr* MI) const {
@@ -245,8 +209,6 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
         case EVM::pJUMPSUB_r:
         case EVM::pJUMPSUBVOID_r:
           expandJUMPSUB(MI);
-          llvm_unreachable(
-              "JUMP(SUB) instructions should have been eliminated already.");
           break;
         // suspend it and expand at finalization time
         //case EVM::pRETURNSUB_r:
