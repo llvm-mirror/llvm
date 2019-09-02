@@ -68,7 +68,8 @@ void StackStatus::swap(unsigned depth) {
       unsigned fst_idx = Register::virtReg2Index(first);
       unsigned second = stackElements.rbegin()[depth];
       unsigned snd_idx = Register::virtReg2Index(second);
-      dbgs() << "  Swapping %" << fst_idx << " and %" << snd_idx << "\n";
+      dbgs() << "  SWAP" << depth << ": Swapping %" << fst_idx << " and %"
+             << snd_idx << "\n";
     });
     std::iter_swap(stackElements.rbegin(), stackElements.rbegin() + depth);
 }
@@ -104,11 +105,14 @@ void StackStatus::push(unsigned reg) {
 
 void StackStatus::dump() const {
   LLVM_DEBUG({
-    dbgs() << "  Dumping stackstatus: \n    ";
-    for (auto i = stackElements.begin(), e = stackElements.end(); i != e; ++i) {
+    dbgs() << "  Stack : ";
+    unsigned counter = 0;
+    for (auto i = stackElements.rbegin(), e = stackElements.rend(); i != e; ++i) {
       unsigned idx = Register::virtReg2Index(*i);
-      dbgs() << "%" << idx << ", ";
+      dbgs() << "(" << counter << ", %" << idx << "), ";
+      counter ++;
     }
+    dbgs() << "\n";
   });
 }
 
@@ -245,7 +249,7 @@ static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) 
       *depth = d;
       LLVM_DEBUG({
         unsigned idx = Register::virtReg2Index(reg);
-        dbgs() << "Found %" << idx << " at depth: " << *depth << "\n";
+        dbgs() << "  Found %" << idx << " at depth: " << *depth << "\n";
       });
       return true;
     }
@@ -435,13 +439,22 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       ss.swap(secondDepthFromTop);
     } else 
 
-    // second in posotion, first is not.
+    // second in position, first is not.
     if (firstDepthFromTop != 1 && secondDepthFromTop == 0) {
-      insertSwapBefore(secondDepthFromTop, MI);
-      ss.swap(secondDepthFromTop);
+      // let's say first's depth is X,  (where X > 0)
+      // and second's depth is 0. We will insert:
+      // SWAPX
+      // SWAP1
+      // SWAPX
+
+      insertSwapBefore(firstDepthFromTop, MI);
+      ss.swap(firstDepthFromTop);
 
       insertSwapBefore(1, MI);
       ss.swap(1);
+
+      insertSwapBefore(firstDepthFromTop, MI);
+      ss.swap(firstDepthFromTop);
     } else
 
     // first and second are reversed
@@ -588,6 +601,8 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
       // 1. mark VregStackified
       // 2. insert DUP if necessary
       handleDef(ss, MI);
+
+      ss.dump();
     }
 
     // at the end of the basicblock, there should be no elements on the stack.
