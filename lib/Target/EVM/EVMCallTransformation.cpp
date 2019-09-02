@@ -66,9 +66,16 @@ private:
 
 } // end anonymous namespace
 
+static bool
+isEVMSpecificIntrinsics(Function *F) {
+  return F->isIntrinsic() && F->getName().startswith("llvm.evm");
+}
+
 bool
 EVMCallTransformation::shouldSkipFunction(Function *F) {
-  return (F->isDeclaration() || F->getName() == StringRef("main"));
+  return (F->isDeclaration() ||
+          F->getName() == StringRef("main") || // skip main function
+          isEVMSpecificIntrinsics(F)); // skip intrinsics.
 }
 
 FunctionType*
