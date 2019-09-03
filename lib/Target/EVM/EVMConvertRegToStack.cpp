@@ -116,8 +116,9 @@ void EVMConvertRegToStack::convertSWAP(MachineInstr* MI) const {
   assert(swapIdx <= 16 && "invalid SWAP");
 
   unsigned opc = getSWAPOpcode(swapIdx);
-  MI->RemoveOperand(0);
-  MI->setDesc(TII->get(opc));
+
+  BuildMI(*MI->getParent(), MI, MI->getDebugLoc(), TII->get(opc));
+  MI->removeFromParent();
 }
 
 void EVMConvertRegToStack::convertDUP(MachineInstr* MI) const {
@@ -125,7 +126,9 @@ void EVMConvertRegToStack::convertDUP(MachineInstr* MI) const {
   assert(dupIdx <= 16 && "invalid DUP");
 
   unsigned opc = getDUPOpcode(dupIdx);
-  MI->setDesc(TII->get(opc));
+
+  BuildMI(*MI->getParent(), MI, MI->getDebugLoc(), TII->get(opc));
+  MI->removeFromParent();
 }
 
 bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
