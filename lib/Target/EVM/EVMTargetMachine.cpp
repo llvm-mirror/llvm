@@ -140,6 +140,9 @@ void EVMPassConfig::addPreEmitPass() {
 }
 
 void EVMPassConfig::addPreRegAlloc() {
+  // this will cause a bug:
+  // see: https://github.com/juntao/etclabs-secondstate/issues/16
+  disablePass(&MachineBlockPlacementID);
 }
 
 void EVMPassConfig::addPostRegAlloc() {

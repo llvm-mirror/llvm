@@ -56,6 +56,9 @@ FunctionPass *llvm::createEVMFinalization() {
 }
 
 bool EVMFinalization::shouldInsertJUMPDEST(MachineBasicBlock &MBB) const {
+  if (MBB.empty()) {
+    return false;
+  }
 
   // Entry MBB needs a basic block.
   if (&MBB == &MBB.getParent()->front()) {
