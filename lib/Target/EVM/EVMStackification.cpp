@@ -320,7 +320,16 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   // us make sure that the registers are on stack top.
  
   const auto &uses = MI.explicit_uses();
-  unsigned numUsesInMI = std::distance(uses.begin(), uses.end());
+  unsigned numUsesInMI = 0;//std::distance(uses.begin(), uses.end());
+
+  // PUTLOCAL and GETLOCAL will have their constant value at the back
+  // find actual num uses:
+  for (const MachineOperand &MO : uses) {
+    if (MO.isReg()) {
+      numUsesInMI++;
+    }
+  }
+
 
   // Case 1: only 1 use
   if (numUsesInMI == 1) {
