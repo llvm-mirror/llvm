@@ -151,6 +151,11 @@ private:
   void insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI);
   void moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI);
 
+  void handleStackArgs(MachineBasicBlock &MBB);
+  void handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB);
+  void handleMBB(StackStatus &ss, MachineBasicBlock &MBB);
+  
+
   DenseMap<unsigned, unsigned> reg2index;
 
   const EVMInstrInfo* TII;
@@ -280,6 +285,7 @@ void EVMStackification::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI)
   MachineInstrBuilder putlocal =
       BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r)).addReg(reg).addImm(index);
   MBB->insertAfter(MachineBasicBlock::iterator(MI), putlocal);
+  LLVM_DEBUG(dbgs() << "  PUTLOCAL is inserted before: "; MI.dump());
 }
 
 /// organize the stack to prepare for the instruction.
@@ -555,11 +561,155 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
 
 }
 
+typedef struct {
+  unsigned reg;
+  bool canStackify;
+} Sarg;
+
+void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) {
+    assert(ss.getStackDepth() == 0);
+
+    std::vector<Sarg> canStackifyStackarg;
+
+    LLVM_DEBUG({ dbgs() << "// start of handling stack args.\n"; });
+    // iterate over stackargs:
+    MachineBasicBlock::iterator SI;
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+         I != E;) {
+      MachineInstr &MI = *I++;
+
+      if (MI.getOpcode() != EVM::pSTACKARG_r) {
+        SI = I;
+        break;
+      }
+      // record stack arg status.
+      unsigned reg = MI.getOperand(0).getReg();
+      bool canStackfy = canStackifyReg(reg, MI);
+      Sarg x{reg, canStackfy};
+      canStackifyStackarg.push_back(x);
+
+      LLVM_DEBUG({
+        unsigned ridx = Register::virtReg2Index(reg);
+        dbgs() << "Stackarg Reg %" << ridx << " is stackifiable? "
+               << canStackfy << "\n";
+      });
+
+      // we should also update stackstatus:
+      ss.push(reg);
+      ss.dump();
+    }
+
+    // inser point:
+    MachineInstr &MI = *SI;
+
+    // from top to bottom.
+    std::reverse(canStackifyStackarg.begin(), canStackifyStackarg.end());
+
+    // insert stack manipulation code here.
+    for (unsigned index = 0; index < canStackifyStackarg.size();  ++index) {
+      Sarg pos = canStackifyStackarg[index];
+
+      unsigned depth = 0;
+      bool found = findRegDepthOnStack(ss, pos.reg, &depth);
+      assert(found);
+
+      LLVM_DEBUG({
+        unsigned ridx = Register::virtReg2Index(pos.reg);
+        dbgs() << "Handling stackarg  %" << ridx << "\n"; 
+      });
+
+      if (pos.canStackify) {
+        // duplicate on to top of stack.
+        unsigned numUses =
+            std::distance(MRI->use_begin(pos.reg), MRI->use_end());
+        for (unsigned i = 1; i < numUses; ++i) {
+          if (i == 1) {
+            insertDupAfter(depth + 1, MI);
+            ss.dup(depth); 
+          } else {
+            // dup the top
+            insertDupAfter(1, MI);
+            ss.dup(0);
+          }
+        }
+
+        // stackify the register
+        assert(!MFI->isVRegStackified(pos.reg));
+        MFI->stackifyVReg(pos.reg);
+        ss.dump();
+      } else {
+        // We can't stackify it:
+        // SWAP and then store.
+        insertSwapBefore(depth, MI);
+        ss.swap(depth);
+
+        MFI->allocate_memory_index(pos.reg);
+        insertStoreToMemoryAfter(pos.reg, MI);
+        ss.pop();
+        ss.dump();
+      }
+    }
+
+    LLVM_DEBUG({ dbgs() << "// end of handling stack args.\n"; });
+
+    for (MachineBasicBlock::iterator I = SI, E = MBB.end();
+         I != E;) {
+      MachineInstr &MI = *I++;
+
+      LLVM_DEBUG({
+        dbgs() << "Stackifying instr: ";
+        MI.dump();
+      });
+
+      // If the Use is stackified:
+      // insert SWAP if necessary
+      handleUses(ss, MI);
+
+      // If the Def is able to be stackified:
+      // 1. mark VregStackified
+      // 2. insert DUP if necessary
+      handleDef(ss, MI);
+
+      ss.dump();
+    }
+
+}
+
+void EVMStackification::handleMBB(StackStatus &ss, MachineBasicBlock &MBB) {
+    assert(ss.getStackDepth() == 0);
+    // The scheduler has already set the sequence for us. We just need to
+    // iterate over by order.
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+         I != E;) {
+      MachineInstr &MI = *I++;
+
+      LLVM_DEBUG({
+        dbgs() << "Stackifying instr: ";
+        MI.dump();
+      });
+
+      // If the Use is stackified:
+      // insert SWAP if necessary
+      handleUses(ss, MI);
+
+      // If the Def is able to be stackified:
+      // 1. mark VregStackified
+      // 2. insert DUP if necessary
+      handleDef(ss, MI);
+
+      ss.dump();
+    }
+}
+
 bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Stackification **********\n"
            << "********** Function: " << MF.getName() << '\n';
   });
+
+  // initialize ////////////
+  reg2index.clear();
+  //////////////////////////
 
   this->MRI = &MF.getRegInfo();
   this->MFI = MF.getInfo<EVMMachineFunctionInfo>();
@@ -582,27 +732,11 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
     // since at this momment we do not stackify register that expand across BBs.
     StackStatus ss;
 
-    // The scheduler has already set the sequence for us. We just need to
-    // iterate over by order.
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
-         I != E;) {
-      MachineInstr &MI = *I++;
-
-      LLVM_DEBUG({
-        dbgs() << "Stackifying instr: ";
-        MI.dump();
-      });
-
-      // If the Use is stackified:
-      // insert SWAP if necessary
-      handleUses(ss, MI);
-
-      // If the Def is able to be stackified:
-      // 1. mark VregStackified
-      // 2. insert DUP if necessary
-      handleDef(ss, MI);
-
-      ss.dump();
+    // special handling of the entry basic block
+    if (&MBB == &MF.front()) {
+      handleEntryMBB(ss, MBB);      
+    } else {
+      handleMBB(ss, MBB);
     }
 
     // at the end of the basicblock, there should be no elements on the stack.
