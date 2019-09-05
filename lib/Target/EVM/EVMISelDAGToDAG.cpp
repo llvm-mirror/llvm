@@ -150,19 +150,25 @@ bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
       SDValue Src = LD->getBasePtr();
       uint64_t bytesToFill = 256 - LD->getMemoryVT().getSizeInBits();
       SDValue multiplier =CurDAG->getConstant(1 << bytesToFill, SDLoc(Node), MVT::i256);
+      SDValue push_mul =
+          SDValue(CurDAG->getMachineNode(EVM::PUSH32_r, SDLoc(Node), MVT::i256,
+                                         multiplier),
+                  0);
       SDValue mload = SDValue(CurDAG->getMachineNode(EVM::MLOAD_r,
                               SDLoc(Node), MVT::i256, Src), 0);
       SDValue mul = SDValue(CurDAG->getMachineNode(EVM::MUL_r, SDLoc(Node),
-                                                   MVT::i256, mload, multiplier), 0);
+                                                   MVT::i256, mload, push_mul), 0);
 
       MachineSDNode * div = CurDAG->getMachineNode(EVM::DIV_r, SDLoc(Node),
-                                                   MVT::i256, mul, multiplier);
+                                                   MVT::i256, mul, push_mul);
       ReplaceNode(Node, div);
       return true;
     }
     case ISD::NON_EXTLOAD:
-    case ISD::EXTLOAD:
-      break;
+    case ISD::EXTLOAD: {
+      //llvm_unreachable("unimplemented");
+      return false;
+    }
   }
   return false;
 }
