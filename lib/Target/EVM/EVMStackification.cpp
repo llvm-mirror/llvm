@@ -320,15 +320,20 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   // us make sure that the registers are on stack top.
  
   const auto &uses = MI.explicit_uses();
-  unsigned numUsesInMI = 0;//std::distance(uses.begin(), uses.end());
+  unsigned numUsesInMI = 0;
 
-  // PUTLOCAL and GETLOCAL will have their constant value at the back
-  // find actual num uses:
-  for (const MachineOperand &MO : uses) {
-    if (MO.isReg()) {
-      numUsesInMI++;
+  if (MI.isPseudo()){
+    // PUTLOCAL and GETLOCAL will have their constant value at the back
+    // find actual num uses:
+    for (const MachineOperand &MO : uses) {
+      if (MO.isReg()) {
+        numUsesInMI++;
+      }
     }
+  } else {
+    numUsesInMI = std::distance(uses.begin(), uses.end());
   }
+
 
 
   // Case 1: only 1 use
@@ -440,13 +445,15 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
     assert(result);
 
-    // idea case, we don't need to do anything
+    // ideal case, we don't need to do anything
     if (firstDepthFromTop == 1 && secondDepthFromTop == 0) {
+      LLVM_DEBUG({ dbgs() << "  case1.\n"; });
       // do nothing
     } else
     
     // first in position, second not in.
     if (firstDepthFromTop == 1 && secondDepthFromTop != 0) {
+      LLVM_DEBUG({ dbgs() << "  case2.\n"; });
       // TODO: do if it is commutatble, optimization
 
       // move the second operand to top, so a swap
@@ -456,6 +463,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
     // second in position, first is not.
     if (firstDepthFromTop != 1 && secondDepthFromTop == 0) {
+      LLVM_DEBUG({ dbgs() << "  case3.\n"; });
       // let's say first's depth is X,  (where X > 0)
       // and second's depth is 0. We will insert:
       // SWAPX
@@ -474,12 +482,14 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
     // first and second are reversed
     if (firstDepthFromTop == 0 && secondDepthFromTop == 1) {
+      LLVM_DEBUG({ dbgs() << "  case4.\n"; });
       insertSwapBefore(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
     } else
 
     // special case: 
     if (firstDepthFromTop == 0 && secondDepthFromTop > 1) {
+      LLVM_DEBUG({ dbgs() << "  case5.\n"; });
       // move the first operand to the correct position.
       insertSwapBefore(1, MI);
       ss.swap(1);
@@ -491,14 +501,27 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     
     // all other situations.
     if (firstDepthFromTop != 1 && secondDepthFromTop != 0) {
+      LLVM_DEBUG({ dbgs() << "  case6.\n"; });
       // either registers are not in place.
+      // first, swap first operand to top, then swap second operand to top
 
+      insertSwapBefore(firstDepthFromTop, MI);
+      ss.swap(firstDepthFromTop);
+
+      insertSwapBefore(1, MI);
+      ss.swap(1);
+
+
+      // after the swap, stack might have been changed, so need to
+      // redo the query.
       result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
       assert(result);
-      assert(secondDepthFromTop != 0);
-
-      insertSwapBefore(secondDepthFromTop, MI);
-      ss.swap(secondDepthFromTop);
+      if (secondDepthFromTop == 0) {
+        LLVM_DEBUG({ dbgs() << "  second operand already on stack top.\n"; });
+      } else {
+        insertSwapBefore(secondDepthFromTop, MI);
+        ss.swap(secondDepthFromTop);
+      }
     } else {
       llvm_unreachable("missing cases for handling.");
     }
