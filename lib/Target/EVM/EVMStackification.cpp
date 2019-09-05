@@ -607,8 +607,8 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
     // iterate over stackargs:
     MachineBasicBlock::iterator SI;
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
-         I != E;) {
-      MachineInstr &MI = *I++;
+         I != E; ++I) {
+      MachineInstr &MI = *I;
 
       if (MI.getOpcode() != EVM::pSTACKARG_r) {
         SI = I;
@@ -682,7 +682,10 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
       }
     }
 
-    LLVM_DEBUG({ dbgs() << "// end of handling stack args.\n"; });
+    LLVM_DEBUG({
+      dbgs() << "// end of handling stack args, next instr:";
+      (*SI).dump();
+    });
 
     for (MachineBasicBlock::iterator I = SI, E = MBB.end();
          I != E;) {
