@@ -95,10 +95,12 @@ void StackStatus::pop() {
 }
 
 void StackStatus::push(unsigned reg) {
+  /*
   LLVM_DEBUG({
     unsigned idx = Register::virtReg2Index(reg);
     dbgs() << "  Pushing %" << idx << " to top of stack.\n";
   });
+  */
   stackElements.push_back(reg);
 }
 
@@ -144,11 +146,11 @@ private:
   unsigned findNumOfUses(unsigned reg) const;
 
   void insertPopAfter(MachineInstr &MI);
-  void insertDupAfter(unsigned index, MachineInstr &MI);
-  void insertSwapBefore(unsigned index, MachineInstr &MI);
+  void insertDup(unsigned index, MachineInstr &MI, bool insertAfter);
+  void insertSwap(unsigned index, MachineInstr &MI, bool insertAfter);
 
   void insertLoadFromMemoryBefore(unsigned reg, MachineInstr& MI);
-  void insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI);
+  void insertStoreToMemory(unsigned reg, MachineInstr &MI, bool insertAfter);
   void moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI);
 
   void handleStackArgs(MachineBasicBlock &MBB);
@@ -238,11 +240,15 @@ void EVMStackification::insertPopAfter(MachineInstr& MI) {
   MBB->insertAfter(MachineBasicBlock::iterator(MI), pop);
 }
 
-void EVMStackification::insertDupAfter(unsigned index, MachineInstr &MI) {
+void EVMStackification::insertDup(unsigned index, MachineInstr &MI, bool insertAfter = true) {
   MachineBasicBlock *MBB = MI.getParent();
   MachineFunction &MF = *MBB->getParent();
   MachineInstrBuilder dup = BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::DUP_r)).addImm(index);
-  MBB->insertAfter(MachineBasicBlock::iterator(MI), dup);
+  if (insertAfter) {
+    MBB->insertAfter(MachineBasicBlock::iterator(MI), dup);
+  } else {
+    MBB->insert(MachineBasicBlock::iterator(MI), dup);
+  }
 }
 
 static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) {
@@ -263,9 +269,17 @@ static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) 
   return false;
 }
 
-void EVMStackification::insertSwapBefore(unsigned index, MachineInstr &MI) {
+void EVMStackification::insertSwap(unsigned index, MachineInstr &MI,
+                                         bool insertAfter = false) {
   MachineBasicBlock *MBB = MI.getParent();
-  BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::SWAP_r)).addImm(index);
+  MachineInstrBuilder swap =
+      BuildMI(*MBB->getParent(), MI.getDebugLoc(), TII->get(EVM::SWAP_r))
+          .addImm(index);
+  if (insertAfter) {
+    MBB->insertAfter(MachineBasicBlock::iterator(MI), swap);
+  } else {
+    MBB->insert(MachineBasicBlock::iterator(MI), swap);
+  }
 }
 
 void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &MI) {
@@ -277,15 +291,19 @@ void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &M
       .addImm(index);
 }
 
-void EVMStackification::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI) {
+void EVMStackification::insertStoreToMemory(unsigned reg, MachineInstr &MI, bool InsertAfter = true) {
   MachineBasicBlock *MBB = MI.getParent();
   MachineFunction &MF = *MBB->getParent();
 
   unsigned index = MFI->get_memory_index(reg);
+  LLVM_DEBUG(dbgs() << "  PUTLOCAL is inserted after: "; MI.dump());
   MachineInstrBuilder putlocal =
       BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r)).addReg(reg).addImm(index);
-  MBB->insertAfter(MachineBasicBlock::iterator(MI), putlocal);
-  LLVM_DEBUG(dbgs() << "  PUTLOCAL is inserted before: "; MI.dump());
+  if (InsertAfter) {
+    MBB->insertAfter(MachineBasicBlock::iterator(MI), putlocal);
+  } else {
+    MBB->insert(MachineBasicBlock::iterator(MI), putlocal);
+  }
 }
 
 /// organize the stack to prepare for the instruction.
@@ -306,7 +324,7 @@ void EVMStackification::moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI
       assert(result);
 
       if (depthFromTop != 0) {
-        insertSwapBefore(depthFromTop, MI);
+        insertSwap(depthFromTop, MI);
         ss.swap(depthFromTop);
       }
     }
@@ -361,7 +379,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       // check if it is on top of the stack.
       if (depthFromTop != 0) {
         // TODO: insert swap
-        insertSwapBefore(depthFromTop, MI);
+        insertSwap(depthFromTop, MI);
         ss.swap(depthFromTop);
       }
     }
@@ -402,14 +420,14 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       assert(result);
       
       if (depthFromTop != 0) {
-        insertSwapBefore(depthFromTop, MI);
+        insertSwap(depthFromTop, MI);
         ss.swap(depthFromTop);
       }
 
       insertLoadFromMemoryBefore(firstReg, MI);
       ss.push(firstReg);
 
-      insertSwapBefore(1, MI);
+      insertSwap(1, MI);
       ss.swap(1);
 
       ss.pop();
@@ -424,7 +442,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       assert(result);
 
       if (depthFromTop != 0) {
-        insertSwapBefore(depthFromTop, MI);
+        insertSwap(depthFromTop, MI);
         ss.swap(depthFromTop);
       }
 
@@ -457,7 +475,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       // TODO: do if it is commutatble, optimization
 
       // move the second operand to top, so a swap
-      insertSwapBefore(secondDepthFromTop, MI);
+      insertSwap(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
     } else 
 
@@ -470,20 +488,20 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       // SWAP1
       // SWAPX
 
-      insertSwapBefore(firstDepthFromTop, MI);
+      insertSwap(firstDepthFromTop, MI);
       ss.swap(firstDepthFromTop);
 
-      insertSwapBefore(1, MI);
+      insertSwap(1, MI);
       ss.swap(1);
 
-      insertSwapBefore(firstDepthFromTop, MI);
+      insertSwap(firstDepthFromTop, MI);
       ss.swap(firstDepthFromTop);
     } else
 
     // first and second are reversed
     if (firstDepthFromTop == 0 && secondDepthFromTop == 1) {
       LLVM_DEBUG({ dbgs() << "  case4.\n"; });
-      insertSwapBefore(secondDepthFromTop, MI);
+      insertSwap(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
     } else
 
@@ -491,11 +509,11 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     if (firstDepthFromTop == 0 && secondDepthFromTop > 1) {
       LLVM_DEBUG({ dbgs() << "  case5.\n"; });
       // move the first operand to the correct position.
-      insertSwapBefore(1, MI);
+      insertSwap(1, MI);
       ss.swap(1);
       
       // then move the second operand on to the top
-      insertSwapBefore(secondDepthFromTop, MI);
+      insertSwap(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
     } else
     
@@ -505,10 +523,10 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       // either registers are not in place.
       // first, swap first operand to top, then swap second operand to top
 
-      insertSwapBefore(firstDepthFromTop, MI);
+      insertSwap(firstDepthFromTop, MI);
       ss.swap(firstDepthFromTop);
 
-      insertSwapBefore(1, MI);
+      insertSwap(1, MI);
       ss.swap(1);
 
 
@@ -519,7 +537,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       if (secondDepthFromTop == 0) {
         LLVM_DEBUG({ dbgs() << "  second operand already on stack top.\n"; });
       } else {
-        insertSwapBefore(secondDepthFromTop, MI);
+        insertSwap(secondDepthFromTop, MI);
         ss.swap(secondDepthFromTop);
       }
     } else {
@@ -570,7 +588,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
     });
 
     MFI->allocate_memory_index(defReg);
-    insertStoreToMemoryAfter(defReg, MI);
+    insertStoreToMemory(defReg, MI);
     return;
   }
 
@@ -587,7 +605,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
 
   unsigned numUses = std::distance(MRI->use_begin(defReg), MRI->use_end());
   for (unsigned i = 1; i < numUses; ++i) {
-    insertDupAfter(1, MI);
+    insertDup(1, MI);
     ss.dup(0);
   }
 
@@ -631,8 +649,12 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
       ss.dump();
     }
 
-    // inser point:
+    // This is the instruction of the first non-stackarg instruction.
     MachineInstr &MI = *SI;
+    LLVM_DEBUG({
+      dbgs() << "First non-stack arg instruction:";
+      MI.dump();
+    });
 
     // from top to bottom.
     std::reverse(canStackifyStackarg.begin(), canStackifyStackarg.end());
@@ -654,13 +676,15 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
         // duplicate on to top of stack.
         unsigned numUses =
             std::distance(MRI->use_begin(pos.reg), MRI->use_end());
+        LLVM_DEBUG({ dbgs() << "  Num of uses: " << numUses << "\n"; });
+
         for (unsigned i = 1; i < numUses; ++i) {
           if (i == 1) {
-            insertDupAfter(depth + 1, MI);
+            insertDup(depth + 1, MI, false);
             ss.dup(depth); 
           } else {
             // dup the top
-            insertDupAfter(1, MI);
+            insertDup(1, MI, false);
             ss.dup(0);
           }
         }
@@ -672,11 +696,12 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
       } else {
         // We can't stackify it:
         // SWAP and then store.
-        insertSwapBefore(depth, MI);
+        insertSwap(depth, MI);
         ss.swap(depth);
 
         MFI->allocate_memory_index(pos.reg);
-        insertStoreToMemoryAfter(pos.reg, MI);
+        // we actually need to insert BEFORE
+        insertStoreToMemory(pos.reg, MI, false);
         ss.pop();
         ss.dump();
       }
@@ -702,7 +727,7 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
 
       // If the Def is able to be stackified:
       // 1. mark VregStackified
-      // 2. insert DUP if necessary
+     // 2. insert DUP if necessary
       handleDef(ss, MI);
 
       ss.dump();
@@ -759,7 +784,6 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
     LI.dump();
   }
 
-  bool Changed = false;
   TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
   for (MachineBasicBlock & MBB : MF) {
@@ -781,5 +805,5 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
   MF.getProperties().set(MachineFunctionProperties::Property::TracksLiveness);
 
 
-  return Changed;
+  return true;
 }
