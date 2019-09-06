@@ -160,7 +160,7 @@ bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
                                                    MVT::i256, mload, push_mul), 0);
 
       MachineSDNode * div = CurDAG->getMachineNode(EVM::DIV_r, SDLoc(Node),
-                                                   MVT::i256, mul, push_mul);
+                                                   MVT::i256, MVT::Other, mul, push_mul);
       ReplaceNode(Node, div);
       return true;
     }
