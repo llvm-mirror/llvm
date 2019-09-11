@@ -63,7 +63,7 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
 
 
   def int_evm_sload : GCCBuiltin<"__builtin_evm_sload">,
-              Intrinsic<[llvm_i256_ty], [llvm_i256_ty], [IntrNoMem]>;
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty], [IntrNoMem, IntrHasSideEffects]>;
   def int_evm_sstore : GCCBuiltin<"__builtin_evm_sstore">,
               Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem, IntrHasSideEffects]>;
 
@@ -98,6 +98,15 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
 
   def int_evm_revert : GCCBuiltin<"__builtin_evm_revert">,
               Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrWriteMem, IntrHasSideEffects]>;
+
+  def int_evm_return : GCCBuiltin<"__builtin_evm_return">,
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrReadMem, IntrHasSideEffects]>;
+
+  def int_evm_staticcall : GCCBuiltin<"__builtin_evm_staticcall">,
+              Intrinsic<[llvm_i256_ty],
+                        [llvm_i256_ty, llvm_i256_ty, llvm_i256_ty,
+                         llvm_i256_ty, llvm_i256_ty, llvm_i256_ty],
+                        [IntrWriteMem, IntrHasSideEffects]>;
 
   def int_evm_selfdestruct : GCCBuiltin<"__builtin_evm_selfdestruct">,
               Intrinsic<[], [llvm_i256_ty], [IntrWriteMem, IntrHasSideEffects]>;
