@@ -1196,7 +1196,7 @@ static PHINode *getRecurrenceVar(Value *VarX, Instruction *DefX,
   return nullptr;
 }
 
-/// Return true iff the idiom is detected in the loop.
+/// Return true if the idiom is detected in the loop.
 ///
 /// Additionally:
 /// 1) \p CntInst is set to the instruction counting the population bit.
