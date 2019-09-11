@@ -10,9 +10,7 @@
 #include "EVM.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Debug.h"
@@ -46,7 +44,6 @@ private:
 
   bool handleFramePointer(MachineInstr *MI);
   bool handleStackPointer(MachineInstr *MI);
-
 };
 } // end anonymous namespace
 
@@ -109,21 +106,25 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
       // expand def, and remove MOVE
       // fmp = PUSH FMP
       // MSTORE fmp src
+      // them remove MOVE
       unsigned fmpReg = this->getNewRegister(MI);
 
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
           .addImm(ST->getFreeMemoryPointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
           .addReg(fmpReg).add(MI->getOperand(1));
+      MI->eraseFromParent();
+      return true;
     }
 
     if (MO.isUse()) {
-      // load SP value on to a new register, and replace this use occurrence with the 
+      // load SP value on to a new register, and replace this use occurrence
       unsigned fmpReg = this->getNewRegister(MI);
-      unsigned reg = this->getNewRegister(MI);
+      unsigned reg = MI->getOperand(0).getReg();
 
       // fmp = PUSH FMP
-      // reg = MLOAD fmp
+      // dst = MLOAD fmp
+      // and remove the MOVE
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
           .addImm(ST->getFreeMemoryPointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), reg)
@@ -134,18 +135,13 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
                <<Register::virtReg2Index(reg) << " in instruction: ";
         MI->dump();
       });
-      MI->getOperand(i).setReg(reg);
+      MI->eraseFromParent();
+      return true;
     }
   }
 
-  // remove MOVE
-  if (MI->getOpcode() == EVM::pMOVE_r) {
-    LLVM_DEBUG({
-      dbgs() << "Remove MOVE instruction: ";
-      MI->dump();
-    });
-    MI->eraseFromParent();
-  }
+  assert(MI->getOpcode() != EVM::pMOVE_r);
+  return false;
 }
 
 unsigned EVMExpandFramePointer::getNewRegister(MachineInstr* MI) const {
@@ -171,7 +167,6 @@ bool EVMExpandFramePointer::runOnMachineFunction(MachineFunction &MF) {
          I != E;) {
 
       MachineInstr *MI = &*I++; 
-      unsigned opcode = MI->getOpcode();
 
       Changed |= handleFramePointer(MI);
       Changed |= handleStackPointer(MI);
