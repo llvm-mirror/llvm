@@ -108,21 +108,31 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
     }
   }
 
+  const Function *F = &MF.getFunction();
+
   // we have found the 0 stack arg, convert the RETURN sub:
   for (MachineBasicBlock &MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
       MachineInstr &MI = *I++;
       if (MI.getOpcode() == EVM::pRETURNSUB_TEMP_r) {
-        BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                 TII->get(EVM::pRETURNSUB_r))
-            .addReg(MI.getOperand(0).getReg())
-            .addReg(returnAddrReg);
+            .addReg(MI.getOperand(0).getReg());
+
+        if (!EVMSubtarget::shouldSkipFunction(F)) {
+            mibuilder.addReg(returnAddrReg);
+        }
+
         MI.eraseFromParent();
       }
       if (MI.getOpcode() == EVM::pRETURNSUBVOID_TEMP_r) {
-        BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII->get(EVM::pRETURNSUBVOID_r))
-            .addReg(returnAddrReg);
+        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                TII->get(EVM::pRETURNSUBVOID_r));
+
+        if (!EVMSubtarget::shouldSkipFunction(F)) {
+            mibuilder.addReg(returnAddrReg);
+        }
+
         MI.eraseFromParent();
       }
     }

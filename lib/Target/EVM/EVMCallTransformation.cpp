@@ -59,8 +59,6 @@ private:
   FunctionType* rebuildFunctionType(FunctionType *FTy) const;
   Function* rebuildFunction(FunctionType* FuncTy, Function* OldFunc);
   void scanFunction(Function& F, FuncMapType &FuncMap) const;
-
-  static bool shouldSkipFunction(Function *F);
 };
 
 
@@ -69,13 +67,6 @@ private:
 static bool
 isEVMSpecificIntrinsics(Function *F) {
   return F->isIntrinsic() && F->getName().startswith("llvm.evm");
-}
-
-bool
-EVMCallTransformation::shouldSkipFunction(Function *F) {
-  return (F->isDeclaration() ||
-          F->getName() == StringRef("main") || // skip main function
-          isEVMSpecificIntrinsics(F)); // skip intrinsics.
 }
 
 FunctionType*
@@ -151,7 +142,7 @@ void EVMCallTransformation::scanFunction(Function& F,
 
     Function* CalledFunction = CI->getCalledFunction();
 
-    if (EVMCallTransformation::shouldSkipFunction(CalledFunction)) {
+    if (EVMSubtarget::shouldSkipFunction(CalledFunction)) {
       continue;
     }
     
@@ -231,7 +222,7 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   // Record old functions.
   for (Function& F : M) {
     // TODO: we should also change function decls.
-    if (shouldSkipFunction(&F)) {
+    if (EVMSubtarget::shouldSkipFunction(&F)) {
       LLVM_DEBUG({
         dbgs() << "Skipping Function:     " << F.getName() << "\n";
       });

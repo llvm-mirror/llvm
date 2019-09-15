@@ -146,6 +146,12 @@ public:
     }
   }
 
+  static bool shouldSkipFunction(const Function *F) {
+    return (F->isDeclaration() ||
+            F->getName() == StringRef("main") || // skip main function
+            F->getName() == StringRef("solidity.ctor")); // skip intrinsics.
+  }
+
   // Memory layout
   // see https://solidity.readthedocs.io/en/latest/miscellaneous.html#layout-of-state-variables-in-storage
   unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
