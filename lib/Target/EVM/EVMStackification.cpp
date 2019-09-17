@@ -694,10 +694,12 @@ void EVMStackification::handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB) 
         MFI->stackifyVReg(pos.reg);
         ss.dump();
       } else {
-        // We can't stackify it:
-        // SWAP and then store.
-        insertSwap(depth, MI);
-        ss.swap(depth);
+        if (depth != 0) {
+          // We can't stackify it:
+          // SWAP and then store.
+          insertSwap(depth, MI);
+          ss.swap(depth);
+        }
 
         MFI->allocate_memory_index(pos.reg);
         // we actually need to insert BEFORE
