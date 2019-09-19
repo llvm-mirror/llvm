@@ -219,17 +219,17 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   FuncMapType FuncMap;
   SmallVector<Function *, 16> FuncVector;
 
-  // Record old functions.
+  // Record old functions that needs to be transformed.
   for (Function& F : M) {
     // TODO: we should also change function decls.
     if (EVMSubtarget::shouldSkipFunction(&F)) {
       LLVM_DEBUG({
-        dbgs() << "Skipping Function:     " << F.getName() << "\n";
+        dbgs() << "Skipping transforming function:     " << F.getName() << "\n";
       });
       continue;
     }
 
-    LLVM_DEBUG({ dbgs() << "Analyzing Function:     " << F.getName() << "\n"; });
+    LLVM_DEBUG({ dbgs() << "Found function to transform:     " << F.getName() << "\n"; });
     FuncVector.push_back(&F);
   }
   
@@ -250,6 +250,18 @@ bool EVMCallTransformation::runOnModule(Module &M) {
     // We can convert all function calls inside the NewFunc
     // because they are all referring to old functions.
     scanFunction(*NewFunc, FuncMap);
+  }
+
+  // don't forget to convert main function:
+  for (Function& F : M) {
+    // TODO: we should also change function decls.
+    if (F.getName() == StringRef("solidity.main")) {
+      LLVM_DEBUG({
+        dbgs() << "Transforming main function:     " << F.getName() << "\n";
+      });
+      scanFunction(F, FuncMap);
+      break;
+    }
   }
 
   // Remove all old functions.

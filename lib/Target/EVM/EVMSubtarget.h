@@ -148,7 +148,7 @@ public:
 
   static bool shouldSkipFunction(const Function *F) {
     return (F->isDeclaration() ||
-            F->getName() == StringRef("main") || // skip main function
+            F->isIntrinsic() ||
             F->getName() == StringRef("solidity.main")); // skip intrinsics.
   }
 
