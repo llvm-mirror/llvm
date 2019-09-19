@@ -58,7 +58,7 @@ FunctionPass *llvm::createEVMExpandFramePointer() {
 /// eliminate frame pointer.
 bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
   bool Changed = false;
-  for (unsigned i = 0; i < MI->getNumExplicitOperands(); ++i) {
+  for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
     MachineOperand &MO = MI->getOperand(i);
     if (!MO.isReg()) continue;
 
@@ -89,7 +89,7 @@ bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
 bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
   bool Changed = false;
 
-  for (unsigned i = 0; i < MI->getNumExplicitOperands(); ++i) {
+  for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
     MachineOperand &MO = MI->getOperand(i);
     if (!MO.isReg()) continue;
 

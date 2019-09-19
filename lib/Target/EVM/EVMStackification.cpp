@@ -308,7 +308,7 @@ void EVMStackification::insertStoreToMemory(unsigned reg, MachineInstr &MI, bool
 
 /// organize the stack to prepare for the instruction.
 void EVMStackification::moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI) {
-  for (const MachineOperand &MO : MI.explicit_uses()) {
+  for (const MachineOperand &MO : MI.uses()) {
     if (!MO.isReg() || MO.isImplicit()) {
       return;
     }
@@ -337,7 +337,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   // TODO: do not support more than 2 uses in an MI. We need scheduler to help
   // us make sure that the registers are on stack top.
  
-  const auto &uses = MI.explicit_uses();
+  const auto &uses = MI.uses();
   unsigned numUsesInMI = 0;
 
   if (MI.isPseudo()){
@@ -356,7 +356,7 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
   // Case 1: only 1 use
   if (numUsesInMI == 1) {
-    MachineOperand& MO = *MI.explicit_uses().begin(); 
+    MachineOperand& MO = *MI.uses().begin(); 
     if (!MO.isReg()) {
       return;
     }
@@ -389,8 +389,8 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
   }
 
   if (numUsesInMI == 2) {
-    MachineOperand& MO1 = *MI.explicit_uses().begin(); 
-    MachineOperand& MO2 = *(MI.explicit_uses().begin() + 1); 
+    MachineOperand& MO1 = *MI.uses().begin(); 
+    MachineOperand& MO2 = *(MI.uses().begin() + 1); 
 
     assert(MO1.isReg() && MO2.isReg());
 
