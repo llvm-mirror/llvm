@@ -119,7 +119,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
                 TII->get(EVM::pRETURNSUB_r))
             .addReg(MI.getOperand(0).getReg());
 
-        if (!EVMSubtarget::shouldSkipFunction(F)) {
+        if (!EVMSubtarget::isMainFunction(F)) {
             mibuilder.addReg(returnAddrReg);
         }
 
@@ -129,7 +129,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
         auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                 TII->get(EVM::pRETURNSUBVOID_r));
 
-        if (!EVMSubtarget::shouldSkipFunction(F)) {
+        if (!EVMSubtarget::isMainFunction(F)) {
             mibuilder.addReg(returnAddrReg);
         }
 

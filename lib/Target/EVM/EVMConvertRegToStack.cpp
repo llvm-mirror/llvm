@@ -148,9 +148,13 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
       // Convert irregular reg->stack mapping
       if (opc == EVM::PUSH32_r) {
         assert(MI.getNumOperands() == 2 && "PUSH32_r's number of operands must be 2.");
-        assert(!MI.getOperand(1).isReg() && "PUSH32_r's operand must not be a register..");
-        MI.RemoveOperand(0);
-        MI.setDesc(TII->get(EVM::PUSH32));
+        if (!MI.getOperand(1).isReg()) {
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::PUSH32)).add(MI.getOperand(1));
+        } else {
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::DUP1));
+        }
+        MI.eraseFromParent();
+        //assert(!MI.getOperand(1).isReg() && "PUSH32_r's operand must not be a register..");
         continue;
       }
 
@@ -183,7 +187,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      for (MachineOperand &MO : reverse(MI.explicit_uses())) {
+      for (MachineOperand &MO : reverse(MI.uses())) {
         // register value:
         if (MO.isReg()) {
           assert(!Register::isPhysicalRegister(MO.getReg()) &&

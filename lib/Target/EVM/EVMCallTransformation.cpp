@@ -255,7 +255,7 @@ bool EVMCallTransformation::runOnModule(Module &M) {
   // don't forget to convert main function:
   for (Function& F : M) {
     // TODO: we should also change function decls.
-    if (F.getName() == StringRef("solidity.main")) {
+    if (EVMSubtarget::isMainFunction(&F)) {
       LLVM_DEBUG({
         dbgs() << "Transforming main function:     " << F.getName() << "\n";
       });
