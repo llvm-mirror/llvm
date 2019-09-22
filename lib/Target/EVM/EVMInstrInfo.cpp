@@ -86,7 +86,10 @@ MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr &MI) const {
   }
   MachineInstr *DefMI = MRI.getUniqueVRegDef(reg);
 
-  assert(DefMI->getOpcode() == EVM::PUSH32_r);
+  if (DefMI->getOpcode() == EVM::PUSH32_r) {
+    return nullptr;
+  }
+
   MachineOperand &MO = DefMI->getOperand(1);
 
   // We do not do indirect jump as well.
