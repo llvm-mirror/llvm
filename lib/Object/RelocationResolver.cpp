@@ -100,6 +100,26 @@ static uint64_t resolveBPF(RelocationRef R, uint64_t S, uint64_t A) {
   }
 }
 
+static bool supportsEVM(uint64_t Type) {
+  switch (Type) {
+  case ELF::R_EVM_ADDR:
+  case ELF::R_EVM_FUNC:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static uint64_t resolveEVM(RelocationRef R, uint64_t S, uint64_t A) {
+  switch (R.getType()) {
+  case ELF::R_EVM_ADDR:
+  case ELF::R_EVM_FUNC:
+    return S & 0x0000FFFF;
+  default:
+    llvm_unreachable("Invalid relocation type");
+  }
+}
+
 static bool supportsMips64(uint64_t Type) {
   switch (Type) {
   case ELF::R_MIPS_32:
@@ -551,6 +571,8 @@ getRelocationResolver(const ObjectFile &Obj) {
       case Triple::bpfel:
       case Triple::bpfeb:
         return {supportsBPF, resolveBPF};
+      case Triple::evm:
+        return {supportsEVM, resolveEVM};
       case Triple::mips64el:
       case Triple::mips64:
         return {supportsMips64, resolveMips64};

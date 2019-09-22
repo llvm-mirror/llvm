@@ -38,7 +38,13 @@ EVMELFObjectWriter::EVMELFObjectWriter(uint8_t OSABI)
 unsigned EVMELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
                                           const MCFixup &Fixup,
                                           bool IsPCRel) const {
-  llvm_unreachable("unimplemented.");
+  // determine the type of the relocation
+  switch ((unsigned)Fixup.getKind()) {
+  default:
+    llvm_unreachable("invalid fixup kind!");
+  case FK_Data_2:
+    return ELF::R_EVM_ADDR;
+  }
 }
 
 std::unique_ptr<MCObjectTargetWriter>

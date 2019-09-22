@@ -1,0 +1,8 @@
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// No relocation
+ELF_RELOC(R_EVM_NONE,       0)
+ELF_RELOC(R_EVM_ADDR,       1)
+ELF_RELOC(R_EVM_FUNC,       2)
