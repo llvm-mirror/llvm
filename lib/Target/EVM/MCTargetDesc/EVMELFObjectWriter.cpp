@@ -42,7 +42,7 @@ unsigned EVMELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
   switch ((unsigned)Fixup.getKind()) {
   default:
     llvm_unreachable("invalid fixup kind!");
-  case FK_Data_2:
+  case FK_SecRel_2:
     return ELF::R_EVM_ADDR;
   }
 }
