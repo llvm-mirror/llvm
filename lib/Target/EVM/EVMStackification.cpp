@@ -145,22 +145,23 @@ private:
   bool canStackifyReg(unsigned reg, MachineInstr &MI) const;
   unsigned findNumOfUses(unsigned reg) const;
 
-  void insertPopAfter(MachineInstr &MI);
+  void insertPop(MachineInstr &MI, bool insertAfter = true);
   void insertDup(unsigned index, MachineInstr &MI, bool insertAfter);
   void insertSwap(unsigned index, MachineInstr &MI, bool insertAfter);
 
   void insertLoadFromMemoryBefore(unsigned reg, MachineInstr& MI);
   void insertStoreToMemory(unsigned reg, MachineInstr &MI, bool insertAfter);
-  void moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI);
+  void bringOperandToTop(StackStatus &ss, unsigned depth, MachineInstr &MI);
+
+  void handleIrregularInstruction(StackStatus &ss, MachineInstr &MI);
 
   void handleStackArgs(MachineBasicBlock &MBB);
   void handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB);
   void handleMBB(StackStatus &ss, MachineBasicBlock &MBB);
-  
 
   DenseMap<unsigned, unsigned> reg2index;
 
-  const EVMInstrInfo* TII;
+  const EVMInstrInfo *TII;
   MachineRegisterInfo *MRI;
   LiveIntervals *LIS;
   EVMMachineFunctionInfo *MFI;
@@ -233,11 +234,15 @@ unsigned EVMStackification::findNumOfUses(unsigned reg) const {
   return numUses;
 }
 
-void EVMStackification::insertPopAfter(MachineInstr& MI) {
+void EVMStackification::insertPop(MachineInstr& MI, bool insertAfter) {
   MachineBasicBlock *MBB = MI.getParent();
   MachineFunction &MF = *MBB->getParent();
   MachineInstrBuilder pop = BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::POP_r));
-  MBB->insertAfter(MachineBasicBlock::iterator(MI), pop);
+  if (insertAfter) {
+    MBB->insertAfter(MachineBasicBlock::iterator(MI), pop);
+  } else {
+    MBB->insert(MachineBasicBlock::iterator(MI), pop);
+  }
 }
 
 void EVMStackification::insertDup(unsigned index, MachineInstr &MI, bool insertAfter = true) {
@@ -287,6 +292,7 @@ void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &M
 
   // deal with physical register.
   unsigned index = MFI->get_memory_index(reg);
+  LLVM_DEBUG(dbgs() << "  GETLOCAL is inserted before: "; MI.dump());
   BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::pGETLOCAL_r), reg)
       .addImm(index);
 }
@@ -306,31 +312,55 @@ void EVMStackification::insertStoreToMemory(unsigned reg, MachineInstr &MI, bool
   }
 }
 
-/// organize the stack to prepare for the instruction.
-void EVMStackification::moveOperandsToStackTop(StackStatus& ss, MachineInstr &MI) {
-  for (const MachineOperand &MO : MI.uses()) {
+// bring a stack element to top, without altering other stack element positions.
+void EVMStackification::bringOperandToTop(StackStatus &ss, unsigned depth,
+                                          MachineInstr &MI) {
+  assert(depth <= 16);
+
+  for (unsigned i = 1; i <= depth; ++i) {
+    insertSwap(i, MI);
+    ss.swap(i);
+  }
+}
+
+void EVMStackification::handleIrregularInstruction(StackStatus &ss,
+                                                   MachineInstr &MI) {
+  // iterate over the operands (back to front), and bring each of them to top.
+  unsigned use_counter = MI.getNumOperands() - 1;
+  unsigned end_defs = MI.getNumExplicitDefs() - 1;
+
+  unsigned pop_counter = 0;
+  while (use_counter != end_defs) {
+    const MachineOperand &MO = MI.getOperand(use_counter);
+    --use_counter;
+    ++pop_counter;
+
     if (!MO.isReg() || MO.isImplicit()) {
+      LLVM_DEBUG(dbgs() << "  Operand is not reg or is implicit, skip: ";
+                 MO.dump());
       return;
     }
 
     unsigned reg = MO.getReg();
     if (!MFI->isVRegStackified(reg)) {
+      LLVM_DEBUG(dbgs() << "  Operand is not stackified: "; MO.dump());
       insertLoadFromMemoryBefore(reg, MI);
       ss.push(reg);
     } else {
+      LLVM_DEBUG(dbgs() << "  Operand is stackified: "; MO.dump());
       // stackified case:
       unsigned depthFromTop = 0;
       bool result = findRegDepthOnStack(ss, reg, &depthFromTop);
       assert(result);
 
-      if (depthFromTop != 0) {
-        insertSwap(depthFromTop, MI);
-        ss.swap(depthFromTop);
-      }
+      bringOperandToTop(ss, depthFromTop, MI);
     }
   }
 
-  return;
+  for (unsigned i = 0; i < MI.getNumOperands() - MI.getNumExplicitDefs(); ++i) {
+    ss.pop();
+  }
+
 }
 
 void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
@@ -549,10 +579,11 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     return;
   }
 
-  moveOperandsToStackTop(ss, MI);
-  for (unsigned i = 0; i < numUsesInMI; ++i) {
-    ss.pop();
-  }
+  LLVM_DEBUG({
+    dbgs() << "  numUsesInMI == " << numUsesInMI << ", handle specifically\n";
+  });
+
+  handleIrregularInstruction(ss, MI);
   return;
 }
 
@@ -575,7 +606,7 @@ void EVMStackification::handleDef(StackStatus &ss, MachineInstr& MI) {
   bool IsDead = MRI->use_empty(defReg);
   if (IsDead) {
     LLVM_DEBUG({ dbgs() << "  Def's use is empty, insert POP after.\n"; });
-    insertPopAfter(MI);
+    insertPop(MI);
     return;
   }
 
