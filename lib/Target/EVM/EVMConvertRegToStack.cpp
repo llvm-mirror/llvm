@@ -208,7 +208,15 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             StackOpcode = EVM::JUMP;
           }
 
-          if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
+          else if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
+            // here we build the return address, and insert it as the first argument
+            // of the function.
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1)).addImm(8);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PC));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
+
+            // swap the callee address with the return address
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::SWAP1));
             StackOpcode = EVM::JUMP;
           }
         }
