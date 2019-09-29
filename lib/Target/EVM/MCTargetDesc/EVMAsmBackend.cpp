@@ -74,7 +74,10 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                                MutableArrayRef<char> Data, uint64_t Value,
                                bool IsResolved,
                                const MCSubtargetInfo *STI) const {
-  // TODO
+  assert(Fixup.getKind() == FK_SecRel_2);
+  assert(Value <= 0xFFFF);
+  support::endian::write<uint16_t>(&Data[Fixup.getOffset()],
+                                   static_cast<uint16_t>(Value), Endian);
 }
 
 std::unique_ptr<MCObjectTargetWriter>
