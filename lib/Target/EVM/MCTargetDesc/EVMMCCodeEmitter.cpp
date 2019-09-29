@@ -119,13 +119,11 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
       support::endian::write<char>(OS, byte, support::big);
     }
   } else if (opnd.isCImm()) {
-    assert(push_size > 8 && "unimplemented push size of CImmediate type");
     //if it is a CImmediate type, it is a value more than 64bit.
     const ConstantInt* ci = opnd.getCImm();
     const APInt& apint = ci->getValue();
-    unsigned byteWidth = (apint.getBitWidth() + 7) / 8;
 
-    for (int i = byteWidth - 1; i >= 0; --i) {
+    for (int i = push_size - 1; i >= 0; --i) {
       APInt apbyte = apint.ashr(i * 8).trunc(sizeof(char));
       char byte = apbyte.getZExtValue();
       support::endian::write<char>(OS, byte, support::big);
