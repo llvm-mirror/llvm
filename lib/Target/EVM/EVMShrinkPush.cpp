@@ -70,6 +70,11 @@ unsigned get_imm_size(int64_t imm) {
 
 }
 
+static void replaceCIwithI(MachineInstr &MI, uint64_t val) {
+  MI.RemoveOperand(0);
+  MI.addOperand(MachineOperand::CreateImm(val));
+}
+
 bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Shrink PUSH **********\n"
@@ -107,9 +112,39 @@ bool EVMShrinkpush::runOnMachineFunction(MachineFunction &MF) {
           const ConstantInt* ci = MO.getCImm();
           unsigned byteWidth = ci->getBitWidth();
           assert(byteWidth <= 256 && "> 256bit constant immediates unsupported");
-          // for now, constants with bit width > 64 will all use PUSH32.
-          // This is an optimization opportunity.
-          LLVM_DEBUG(dbgs() << " (Keeping the width due to size)");
+          const APInt& apval = ci->getValue();
+          unsigned activeBits = apval.getActiveBits();
+
+          if (activeBits <= 8) {
+              MI.setDesc(TII.get(EVM::PUSH1));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 16) {
+              MI.setDesc(TII.get(EVM::PUSH2));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 24) {
+              MI.setDesc(TII.get(EVM::PUSH3));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 32) {
+              MI.setDesc(TII.get(EVM::PUSH4));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 40) {
+              MI.setDesc(TII.get(EVM::PUSH5));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 48) {
+              MI.setDesc(TII.get(EVM::PUSH6));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 56) {
+              MI.setDesc(TII.get(EVM::PUSH7));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else if (activeBits <= 64) {
+              MI.setDesc(TII.get(EVM::PUSH8));
+              replaceCIwithI(MI, ci->getZExtValue());
+          } else {
+            // for now, constants with bit width > 64 will all use PUSH32.
+            // This is an optimization opportunity.
+            LLVM_DEBUG(dbgs() << " (Keeping the width due to size)");
+          }
+
         }
 
         // EIP-170
