@@ -600,28 +600,33 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
   Ops.push_back(Chain);
   Ops.push_back(Callee);
 
+  // TODO: remove frame manipulation
   for (unsigned I = 0; I < Outs.size(); ++I) {
     const ISD::OutputArg &Out = Outs[I];
     SDValue &OutVal = OutVals[I];
     if (Out.Flags.isByVal() && Out.Flags.getByValSize() != 0) {
       auto &MFI = MF.getFrameInfo();
       int FI = MFI.CreateStackObject(Out.Flags.getByValSize(),
-          Out.Flags.getByValAlign(),
-          /*isSS=*/false);
+          Out.Flags.getByValAlign(), false);
       SDValue SizeNode =
         DAG.getConstant(Out.Flags.getByValSize(), DL, MVT::i32);
       SDValue FINode = DAG.getFrameIndex(FI, getPointerTy(Layout));
       Chain = DAG.getMemcpy(
           Chain, DL, FINode, OutVal, SizeNode, Out.Flags.getByValAlign(),
-          /*isVolatile*/ false, /*AlwaysInline=*/false,
-          /*isTailCall*/ false, MachinePointerInfo(), MachinePointerInfo());
+          false, false,
+          false, MachinePointerInfo(), MachinePointerInfo());
       OutVal = FINode;
     }
     //Ops.push_back(OutVal);
   }
 
+  // PC + 6 is the return address
+  // insert the first operand to Chain
+  //SDValue PC = DAG.getNode(EVMISD::PC_PLUS_OFFSET, DL, MVT::i256);
+
   // Add all fixed arguments. Note that for non-varargs calls, NumFixedArgs
   // isn't reliable.
+  //Ops.push_back(PC);
   Ops.append(OutVals.begin(), OutVals.end());
 
 
@@ -641,6 +646,8 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
     InVals.push_back(Res);
     Chain = Res.getValue(1);
   }
+
+
 
   Chain = DAG.getCALLSEQ_END(
             Chain,

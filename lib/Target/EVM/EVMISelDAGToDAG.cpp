@@ -184,6 +184,25 @@ bool EVMDAGToDAGISel::SelectBlockAddress(SDNode *Node) {
   return true;
 }
 
+bool EVMDAGToDAGISel::SelectSIGNEXTEND(SDNode *Node) {
+  unsigned opcode = Node->getOpcode();
+  assert(opcode == EVMISD::SIGNEXTEND);
+
+  const SDValue reg = Node->getOperand(0);
+  const SDValue shiftVal = Node->getOperand(1);
+  ConstantSDNode *shiftConstant = dyn_cast<ConstantSDNode>(shiftVal);
+  uint64_t shiftuint = shiftConstant->getZExtValue();
+
+  SDValue sval = CurDAG->getConstant(shiftuint, SDLoc(Node), MVT::i256);
+  const SDValue shift = SDValue(
+      CurDAG->getMachineNode(EVM::PUSH32_r, SDLoc(Node), MVT::i256, sval), 0);
+  MachineSDNode *signextend = CurDAG->getMachineNode(
+      EVM::SIGNEXTEND_r, SDLoc(Node), MVT::i256, reg, shift);
+
+  ReplaceNode(Node, signextend);
+  return true;
+}
+
 bool EVMDAGToDAGISel::SelectCall(SDNode *Node) {
   unsigned opcode = Node->getOpcode();
   assert (opcode == EVMISD::CALL || opcode == EVMISD::CALLVOID);
@@ -292,6 +311,9 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
     case EVMISD::CALL:
     case EVMISD::CALLVOID:
       if (SelectCall(Node)) return;
+      break;
+    case EVMISD::SIGNEXTEND:
+      if (SelectSIGNEXTEND(Node)) return;
       break;
   }
 
