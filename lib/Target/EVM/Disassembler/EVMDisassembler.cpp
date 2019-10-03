@@ -35,8 +35,10 @@ namespace {
 class EVMDisassembler final : public MCDisassembler {
 public:
   EVMDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
-      : MCDisassembler(STI, Ctx) {}
+      : Ctx(Ctx), MCDisassembler(STI, Ctx) {}
   virtual ~EVMDisassembler() = default;
+
+  MCContext &Ctx;
 
   DecodeStatus getInstruction(MCInst &Instr, uint64_t &Size,
                               ArrayRef<uint8_t> Bytes, uint64_t Address,
@@ -78,11 +80,12 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
     Size = 1 + length;
 
     if (length > 8) {
-      APInt cimm;
+      // TODO: we have to extend it to 256 bit.
+      APInt cimm(64, 0);
       for (unsigned i = 0; i < length; ++i) {
         cimm = cimm << 8 + Bytes[1 + i];
       }
-      llvm_unreachable("unimplemented");
+      Instr.addOperand(MCOperand::createImm(cimm.getLimitedValue()));
     } else {
       uint64_t imm = 0;
       for (unsigned i = 0; i < length; ++i) {
@@ -94,6 +97,7 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
 
   Result = decodeInstruction(DecoderTable8, Instr, Bytes[0], Address, this, STI);
+  Size = 1;
   LLVM_DEBUG({
     if (Result != DecodeStatus::Success) {
       dbgs() << "Unsuccessfully decoding at: " << Address << "\n";
