@@ -38,7 +38,8 @@ LLVMContextImpl::LLVMContextImpl(LLVMContext &C)
     Int16Ty(C, 16),
     Int32Ty(C, 32),
     Int64Ty(C, 64),
-    Int128Ty(C, 128) {}
+    Int128Ty(C, 128),
+    Int256Ty(C, 256) {}
 
 LLVMContextImpl::~LLVMContextImpl() {
   // NOTE: We need to delete the contents of OwnedModules, but Module's dtor
