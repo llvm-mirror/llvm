@@ -76,7 +76,10 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                                const MCSubtargetInfo *STI) const {
   assert(Fixup.getKind() == FK_SecRel_2);
   assert(Value <= 0xFFFF);
-  support::endian::write<uint16_t>(&Data[Fixup.getOffset()],
+
+  // The offset points to the beginning of the instruction, so we have to
+  // + 1
+  support::endian::write<uint16_t>(&Data[Fixup.getOffset() + 1],
                                    static_cast<uint16_t>(Value), Endian);
 }
 

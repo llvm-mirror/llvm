@@ -113,7 +113,8 @@ static unsigned getDUPOpcode(unsigned idx) {
 
 void EVMConvertRegToStack::convertSWAP(MachineInstr* MI) const {
   unsigned swapIdx = MI->getOperand(0).getImm();
-  assert(swapIdx <= 16 && "invalid SWAP");
+  swapIdx = (swapIdx > 16) ? 16 : swapIdx;
+  //assert(swapIdx <= 16 && "invalid SWAP");
 
   unsigned opc = getSWAPOpcode(swapIdx);
 
