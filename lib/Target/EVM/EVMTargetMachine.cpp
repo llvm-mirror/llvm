@@ -123,6 +123,7 @@ void EVMPassConfig::addPreEmitPass() {
     addPass(createEVMVRegToMem());
   }
 
+
   // We use a custom pass to expand pseudos at a later pahse
   addPass(createEVMExpandPseudos());
 

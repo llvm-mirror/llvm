@@ -45,6 +45,7 @@ private:
   bool runOnMachineFunction(MachineFunction &MF) override;
   void expandLOCAL(MachineInstr* MI) const;
   void expandRETURN(MachineInstr* MI) const;
+  void expandJUMP(MachineInstr* MI) const;
 
 };
 } // end anonymous namespace
@@ -62,6 +63,32 @@ unsigned EVMExpandPseudos::getNewRegister(MachineInstr* MI) const {
     MachineFunction *F = MI->getParent()->getParent();
     MachineRegisterInfo &RegInfo = F->getRegInfo();
     return RegInfo.createVirtualRegister(&EVM::GPRRegClass);
+}
+
+void EVMExpandPseudos::expandJUMP(MachineInstr* MI) const {
+  MachineBasicBlock* MBB = MI->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+
+  unsigned opc = MI->getOpcode();
+
+  if (opc == EVM::pJUMPTO_r) {
+    MachineBasicBlock * dest = MI->getOperand(0).getMBB();
+    unsigned destReg = this->getNewRegister(MI);
+
+    BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), destReg).addMBB(dest);
+    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r)).addReg(destReg);
+  }
+
+  if (opc == EVM::pJUMPIF_r) {
+    MachineBasicBlock * dest = MI->getOperand(1).getMBB();
+    unsigned destReg = this->getNewRegister(MI);
+
+    BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), destReg).addMBB(dest);
+    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMPI_r))
+        .add(MI->getOperand(0))
+        .addReg(destReg);
+  }
+  MI->eraseFromParent();
 }
 
 void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
@@ -157,6 +184,11 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
         case EVM::pMOVE_r:
           llvm_unreachable(
               "MOVE instructions should have been eliminated already.");
+          break;
+        case EVM::pJUMPTO_r:
+        case EVM::pJUMPIF_r:
+          expandJUMP(MI);
+          Changed = true;
           break;
         // suspend it and expand at finalization time
         //case EVM::pRETURNSUB_r:

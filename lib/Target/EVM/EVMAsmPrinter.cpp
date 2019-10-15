@@ -593,7 +593,7 @@ void EVMAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
     break;
   case MachineOperand::MO_BlockAddress: {
     MCSymbol *Sym = GetBlockAddressSymbol(MO.getBlockAddress());
-    Sym->print(OS, MAI);
+    OS << Sym->getName();
     break;
   }
   default:

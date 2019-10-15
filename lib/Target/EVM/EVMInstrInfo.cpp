@@ -73,45 +73,6 @@ bool EVMInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   return false;
 }
 
-MachineBasicBlock *EVMInstrInfo::findJumpTarget(MachineInstr &MI) const {
-  MachineBasicBlock* MBB = MI.getParent();
-  MachineFunction *MF = MBB->getParent();
-  MachineRegisterInfo &MRI = MF->getRegInfo();
-
-  unsigned reg = MI.getOperand(0).getReg();
-
-  // make sure we only ahve one def, otherwise we bailout.
-  if (!MRI.hasOneDef(reg)) {
-    return nullptr;
-  }
-  MachineInstr *DefMI = MRI.getUniqueVRegDef(reg);
-
-  if (DefMI->getOpcode() == EVM::PUSH32_r) {
-    return nullptr;
-  }
-
-  MachineOperand &MO = DefMI->getOperand(1);
-
-  // We do not do indirect jump as well.
-  if (!MO.isBlockAddress()) {
-    return nullptr;
-  }
-
-  // we are going to use a very naive way to map BasicBlock to MachineBasicBlock
-  // -- let me know if you can find a better way
-  const BasicBlock* bb = MO.getBlockAddress()->getBasicBlock();
-
-  for (MachineFunction::iterator i = MF->begin(); i != MF->end(); ++i) {
-    MachineBasicBlock &MBBB = *i;
-    const BasicBlock* bbb = MBBB.getBasicBlock();
-    if (bb == bbb) {
-      return &MBBB;
-    }
-  }
-
-  return nullptr;
-}
-
 // We copied it from BPF backend. It seems to be quite incompleted,
 // but let's bear with it for now.
 bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
@@ -134,11 +95,11 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
     default:
       // Unhandled instruction; bail out.
       return true;
-    case EVM::JUMP_r: {
+    case EVM::pJUMPTO_r: {
       MachineBasicBlock *TMBB;
-      assert(MI.getOperand(0).isReg());
 
-      MachineBasicBlock *jumpTarget = findJumpTarget(MI);
+      assert(MI.getOperand(0).isMBB());
+      MachineBasicBlock *jumpTarget = MI.getOperand(0).getMBB();
 
       // bailout if we cannot find it.
       if (jumpTarget) {
@@ -152,13 +113,13 @@ bool EVMInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
       lastJump = true;
       break;
       }
-    case EVM::JUMPI_r: {
+    case EVM::pJUMPIF_r: {
       if (HaveCond) return true;
       Cond.push_back(MachineOperand::CreateImm(true));
       Cond.push_back(MI.getOperand(0));
 
-      assert(MI.getOperand(1).isReg());
-      MachineBasicBlock *jumpTarget = findJumpTarget(MI);
+      assert(MI.getOperand(1).isMBB());
+      MachineBasicBlock *jumpTarget = MI.getOperand(1).getMBB();
       if (jumpTarget) {
         TBB = jumpTarget;
       } else {
@@ -185,12 +146,10 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
   MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
-  unsigned tbbReg = RegInfo.createVirtualRegister(&EVM::GPRRegClass);
 
-  BuildMI(&MBB, DL, get(EVM::PUSH32_r), tbbReg).addMBB(TBB);
   if (Cond.empty()) {
     assert(!FBB && "Unconditional branch with multiple successors!");
-    BuildMI(&MBB, DL, get(EVM::JUMP_r)).addReg(tbbReg);
+    BuildMI(&MBB, DL, get(EVM::pJUMPTO_r)).addMBB(TBB);
     return 1;
   }
 
@@ -198,13 +157,12 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   assert(Cond[0].getImm() && "insertBranch does not accept false parameter");
 
-  BuildMI(&MBB, DL, get(EVM::JUMPI_r)).add(Cond[1]).addReg(tbbReg);
+  BuildMI(&MBB, DL, get(EVM::pJUMPIF_r)).add(Cond[1]).addMBB(TBB);
 
   if (!FBB)
     return 1;
 
-  unsigned fbbReg = RegInfo.createVirtualRegister(&EVM::GPRRegClass);
-  BuildMI(&MBB, DL, get(EVM::JUMP_r)).addReg(fbbReg);
+  BuildMI(&MBB, DL, get(EVM::pJUMPTO_r)).addMBB(FBB);
   return 2;
 }
 
@@ -220,8 +178,8 @@ unsigned EVMInstrInfo::removeBranch(MachineBasicBlock &MBB,
     if (MI.isDebugInstr())
       continue;
 
-    if (MI.getOpcode() == EVM::JUMP_r ||
-        MI.getOpcode() == EVM::JUMPI_r) {
+    if (MI.getOpcode() == EVM::pJUMPTO_r ||
+        MI.getOpcode() == EVM::pJUMPIF_r) {
       MI.eraseFromParent();
       I = MBB.terminators().begin();
       ++Count;

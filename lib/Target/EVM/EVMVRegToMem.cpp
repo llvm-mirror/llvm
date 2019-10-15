@@ -252,5 +252,5 @@ bool EVMVRegToMem::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
-  return Changed;
+  return true;
 }

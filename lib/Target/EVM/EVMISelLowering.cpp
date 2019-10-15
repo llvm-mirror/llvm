@@ -266,16 +266,9 @@ SDValue EVMTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
   SDLoc DL(Op);
 
-  // get the blockaddress
-  BasicBlockSDNode* bbsd = cast<BasicBlockSDNode>(Dest);
-  const BasicBlock *bb = bbsd->getBasicBlock()->getBasicBlock();
-  const BlockAddress *ba = BlockAddress::get(const_cast<BasicBlock *>(bb));
-  SDValue tba = DAG.getTargetBlockAddress(ba, MVT::i256);
-
   return DAG.getNode(
       EVMISD::BRCC, DL, Op.getValueType(), Chain, LHS, RHS,
-      DAG.getConstant(CC, DL, LHS.getValueType()),
-      DAG.getNode(EVMISD::WRAPPER, DL, getPointerTy(DAG.getDataLayout()), tba));
+      DAG.getConstant(CC, DL, LHS.getValueType()), Dest);
 }
 
 SDValue EVMTargetLowering::LowerBR(SDValue Op, SelectionDAG &DAG) const {
@@ -283,15 +276,7 @@ SDValue EVMTargetLowering::LowerBR(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(1);
   SDLoc DL(Op);
 
-  // get the blockaddress
-  BasicBlockSDNode* bbsd = cast<BasicBlockSDNode>(Dest);
-  const BasicBlock *bb = bbsd->getBasicBlock()->getBasicBlock();
-  const BlockAddress *ba = BlockAddress::get(const_cast<BasicBlock *>(bb));
-
-  SDValue tba = DAG.getTargetBlockAddress(ba, MVT::i256);
-  return DAG.getNode(
-      ISD::BRIND, DL, Op.getValueType(), Chain,
-      DAG.getNode(EVMISD::WRAPPER, DL, getPointerTy(DAG.getDataLayout()), tba));
+  return DAG.getNode(ISD::BRIND, DL, Op.getValueType(), Chain, Dest);
 }
 
 SDValue EVMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
@@ -378,7 +363,7 @@ EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
   // we must insert an unconditional branch to the fallthrough destination
   // if we are to insert basic blocks at the prior fallthrough point.
   if (FallThrough != nullptr) {
-    BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(FallThrough);
+    BuildMI(MBB, dl, TII.get(EVM::pJUMPTO_r)).addMBB(FallThrough);
   }
 
   // create two MBBs to handle true and false
@@ -465,18 +450,18 @@ EVMTargetLowering::insertSELECTCC(MachineInstr &MI,
         break;
     }
 
-    BuildMI(MBB, dl, TII.get(EVM::JUMPI_r)).addReg(rvreg).addMBB(trueMBB);
+    BuildMI(MBB, dl, TII.get(EVM::pJUMPIF_r)).addReg(rvreg).addMBB(trueMBB);
   }
 
   // Finally, add branch to falseMBB 
-  BuildMI(MBB, dl, TII.get(EVM::JUMP_r)).addMBB(falseMBB);
+  BuildMI(MBB, dl, TII.get(EVM::pJUMPTO_r)).addMBB(falseMBB);
 
   MBB->addSuccessor(falseMBB);
   MBB->addSuccessor(trueMBB);
 
   // Unconditionally flow back to the true block
   {
-    BuildMI(falseMBB, dl, TII.get(EVM::JUMP_r)).addMBB(trueMBB);
+    BuildMI(falseMBB, dl, TII.get(EVM::pJUMPTO_r)).addMBB(trueMBB);
     falseMBB->addSuccessor(trueMBB);
   }
 

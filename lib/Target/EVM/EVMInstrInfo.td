@@ -525,8 +525,8 @@ let isCall = 1 in {
 }
 
 let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
-  def pJUMPTO  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
-  def pJUMPIF  : EVMPseudo<(outs), (ins GPR:$src1, GPR:$src2, brtarget:$dst), []>;
+  def pJUMPTO_r  : EVMPseudo<(outs), (ins brtarget:$dst), []>;
+  def pJUMPIF_r  : EVMPseudo<(outs), (ins GPR:$src, brtarget:$dst), []>;
   def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
 
   let isReturn = 1 in {
@@ -603,28 +603,28 @@ def EVM_CC_LE  : PatLeaf<(i256 imm),
                          [{return (N->getZExtValue() == ISD::SETULE);}]>;
 
 // matching BRCC
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (SLT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (ISZERO_r (SGT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (LT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (ISZERO_r (GT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLT, bb:$BrDst),
+          (pJUMPIF_r (SLT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SLE, bb:$BrDst),
+          (pJUMPIF_r (ISZERO_r (SGT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LT, bb:$BrDst),
+          (pJUMPIF_r (LT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_LE, bb:$BrDst),
+          (pJUMPIF_r (ISZERO_r (GT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (SGT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (ISZERO_r (SLT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (GT_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (ISZERO_r (LT_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGT, bb:$BrDst),
+          (pJUMPIF_r (SGT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_SGE, bb:$BrDst),
+          (pJUMPIF_r (ISZERO_r (SLT_r i256:$dst, i256:$src)), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GT, bb:$BrDst),
+          (pJUMPIF_r (GT_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_GE, bb:$BrDst),
+          (pJUMPIF_r (ISZERO_r (LT_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (EQ_r i256:$dst, i256:$src), (PUSH32_r tblockaddress:$BrDst))>;
-def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, (EVMWrapper tblockaddress:$BrDst)),
-          (JUMPI_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), (PUSH32_r tblockaddress:$BrDst))>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_EQ, bb:$BrDst),
+          (pJUMPIF_r (EQ_r i256:$dst, i256:$src), bb:$BrDst)>;
+def : Pat<(EVMBrcc i256:$dst, i256:$src, EVM_CC_NE, bb:$BrDst),
+          (pJUMPIF_r (ISZERO_r (EQ_r i256:$dst, i256:$src)), bb:$BrDst)>;
 
 // bitwise
 def : Pat<(i256 (shl i256:$lhs, i256:$rhs)),
@@ -645,7 +645,7 @@ def : Pat<(extload i256:$src), (MLOAD_r i256:$src)>;
 // Memory accesses
 def : Pat<(EVMWrapper tglobaladdr:$in), (PUSH32_r tglobaladdr:$in)>;
 def : Pat<(EVMWrapper tblockaddress:$blk), (PUSH32_r tblockaddress:$blk)>;
-def : Pat<(brind i256:$dst), (JUMP_r i256:$dst)>;
+def : Pat<(brind bb:$dst), (pJUMPTO_r bb:$dst)>;
 
 // Function calls
 /*
