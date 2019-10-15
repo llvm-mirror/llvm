@@ -81,7 +81,7 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
 
     if (length > 8) {
       // TODO: we have to extend it to 256 bit.
-      APInt cimm(64, 0);
+      APInt cimm(32, 0);
       for (unsigned i = 0; i < length; ++i) {
         cimm = (cimm << 8) + Bytes[1 + i];
       }
@@ -89,7 +89,7 @@ DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
     } else {
       uint64_t imm = 0;
       for (unsigned i = 0; i < length; ++i) {
-        imm = (imm << i) + Bytes[1 + i];
+        imm = (imm << 8) + Bytes[1 + i];
       }
       Instr.addOperand(MCOperand::createImm(imm));
     }
