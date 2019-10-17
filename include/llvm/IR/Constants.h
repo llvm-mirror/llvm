@@ -121,6 +121,7 @@ public:
   /// Return a ConstantInt with the specified value and an implied Type. The
   /// type is the integer type that corresponds to the bit width of the value.
   static ConstantInt *get(LLVMContext &Context, const APInt &V);
+  static ConstantInt *get(MCContext &Context, const APInt &V);
 
   /// Return a ConstantInt constructed from the string strStart with the given
   /// radix.

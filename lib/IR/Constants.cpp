@@ -28,6 +28,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/MC/MCContext.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -709,6 +710,14 @@ Constant *ConstantInt::get(Type *Ty, uint64_t V, bool isSigned) {
     return ConstantVector::getSplat(VTy->getNumElements(), C);
 
   return C;
+}
+
+ConstantInt *ConstantInt::get(MCContext &Context, const APInt &V) {
+  IntegerType *ITy = IntegerType::get(Context, V.getBitWidth());
+
+  ConstantInt* ci = new ConstantInt(ITy, V);
+  Context.getConstantPool().push_back(ci);
+  return ci;
 }
 
 ConstantInt *ConstantInt::get(IntegerType *Ty, uint64_t V, bool isSigned) {

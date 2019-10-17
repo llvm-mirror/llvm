@@ -121,6 +121,13 @@ void MCContext::reset() {
   GenDwarfFileNumber = 0;
 
   HadError = false;
+
+  // clear ConstantIntsPool
+  while (!ConstantIntsVector.empty()) {
+    ConstantInt * ci = ConstantIntsVector.back();
+    ConstantIntsVector.pop_back();
+    delete ci;
+  }
 }
 
 //===----------------------------------------------------------------------===//
