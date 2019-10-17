@@ -124,7 +124,7 @@ void EVMMCCodeEmitter::encodeImmediate(raw_ostream &OS,
     const APInt& apint = ci->getValue();
 
     for (int i = push_size - 1; i >= 0; --i) {
-      APInt apbyte = apint.ashr(i * 8).trunc(sizeof(char));
+      APInt apbyte = apint.lshr(i * 8).trunc(8);
       char byte = apbyte.getZExtValue();
       support::endian::write<char>(OS, byte, support::big);
     }
