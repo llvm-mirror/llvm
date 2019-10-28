@@ -18,4 +18,4 @@
 type = Library
 name = MCDisassembler
 parent = MC
-required_libraries = MC Support Core
+required_libraries = MC Support
