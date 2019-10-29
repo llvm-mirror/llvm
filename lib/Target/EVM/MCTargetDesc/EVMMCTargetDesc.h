@@ -51,6 +51,7 @@ MCAsmBackend *createEVMAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                   const MCTargetOptions &Options);
 
 std::unique_ptr<MCObjectTargetWriter> createEVMELFObjectWriter(uint8_t OSABI);
+std::unique_ptr<MCObjectTargetWriter> createEVMBinaryObjectWriter();
 std::unique_ptr<MCObjectTargetWriter> createEVMObjectWriter();
 
 MCTargetStreamer *

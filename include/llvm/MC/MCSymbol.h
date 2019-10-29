@@ -49,6 +49,7 @@ protected:
     SymbolKindMachO,
     SymbolKindWasm,
     SymbolKindXCOFF,
+    SymbolKindEVM,
   };
 
   /// A symbol can contain an Offset, or Value, or be Common, but never more

@@ -38,7 +38,9 @@ namespace {
 class EVMBinaryObjectWriter : public MCObjectWriter {
 public:
   EVMBinaryObjectWriter(std::unique_ptr<MCEVMObjectTargetWriter> MOTW,
-                   raw_pwrite_stream &OS) : W(OS, support::big) {}
+                        raw_pwrite_stream &OS)
+      : W(OS, support::big), TargetObjectWriter(std::move(MOTW)) {}
+  void reset() override;
 
 private:
   void recordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
@@ -51,16 +53,20 @@ private:
   uint64_t writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
 
   support::endian::Writer W;
+
+  std::unique_ptr<MCEVMObjectTargetWriter> TargetObjectWriter;
 };
 
 } // end anonymous namespace
 
 
+// TODO
 void EVMBinaryObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
                                                 const MCAsmLayout &Layout) {
-  llvm_unreachable("unimplemented");
+
 }
 
+// TODO
 void EVMBinaryObjectWriter::recordRelocation(MCAssembler &Asm,
                                         const MCAsmLayout &Layout,
                                         const MCFragment *Fragment,
@@ -73,15 +79,29 @@ void EVMBinaryObjectWriter::recordRelocation(MCAssembler &Asm,
     llvm_unreachable("unimplemented");
   }
 
+  /*
+  uint32_t FixeupOffset = Layout.getFragmentOffset(Fragment);
+  unsigned Kind = Fixup.getKind();
+  FixeupOffset += Fixup.getOffset();
+  */
+  // we do not need to do anything here.
+
 }
 
+// TODO
+void EVMBinaryObjectWriter::reset() {
+
+}
+
+// TODO
 uint64_t EVMBinaryObjectWriter::writeObject(MCAssembler &Asm,
                                        const MCAsmLayout &Layout) {
-  uint64_t StartOffset = 0;
+  uint64_t StartOffset = W.OS.tell();
 
-
-
-  llvm_unreachable("unimplemented");
+  for (const MCSection &Sec : Asm) {
+    Asm.writeSectionData(W.OS, &Sec, Layout);
+  }
+  //llvm_unreachable("unimplemented");
 }
 
 std::unique_ptr<MCObjectWriter>

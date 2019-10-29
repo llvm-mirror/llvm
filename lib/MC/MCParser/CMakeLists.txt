@@ -4,6 +4,7 @@ add_llvm_component_library(LLVMMCParser
   COFFAsmParser.cpp
   DarwinAsmParser.cpp
   ELFAsmParser.cpp
+  EVMObjAsmParser.cpp
   MCAsmLexer.cpp
   MCAsmParser.cpp
   MCAsmParserExtension.cpp

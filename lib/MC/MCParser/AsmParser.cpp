@@ -693,6 +693,7 @@ extern MCAsmParserExtension *createDarwinAsmParser();
 extern MCAsmParserExtension *createELFAsmParser();
 extern MCAsmParserExtension *createCOFFAsmParser();
 extern MCAsmParserExtension *createWasmAsmParser();
+extern MCAsmParserExtension *createEVMAsmParser();
 
 } // end namespace llvm
 
@@ -728,6 +729,9 @@ AsmParser::AsmParser(SourceMgr &SM, MCContext &Ctx, MCStreamer &Out,
   case MCObjectFileInfo::IsXCOFF:
     report_fatal_error(
         "Need to implement createXCOFFAsmParser for XCOFF format.");
+    break;
+  case MCObjectFileInfo::IsEVM:
+    PlatformParser.reset(createEVMAsmParser());
     break;
   }
 
