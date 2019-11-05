@@ -79,13 +79,6 @@ void EVMBinaryObjectWriter::recordRelocation(MCAssembler &Asm,
     llvm_unreachable("unimplemented");
   }
 
-  /*
-  uint32_t FixeupOffset = Layout.getFragmentOffset(Fragment);
-  unsigned Kind = Fixup.getKind();
-  FixeupOffset += Fixup.getOffset();
-  */
-  // we do not need to do anything here.
-
 }
 
 // TODO
@@ -101,7 +94,6 @@ uint64_t EVMBinaryObjectWriter::writeObject(MCAssembler &Asm,
   for (const MCSection &Sec : Asm) {
     Asm.writeSectionData(W.OS, &Sec, Layout);
   }
-  //llvm_unreachable("unimplemented");
 }
 
 std::unique_ptr<MCObjectWriter>
