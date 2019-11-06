@@ -51,10 +51,8 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setSchedulingPreference(Sched::RegPressure);
   setStackPointerRegisterToSaveRestore(EVM::SP);
 
-
-
-  for (auto VT : { MVT::i1, MVT::i8, MVT::i16, MVT::i32,
-                   MVT::i64, MVT::i128, MVT::i256 }) {
+  for (auto VT : {MVT::i1, MVT::i8, MVT::i16, MVT::i32, MVT::i64, MVT::i128,
+                  MVT::i160, MVT::i256}) {
     setOperationAction(ISD::SMIN, VT, Expand);
     setOperationAction(ISD::SMAX, VT, Expand);
     setOperationAction(ISD::UMIN, VT, Expand);
@@ -136,6 +134,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
   setTruncStoreAction(MVT::i256, MVT::i32,  Legal);
   setTruncStoreAction(MVT::i256, MVT::i64,  Legal);
   setTruncStoreAction(MVT::i256, MVT::i128, Legal);
+  setTruncStoreAction(MVT::i256, MVT::i160, Legal);
 
   // Load extented operations for i1 types must be promoted
   for (MVT VT : MVT::integer_valuetypes()) {
