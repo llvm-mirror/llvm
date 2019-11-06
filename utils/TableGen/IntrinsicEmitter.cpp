@@ -234,17 +234,19 @@ enum IIT_Info {
   IIT_PTR_TO_ELT = 33,
   IIT_VEC_OF_ANYPTRS_TO_ELT = 34,
   IIT_I128 = 35,
-  IIT_V512 = 36,
-  IIT_V1024 = 37,
-  IIT_STRUCT6 = 38,
-  IIT_STRUCT7 = 39,
-  IIT_STRUCT8 = 40,
-  IIT_F128 = 41,
-  IIT_VEC_ELEMENT = 42,
-  IIT_SCALABLE_VEC = 43,
-  IIT_SUBDIVIDE2_ARG = 44,
-  IIT_SUBDIVIDE4_ARG = 45,
-  IIT_VEC_OF_BITCASTS_TO_INT = 46
+  IIT_I160 = 36,
+  IIT_I256 = 37,
+  IIT_V512 = 38,
+  IIT_V1024 = 39,
+  IIT_STRUCT6 = 40,
+  IIT_STRUCT7 = 41,
+  IIT_STRUCT8 = 42,
+  IIT_F128 = 43,
+  IIT_VEC_ELEMENT = 44,
+  IIT_SCALABLE_VEC = 45,
+  IIT_SUBDIVIDE2_ARG = 46,
+  IIT_SUBDIVIDE4_ARG = 47,
+  IIT_VEC_OF_BITCASTS_TO_INT = 48
 };
 
 static void EncodeFixedValueType(MVT::SimpleValueType VT,
@@ -259,6 +261,8 @@ static void EncodeFixedValueType(MVT::SimpleValueType VT,
     case 32: return Sig.push_back(IIT_I32);
     case 64: return Sig.push_back(IIT_I64);
     case 128: return Sig.push_back(IIT_I128);
+    case 160: return Sig.push_back(IIT_I160);
+    case 256: return Sig.push_back(IIT_I256);
     }
   }
 
