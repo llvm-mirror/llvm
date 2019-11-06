@@ -33,5 +33,5 @@ Triple::ObjectFormatType EVMBinaryObjectWriter::getFormat() const {
 
 std::unique_ptr<MCObjectTargetWriter>
 llvm::createEVMBinaryObjectWriter() {
-  return llvm::make_unique<EVMBinaryObjectWriter>();
+  return std::make_unique<EVMBinaryObjectWriter>();
 }

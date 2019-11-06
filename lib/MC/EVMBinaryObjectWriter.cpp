@@ -99,5 +99,5 @@ uint64_t EVMBinaryObjectWriter::writeObject(MCAssembler &Asm,
 std::unique_ptr<MCObjectWriter>
 llvm::createEVMObjectWriter(std::unique_ptr<MCEVMObjectTargetWriter> MOTW,
                             raw_pwrite_stream &OS) {
-  return llvm::make_unique<EVMBinaryObjectWriter>(std::move(MOTW), OS);
+  return std::make_unique<EVMBinaryObjectWriter>(std::move(MOTW), OS);
 }

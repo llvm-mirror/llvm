@@ -49,5 +49,5 @@ unsigned EVMELFObjectWriter::getRelocType(MCContext &Ctx, const MCValue &Target,
 
 std::unique_ptr<MCObjectTargetWriter>
 llvm::createEVMELFObjectWriter(uint8_t OSABI) {
-  return llvm::make_unique<EVMELFObjectWriter>(OSABI);
+  return std::make_unique<EVMELFObjectWriter>(OSABI);
 }

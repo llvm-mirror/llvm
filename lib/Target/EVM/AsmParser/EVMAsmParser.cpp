@@ -159,22 +159,22 @@ public:
   }
 
   static std::unique_ptr<EVMOperand> CreateToken(StringRef Str, SMLoc S) {
-    return make_unique<EVMOperand>(Str, S);
+    return std::make_unique<EVMOperand>(Str, S);
   }
 
   static std::unique_ptr<EVMOperand> CreateReg(unsigned RegNum, SMLoc S,
                                                SMLoc E) {
-    return make_unique<EVMOperand>(RegNum, S, E);
+    return std::make_unique<EVMOperand>(RegNum, S, E);
   }
 
   static std::unique_ptr<EVMOperand> CreateImm(const MCExpr *Val, SMLoc S,
                                                SMLoc E) {
-    return make_unique<EVMOperand>(Val, S, E);
+    return std::make_unique<EVMOperand>(Val, S, E);
   }
 
   static std::unique_ptr<EVMOperand>
   CreateMemri(unsigned RegNum, const MCExpr *Val, SMLoc S, SMLoc E) {
-    return make_unique<EVMOperand>(RegNum, Val, S, E);
+    return std::make_unique<EVMOperand>(RegNum, Val, S, E);
   }
 
   void makeToken(StringRef Token) {

@@ -37,7 +37,7 @@ namespace {
 class EVMDisassembler final : public MCDisassembler {
 public:
   EVMDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
-      : Ctx(Ctx), MCDisassembler(STI, Ctx) {}
+      : MCDisassembler(STI, Ctx), Ctx(Ctx) {}
   virtual ~EVMDisassembler() = default;
 
   MCContext &Ctx;
