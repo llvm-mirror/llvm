@@ -554,8 +554,8 @@ SDValue EVMTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   if (IsVarArg) { llvm_unreachable("unimplemented."); }
 
-  bool IsTailCall = CLI.IsTailCall;
-  if (IsTailCall) { llvm_unreachable("unimplemented."); }
+  // For now we do not specifically optimize for tail calls.
+  CLI.IsTailCall = false;
 
   switch (CallConv) {
   default:
