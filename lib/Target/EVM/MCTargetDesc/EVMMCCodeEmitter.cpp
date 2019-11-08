@@ -159,7 +159,7 @@ void EVMMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
       MCFixupKind Kind = MCFixupKind(FK_SecRel_2);
       // allocate space for fix up.
       support::endian::write<uint16_t>(OS, 0x0000, support::big);
-      Fixups.push_back(MCFixup::create(0, opnd.getExpr(), Kind, MI.getLoc()));
+      Fixups.push_back(MCFixup::create(1, opnd.getExpr(), Kind, MI.getLoc()));
     }
   }
 }

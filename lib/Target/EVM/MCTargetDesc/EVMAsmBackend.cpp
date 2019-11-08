@@ -79,7 +79,7 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
 
   // The offset points to the beginning of the instruction, so we have to
   // + 1
-  support::endian::write<uint16_t>(&Data[Fixup.getOffset() + 1],
+  support::endian::write<uint16_t>(&Data[Fixup.getOffset()],
                                    static_cast<uint16_t>(Value), Endian);
 }
 
