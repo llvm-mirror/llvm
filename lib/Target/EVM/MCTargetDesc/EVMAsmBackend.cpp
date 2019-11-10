@@ -17,6 +17,10 @@
 #include <cassert>
 #include <cstdint>
 
+#include "llvm/Support/Debug.h"
+#include "llvm/MC/MCValue.h"
+#define DEBUG_TYPE "evm_asmbackend"
+
 using namespace llvm;
 
 namespace {
@@ -76,6 +80,15 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
                                const MCSubtargetInfo *STI) const {
   assert(Fixup.getKind() == FK_SecRel_2);
   assert(Value <= 0xFFFF);
+
+  if (Target.getSymA()->getSymbol().getName() == "deploy.size") {
+    LLVM_DEBUG(
+        dbgs()
+            << "Found \"deploy.size\" symbol, fixing it up with binary size: "
+            << Data.size() << ".\n");
+    assert(Data.size() <= 0xFFFF);
+    Value = Data.size();
+  }
 
   // The offset points to the beginning of the instruction, so we have to
   // + 1
