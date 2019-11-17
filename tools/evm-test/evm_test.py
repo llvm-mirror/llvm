@@ -35,7 +35,7 @@ Return:
     PUSH1 0x20
     PUSH1 0x00
     RETURN
-Function:\n
+Function:
 """
 
 template_2_1 = """
@@ -52,7 +52,7 @@ Return:
     PUSH1 0x20
     PUSH1 0x00
     RETURN
-Function:\n
+Function:
 """
 
 def generate_header_str(inputs: List[int]) -> str:
@@ -76,6 +76,9 @@ def generate_function_binary(filename: str, offset: int) -> str:
 def generate_contract(inputs: List[int], func: str) -> str:
   assert len(inputs) < 3
   complete_str = generate_header_str(inputs) + func
+  f=open("./generated_contract.s", "w")
+  f.write(complete_str)
+  f.close()
   return asm.assemble_hex(complete_str)
 
 def execute_in_evm(code: str, expected: str) -> str:
@@ -91,13 +94,28 @@ def execute_in_evm(code: str, expected: str) -> str:
   result.check_returncode()
   return result.stdout
 
+def should_remove(input: str) -> bool:
+  sline = input.strip()
+  if sline.startswith("."):
+    return True
+  elif sline.startswith("#"):
+    return True
+  return False
+
+def process_line(input: str) -> str:
+  index = input.find("#")
+  if index is -1:
+    return input
+  return input[:index]
+
 def remove_directives_in_assembly(input: str) -> str:
+  print("EVM TEST: removing directives")
   cleaned_input = []
-  for line in str.split("\n"):
+  for line in input.split("\n"):
     # ignore directives
-    if not line.trim().startswith("\."):
-      cleaned_input.append(line)
-  return "".join(cleaned_input)
+    if not should_remove(line):
+      cleaned_input.append(process_line(line))
+  return "\n".join(cleaned_input)
 
 def generate_asm_file(infilename: str, outfilename: str) -> str:
   defined_llc = False
@@ -115,13 +133,21 @@ def generate_asm_file(infilename: str, outfilename: str) -> str:
     llc_exec = "llc" 
 
   command = [llc_exec, "-mtriple=evm", "-filetype=asm", infilename, "-o", outfilename]
+  print("EVM TEST: executing command:")
+  print(' '.join(command))
+
   result = subprocess.run(command, stdout=subprocess.PIPE) 
   result.check_returncode()
   return 
 
-#contract = generate_contract(
-#    inputs=["0x12345678", "0x87654321"], func="JUMPDEST\nADD\nSWAP1\nJUMP")
-#result = execute_in_evm(contract, "")
-#print(result)
+
 
 generate_asm_file("./test.ll", "./test.s")
+f=open("./test.s", "r")
+content = f.read()
+f.close()
+cleaned_content = remove_directives_in_assembly(content)
+
+contract = generate_contract(
+    inputs=["0x12345678", "0x87654321"], func=cleaned_content)
+result = execute_in_evm(contract, "")
