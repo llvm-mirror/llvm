@@ -91,10 +91,37 @@ def execute_in_evm(code: str, expected: str) -> str:
   result.check_returncode()
   return result.stdout
 
-def load_assembly_from_file(filename: str) -> str:
-  pass
+def remove_directives_in_assembly(input: str) -> str:
+  cleaned_input = []
+  for line in str.split("\n"):
+    # ignore directives
+    if not line.trim().startswith("\."):
+      cleaned_input.append(line)
+  return "".join(cleaned_input)
 
-contract = generate_contract(
-    inputs=["0x12345678", "0x87654321"], func="JUMPDEST\nADD\nSWAP1\nJUMP")
-result = execute_in_evm(contract, "")
-print(result)
+def generate_asm_file(infilename: str, outfilename: str) -> str:
+  defined_llc = False
+  llc_path = None
+  key = 'LLC_PATH'
+  try:
+    llc_path = os.environ[key]
+  except KeyError:
+    print("LLC_PATH not defined, using $PATH instead")
+  
+  llc_exec = None
+  if defined_llc:
+    llc_exec = llc_path + "/llc"
+  else:
+    llc_exec = "llc" 
+
+  command = [llc_exec, "-mtriple=evm", "-filetype=asm", infilename, "-o", outfilename]
+  result = subprocess.run(command, stdout=subprocess.PIPE) 
+  result.check_returncode()
+  return 
+
+#contract = generate_contract(
+#    inputs=["0x12345678", "0x87654321"], func="JUMPDEST\nADD\nSWAP1\nJUMP")
+#result = execute_in_evm(contract, "")
+#print(result)
+
+generate_asm_file("./test.ll", "./test.s")
