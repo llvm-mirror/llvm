@@ -17,11 +17,15 @@
 #include <cassert>
 #include <cstdint>
 
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/MC/MCValue.h"
 #define DEBUG_TYPE "evm_asmbackend"
 
 using namespace llvm;
+
+static cl::opt<unsigned> DebugOffset("evm-debug-offset", cl::init(0),
+  cl::Hidden, cl::desc("Artifical offset for relocation"));
 
 namespace {
 
@@ -90,9 +94,12 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
     Value = Data.size();
   }
 
-  // The offset points to the beginning of the instruction, so we have to
-  // + 1
-  support::endian::write<uint16_t>(&Data[Fixup.getOffset()],
+  if (DebugOffset != 0) {
+    LLVM_DEBUG(dbgs() << "Artifically adding " << DebugOffset
+                      << " to all Fixup relocation.\n";);
+  }
+
+  support::endian::write<uint16_t>(&Data[Fixup.getOffset() + DebugOffset],
                                    static_cast<uint16_t>(Value), Endian);
 }
 
