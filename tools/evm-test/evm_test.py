@@ -2,6 +2,8 @@
 
 from typing import List
 from string import Template
+import subprocess
+import os
 
 import pyevmasm as asm
 
@@ -66,14 +68,33 @@ def generate_header_str(inputs: List[int]) -> str:
 def generate_header_binary(inputs: List[int]) -> str:
   asm.assemble_hex(generate_header_str(inputs))
 
+def generate_function_binary(filename: str, offset: int) -> str:
+  assert offset > 0
+  # being lazy
+  pass
+
 def generate_contract(inputs: List[int], func: str) -> str:
   assert len(inputs) < 3
   complete_str = generate_header_str(inputs) + func
   return asm.assemble_hex(complete_str)
 
 def execute_in_evm(code: str, expected: str) -> str:
+  # we could use py-evm to do it so everything will be in python.
+  emv_path = ""
+  try:
+    emv_path = os.environ['EVM_PATH']
+  except KeyError(key):
+    print("\"" + key + "\" not defined, using pwd instead")
+
+  command = [emv_path + "/evm", "--code", code, "run"]
+  result = subprocess.run(command, stdout=subprocess.PIPE) 
+  result.check_returncode()
+  return result.stdout
+
+def load_assembly_from_file(filename: str) -> str:
   pass
 
-
-print(generate_contract(
-    inputs=["0x12345678", "0x87654321"], func="JUMPDEST\nADD\nSWAP1\nJUMP"))
+contract = generate_contract(
+    inputs=["0x12345678", "0x87654321"], func="JUMPDEST\nADD\nSWAP1\nJUMP")
+result = execute_in_evm(contract, "")
+print(result)
