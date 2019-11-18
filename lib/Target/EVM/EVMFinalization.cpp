@@ -84,17 +84,17 @@ void EVMFinalization::expandADJFP(MachineInstr* MI) const {
 
   // we are going to expand ADJFPUP/DOWN into:
   // PUSH1 freeMem
-  // DUP1
   // MLOAD
   // PUSH1 offset (index * 32)
   // ADD/SUB (according to UP or DOWN)
+  // PUSH1 freeMem
   // MSTORE
   unsigned freeMemPointer = ST->getFreeMemoryPointer();
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH1)).addImm(freeMemPointer);
-  BuildMI(*MBB, MI, DL, TII->get(EVM::DUP1));
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD));
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH1)).addImm(index * 32);
   BuildMI(*MBB, MI, DL, TII->get(opc));
+  BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH1)).addImm(freeMemPointer);
   BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE));
 
   MI->eraseFromParent();

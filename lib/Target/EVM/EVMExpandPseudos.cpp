@@ -119,12 +119,11 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
     .addReg(reg);
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), immReg)
-      .addImm(MI->getOperand(1).getImm());
+      .addImm(MI->getOperand(1).getImm() * 32);
   BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), addrReg)
     .addReg(fpReg).addReg(immReg);
 
   unsigned localReg = MI->getOperand(0).getReg();
-
   if (opc == EVM::pGETLOCAL_r) {
     BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), localReg).addReg(addrReg);
   } else if (opc == EVM::pPUTLOCAL_r) {
