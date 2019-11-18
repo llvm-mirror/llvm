@@ -508,8 +508,8 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   for (const ISD::InputArg &In __attribute__((unused)) : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
-
-    const SDValue &idx = DAG.getTargetConstant(InVals.size(),
+    // the index starts with 1. the zero index is left for return address
+    const SDValue &idx = DAG.getTargetConstant(InVals.size() + 1,
                                                DL, MVT::i64);
     Opnds.push_back(idx);
     //Opnds.push_back(Chain);

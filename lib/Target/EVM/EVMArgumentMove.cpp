@@ -89,8 +89,8 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
   unsigned returnAddrReg = 0;
 
   // the stack arrangement is:
-  // (top) 1st argument, 2nd argument, 3rd argument, ... (bottom)
-  for (int i = stackargs.size() - 1; i >= 0 ; --i) {
+  // (top) 1st argument, 2nd argument, 3rd argument, ..., return address (bottom)
+  for (int i = stackargs.size() - 1; i >= 1 ; --i) {
     // create the instruction, and insert it
     if (!stackargs[i]) {
       MachineBasicBlock::iterator insertPt = EntryMBB.begin();
@@ -114,7 +114,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       unsigned destReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
       auto bmi = BuildMI(EntryMBB, EntryMBB.front(), EntryMBB.front().getDebugLoc(),
               TII->get(EVM::pSTACKARG_r), destReg)
-          .addImm(256);
+          .addImm(0);
       returnAddrReg = destReg;
 
       LLVM_DEBUG({
@@ -177,12 +177,17 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
     if (EVMArgumentMove::isStackArg(MI)) {
       MachineOperand &MO = MI.getOperand(1);
       unsigned index = MO.getImm();
-      if (index == 256) continue;
+
+      LLVM_DEBUG({
+        dbgs() << "Inserting index2mi: " << index << ", ";
+        MI.dump();
+      });
 
       index2mi.insert(std::pair<unsigned, MachineInstr *>(index, &MI));
 
       unsigned reg = MI.getOperand(0).getReg();
 
+      // record unused stack arguments so we can pop it later.
       bool IsDead = MRI.use_empty(reg);
       if (IsDead) {
         LLVM_DEBUG({
