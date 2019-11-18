@@ -112,13 +112,15 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   */
 
   auto &LIS = getAnalysis<LiveIntervals>();
-  dbgs() << "Before:\n\n";
-  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = Register::index2VirtReg(I);
+  LLVM_DEBUG({
+    dbgs() << "Before:\n\n";
+    for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
+      unsigned Reg = Register::index2VirtReg(I);
 
-    const LiveInterval &LI = LIS.getInterval(Reg);
-    LI.dump();
-  }
+      const LiveInterval &LI = LIS.getInterval(Reg);
+      LI.dump();
+    }
+  });
 
   // Split multiple-VN LiveIntervals into multiple LiveIntervals.
   SmallVector<LiveInterval *, 4> SplitLIs;
@@ -131,14 +133,14 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
     SplitLIs.clear();
   }
 
-  dbgs() << "after:\n\n";
-
-  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = Register::index2VirtReg(I);
-
-    const LiveInterval &LI = LIS.getInterval(Reg);
-    LI.dump();
-  }
+  LLVM_DEBUG({
+    dbgs() << "after:\n";
+    for (unsigned I = 0, E = MRI.getNumVirtRegs(); I < E; ++I) {
+      unsigned Reg = Register::index2VirtReg(I);
+      const LiveInterval &LI = LIS.getInterval(Reg);
+      LI.dump();
+    }
+  });
 
   return true;
 }

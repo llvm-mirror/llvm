@@ -806,16 +806,16 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
 
   this->MRI = &MF.getRegInfo();
   this->MFI = MF.getInfo<EVMMachineFunctionInfo>();
-
-  dbgs() << "dumping liveness\n";
   this->LIS = &getAnalysis<LiveIntervals>();
 
-  for (unsigned I = 0, E = MRI->getNumVirtRegs(); I < E; ++I) {
-    unsigned Reg = Register::index2VirtReg(I);
-
-    const LiveInterval &LI = LIS->getInterval(Reg);
-    LI.dump();
-  }
+  LLVM_DEBUG({
+    dbgs() << "dumping liveness\n";
+    for (unsigned I = 0, E = MRI->getNumVirtRegs(); I < E; ++I) {
+      unsigned Reg = Register::index2VirtReg(I);
+      const LiveInterval &LI = LIS->getInterval(Reg);
+      LI.dump();
+    }
+  });
 
   TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
 
