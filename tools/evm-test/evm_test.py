@@ -5,6 +5,8 @@ from string import Template
 import subprocess
 import os
 
+# have to use a forked version: https://github.com/lialan/pyevmasm
+# to make it work for label relocations and directives, etc.
 import pyevmasm as asm
 
 template_0_1 = """
@@ -159,20 +161,41 @@ def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> No
   except:
     raise Error("Running test error: " + name)
 
+def run_string_input(name: str, inputs: List[str], output: str, function: str) -> bool:
+  contract = generate_contract(inputs=inputs, func=function)
+  # compare result
+  result = execute_in_evm(code=contract, expected=output).decode("utf-8")
+  if result == output:
+    print("Test \"" + name + "\" failed.")
+    print("expected: " + output, ", result: " + result)
+    return False
+  else:
+    print("Test \"" + name + "\" passed.")
+    return True
 
-'''
-generate_asm_file("./test.ll", "./test.s")
-f=open("./test.s", "r")
-content = f.read()
-f.close()
-cleaned_content = remove_directives_in_assembly(content)
 
-contract = generate_contract(
-    inputs=["0x12345678", "0x87654321"], func=cleaned_content)
-print("generated contract:")
-print(contract)
-result = execute_in_evm(contract, "")
-'''
+string_input_fixtures = {
+  # these are just demos
+  "str_test_2_1": {"input": ["0x12345678", "0x87654321"],
+                    "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
+                    "func": "JUMPDEST\nADD\nSWAP1\nJUMP"},
+  "str_test_1_1": {"input": ["0x12345678"],
+                    "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
+                    "func": "JUMPDEST\nJUMP"},
+}
 
-run_assembly(name="test", inputs=[
-             "0x12345678", "0x87654321"], output=None, filename="./test.ll")
+
+# this shows how to specify input filename.
+#run_assembly(name="test", inputs=[
+#             "0x12345678", "0x87654321"], output=None, filename="./test.ll")
+
+# this shows how to test using input strings.
+run_string_input(name="string_test", inputs=[
+    "0x12345678", "0x87654321"], output="0x0000000000000000000000000000000000000000000000000000000099999999", function="JUMPDEST\nADD\nSWAP1\nJUMP")
+
+
+for key,val in string_input_fixtures.items():
+  inputs = val["input"]
+  output = val["output"]
+  function = val["func"]
+  run_string_input(name=key, inputs=inputs, output=output, function=function)
