@@ -25,6 +25,17 @@ Return:
 Function:
 """
 
+template_0_0 = """
+Start:
+    PUSH1 Return
+    PUSH2 Function
+    JUMP
+Return:
+    JUMPDEST
+    STOP
+Function:
+"""
+
 template_1_1 = """
 Start:
     PUSH1 Return
@@ -58,10 +69,12 @@ Return:
 Function:
 """
 
-def generate_header_str(inputs: List[int]) -> str:
+def generate_header_str(inputs: List[int], output: str) -> str:
   assert len(inputs) < 3
   t = ""
   if len(inputs) is 0:
+    if output == "":
+      return template_0_0
     t = template_0_1
   if len(inputs) is 1:
     t = Template(template_1_1).substitute(input_value = inputs[0])
@@ -70,17 +83,14 @@ def generate_header_str(inputs: List[int]) -> str:
         input_value_1 = inputs[0], input_value_2 = inputs[1])
   return t
 
-def generate_header_binary(inputs: List[int]) -> str:
-  asm.assemble_hex(generate_header_str(inputs))
-
 def generate_function_binary(filename: str, offset: int) -> str:
   assert offset > 0
   # being lazy
   pass
 
-def generate_contract(inputs: List[int], func: str) -> str:
+def generate_contract(inputs: List[int], output: str, func: str) -> str:
   assert len(inputs) < 3
-  complete_str = generate_header_str(inputs) + func
+  complete_str = generate_header_str(inputs, output) + func
   assembly = asm.assemble_hex(complete_str)
   return assembly
 
@@ -127,7 +137,8 @@ def generate_asm_file(infilename: str, outfilename: str) -> str:
   try:
     llc_path = os.environ[key]
   except KeyError:
-    print("LLC_PATH not defined, using $PATH instead")
+    #print("LLC_PATH not defined, using $PATH instead")
+    pass
   
   llc_exec = None
   if defined_llc:
@@ -167,38 +178,53 @@ def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> No
     content = f.read()
     cleaned_content = remove_directives_in_assembly(content)
 
-  contract = generate_contract(inputs=inputs, func=cleaned_content)
+  contract = generate_contract(
+      inputs=inputs, output=output, func=cleaned_content)
   result = execute_in_evm(code=contract, expected=output).decode("utf-8")
-  return check_result(name, result, output)
+  success = check_result(name, result, output)
+  if not success:
+    print("contract: ")
+    print(contract)
+  return success
 
 
 def run_string_input(name: str, inputs: List[str], output: str, function: str) -> bool:
-  contract = generate_contract(inputs=inputs, func=function)
+  contract = generate_contract(inputs=inputs, output=output, func=function)
   # compare result
   result = execute_in_evm(code=contract, expected=output).decode("utf-8")
-  return check_result(name, result, output)
+  success = check_result(name, result, output)
+  if not success:
+    print("contract: ")
+    print(contract)
+  return success
 
 
 string_input_fixtures = {
   # these are just demos
-  "str_test_2_1": {"input": ["0x12345678", "0x87654321"],
-                    "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
-                    "func": "JUMPDEST\nADD\nSWAP1\nJUMP"},
   "str_test_1_1": {"input": ["0x12345678"],
                     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
                     "func": "JUMPDEST\nJUMP"},
+  "str_test_2_1": {"input": ["0x12345678", "0x87654321"],
+                    "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
+                    "func": "JUMPDEST\nADD\nSWAP1\nJUMP"},
 }
 
+runtime_file_prefix = "../../test/CodeGen/EVM/runtime_tests/"
 file_input_fixtures = {
   "file_test_1" : {
     "input":  [],
     "output": ["0x000000000000000000000000000000000000000000000000000000001"],
-    "file": "./tests/simple_test_1.s"
+    "file": "simple_test_1.ll"
   },
   "file_test_2" : {
     "input":  ["0x12345678", "0x87654321"],
-    "output": ["0x000000000000000000000000000000000000000000000000000000001"],
-    "file": "./tests/simple_test_2.s"
+    "output": "0x000000000000000000000000000000000000000000000000000000001",
+    "file": "simple_test_2.ll"
+  },
+  "file_test_3" : {
+    "input":  [],
+    "output": "",
+    "file": "simple_test_3.ll"
   },
 }
 
@@ -212,7 +238,7 @@ def execute_tests() -> None:
   for key,val in file_input_fixtures.items():
     inputs = val["input"]
     output = val["output"]
-    filename = val["file"]
+    filename = runtime_file_prefix + val["file"]
     run_assembly(name=key, inputs=inputs, output=output, filename=filename)
 
 seed(2019)
