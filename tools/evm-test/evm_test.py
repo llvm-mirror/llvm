@@ -2,6 +2,7 @@
 
 from typing import List
 from string import Template
+from random import seed, randint
 import subprocess
 import os
 
@@ -60,6 +61,8 @@ Function:
 def generate_header_str(inputs: List[int]) -> str:
   assert len(inputs) < 3
   t = ""
+  if len(inputs) is 0:
+    t = template_0_1
   if len(inputs) is 1:
     t = Template(template_1_1).substitute(input_value = inputs[0])
   elif len(inputs) is 2:
@@ -78,10 +81,8 @@ def generate_function_binary(filename: str, offset: int) -> str:
 def generate_contract(inputs: List[int], func: str) -> str:
   assert len(inputs) < 3
   complete_str = generate_header_str(inputs) + func
-  f=open("./generated_contract.s", "w")
-  f.write(complete_str)
-  f.close()
-  return asm.assemble_hex(complete_str)
+  assembly = asm.assemble_hex(complete_str)
+  return assembly
 
 def execute_in_evm(code: str, expected: str) -> str:
   # we could use py-evm to do it so everything will be in python.
@@ -142,36 +143,40 @@ def generate_asm_file(infilename: str, outfilename: str) -> str:
   result.check_returncode()
   return 
 
+def check_result(name: str, result: str, expected: str) -> bool:
+  if result.find("error") is not -1:
+    print("Test \"" + name + "\" failed due to program error:")
+    print(result)
+    return False
+  if result == expected:
+    print("Test \"" + name + "\" failed.")
+    print("expected: " + expected, ", result: " + result)
+    return False
+  else:
+    print("Test \"" + name + "\" passed.")
+    return True
 
 def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> None:
-  assembly_filename = filename + ".s"
+  assembly_filename = Template(
+      "/tmp/evm_test_${num}.s").substitute(num=randint(0, 65535))
   generate_asm_file(filename, assembly_filename)
 
   cleaned_content = None
+
   with open(assembly_filename, "r") as f:
     content = f.read()
     cleaned_content = remove_directives_in_assembly(content)
-  os.remove(assembly_filename)
 
-  contract = generate_contract(
-      inputs=inputs, func=cleaned_content)
+  contract = generate_contract(inputs=inputs, func=cleaned_content)
+  result = execute_in_evm(code=contract, expected=output).decode("utf-8")
+  return check_result(name, result, output)
 
-  try:
-    execute_in_evm(code=contract, expected=output)
-  except:
-    raise Error("Running test error: " + name)
 
 def run_string_input(name: str, inputs: List[str], output: str, function: str) -> bool:
   contract = generate_contract(inputs=inputs, func=function)
   # compare result
   result = execute_in_evm(code=contract, expected=output).decode("utf-8")
-  if result == output:
-    print("Test \"" + name + "\" failed.")
-    print("expected: " + output, ", result: " + result)
-    return False
-  else:
-    print("Test \"" + name + "\" passed.")
-    return True
+  return check_result(name, result, output)
 
 
 string_input_fixtures = {
@@ -184,18 +189,31 @@ string_input_fixtures = {
                     "func": "JUMPDEST\nJUMP"},
 }
 
+file_input_fixtures = {
+  "file_test_1" : {
+    "input":  [],
+    "output": ["0x000000000000000000000000000000000000000000000000000000001"],
+    "file": "./tests/simple_test_1.s"
+  },
+  "file_test_2" : {
+    "input":  ["0x12345678", "0x87654321"],
+    "output": ["0x000000000000000000000000000000000000000000000000000000001"],
+    "file": "./tests/simple_test_2.s"
+  },
+}
 
-# this shows how to specify input filename.
-#run_assembly(name="test", inputs=[
-#             "0x12345678", "0x87654321"], output=None, filename="./test.ll")
+def execute_tests() -> None:
+  for key,val in string_input_fixtures.items():
+    inputs = val["input"]
+    output = val["output"]
+    function = val["func"]
+    run_string_input(name=key, inputs=inputs, output=output, function=function)
 
-# this shows how to test using input strings.
-run_string_input(name="string_test", inputs=[
-    "0x12345678", "0x87654321"], output="0x0000000000000000000000000000000000000000000000000000000099999999", function="JUMPDEST\nADD\nSWAP1\nJUMP")
+  for key,val in file_input_fixtures.items():
+    inputs = val["input"]
+    output = val["output"]
+    filename = val["file"]
+    run_assembly(name=key, inputs=inputs, output=output, filename=filename)
 
-
-for key,val in string_input_fixtures.items():
-  inputs = val["input"]
-  output = val["output"]
-  function = val["func"]
-  run_string_input(name=key, inputs=inputs, output=output, function=function)
+seed(2019)
+execute_tests()
