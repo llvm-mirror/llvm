@@ -141,7 +141,26 @@ def generate_asm_file(infilename: str, outfilename: str) -> str:
   return 
 
 
+def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> None:
+  assembly_filename = filename + ".s"
+  generate_asm_file(filename, assembly_filename)
 
+  cleaned_content = None
+  with open(assembly_filename, "r") as f:
+    content = f.read()
+    cleaned_content = remove_directives_in_assembly(content)
+  os.remove(assembly_filename)
+
+  contract = generate_contract(
+      inputs=inputs, func=cleaned_content)
+
+  try:
+    execute_in_evm(code=contract, expected=output)
+  except:
+    raise Error("Running test error: " + name)
+
+
+'''
 generate_asm_file("./test.ll", "./test.s")
 f=open("./test.s", "r")
 content = f.read()
@@ -150,4 +169,10 @@ cleaned_content = remove_directives_in_assembly(content)
 
 contract = generate_contract(
     inputs=["0x12345678", "0x87654321"], func=cleaned_content)
+print("generated contract:")
+print(contract)
 result = execute_in_evm(contract, "")
+'''
+
+run_assembly(name="test", inputs=[
+             "0x12345678", "0x87654321"], output=None, filename="./test.ll")
