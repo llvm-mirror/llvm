@@ -34,7 +34,7 @@ bool EVMFrameLowering::hasFP(const MachineFunction &MF) const {
 void EVMFrameLowering::emitPrologue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
   EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
-  unsigned fiSize = MFI.getFrameIndexSize();
+  //unsigned fiSize = MFI.getFrameIndexSize();
 
   const EVMInstrInfo *TII =
     static_cast<const EVMInstrInfo *>(MF.getSubtarget().getInstrInfo());
@@ -47,13 +47,13 @@ void EVMFrameLowering::emitPrologue(MachineFunction &MF,
   }
   DebugLoc DL = MBBI->getDebugLoc();
 
-  BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPUP_r)).addImm(fiSize);
+  //BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPUP_r)).addImm(fiSize);
 }
 
 void EVMFrameLowering::emitEpilogue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
   EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
-  unsigned fiSize = MFI.getFrameIndexSize();
+  //unsigned fiSize = MFI.getFrameIndexSize();
   const EVMInstrInfo *TII =
     static_cast<const EVMInstrInfo *>(MF.getSubtarget().getInstrInfo());
 
@@ -61,7 +61,7 @@ void EVMFrameLowering::emitEpilogue(MachineFunction &MF,
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   DebugLoc DL = MBBI->getDebugLoc();
 
-  BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPDOWN_r)).addImm(fiSize);
+  //BuildMI(MBB, MBBI, DL, TII->get(EVM::pADJFPDOWN_r)).addImm(fiSize);
 }
 
 void EVMFrameLowering::processFunctionBeforeFrameFinalized(
