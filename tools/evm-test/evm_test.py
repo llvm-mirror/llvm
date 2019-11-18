@@ -63,7 +63,7 @@ def execute_in_evm(code: str, expected: str) -> str:
   try:
     emv_path = os.environ['EVM_PATH'] + "/evm"
   except KeyError:
-    print("EVM_PATH not defined, using pwd instead")
+    #print("EVM_PATH not defined, using pwd instead")
     evm_pth = "evm"
 
   command = ["evm", "--code", code, "run"]
@@ -86,7 +86,7 @@ def process_line(input: str) -> str:
   return input[:index]
 
 def remove_directives_in_assembly(input: str) -> str:
-  print("EVM TEST: removing directives")
+  # print("EVM TEST: removing directives")
   cleaned_input = []
   for line in input.split("\n"):
     # ignore directives
@@ -111,8 +111,8 @@ def generate_asm_file(infilename: str, outfilename: str) -> str:
     llc_exec = "llc" 
 
   command = [llc_exec, "-mtriple=evm", "-filetype=asm", infilename, "-o", outfilename]
-  print("EVM TEST: executing command:")
-  print(' '.join(command))
+  #print("EVM TEST: executing command:")
+  #print(' '.join(command))
 
   result = subprocess.run(command, stdout=subprocess.PIPE) 
   result.check_returncode()
@@ -131,7 +131,7 @@ def check_result(name: str, result: str, expected: str) -> bool:
     print("Test \"" + name + "\" passed.")
     return True
 
-def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> None:
+def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> bool:
   assembly_filename = Template(
       "/tmp/evm_test_${num}.s").substitute(num=randint(0, 65535))
   generate_asm_file(filename, assembly_filename)
@@ -203,18 +203,31 @@ file_input_fixtures = {
   },
 }
 
+def assembly_tests() -> List[str]:
+  failed_tests = []
+  for key,val in file_input_fixtures.items():
+    inputs = val["input"]
+    output = val["output"]
+    filename = runtime_file_prefix + key
+    result = run_assembly(name=key, inputs=inputs,
+                          output=output, filename=filename)
+    if not result:
+      failed_tests.append(key)
+  return failed_tests
+
+def print_failed(tests: List[str]) -> None:
+  print("The following test cases are failing:")
+  for t in tests:
+    print("    " + t)
+
 def execute_tests() -> None:
   for key,val in string_input_fixtures.items():
     inputs = val["input"]
     output = val["output"]
     function = val["func"]
     run_string_input(name=key, inputs=inputs, output=output, function=function)
-
-  for key,val in file_input_fixtures.items():
-    inputs = val["input"]
-    output = val["output"]
-    filename = runtime_file_prefix + key
-    run_assembly(name=key, inputs=inputs, output=output, filename=filename)
+  failed_asembly = assembly_tests()
+  print_failed(failed_asembly)
 
 seed(2019)
 execute_tests()
