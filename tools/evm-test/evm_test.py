@@ -10,9 +10,10 @@ import os
 # to make it work for label relocations and directives, etc.
 import pyevmasm as asm
 
-template_0_1 = """
+template_x_1 = """
 Start:
     PUSH1 Return
+    ${pushes}
     PUSH2 Function
     JUMP
 Return:
@@ -25,9 +26,10 @@ Return:
 Function:
 """
 
-template_0_0 = """
+template_x_0 = """
 Start:
     PUSH1 Return
+    ${pushes}
     PUSH2 Function
     JUMP
 Return:
@@ -35,61 +37,22 @@ Return:
     STOP
 Function:
 """
+def generate_header_str(inputs: List[str], output: str) -> str:
+  push_list = []
+  for input in inputs:
+    push = Template("PUSH4 ${input}").substitute(input=input)
+    push_list.append(push)
 
-template_1_1 = """
-Start:
-    PUSH1 Return
-    PUSH4 ${input_value}
-    PUSH2 Function
-    JUMP
-Return:
-    JUMPDEST
-    PUSH1 0x00
-    MSTORE
-    PUSH1 0x20
-    PUSH1 0x00
-    RETURN
-Function:
-"""
-
-template_2_1 = """
-Start:
-    PUSH1 Return
-    PUSH4 ${input_value_1}
-    PUSH4 ${input_value_2}
-    PUSH2 Function
-    JUMP
-Return:
-    JUMPDEST
-    PUSH1 0x00
-    MSTORE
-    PUSH1 0x20
-    PUSH1 0x00
-    RETURN
-Function:
-"""
-
-def generate_header_str(inputs: List[int], output: str) -> str:
-  assert len(inputs) < 3
-  t = ""
-  if len(inputs) is 0:
-    if output == "":
-      return template_0_0
-    t = template_0_1
-  if len(inputs) is 1:
-    t = Template(template_1_1).substitute(input_value = inputs[0])
-  elif len(inputs) is 2:
-    t = Template(template_2_1).substitute(
-        input_value_1 = inputs[0], input_value_2 = inputs[1])
-  return t
-
-def generate_function_binary(filename: str, offset: int) -> str:
-  assert offset > 0
-  # being lazy
-  pass
+  t = None
+  if output == "":
+    # case X 0
+    t = Template(template_x_0)
+  else:
+    # case X 1
+    t = Template(template_x_1)
+  return t.substitute(pushes='\n'.join(push_list))
 
 def generate_contract(inputs: List[int], output: str, func: str) -> str:
-  assert len(inputs) < 3
   complete_str = generate_header_str(inputs, output) + func
   assembly = asm.assemble_hex(complete_str)
   return assembly
@@ -98,11 +61,12 @@ def execute_in_evm(code: str, expected: str) -> str:
   # we could use py-evm to do it so everything will be in python.
   emv_path = ""
   try:
-    emv_path = os.environ['EVM_PATH']
-  except KeyError(key):
-    print("\"" + key + "\" not defined, using pwd instead")
+    emv_path = os.environ['EVM_PATH'] + "/evm"
+  except KeyError:
+    print("EVM_PATH not defined, using pwd instead")
+    evm_pth = "evm"
 
-  command = [emv_path + "/evm", "--code", code, "run"]
+  command = ["evm", "--code", code, "run"]
   result = subprocess.run(command, stdout=subprocess.PIPE) 
   result.check_returncode()
   return result.stdout
@@ -183,6 +147,8 @@ def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> No
   result = execute_in_evm(code=contract, expected=output).decode("utf-8")
   success = check_result(name, result, output)
   if not success:
+    print("Generated Assembly: ")
+    print(generate_header_str(inputs, output) + cleaned_content)
     print("contract: ")
     print(contract)
   return success
@@ -203,7 +169,7 @@ string_input_fixtures = {
   # these are just demos
   "str_test_1_1": {"input": ["0x12345678"],
                     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
-                    "func": "JUMPDEST\nJUMP"},
+                    "func": "JUMPDEST\nSWAP1\nJUMP"},
   "str_test_2_1": {"input": ["0x12345678", "0x87654321"],
                     "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
                     "func": "JUMPDEST\nADD\nSWAP1\nJUMP"},
@@ -211,20 +177,29 @@ string_input_fixtures = {
 
 runtime_file_prefix = "../../test/CodeGen/EVM/runtime_tests/"
 file_input_fixtures = {
-  "file_test_1" : {
+  "simple_test_1.ll" : {
     "input":  [],
     "output": ["0x000000000000000000000000000000000000000000000000000000001"],
-    "file": "simple_test_1.ll"
   },
-  "file_test_2" : {
+  "simple_test_2.ll" : {
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x000000000000000000000000000000000000000000000000000000001",
-    "file": "simple_test_2.ll"
   },
-  "file_test_3" : {
+  "simple_test_3.ll" : {
     "input":  [],
     "output": "",
-    "file": "simple_test_3.ll"
+  },
+  "simple_test_4.ll" : {
+    "input":  ["0x12345678"],
+    "output": "",
+  },
+  "simple_test_5.ll" : {
+    "input":  ["0x12345678"],
+    "output": "0x000000000000000000000000000000000000000000000000012345679",
+  },
+  "simple_test_6.ll" : {
+    "input":  ["0x12345678", "0x87654321"],
+    "output": "0x000000000000000000000000000000000000000000000000012345678",
   },
 }
 
@@ -238,7 +213,7 @@ def execute_tests() -> None:
   for key,val in file_input_fixtures.items():
     inputs = val["input"]
     output = val["output"]
-    filename = runtime_file_prefix + val["file"]
+    filename = runtime_file_prefix + key
     run_assembly(name=key, inputs=inputs, output=output, filename=filename)
 
 seed(2019)
