@@ -182,7 +182,6 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
         dbgs() << "Inserting index2mi: " << index << ", ";
         MI.dump();
       });
-
       index2mi.insert(std::pair<unsigned, MachineInstr *>(index, &MI));
 
       unsigned reg = MI.getOperand(0).getReg();
@@ -204,20 +203,23 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
   // Look for the first NonArg instruction.
   for (MachineInstr &MI : EntryMBB) {
     if (!EVMArgumentMove::isStackArg(MI)) {
+      LLVM_DEBUG({
+        dbgs() << "Insert point is: "; MI.dump();
+      });
       InsertPt = MI;
       break;
     }
   }
 
   // arrange stackargs to top of MBB
-  for (int i = numArgs - 1; i >= 0; --i) {
+  for (unsigned i = 0; i < numArgs; ++i) {
     assert(index2mi.find(i) != index2mi.end());
+      LLVM_DEBUG({
+        dbgs() << "rearranging index2mi: " << i << ", ";
+        index2mi[i]->dump();
+      });
     EntryMBB.insert(InsertPt, index2mi[i]->removeFromParent());
     Changed = true;
-  }
-
-  if (!EVMSubtarget::isMainFunction(&MF.getFunction())) {
-    EntryMBB.insert(InsertPt, EntryMBB.front().removeFromParent());
   }
 
   // TODO: this is buggy
@@ -231,7 +233,6 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
     BuildMI(EntryMBB, InsertPt, InsertPt->getDebugLoc(),
             TII->get(EVM::POP_r)).addReg(*rit);
   }
-
 
   // Now move any argument instructions later in the block
   // to before our first NonArg instruction.
