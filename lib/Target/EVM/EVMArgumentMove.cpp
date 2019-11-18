@@ -72,7 +72,9 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   unsigned numStackArgs = MFI->getNumStackArgs();
-  BitVector stackargs(numStackArgs, false);
+
+  // we plus one so that the return address is included
+  BitVector stackargs(numStackArgs + 1, false);
 
   MachineBasicBlock &EntryMBB = MF.front();
 
@@ -89,7 +91,9 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
   unsigned returnAddrReg = 0;
 
   // the stack arrangement is:
-  // (top) 1st argument, 2nd argument, 3rd argument, ..., return address (bottom)
+  // (top) 1st argument, 2nd argument, 3rd argument, ..., return address
+  // (bottom) Iterate over stack args, excluding the index zero one (return
+  // address slot)
   for (int i = stackargs.size() - 1; i >= 1 ; --i) {
     // create the instruction, and insert it
     if (!stackargs[i]) {
