@@ -12,6 +12,9 @@ import pyevmasm as asm
 
 template_x_1 = """
 Start:
+    PUSH2 0x100
+    PUSH1 0x40
+    MSTORE
     PUSH1 Return
     ${pushes}
     PUSH2 Function
@@ -28,6 +31,9 @@ Function:
 
 template_x_0 = """
 Start:
+    PUSH2 0x100
+    PUSH1 0x40
+    MSTORE
     PUSH1 Return
     ${pushes}
     PUSH2 Function
@@ -200,6 +206,10 @@ file_input_fixtures = {
   "simple_test_6.ll" : {
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x000000000000000000000000000000000000000000000000012345678",
+  },
+  "simple_test_7.ll" : {
+    "input":  ["0x12345678", "0x87654321"],
+    "output": "0x000000000000000000000000000000000000000000000000087654321",
   },
 }
 
