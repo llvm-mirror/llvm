@@ -316,7 +316,7 @@ defm MLOAD : RSInst<(outs GPR:$dst), (ins GPR:$src),
 let mayStore = 1 in {
 // MSTORE_r offset value
 defm MSTORE : Inst_2_0<"MSTORE",
-                       [(store GPR:$src2, GPR:$src1)], 0x52, 3>;
+                       [(store GPR:$src1, GPR:$src2)], 0x52, 3>;
 
 defm MSTORE8 : Inst_2_0<"MSTORE8", [], 0x53, 3>;
 }
@@ -636,7 +636,7 @@ def : Pat<(i256 (sra i256:$lhs, i256:$rhs)),
 
 // ext/trunc load/stores
 def : Pat<(truncstore i256:$lhs, i256:$rhs),
-          (MSTORE_r i256:$rhs, i256:$lhs)>;
+          (MSTORE_r i256:$lhs, i256:$rhs)>;
 
 // FIXME
 def : Pat<(zextload i256:$src), (MLOAD_r i256:$src)>;

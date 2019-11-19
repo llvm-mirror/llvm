@@ -39,6 +39,7 @@ private:
 
   const TargetInstrInfo* TII;
   const EVMSubtarget* ST;
+  const MachineFunction* MF;
 
   unsigned getNewRegister(MachineInstr* MI) const;
 
@@ -113,13 +114,15 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   unsigned immReg   = this->getNewRegister(MI);
   unsigned addrReg  = this->getNewRegister(MI);
 
+  const EVMMachineFunctionInfo *MFI = this->MF->getInfo<EVMMachineFunctionInfo>();
+  unsigned fiSize = MFI->getFrameIndexSize();
 
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
       .addImm(ST->getFreeMemoryPointer());
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
     .addReg(reg);
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), immReg)
-      .addImm(MI->getOperand(1).getImm() * 32);
+      .addImm((MI->getOperand(1).getImm() + fiSize) * 32);
   BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), addrReg)
     .addReg(fpReg).addReg(immReg);
 
@@ -162,6 +165,7 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
 
   this->ST = &MF.getSubtarget<EVMSubtarget>();
   this->TII = ST->getInstrInfo();
+  this->MF = &MF;
 
   bool Changed = false;
 
