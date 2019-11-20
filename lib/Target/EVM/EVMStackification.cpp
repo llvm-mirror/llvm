@@ -256,18 +256,25 @@ void EVMStackification::insertDup(unsigned index, MachineInstr &MI, bool insertA
   }
 }
 
-static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth) {
+// The skip here means how many same items needs to be skipped.
+static bool findRegDepthOnStack(StackStatus &ss, unsigned reg, unsigned *depth,
+                                unsigned skip = 0) {
   unsigned curHeight = ss.getStackDepth();
 
   for (unsigned d = 0; d < curHeight; ++d) {
     unsigned stackReg = ss.get(d);
     if (stackReg == reg) {
-      *depth = d;
-      LLVM_DEBUG({
-        unsigned idx = Register::virtReg2Index(reg);
-        dbgs() << "  Found %" << idx << " at depth: " << *depth << "\n";
-      });
-      return true;
+      if (skip != 0) {
+        // skipping register
+        --skip;
+      } else {
+        *depth = d;
+        LLVM_DEBUG({
+          unsigned idx = Register::virtReg2Index(reg);
+          dbgs() << "  Found %" << idx << " at depth: " << *depth << "\n";
+        });
+        return true;
+      }
     }
   }
 
@@ -490,7 +497,16 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     bool result = findRegDepthOnStack(ss, firstReg, &firstDepthFromTop);
     assert(result);
 
-    result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
+    // there is a special case: both the operands are the same.
+    if (firstReg == secondReg) {
+      LLVM_DEBUG(
+          { dbgs() << "  Special case: both operands are the same.\n"; });
+      //we should skip the first one and find the second one.
+      result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop,
+                                   /*skip = */ 1);
+    } else {
+      result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
+    }
     assert(result);
 
     // ideal case, we don't need to do anything
