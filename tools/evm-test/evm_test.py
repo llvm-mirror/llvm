@@ -50,7 +50,7 @@ def generate_header_str(inputs: List[str], output: str) -> str:
     push_list.append(push)
 
   t = None
-  if output == "":
+  if output == "0x":
     # case X 0
     t = Template(template_x_0)
   else:
@@ -129,13 +129,13 @@ def check_result(name: str, result: str, expected: str) -> bool:
     print("Test \"" + name + "\" failed due to program error:")
     print(result)
     return False
-  if result == expected:
+  if result == expected + '\n':
+    print("Test \"" + name + "\" passed.")
+    return True
+  else:
     print("Test \"" + name + "\" failed.")
     print("expected: " + expected, ", result: " + result)
     return False
-  else:
-    print("Test \"" + name + "\" passed.")
-    return True
 
 def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> bool:
   assembly_filename = Template(
@@ -153,9 +153,9 @@ def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> bo
   result = execute_in_evm(code=contract, expected=output).decode("utf-8")
   success = check_result(name, result, output)
   if not success:
-    print("Generated Assembly: ")
-    print(generate_header_str(inputs, output) + cleaned_content)
-    print("contract: ")
+    #print("Generated Assembly: ")
+    #print(generate_header_str(inputs, output) + cleaned_content)
+    print("  contract: ")
     print(contract)
   return success
 
@@ -185,31 +185,31 @@ runtime_file_prefix = "../../test/CodeGen/EVM/runtime_tests/"
 file_input_fixtures = {
   "simple_test_1.ll" : {
     "input":  [],
-    "output": ["0x000000000000000000000000000000000000000000000000000000001"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "simple_test_2.ll" : {
     "input":  ["0x12345678", "0x87654321"],
-    "output": "0x000000000000000000000000000000000000000000000000000000001",
+    "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
   },
   "simple_test_3.ll" : {
     "input":  [],
-    "output": "",
+    "output": "0x",
   },
   "simple_test_4.ll" : {
     "input":  ["0x12345678"],
-    "output": "",
+    "output": "0x",
   },
   "simple_test_5.ll" : {
     "input":  ["0x12345678"],
-    "output": "0x000000000000000000000000000000000000000000000000012345679",
+    "output": "0x0000000000000000000000000000000000000000000000000000000012345679",
   },
   "simple_test_6.ll" : {
     "input":  ["0x12345678", "0x87654321"],
-    "output": "0x000000000000000000000000000000000000000000000000012345678",
+    "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
   },
   "simple_test_7.ll" : {
     "input":  ["0x12345678", "0x87654321"],
-    "output": "0x000000000000000000000000000000000000000000000000087654321",
+    "output": "0x0000000000000000000000000000000000000000000000000000000087654321",
   },
   "loop.ll" : {
     "input":  ["0x00001000", "0x00000001"],
@@ -218,6 +218,10 @@ file_input_fixtures = {
   "loop2.ll" : {
     "input":  ["0x00001000", "0x0000000a"],
     "output": "0x00000000000000000000000000000000000000000000000000000a000",
+  },
+  "cmp.ll" : {
+    "input":  ["0x00001234", "0x00004321"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000004c5f4b4",
   },
 }
 
