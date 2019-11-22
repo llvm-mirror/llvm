@@ -302,24 +302,6 @@ void EVMAsmPrinter::appendJumpTo(MCSymbol *S) const {
   OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMP), *STI);
 }
 
-void EVMAsmPrinter::appendRevert() const {
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
-}
-
-void EVMAsmPrinter::appendConditionalRevert(MCSymbol *S) const {
-  pushSymbol(S);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPI), *STI);
-  
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::PUSH1).addImm(0x0), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::DUP1), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::REVERT), *STI);
-  OutStreamer->EmitLabel(S);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::JUMPDEST), *STI);
-  OutStreamer->EmitInstruction(MCInstBuilder(EVM::POP), *STI);
-}
-
 void EVMAsmPrinter::appendFunctionSelector(Module &M) {
   OutStreamer->EmitLabel(createSymbol("function_selector"));
 

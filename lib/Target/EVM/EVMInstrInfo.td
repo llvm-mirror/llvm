@@ -452,36 +452,49 @@ defm CREATE : Inst_3_1<"CREATE",
                        0xf0, 32000>;
 }
 
-let isCall = 1 in {
+let isCall = 1, hasSideEffects = 1, mayLoad = 1, mayStore = 1 in {
 // TODO: We should compute the cost of CALL separately.
-defm CALL   : Inst_7_1<"CALL", [], 0xf1, 0>;
-defm CALLNODE   : Inst_7_1<"CALLNODE", [], 0xf2, 0>;
+defm CALL   : Inst_7_1<"CALL",
+                      [(set GPR:$dst,
+                       (int_evm_call GPR:$src1, GPR:$src2, GPR:$src3,
+                       GPR:$src4, GPR:$src5, GPR:$src6, GPR:$src7))],
+                      0xf1, 0>;
+defm CALLNODE   : Inst_7_1<"CALLNODE",
+                      [(set GPR:$dst,
+                       (int_evm_call GPR:$src1, GPR:$src2, GPR:$src3,
+                       GPR:$src4, GPR:$src5, GPR:$src6, GPR:$src7))],
+                      0xf2, 0>;
 }
 
-let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
-defm RETURN : RSInst<(outs), (ins), [],
+let isBarrier = 1, hasSideEffects = 1, mayLoad = 1 in {
+defm RETURN : RSInst<(outs), (ins GPR:$offset, GPR:$length),
+                    [(int_evm_return GPR:$offset, GPR:$length)],
                      "RETURN_r", "RETURN", 0xf3, 0>;
 }
 
-let isCall = 1 in {
-defm DELEGATECALL : Inst_6_1<"DELEGATECALL", [], 0xf4, 0>;
-defm CALLBLACKBOX : Inst_6_1<"CALLBLACKBLOX", [], 0xf5, 0>;
-defm STATICCALL : Inst_7_1<"STATICCALL", [], 0xfa, 40>;
+let isCall = 1, hasSideEffects = 1, mayStore = 1 in {
+defm DELEGATECALL : Inst_6_1<"DELEGATECALL",
+                      [(set GPR:$dst,
+                       (int_evm_delegatecall GPR:$src1, GPR:$src2,
+                        GPR:$src3, GPR:$src4, GPR:$src5, GPR:$src6))],
+                    0xf4, 0>;
+defm STATICCALL : Inst_6_1<"STATICCALL",
+                      [(set GPR:$dst,
+                       (int_evm_delegatecall GPR:$src1, GPR:$src2,
+                        GPR:$src3, GPR:$src4, GPR:$src5, GPR:$src6))],
+                    0xfa, 40>;
 }
 
-let hasSideEffects = 1 in {
-let mayStore = 1 in {
-defm CREATE2    : Inst_3_1<"CREATE2",
+let hasSideEffects = 1, mayStore = 1 in {
+defm CREATE2    : Inst_4_1<"CREATE2",
                            [(set GPR:$dst,
-                             (int_evm_create2
-                              GPR:$src1, GPR:$src2, GPR:$src3))],
-                           0xfb, 32000>;
-// defm TXEXEGAS // TODO
+                             (int_evm_create2 GPR:$src1, GPR:$src2,
+                              GPR:$src3, GPR:$src4))],
+                           0xf5, 32000>;
 
-defm REVERT     : Inst_2_1<"REVERT",
-                           [(set GPR:$dst, (int_evm_revert GPR:$src1, GPR:$src2))],
+defm REVERT     : Inst_2_0<"REVERT",
+                           [(int_evm_revert GPR:$src1, GPR:$src2)],
                            0xfd, 0>;
-}
 }
 
 defm INVALID    : Inst_0_0<"INVALID", [], 0xfe, 0>;
