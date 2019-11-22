@@ -82,7 +82,7 @@ void EVMRegisterInfo::eliminateFrameIndex(
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   Register FrameReg = getFrameRegister(MF);
 
-  int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) * 32;
+  int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex);
 
   unsigned fiReg = FrameReg;
   if (Offset != 0) {
