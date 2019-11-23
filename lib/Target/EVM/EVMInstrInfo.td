@@ -316,7 +316,7 @@ defm MLOAD : RSInst<(outs GPR:$dst), (ins GPR:$src),
 let mayStore = 1 in {
 // MSTORE_r offset value
 defm MSTORE : Inst_2_0<"MSTORE",
-                       [(store GPR:$src1, GPR:$src2)], 0x52, 3>;
+                       [(store GPR:$src2, GPR:$src1)], 0x52, 3>;
 
 defm MSTORE8 : Inst_2_0<"MSTORE8", [], 0x53, 3>;
 }

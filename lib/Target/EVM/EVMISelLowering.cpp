@@ -145,7 +145,7 @@ EVMTargetLowering::EVMTargetLowering(const TargetMachine &TM,
 }
 
 EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
-                                            EVT VT) const {
+                                          EVT VT) const {
   return MVT::i256;
 }
 
