@@ -508,21 +508,17 @@ SDValue EVMTargetLowering::LowerFormalArguments(
   for (const ISD::InputArg &In __attribute__((unused)) : Ins) {
     SmallVector<SDValue, 4> Opnds;
 
-    // the index starts with 1. the zero index is left for return address
-    const SDValue &idx = DAG.getTargetConstant(InVals.size() + 1,
+    // (top) stackarg0(1st arg), stackarg1 (2nd arg), ... (bottom)
+    // the index starts with 0. the zero index is left for return address
+    const SDValue &idx = DAG.getTargetConstant(InVals.size(),
                                                DL, MVT::i64);
     Opnds.push_back(idx);
-    //Opnds.push_back(Chain);
 
     const SDValue &StackArg =
        DAG.getNode(EVMISD::STACKARG, DL, MVT::i256, Opnds);
 
     InVals.push_back(StackArg);
-    //ArgsChain.push_back(StackArg);
   }
-
-  //ArgsChain.push_back(Chain);
-  //Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, ArgsChain);
 
   return Chain;
 }

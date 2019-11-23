@@ -1,5 +1,5 @@
 ;; simple comparison
-define i256 @abcd(i256 %a, i256 %b) {
+define i256 @max(i256 %a, i256 %b) {
 entry:
   %0 = alloca i256
   %1 = icmp ugt i256 %a, %b

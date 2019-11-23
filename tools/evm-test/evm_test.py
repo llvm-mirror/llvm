@@ -45,6 +45,8 @@ Function:
 """
 def generate_header_str(inputs: List[str], output: str) -> str:
   push_list = []
+  if inputs is not None:
+    inputs.reverse()
   for input in inputs:
     push = Template("PUSH4 ${input}").substitute(input=input)
     push_list.append(push)
