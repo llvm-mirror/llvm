@@ -138,6 +138,9 @@ multiclass Inst_2_1<string name, list<dag> pattern, bits<8> inst, int cost>
 multiclass BinaryInst<SDNode node, string name, bits<8> inst, int cost>
     : Inst_2_1<name, [(set GPR:$dst, (node GPR:$src1, GPR:$src2))], inst, cost>;
 
+multiclass ShiftInst<SDNode node, string name, bits<8> inst, int cost>
+    : Inst_2_1<name, [(set GPR:$dst, (node GPR:$src2, GPR:$src1))], inst, cost>;
+
 multiclass ComparisonInst<CondCode cond, string name, bits<8> inst, int cost>
     : Inst_2_1<name, [(set GPR:$dst, (setcc GPR:$src1, GPR:$src2, cond))], inst, cost>;
 

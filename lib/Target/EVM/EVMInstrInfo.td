@@ -194,11 +194,11 @@ defm NOT  :  Inst_1_1<"NOT" , [], 0x19, 3>;
 
 
 // bitwise opcodes -- EIP#145
-defm SHL : BinaryInst<shl,  "SHL", 0x1b, 3>;
-defm SHR : BinaryInst<srl,  "SHR", 0x1c, 3>;
-defm SAR : BinaryInst<sra,  "SAR", 0x1d, 3>;
-defm ROL : BinaryInst<rotl, "ROL", 0x1e, 3>;
-defm ROR : BinaryInst<rotr, "SAR", 0x1f, 3>;
+defm SHL : ShiftInst<shl,  "SHL", 0x1b, 3>;
+defm SHR : ShiftInst<srl,  "SHR", 0x1c, 3>;
+defm SAR : ShiftInst<sra,  "SAR", 0x1d, 3>;
+defm ROL : ShiftInst<rotl, "ROL", 0x1e, 3>;
+defm ROR : ShiftInst<rotr, "SAR", 0x1f, 3>;
 
 
 defm BYTE :  Inst_2_1<"BYTE", [], 0x20, 3>;
