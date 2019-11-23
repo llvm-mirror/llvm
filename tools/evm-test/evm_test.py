@@ -228,7 +228,7 @@ file_input_fixtures = {
 loop_tests = {
   "loop.ll" : {
     "input":  ["0x00001000", "0x00000001"],
-    "output": "0x00000000000000000000000000000000000000000000000000000100a",
+    "output": "0x000000000000000000000000000000000000000000000000000000000000100a",
   },
   "loop2.ll" : {
     "input":  ["0x00001000", "0x0000000a"],
@@ -271,6 +271,7 @@ def assembly_tests() -> List[str]:
   failed_tests = []
   failed_tests += run_testset(file_input_fixtures)
   failed_tests += run_testset(setcc_tests)
+  failed_tests += run_testset(loop_tests)
   return failed_tests
 
 def print_failed(tests: List[str]) -> None:

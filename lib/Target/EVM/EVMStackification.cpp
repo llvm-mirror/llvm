@@ -524,6 +524,11 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       LLVM_DEBUG({ dbgs() << "  case2.\n"; });
       // TODO: do if it is commutatble, optimization
 
+      // 0: start:  a, xx, xx1, b
+      // 1: swap(b, a): b, xx, xx1, a
+      // 2: swap(b, xx):  xx, b, xx1, a
+      // 3: swap(a, xx): a, b, xx1, xx
+
       // move the second operand to top, so a swap
       insertSwap(secondDepthFromTop, MI);
       ss.swap(secondDepthFromTop);
@@ -531,6 +536,13 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
       // and another swap1 to swap the fst and snd operands
       insertSwap(1, MI);
       ss.swap(1);
+
+      result = findRegDepthOnStack(ss, firstReg, &firstDepthFromTop);
+      assert(result);
+      assert(firstDepthFromTop > 1);
+
+      insertSwap(firstDepthFromTop, MI);
+      ss.swap(firstDepthFromTop);
     } else 
 
     // second in position, first is not.
