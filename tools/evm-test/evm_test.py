@@ -215,6 +215,13 @@ file_input_fixtures = {
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000087654321",
   },
+  "cmp.ll" : {
+    "input":  ["0x00001234", "0x00004321"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000004c5f4b4",
+  },
+}
+
+loop_tests = {
   "loop.ll" : {
     "input":  ["0x00001000", "0x00000001"],
     "output": "0x00000000000000000000000000000000000000000000000000000100a",
@@ -223,19 +230,30 @@ file_input_fixtures = {
     "input":  ["0x00001000", "0x0000000a"],
     "output": "0x00000000000000000000000000000000000000000000000000000a000",
   },
-  "cmp.ll" : {
-    "input":  ["0x00001234", "0x00004321"],
-    "output": "0x0000000000000000000000000000000000000000000000000000000004c5f4b4",
+}
+
+setcc_tests = {
+  "setcc_eq.ll" : {
+    "input":  ["0xff00ff00", "0x00ff00ff"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
-  "setcc.ll" : {
+  "setcc_ne.ll" : {
+    "input":  ["0xff00ff01", "0x00ff00ff"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  },
+  "setcc_ule.ll" : {
+    "input":  ["0xff00ff00", "0x00ff01ff"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  },
+  "setcc_uge.ll" : {
     "input":  ["0xff00ff00", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
 }
 
-def assembly_tests() -> List[str]:
+def run_testset(testset) -> List[str]:
   failed_tests = []
-  for key,val in file_input_fixtures.items():
+  for key,val in testset.items():
     inputs = val["input"]
     output = val["output"]
     filename = runtime_file_prefix + key
@@ -243,6 +261,12 @@ def assembly_tests() -> List[str]:
                           output=output, filename=filename)
     if not result:
       failed_tests.append(key)
+  return failed_tests
+
+def assembly_tests() -> List[str]:
+  failed_tests = []
+  failed_tests += run_testset(file_input_fixtures)
+  failed_tests += run_testset(setcc_tests)
   return failed_tests
 
 def print_failed(tests: List[str]) -> None:

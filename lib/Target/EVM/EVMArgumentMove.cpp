@@ -132,13 +132,14 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
       MachineInstr &MI = *I++;
       if (MI.getOpcode() == EVM::pRETURNSUB_TEMP_r) {
         auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII->get(EVM::pRETURNSUB_r))
-            .addReg(MI.getOperand(0).getReg());
+                TII->get(EVM::pRETURNSUB_r));
 
+        // TODO: this might change
         if (!EVMSubtarget::isMainFunction(F)) {
             mibuilder.addReg(returnAddrReg);
         }
 
+        mibuilder.addReg(MI.getOperand(0).getReg());
         MI.eraseFromParent();
       }
       if (MI.getOpcode() == EVM::pRETURNSUBVOID_TEMP_r) {
