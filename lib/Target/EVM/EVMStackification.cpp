@@ -539,10 +539,11 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
 
       result = findRegDepthOnStack(ss, firstReg, &firstDepthFromTop);
       assert(result);
-      assert(firstDepthFromTop > 1);
 
-      insertSwap(firstDepthFromTop, MI);
-      ss.swap(firstDepthFromTop);
+      if (firstDepthFromTop != 0) {
+        insertSwap(firstDepthFromTop, MI);
+        ss.swap(firstDepthFromTop);
+      }
     } else 
 
     // second in position, first is not.
