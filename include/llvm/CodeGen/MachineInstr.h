@@ -122,7 +122,7 @@ private:
                                         // information about machine
                                         // instruction.
 
-  uint8_t AsmPrinterFlags = 0;          // Various bits of information used by
+  uint32_t AsmPrinterFlags = 0;         // Various bits of information used by
                                         // the AsmPrinter to emit helpful
                                         // comments.  This is *not* semantic
                                         // information.  Do not use this for
@@ -283,7 +283,7 @@ public:
   }
 
   /// Return the asm printer flags bitvector.
-  uint8_t getAsmPrinterFlags() const { return AsmPrinterFlags; }
+  uint32_t getAsmPrinterFlags() const { return AsmPrinterFlags; }
 
   /// Clear the AsmPrinter bitvector.
   void clearAsmPrinterFlags() { AsmPrinterFlags = 0; }
@@ -294,7 +294,7 @@ public:
   }
 
   /// Set a flag for the AsmPrinter.
-  void setAsmPrinterFlag(uint8_t Flag) {
+  void setAsmPrinterFlag(uint32_t Flag) {
     AsmPrinterFlags |= Flag;
   }
 

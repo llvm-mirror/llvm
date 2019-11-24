@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMUTILITIES_H
 #define LLVM_LIB_TARGET_EVM_EVMUTILITIES_H
 
+#include "EVMInstrInfo.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
@@ -29,7 +30,12 @@ unsigned getEncodedSize(Function &F);
 
 std::string getCanonicalName(Type* input);
 
-} // end namespace WebAssembly
+uint32_t BuildCommentFlags(AsmComments commentFlag, uint16_t value);
+
+void ParseCommentFlags(uint32_t input, AsmComments &commentFlag,
+                       uint16_t &value);
+
+} // end namespace EVM
 
 } // end namespace llvm
 

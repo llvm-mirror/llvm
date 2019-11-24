@@ -39,9 +39,8 @@ namespace {
 class EVMAsmPrinter : public AsmPrinter {
 public:
   explicit EVMAsmPrinter(TargetMachine &TM,
-                           std::unique_ptr<MCStreamer> Streamer)
+                         std::unique_ptr<MCStreamer> Streamer)
       : AsmPrinter(TM, std::move(Streamer)) {}
-
 
   //void EmitFunctionEntryLabel() override;
 
@@ -79,11 +78,46 @@ MCSymbol* EVMAsmPrinter::createSymbol(std::string name) const {
   return ctx->getOrCreateSymbol(name);
 }
 
+static bool emitEVMComments(const MachineInstr* MI, raw_ostream &OS) {
+  if (!MI->getAsmPrinterFlag(MachineInstr::TAsmComments)) {
+    return false;
+  }
+  uint32_t flags = MI->getAsmPrinterFlags();
+
+  EVM::AsmComments commentType;
+  uint16_t commentValue;
+  EVM::ParseCommentFlags(flags, commentType, commentValue);
+
+  switch (commentType) {
+  case EVM::PUTLOCAL:
+    OS << "putlocal: " << commentValue << "\n";
+    break;
+  case EVM::GETLOCAL:
+    OS << "getlocal: " << commentValue << "\n";
+    break;
+  case EVM::SUBROUTINE:
+    OS << "subroutine \n";
+    break;
+  case EVM::RETURN_FROM_SUBROUTINE:
+    OS << "return\n";
+    break;
+  default:
+    llvm_unreachable("unimplemented");
+  }
+
+  return true;
+}
+
 void EVMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   EVMMCInstLower MCInstLowering(OutContext, *this);
   MCInst TmpInst;
   MCInstLowering.Lower(MI, TmpInst);
+
+  bool commented = emitEVMComments(MI, OutStreamer->GetCommentOS());
   EmitToStreamer(*OutStreamer, TmpInst);
+  if (commented) {
+    OutStreamer->AddBlankLine();
+  }
 }
 
 void EVMAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,

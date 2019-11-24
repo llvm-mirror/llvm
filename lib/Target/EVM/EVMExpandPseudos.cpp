@@ -10,6 +10,8 @@
 #include "EVM.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
+#include "EVMInstrInfo.h"
+#include "EVMUtils.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -121,17 +123,26 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
       .addImm(ST->getFreeMemoryPointer());
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
     .addReg(reg);
+  unsigned slot_index = MI->getOperand(1).getImm() + fiSize;
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), immReg)
-      .addImm((MI->getOperand(1).getImm() + fiSize) * 32);
+      .addImm(slot_index * 32);
   BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), addrReg)
     .addReg(fpReg).addReg(immReg);
 
   unsigned localReg = MI->getOperand(0).getReg();
   if (opc == EVM::pGETLOCAL_r) {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), localReg).addReg(addrReg);
+    auto mi = BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), localReg).addReg(addrReg);
+
+    uint32_t flags = EVM::BuildCommentFlags(EVM::GETLOCAL, slot_index);
+    mi->setAsmPrinterFlag(flags);
   } else if (opc == EVM::pPUTLOCAL_r) {
     // MSTORE_r addrReg value
-    BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r)).addReg(addrReg).addReg(localReg);
+    auto mi = BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
+                  .addReg(addrReg)
+                  .addReg(localReg);
+
+    uint32_t flags = EVM::BuildCommentFlags(EVM::PUTLOCAL, slot_index);
+    mi->setAsmPrinterFlag(flags);
   } else {
     llvm_unreachable("invalid parameter");
   }
@@ -150,8 +161,11 @@ void EVMExpandPseudos::expandRETURN(MachineInstr* MI) const {
   if (opc == EVM::pRETURNSUB_r) {
     llvm_unreachable("unimplemented");
   } else {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
+    auto mi = BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
       .add(MI->getOperand(0));
+
+    //uint32_t flags = EVM::BuildCommentFlags(EVM::RETURN_FROM_SUBROUTINE, 0);
+    //mi->setAsmPrinterFlag(flags);
   }
 
   MI->eraseFromParent();

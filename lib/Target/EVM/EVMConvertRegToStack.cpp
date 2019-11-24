@@ -19,6 +19,7 @@
 #include "EVM.h"
 #include "EVMMachineFunctionInfo.h"
 #include "EVMSubtarget.h"
+#include "EVMUtils.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -159,18 +160,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      if (opc == EVM::pADJFPUP_r) {
-        assert(MI.getNumOperands() == 1 && "pADJFPUP_r's number of operands must be 1.");
-        MI.setDesc(TII->get(EVM::pADJFPUP));
-        continue;
-      }
-
-      if (opc == EVM::pADJFPDOWN_r) {
-        assert(MI.getNumOperands() == 1 && "pADJFPDOWN_r's number of operands must be 1.");
-        MI.setDesc(TII->get(EVM::pADJFPDOWN));
-        continue;
-      }
-
       if (opc == EVM::pSTACKARG_r) {
         MI.RemoveOperand(0);
         MI.setDesc(TII->get(EVM::pSTACKARG));
@@ -210,6 +199,23 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           }
 
           else if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
+            // store FreeMemory Pointer to latest location:
+
+            EVMMachineFunctionInfo *MFI = MF.getInfo<EVMMachineFunctionInfo>();
+
+            unsigned index = MFI->getNumAllocatedIndexInFunction();
+            // insert free pointer to FP[index]:
+            // PUSH1 0x40
+            // MLOAD
+            // DUP2  (fp, fp, fp)
+            // PUSH2 index * 32 (index, fp, fp, fp)
+            // ADD   (fp[index], fp, fp)
+            // MSTORE  (fp)
+            // PUSH2 (index + 1) * 32     (fp[index+1], fp)
+            // ADD (newFP)
+
+
+
             // here we build the return address, and insert it as the first argument
             // of the function.
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1))
@@ -223,8 +229,10 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(opc));
             StackOpcode = EVM::JUMP;
 
+            // insert JUMPDEST after MI
             MachineBasicBlock::iterator mit(MI);
-            BuildMI(*MI.getParent(), ++mit, MI.getDebugLoc(), TII->get(EVM::JUMPDEST));
+            BuildMI(*MI.getParent(), ++mit, MI.getDebugLoc(),
+                    TII->get(EVM::JUMPDEST));
           }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");
@@ -239,6 +247,9 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
               "By design we should only see register operands at this point");
           MI.RemoveOperand(i);
         }
+
+        // setting comment
+        //MI.setAsmPrinterFlag(EVM::BuildCommentFlags(EVM::SUBROUTINE, 0));
       }
     }
   }

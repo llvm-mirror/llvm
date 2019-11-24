@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMINSTRINFO_H
 #define LLVM_LIB_TARGET_EVM_EVMINSTRINFO_H
 
+#include "llvm/Support/Debug.h"
 #include "EVMRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
@@ -20,6 +21,16 @@
 #include "EVMGenInstrInfo.inc"
 
 namespace llvm {
+
+namespace EVM {
+enum AsmComments {
+  PUTLOCAL                = 0,
+  GETLOCAL                = 1 << 0,
+  SUBROUTINE              = 1 << 1,
+  RETURN_FROM_SUBROUTINE  = 1 << 2,
+  LAST_TYPE_OF_COMMENT    = 1 << 15 
+};
+}
 
 class EVMInstrInfo : public EVMGenInstrInfo {
 
