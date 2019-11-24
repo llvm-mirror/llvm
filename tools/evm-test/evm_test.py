@@ -3,8 +3,10 @@
 from typing import List
 from string import Template
 from random import seed, randint
+from collections import OrderedDict
 import subprocess
 import os
+import json
 
 # have to use a forked version: https://github.com/lialan/pyevmasm
 # to make it work for label relocations and directives, etc.
@@ -184,85 +186,103 @@ string_input_fixtures = {
 }
 
 runtime_file_prefix = "../../test/CodeGen/EVM/runtime_tests/"
-file_input_fixtures = {
-  "simple_test_1.ll" : {
+
+file_input_fixtures = OrderedDict({
+  "simple_test_1" : {
+    "file": "simple_test_1.ll",
     "input":  [],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
-  "simple_test_2.ll" : {
+  "simple_test_2" : {
+    "file": "simple_test_2.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
   },
-  "simple_test_3.ll" : {
+  "simple_test_3" : {
+    "file": "simple_test_3.ll",
     "input":  [],
     "output": "0x",
   },
-  "simple_test_4.ll" : {
+  "simple_test_4" : {
+    "file": "simple_test_4.ll",
     "input":  ["0x12345678"],
     "output": "0x",
   },
   "simple_test_5.ll" : {
+    "file": "simple_test_5.ll",
     "input":  ["0x12345678"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345679",
   },
-  "simple_test_6.ll" : {
+  "simple_test_6" : {
+    "file": "simple_test_6.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
   },
-  "simple_test_7.ll" : {
+  "simple_test_7" : {
+    "file": "simple_test_7.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000087654321",
   },
   "simple_test_8.ll" : {
+    "file": "simple_test_8.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
   },
-}
+})
 
-loop_tests = {
-  "loop.ll" : {
+loop_tests = OrderedDict({
+  "loop1" : {
+    "file": "loop.ll",
     "input":  ["0x00001000", "0x00000001"],
     "output": "0x000000000000000000000000000000000000000000000000000000000000100a",
   },
-  "loop2.ll" : {
+  "loop2" : {
+    "file": "loop2.ll",
     "input":  ["0x00001000", "0x0000000a"],
     "output": "0x00000000000000000000000000000000000000000000000000000a000",
   },
-}
+})
 
-setcc_tests = {
-  "setcc_eq.ll" : {
+setcc_tests = OrderedDict({
+  "setcc_eq1" : {
+    "file": "setcc_eq.ll",
     "input":  ["0xff00ff00", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
-  "setcc_ne.ll" : {
+  "setcc_ne1" : {
+    "file": "setcc_ne.ll",
     "input":  ["0xff00ff01", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
-  "setcc_ule.ll" : {
+  "setcc_ule" : {
+    "file": "setcc_ule.ll",
     "input":  ["0xff00ff00", "0x00ff01ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
   },
-  "setcc_uge.ll" : {
+  "setcc_uge" : {
+    "file": "setcc_uge.ll",
     "input":  ["0xff00ff00", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
-  "cmp.ll" : {
+  "cmp1" : {
+    "file": "cmp.ll",
     "input":  ["0x00001234", "0x00004321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000021908",
   },
-  "cmp.ll" : {
+  "cmp2" : {
+    "file": "cmp.ll",
     "input":  ["0x00004321", "0x00001234"],
     "output": "0x0000000000000000000000000000000000000000000000000000000004c5f4b4",
   },
-}
+})
 
 def run_testset(testset) -> List[str]:
   failed_tests = []
   for key,val in testset.items():
+    file   = val["file"]
     inputs = val["input"]
     output = val["output"]
-    filename = runtime_file_prefix + key
+    filename = runtime_file_prefix + file
     result = run_assembly(name=key, inputs=inputs,
                           output=output, filename=filename)
     if not result:
