@@ -79,11 +79,12 @@ EVMCallTransformation::rebuildFunctionType(FunctionType *OrigType) const {
 
   SmallVector<Type*, 16> ParamTypesVector;
 
+  // For some reason, the pointer type is (i8*) in LLVM IR.
+  ParamTypesVector.push_back(Type::getInt8PtrTy(OrigType->getContext()));
+
   for (Type* type : OrigType->params()) {
     ParamTypesVector.push_back(type);
   }
-  // For some reason, the pointer type is (i8*) in LLVM IR.
-  ParamTypesVector.push_back(Type::getInt8PtrTy(OrigType->getContext()));
 
   FunctionType* FT = FunctionType::get(RetType, ParamTypesVector,
                                        OrigType->isVarArg());
@@ -197,13 +198,15 @@ EVMCallTransformation::rebuildFunction(FunctionType* NewFuncTy, Function* OldFun
   ValueToValueMapTy VMap;
   auto NewFArgIt = NewFunc->arg_begin();
 
+  // TODO: the first arg should be the return.
+  NewFArgIt->setName("retaddr");
+  NewFArgIt++;
+
   for (auto &Arg: OldFunc->args()) {
     auto ArgName = Arg.getName();
     NewFArgIt->setName(ArgName);
     VMap[&Arg] = &(*NewFArgIt++);
   }
-  // TODO: the last arg should be the return.
-  NewFArgIt->setName("retaddr");
 
   SmallVector<ReturnInst*, 2> Returns;
   CloneFunctionInto(NewFunc, OldFunc, VMap, OldFunc->getSubprogram() != nullptr, Returns);
