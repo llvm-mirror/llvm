@@ -212,13 +212,19 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           else if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
             // here we build the return address, and insert it as the first argument
             // of the function.
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1)).addImm(8);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1))
+                .addImm(4);
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::GETPC));
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
 
             // swap the callee address with the return address
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::SWAP1));
+            unsigned uses = std::distance(MI.uses().begin(), MI.uses().end());
+            unsigned opc = getSWAPOpcode(uses);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(opc));
             StackOpcode = EVM::JUMP;
+
+            MachineBasicBlock::iterator mit(MI);
+            BuildMI(*MI.getParent(), ++mit, MI.getDebugLoc(), TII->get(EVM::JUMPDEST));
           }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");

@@ -220,14 +220,24 @@ bool EVMDAGToDAGISel::SelectCall(SDNode *Node) {
   // construct return 
   std::vector<SDValue> opsVec;
 
+
+  for (unsigned i = 2; i < Node->getNumOperands(); ++i) {
+    opsVec.push_back(Node->getOperand(i));
+  }
+
+  // we put the target at the back of the operands, it becomes:
+  // pJUMPSUB arg1, arg2, arg3, ..., targetAddr
+  // stack status is:
+  // (top) arg1, arg2, arg3, ..., targetAddr
+  // we need to have return address, which is best to be fixed in position:
+  // 1. PUSH retAddr (PC + offset)
+  // 2. swap retAddr and targetAddr
+  
   MachineSDNode *push =
       CurDAG->getMachineNode(EVM::PUSH32_r, SDLoc(Node), MVT::i256, target);
   SDValue pushVal = SDValue(push, 0);
   opsVec.push_back(pushVal);
 
-  for (unsigned i = 2; i < Node->getNumOperands(); ++i) {
-    opsVec.push_back(Node->getOperand(i));
-  }
   opsVec.push_back(chain);
 
 
