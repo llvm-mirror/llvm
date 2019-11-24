@@ -17,7 +17,7 @@ define i256 @abc(i256, i256) #0 {
 ; <label>:10:                                     ; preds = %6
   %11 = load i256, i256* %3, align 4
   %12 = load i256, i256* %3, align 4
-  %13 = add i256 %12, %11
+  %13 = add i256 %12, 1
   store i256 %13, i256* %3, align 4
   br label %14
 
