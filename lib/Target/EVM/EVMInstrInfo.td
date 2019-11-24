@@ -342,7 +342,7 @@ defm JUMPI : RSInst<(outs), (ins GPR:$src, GPR:$dst), [],
 }
 }
 
-defm PC       : Inst_0_1<"PC",
+defm GETPC    : Inst_0_1<"GETPC",
                          [(set GPR:$dst, (int_evm_getpc))],
                          0x58, 2>;
 

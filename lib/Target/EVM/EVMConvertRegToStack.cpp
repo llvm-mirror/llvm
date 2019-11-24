@@ -213,7 +213,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             // here we build the return address, and insert it as the first argument
             // of the function.
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1)).addImm(8);
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PC));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::GETPC));
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
 
             // swap the callee address with the return address
