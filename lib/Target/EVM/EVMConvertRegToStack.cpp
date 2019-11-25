@@ -203,7 +203,7 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             EVMMachineFunctionInfo *MFI = MF.getInfo<EVMMachineFunctionInfo>();
 
-            unsigned index = MFI->getNumAllocatedIndexInFunction();
+            unsigned index = MFI->getNumAllocatedIndexInFunction() + 1;
             // insert free pointer to FP[index]:
 
             // store current FP to fp[index]:
@@ -271,11 +271,15 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             // restore free pointer from index
             // PUSH FPAddr  (fpaddr)
-            // DUP1         (fpaddr)
             // MLOAD        (fp)
             // PUSH 32      (32, fp)
             // SWAP1        (fp, 32)
             // SUB          (fp-32)
+            // MLOAD        (oldFP)
+            // PUSH FPAddr  (fpaddr, oldFP)
+            // MSTORE
+
+
             // PUSH FPAddr  (fpadd,r fp-32)
             // MSTORE     
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
@@ -290,6 +294,8 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
                     TII->get(EVM::SWAP1));
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::SUB));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::MLOAD));
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::PUSH32))
                 .addImm(fpaddr);
