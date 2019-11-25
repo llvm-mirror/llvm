@@ -205,16 +205,50 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             unsigned index = MFI->getNumAllocatedIndexInFunction();
             // insert free pointer to FP[index]:
-            // PUSH1 0x40
-            // MLOAD
-            // DUP2  (fp, fp, fp)
-            // PUSH2 index * 32 (index, fp, fp, fp)
-            // ADD   (fp[index], fp, fp)
-            // MSTORE  (fp)
-            // PUSH2 (index + 1) * 32     (fp[index+1], fp)
-            // ADD (newFP)
+
+            // store current FP to fp[index]:
+
+            // PUSH fpaddr
+            // MLOAD  (fp)
+            // DUP1 (fp, fp)
+            // PUSH index (index, fp, fp)
+            // ADD   (fp+index, fp)
+            // MSTORE                 
+
+            // update FP to FP[index + 1]
+
+            // PUSH fpaddr (fpaddr)
+            // MLOAD (fp)
+            // PUSH (index + 1) * 32     (index+1, fp)
+            // ADD   (fp[index+1])
+            // PUSH fpaddr   (fpaddr, fp[index+1])
+            // MSTORE
+
+            unsigned fpaddr = MF.getSubtarget<EVMSubtarget>().getFreeMemoryPointer();
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(fpaddr);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MLOAD));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::DUP1));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(index * 32);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MSTORE));
 
 
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(fpaddr);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MLOAD));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm((index + 1) * 32);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(fpaddr);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MSTORE));
 
             // here we build the return address, and insert it as the first argument
             // of the function.
@@ -231,8 +265,36 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             // insert JUMPDEST after MI
             MachineBasicBlock::iterator mit(MI);
-            BuildMI(*MI.getParent(), ++mit, MI.getDebugLoc(),
+            ++mit;
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::JUMPDEST));
+
+            // restore free pointer from index
+            // PUSH FPAddr  (fpaddr)
+            // DUP1         (fpaddr, fpaddr)
+            // MLOAD        (fp, fpaddr)
+            // PUSH 32      (32, fp, fpaddr)
+            // SWAP1        (fp, 32, fpaddr)
+            // SUB          (fp-32, fpaddr)
+            // MSTORE
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(fpaddr);
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::DUP1));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::MLOAD));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::MLOAD));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(index * 32);
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::SWAP1));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::SUB));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::MSTORE));
           }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");

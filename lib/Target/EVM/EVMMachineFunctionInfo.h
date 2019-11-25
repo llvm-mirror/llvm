@@ -83,6 +83,10 @@ public:
     return VRegStackified.test(I);
   }
 
+  unsigned getNumAllocatedIndexInFunction() const {
+    return reg2index.size();
+  }
+
   unsigned allocate_memory_index(unsigned reg) {
     assert(reg2index.find(reg) == reg2index.end());
     unsigned index = reg2index.size();
