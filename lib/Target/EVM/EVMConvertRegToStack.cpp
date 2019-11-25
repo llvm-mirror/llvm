@@ -271,28 +271,28 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             // restore free pointer from index
             // PUSH FPAddr  (fpaddr)
-            // DUP1         (fpaddr, fpaddr)
-            // MLOAD        (fp, fpaddr)
-            // PUSH 32      (32, fp, fpaddr)
-            // SWAP1        (fp, 32, fpaddr)
-            // SUB          (fp-32, fpaddr)
-            // MSTORE
+            // DUP1         (fpaddr)
+            // MLOAD        (fp)
+            // PUSH 32      (32, fp)
+            // SWAP1        (fp, 32)
+            // SUB          (fp-32)
+            // PUSH FPAddr  (fpadd,r fp-32)
+            // MSTORE     
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::PUSH32))
                 .addImm(fpaddr);
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::DUP1));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::MLOAD));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::MLOAD));
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::PUSH32))
-                .addImm(index * 32);
+                .addImm(32);
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::SWAP1));
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::SUB));
+            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(fpaddr);
             BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
                     TII->get(EVM::MSTORE));
           }
