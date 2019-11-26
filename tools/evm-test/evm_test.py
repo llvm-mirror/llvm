@@ -187,44 +187,44 @@ string_input_fixtures = {
 
 runtime_file_prefix = "../../test/CodeGen/EVM/runtime_tests/"
 
-file_input_fixtures = OrderedDict({
+simple_tests = OrderedDict({
   "simple_test_1" : {
-    "file": "simple_test_1.ll",
+    "file": "simple_tests/simple_test_1.ll",
     "input":  [],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "simple_test_2" : {
-    "file": "simple_test_2.ll",
+    "file": "simple_tests/simple_test_2.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
   },
   "simple_test_3" : {
-    "file": "simple_test_3.ll",
+    "file": "simple_tests/simple_test_3.ll",
     "input":  [],
     "output": "0x",
   },
   "simple_test_4" : {
-    "file": "simple_test_4.ll",
+    "file": "simple_tests/simple_test_4.ll",
     "input":  ["0x12345678"],
     "output": "0x",
   },
   "simple_test_5.ll" : {
-    "file": "simple_test_5.ll",
+    "file": "simple_tests/simple_test_5.ll",
     "input":  ["0x12345678"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345679",
   },
   "simple_test_6" : {
-    "file": "simple_test_6.ll",
+    "file": "simple_tests/simple_test_6.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
   },
   "simple_test_7" : {
-    "file": "simple_test_7.ll",
+    "file": "simple_tests/simple_test_7.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000087654321",
   },
   "simple_test_8.ll" : {
-    "file": "simple_test_8.ll",
+    "file": "simple_tests/simple_test_8.ll",
     "input":  ["0x12345678", "0x87654321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
   },
@@ -232,17 +232,17 @@ file_input_fixtures = OrderedDict({
 
 loop_tests = OrderedDict({
   "loop1" : {
-    "file": "loop.ll",
+    "file": "loops/loop.ll",
     "input":  ["0x00001000", "0x00000001"],
     "output": "0x000000000000000000000000000000000000000000000000000000000000100a",
   },
   "loop2" : {
-    "file": "loop2.ll",
+    "file": "loops/loop2.ll",
     "input":  ["0x00001000", "0x0000000a"],
     "output": "0x000000000000000000000000000000000000000000000000000000000000100a"
   },
   "loop3" : {
-    "file": "loop2.ll",
+    "file": "loops/loop2.ll",
     "input":  ["0x0000000a", "0x00001000"],
     "output": "0x000000000000000000000000000000000000000000000000000000000000100a"
   },
@@ -250,56 +250,61 @@ loop_tests = OrderedDict({
 
 setcc_tests = OrderedDict({
   "setcc_eq1" : {
-    "file": "setcc_eq.ll",
+    "file": "setcc/setcc_eq.ll",
     "input":  ["0xff00ff00", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "setcc_ne1" : {
-    "file": "setcc_ne.ll",
+    "file": "setcc/setcc_ne.ll",
     "input":  ["0xff00ff01", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "setcc_ule" : {
-    "file": "setcc_ule.ll",
+    "file": "setcc/setcc_ule.ll",
     "input":  ["0xff00ff00", "0x00ff01ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
   },
   "setcc_uge" : {
-    "file": "setcc_uge.ll",
+    "file": "setcc/setcc_uge.ll",
     "input":  ["0xff00ff00", "0x00ff00ff"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "cmp1" : {
-    "file": "cmp.ll",
+    "file": "setcc/cmp.ll",
     "input":  ["0x00001234", "0x00004321"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000021908",
   },
   "cmp2" : {
-    "file": "cmp.ll",
+    "file": "setcc/cmp.ll",
     "input":  ["0x00004321", "0x00001234"],
     "output": "0x0000000000000000000000000000000000000000000000000000000004c5f4b4",
   },
+})
+
+fib_tests = OrderedDict({
   "fibonacci 1" : {
-    "file": "fib.ll",
+    "file": "fib/fib.ll",
     "input": ["0x00000001"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "fibonacci 2" : {
-    "file": "fib.ll",
+    "file": "fib/fib.ll",
     "input": ["0x00000002"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000002",
   },
   "fibonacci 3" : {
-    "file": "fib.ll",
+    "file": "fib/fib.ll",
     "input": ["0x00000003"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000003",
   },
   "fibonacci 10" : {
-    "file": "fib.ll",
+    "file": "fib/fib.ll",
     "input": ["0x0000000a"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000059",
   },
 })
+
+test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests]
 
 def run_testset(testset) -> List[str]:
   failed_tests = []
@@ -316,9 +321,8 @@ def run_testset(testset) -> List[str]:
 
 def assembly_tests() -> List[str]:
   failed_tests = []
-  failed_tests += run_testset(file_input_fixtures)
-  failed_tests += run_testset(setcc_tests)
-  failed_tests += run_testset(loop_tests)
+  for tests in test_suite:
+    failed_tests += run_testset(tests)
   return failed_tests
 
 def print_failed(tests: List[str]) -> None:
