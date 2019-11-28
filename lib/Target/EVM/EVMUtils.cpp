@@ -246,7 +246,8 @@ unsigned EVM::getEncodedSize(Function &F) {
 	return 32;
 }
 
-#define COMMENT_FLAG_BITSHIFT 8
+#define COMMENT_FLAG_BITSHIFT 4
+#define VALUE_FLAG_BITWIDTH   4
 #define VALUE_FLAG_BITSHIFT  16
 
 uint32_t EVM::BuildCommentFlags(AsmComments commentFlag, uint16_t value) {
@@ -258,5 +259,6 @@ void EVM::ParseCommentFlags(uint32_t input, AsmComments &commentFlag,
                             uint16_t &value) {
   assert(input & MachineInstr::TAsmComments);
   value = (input >> VALUE_FLAG_BITSHIFT);
-  commentFlag = (AsmComments)((input >> COMMENT_FLAG_BITSHIFT) & 0x00FF);
+  commentFlag = (AsmComments)((input >> COMMENT_FLAG_BITSHIFT) &
+                              (1 << VALUE_FLAG_BITWIDTH - 1));
 }

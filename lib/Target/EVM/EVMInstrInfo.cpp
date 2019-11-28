@@ -145,8 +145,6 @@ unsigned EVMInstrInfo::insertBranch(MachineBasicBlock &MBB,
   // Shouldn't be a fall through.
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
-  MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
-
   if (Cond.empty()) {
     assert(!FBB && "Unconditional branch with multiple successors!");
     BuildMI(&MBB, DL, get(EVM::pJUMPTO_r)).addMBB(TBB);

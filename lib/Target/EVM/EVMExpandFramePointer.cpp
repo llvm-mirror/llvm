@@ -87,8 +87,6 @@ bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
   return Changed;
 }
 bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
-  bool Changed = false;
-
   for (unsigned i = 0; i < MI->getNumOperands(); ++i) {
     MachineOperand &MO = MI->getOperand(i);
     if (!MO.isReg()) continue;

@@ -156,7 +156,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(EVM::DUP1));
         }
         MI.eraseFromParent();
-        //assert(!MI.getOperand(1).isReg() && "PUSH32_r's operand must not be a register..");
         continue;
       }
 
@@ -260,7 +259,10 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             // swap the callee address with the return address
             unsigned uses = std::distance(MI.uses().begin(), MI.uses().end());
             unsigned opc = getSWAPOpcode(uses);
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(opc));
+            auto mm = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(opc));
+            // setting comment
+            mm->setAsmPrinterFlag(
+                EVM::BuildCommentFlags(EVM::SUBROUTINE_BEGIN, 0));
             StackOpcode = EVM::JUMP;
 
             // insert JUMPDEST after MI
@@ -278,7 +280,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             // MLOAD        (oldFP)
             // PUSH FPAddr  (fpaddr, oldFP)
             // MSTORE
-
 
             // PUSH FPAddr  (fpadd,r fp-32)
             // MSTORE     
@@ -316,8 +317,6 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
           MI.RemoveOperand(i);
         }
 
-        // setting comment
-        //MI.setAsmPrinterFlag(EVM::BuildCommentFlags(EVM::SUBROUTINE, 0));
       }
     }
   }

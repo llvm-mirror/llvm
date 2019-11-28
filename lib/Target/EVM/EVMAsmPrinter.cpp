@@ -95,8 +95,8 @@ static bool emitEVMComments(const MachineInstr* MI, raw_ostream &OS) {
   case EVM::GETLOCAL:
     OS << "getlocal: " << commentValue << "\n";
     break;
-  case EVM::SUBROUTINE:
-    OS << "subroutine \n";
+  case EVM::SUBROUTINE_BEGIN:
+    OS << "subroutine call\n";
     break;
   case EVM::RETURN_FROM_SUBROUTINE:
     OS << "return\n";
