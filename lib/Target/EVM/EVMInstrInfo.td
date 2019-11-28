@@ -318,7 +318,9 @@ let mayStore = 1 in {
 defm MSTORE : Inst_2_0<"MSTORE",
                        [(store GPR:$src2, GPR:$src1)], 0x52, 3>;
 
-defm MSTORE8 : Inst_2_0<"MSTORE8", [], 0x53, 3>;
+defm MSTORE8 : Inst_2_0<"MSTORE8",
+                        [(int_evm_mstore8 GPR:$src1, GPR:$src2)],
+                        0x53, 3>;
 }
 
 let hasSideEffects = 1 in {
@@ -660,7 +662,17 @@ def : Pat<(EVMWrapper tglobaladdr:$in), (PUSH32_r tglobaladdr:$in)>;
 def : Pat<(EVMWrapper tblockaddress:$blk), (PUSH32_r tblockaddress:$blk)>;
 def : Pat<(brind bb:$dst), (pJUMPTO_r bb:$dst)>;
 
-// Function calls
+// Common Intrinsics
+def : Pat<(i256 (int_evm_sload GPR:$addr)),
+          (i256 (SLOAD_r GPR:$addr))>;
+def : Pat<(int_evm_sstore GPR:$offset, GPR:$value),
+          (SSTORE_r GPR:$offset, GPR:$value)>;
+
+def : Pat<(int_evm_mload GPR:$addr), (MLOAD_r GPR:$addr)>;
+def : Pat<(int_evm_mstore GPR:$offset, GPR:$value),
+          (MSTORE_r GPR:$offset, GPR:$value)>;
+
+// External calls
 /*
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),
           (pJUMPSUB_r tglobaladdr:$callee)>;

@@ -149,13 +149,6 @@ EVT EVMTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
   return MVT::i256;
 }
 
-bool EVMTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
-                                             const CallInst &I,
-                                             MachineFunction &MF,
-                                             unsigned Intrinsic) const {
-  llvm_unreachable("unimplemented.");
-}
-
 bool EVMTargetLowering::isLegalICmpImmediate(int64_t Imm) const {
   return true;
 }

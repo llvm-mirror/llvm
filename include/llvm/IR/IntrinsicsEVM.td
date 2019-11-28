@@ -12,6 +12,14 @@
 
 // Specialized loads from packet
 let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
+  def int_evm_mload : GCCBuiltin<"__builtin_evm_mload">,
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty], [IntrReadMem]>;
+  def int_evm_mstore : GCCBuiltin<"__builtin_evm_mstore">,
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrWriteMem]>;
+  def int_evm_mstore8 : GCCBuiltin<"__builtin_evm_mstore8">,
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrWriteMem]>;
+
+  // The following are EVM-specific operations
   def int_evm_exp : GCCBuiltin<"__builtin_evm_exp">,
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
   def int_evm_sha3 : GCCBuiltin<"__builtin_evm_sha3">,

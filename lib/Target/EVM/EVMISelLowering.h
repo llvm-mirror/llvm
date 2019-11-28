@@ -45,9 +45,6 @@ public:
          const SmallVectorImpl<ISD::OutputArg> &Outs,
          LLVMContext & /*Context*/) const override;
 
-  bool getTgtMemIntrinsic(IntrinsicInfo &Info, const CallInst &I,
-                          MachineFunction &MF,
-                          unsigned Intrinsic) const override;
   bool isLegalICmpImmediate(int64_t Imm) const override;
   bool isLegalAddImmediate(int64_t Imm) const override;
   bool isTruncateFree(Type *SrcTy, Type *DstTy) const override;

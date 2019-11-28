@@ -24,11 +24,12 @@ namespace llvm {
 
 namespace EVM {
 enum AsmComments {
-  PUTLOCAL                = 0,
-  GETLOCAL                = 1 << 0,
-  SUBROUTINE              = 1 << 1,
-  RETURN_FROM_SUBROUTINE  = 1 << 2,
-  LAST_TYPE_OF_COMMENT    = 1 << 15 
+  PUTLOCAL = 0,
+  GETLOCAL,              
+  SUBROUTINE_BEGIN,          
+  SUBROUTINE_END,
+  RETURN_FROM_SUBROUTINE,
+  LAST_TYPE_OF_COMMENT = 1 << 15 
 };
 }
 
