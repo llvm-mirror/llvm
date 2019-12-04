@@ -168,6 +168,9 @@ namespace llvm {
     /// Generate dwarf debugging info for assembly source files.
     bool GenDwarfForAssembly = false;
 
+    /// Generate EVM binary metadata information.
+    bool GenEVMMetadataForAssembly = false;
+
     /// The current dwarf file number when generate dwarf debugging info for
     /// assembly source files.
     unsigned GenDwarfFileNumber = 0;
@@ -624,6 +627,9 @@ namespace llvm {
     bool getGenDwarfForAssembly() { return GenDwarfForAssembly; }
     void setGenDwarfForAssembly(bool Value) { GenDwarfForAssembly = Value; }
     unsigned getGenDwarfFileNumber() { return GenDwarfFileNumber; }
+
+    bool getGenEVMMetadataForAssembly() { return GenEVMMetadataForAssembly; }
+    void setGenEVMMetaDataForAssembly(bool Value) { GenEVMMetadataForAssembly = Value; }
 
     void setGenDwarfFileNumber(unsigned FileNumber) {
       GenDwarfFileNumber = FileNumber;

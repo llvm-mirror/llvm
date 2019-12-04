@@ -766,4 +766,9 @@ void MCObjectStreamer::FinishImpl() {
 
   resolvePendingFixups();
   getAssembler().Finish();
+
+  // Needs to emit additional file containing EVMMetadata.
+  if (getContext().getGenEVMMetadataForAssembly()) {
+    
+  }
 }
