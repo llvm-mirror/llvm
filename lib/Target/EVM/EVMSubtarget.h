@@ -159,22 +159,10 @@ public:
   // Memory layout
   // see https://solidity.readthedocs.io/en/latest/miscellaneous.html#layout-of-state-variables-in-storage
   unsigned getZeroPointer() const { return getFreeMemoryPointer() + 32; }
-  unsigned getGeneralPurposeMemoryStart() const { return getZeroPointer() + 32; }
   static unsigned getIdentityContractAddress() { return 4; }
   static unsigned getDataStartOffset() { return 4; }
 
-  // TODO: make sure this will not collide with our values.
-  unsigned getFramePointerLocation() const { return 32; }
-
   static unsigned getFreeMemoryPointer() { return 0x40; }
-  static Function* getFallbackFunction(Module &M);
-  static bool hasPayableFunctions(Module& M);
-  static bool moduleIsLibrary(Module& M);
-  static bool hasInterfaceFunctions(Module &M);
-  static bool isPayableFunction(Function *F);
-
-
-  // Constants
 };
 } // End llvm namespace
 

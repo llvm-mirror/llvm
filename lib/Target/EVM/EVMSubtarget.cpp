@@ -37,26 +37,3 @@ EVMSubtarget::EVMSubtarget(const Triple &TT, const std::string &CPU,
       FrameLowering(initializeSubtargetDependencies(CPU, FS)),
       InstrInfo(), TLInfo(TM, *this) {
 }
-
-bool EVMSubtarget::moduleIsLibrary(Module &M) {
-  // TODO
-  return false;
-}
-
-Function* EVMSubtarget::getFallbackFunction(Module &M) {
-  // TODO
-  return nullptr;
-}
-
-bool EVMSubtarget::hasPayableFunctions(Module &M) {
-  // TODO
-  return false;
-}
-
-bool EVMSubtarget::isPayableFunction(Function *F) {
-  return true; 
-}
-
-bool EVMSubtarget::hasInterfaceFunctions(Module& M) {
-  return true; 
-}

@@ -9,6 +9,7 @@
 #ifndef LLVM_LIB_TARGET_EVM_EVMMCINSTLOWER_H
 #define LLVM_LIB_TARGET_EVM_EVMMCINSTLOWER_H
 
+#include "llvm/MC/MCContext.h"
 #include "llvm/Support/Compiler.h"
 
 namespace llvm {
@@ -30,7 +31,9 @@ class LLVM_LIBRARY_VISIBILITY EVMMCInstLower {
 
 public:
   EVMMCInstLower(MCContext &ctx, AsmPrinter &printer)
-      : Ctx(ctx), Printer(printer) {}
+      : Ctx(ctx), Printer(printer) {
+        ctx.setGenEVMMetaDataForAssembly(true);
+      }
   void Lower(const MachineInstr *MI, MCInst &OutMI) const;
 
   MCOperand LowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym) const;

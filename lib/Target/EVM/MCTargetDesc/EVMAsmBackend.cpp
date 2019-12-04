@@ -60,6 +60,8 @@ public:
                         MCInst &Res) const override {}
 
   bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+
+private:
 };
 
 } // end anonymous namespace

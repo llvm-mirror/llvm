@@ -202,10 +202,11 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             EVMMachineFunctionInfo *MFI = MF.getInfo<EVMMachineFunctionInfo>();
 
+            // we implicitly allocate a slot at FP[lastIndex+1]:
             unsigned index = MFI->getNumAllocatedIndexInFunction() + 1;
-            // insert free pointer to FP[index]:
 
             // store current FP to fp[index]:
+            // TODO can optimize this sequence
 
             // PUSH fpaddr
             // MLOAD  (fp)
