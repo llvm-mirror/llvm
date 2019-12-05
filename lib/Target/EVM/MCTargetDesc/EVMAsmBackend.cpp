@@ -13,8 +13,11 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCGenEVMInfo.h"
 #include "llvm/Support/EndianStream.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/WithColor.h"
+#include "llvm/Support/FileSystem.h"
 #include <cassert>
 #include <cstdint>
 
@@ -28,43 +31,84 @@ using namespace llvm;
 static cl::opt<unsigned> DebugOffset("evm-debug-offset", cl::init(0),
   cl::Hidden, cl::desc("Artifical offset for relocation"));
 
-namespace {
+static cl::opt<std::string>
+EVMMetadataFile("evm_md_file", cl::desc("EVM metadata filename."));
 
-class EVMAsmBackend : public MCAsmBackend {
+class MCGenEVMInfo {
 public:
-  EVMAsmBackend(support::endianness Endian) : MCAsmBackend(Endian) {}
-  ~EVMAsmBackend() override = default;
 
-  void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
-                  const MCValue &Target, MutableArrayRef<char> Data,
-                  uint64_t Value, bool IsResolved,
-                  const MCSubtargetInfo *STI) const override;
+  // When generating EVM Metadata for assembly source files this emits the EVM 
+  // sections.
+  static void Emit(const MCAssembler &Asm) {
+    if (EVMMetadataFile.empty()) {
+      // TODO: change it to an appropriate name
+      EVMMetadataFile = "EVMMeta.txt";
+    }
 
-  std::unique_ptr<MCObjectTargetWriter>
-  createObjectTargetWriter() const override;
+    std::error_code EC;
+    sys::fs::OpenFlags OpenFlags = sys::fs::OF_None;
+    auto FDOut =
+        std::make_unique<ToolOutputFile>(EVMMetadataFile, EC, OpenFlags);
 
-  // No instruction requires relaxation
-  bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
-                            const MCRelaxableFragment *DF,
-                            const MCAsmLayout &Layout) const override {
-    return false;
+    if (EC) {
+      WithColor::error() << EC.message() << '\n';
+      return;
+    }
+
+    // Now FDOut is ready, emit the labeles and its location to the file.
+    // Iterate over this structure and emit tables.
+    llvm::raw_fd_ostream &os = FDOut->os();
+    os << "[\n";
+    for (MCAssembler::const_symbol_iterator it = Asm.symbol_begin(),
+                                            ie = Asm.symbol_end();
+         it != ie; ++it) {
+      os << "\t{ \"SymbolName\": \"";
+      os << it->getName();
+      os << "\", \"Offset\": \"" << it->getOffset() << "\" }\n";
+    }
+    os << "]\n";
+
+    FDOut->keep();
   }
+};
 
-  unsigned getNumFixupKinds() const override { return 1; }
+  namespace {
 
-  bool mayNeedRelaxation(const MCInst &Inst,
-                         const MCSubtargetInfo &STI) const override {
-    return false;
-  }
+  class EVMAsmBackend : public MCAsmBackend {
+  public:
+    EVMAsmBackend(support::endianness Endian) : MCAsmBackend(Endian) {}
+    ~EVMAsmBackend() override = default;
 
-  void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
-                        MCInst &Res) const override {}
+    void applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
+                    const MCValue &Target, MutableArrayRef<char> Data,
+                    uint64_t Value, bool IsResolved,
+                    const MCSubtargetInfo *STI) const override;
 
-  bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+    std::unique_ptr<MCObjectTargetWriter>
+    createObjectTargetWriter() const override;
 
-  void finish(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
+    // No instruction requires relaxation
+    bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
+                              const MCRelaxableFragment *DF,
+                              const MCAsmLayout &Layout) const override {
+      return false;
+    }
 
-private:
+    unsigned getNumFixupKinds() const override { return 1; }
+
+    bool mayNeedRelaxation(const MCInst &Inst,
+                           const MCSubtargetInfo &STI) const override {
+      return false;
+    }
+
+    void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                          MCInst &Res) const override {}
+
+    bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+
+    void finish(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
+
+  private:
 };
 
 } // end anonymous namespace
@@ -74,7 +118,7 @@ bool EVMAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
 }
 
 void EVMAsmBackend::finish(const MCAssembler &Asm, MCAsmLayout &Layout) const {
-  MCGenEVMInfo::Emit(Asm, Layout);
+  MCGenEVMInfo::Emit(Asm);
 
 }
 
