@@ -66,6 +66,28 @@ public:
       os << it->getName();
       os << "\", \"Offset\": \"" << it->getOffset() << "\" }\n";
     }
+    // Get content size
+    {
+      os << "\t{ \"Section Info\": \n";
+      os << "\t\t[\n";
+      for (MCSection &sec : Asm) {
+        size_t sec_size = 0;
+        os << "\t\t\t{ \"begin_symbol\": \"" << sec.getBeginSymbol()->getName() << "\",\n";
+        os << "\t\t\t  \"size\": ";
+        for (MCFragment &Frag : sec) {
+          if (auto *DataFrag = dyn_cast<MCDataFragment>(&Frag)) {
+            sec_size += DataFrag->getContents().size();
+          } else if (auto *DataFrag = dyn_cast<MCAlignFragment>(&Frag)) {
+            continue;
+          } else {
+            llvm_unreachable("EVM does not generate other fragments.");
+          }
+        }
+        os << "\t\t\t  " << sec_size << "}\n";
+      }
+      os << "\t\t],\n";
+      os << "\t}\n";
+    }
     os << "]\n";
 
     FDOut->keep();
