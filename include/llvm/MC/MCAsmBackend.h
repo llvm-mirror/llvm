@@ -183,6 +183,9 @@ public:
   /// Give backend an opportunity to finish layout after relaxation
   virtual void finishLayout(MCAssembler const &Asm,
                             MCAsmLayout &Layout) const {}
+  
+  /// Give backend an opportunity to wrap up before we write to file.
+  virtual void finish(MCAssembler const &Asm, MCAsmLayout &Layout) const {}
 
   /// Handle any target-specific assembler flags. By default, do nothing.
   virtual void handleAssemblerFlag(MCAssemblerFlag Flag) {}

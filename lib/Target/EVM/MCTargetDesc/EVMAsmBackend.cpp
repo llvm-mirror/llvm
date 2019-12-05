@@ -13,6 +13,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCGenEVMInfo.h"
 #include "llvm/Support/EndianStream.h"
 #include <cassert>
 #include <cstdint>
@@ -61,14 +62,20 @@ public:
 
   bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
 
+  void finish(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
+
 private:
 };
 
 } // end anonymous namespace
 
 bool EVMAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
-  llvm_unreachable("Shouldn't appear here.");
-  return false;
+  return true;
+}
+
+void EVMAsmBackend::finish(const MCAssembler &Asm, MCAsmLayout &Layout) const {
+  MCGenEVMInfo::Emit(Asm, Layout);
+
 }
 
 void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,

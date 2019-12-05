@@ -20,6 +20,7 @@
 #include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCGenEVMInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCFixupKindInfo.h"
@@ -866,6 +867,8 @@ void MCAssembler::Finish() {
   // Create the layout object.
   MCAsmLayout Layout(*this);
   layout(Layout);
+
+  getBackend().finish(*this, Layout);
 
   // Write the object file.
   stats::ObjectBytes += getWriter().writeObject(*this, Layout);

@@ -1,5 +1,7 @@
 
 #include "llvm/MC/MCGenEVMInfo.h"
+#include "llvm/MC/MCAssembler.h"
+#include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -11,7 +13,7 @@ using namespace llvm;
 static cl::opt<std::string>
 EVMMetadataFile("evm_md_file", cl::desc("EVM metadata filename."));
    
-void MCGenEVMInfo::Emit() {
+void MCGenEVMInfo::Emit(const MCAssembler& Asm, const MCAsmLayout &Layout) {
     if (EVMMetadataFile.empty()) {
         // TODO: change it to an appropriate name
         EVMMetadataFile = "EVMMeta.txt";
@@ -28,9 +30,16 @@ void MCGenEVMInfo::Emit() {
 
     // Now FDOut is ready, emit the labeles and its location to the file.
     // Iterate over this structure and emit tables.
-    for (std::pair<MCSymbol*, uint32_t> symbol_pair : this->symbol_locations) {
-        FDOut->os() << "[" << symbol_pair.first << ", " << symbol_pair.second << "]\n";
+    llvm::raw_fd_ostream &os = FDOut->os();
+    os << "[\n";
+    for (MCAssembler::const_symbol_iterator it = Asm.symbol_begin(),
+                                            ie = Asm.symbol_end();
+         it != ie; ++it) {
+      os << "\t{ \"SymbolName\": \"";
+      os << it->getName();
+      os << "\", \"Offset\": \"" << it->getOffset() << "\" }\n";
     }
+    os << "]\n";
 
     FDOut->keep();
 }

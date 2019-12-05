@@ -19,6 +19,7 @@
 namespace llvm {
 
 class MCAsmBackend;
+class MCAsmLayout;
 class MCContext;
 
 class MCGenEVMInfo {
@@ -27,15 +28,11 @@ public:
   // When generating EVM Metadata for assembly source files this emits the EVM 
   // sections.
   //
-  void Emit();
+  static void Emit(const MCAssembler &Asm, const MCAsmLayout &Layout);
 
   MCGenEVMInfo() {};
 
 private:
-  std::vector<std::pair<MCSymbol *, uint32_t>> symbol_locations;
-
-  void EmitSymbolLocationPair();
-  
 };
 
 }
