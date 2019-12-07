@@ -131,6 +131,8 @@ public:
     void finish(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
 
   private:
+    void applyFixupValue(MutableArrayRef<char> &Contents, size_t Offset,
+                         uint16_t Value) const;
 };
 
 } // end anonymous namespace
@@ -139,9 +141,43 @@ bool EVMAsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
   return true;
 }
 
+void EVMAsmBackend::applyFixupValue(MutableArrayRef<char> &Contents,
+                                    size_t Offset, uint16_t Value) const {
+  if (DebugOffset != 0) {
+    LLVM_DEBUG(dbgs() << "Artifically adding " << DebugOffset
+                      << " to all Fixup relocation.\n";);
+  }
+  support::endian::write<uint16_t>(&Contents[Offset + DebugOffset],
+                                   static_cast<uint16_t>(Value), Endian);
+}
+
 void EVMAsmBackend::finish(const MCAssembler &Asm, MCAsmLayout &Layout) const {
   MCGenEVMInfo::Emit(Asm);
 
+  // also fix up hidden variables such as deploy.size
+  for (MCAssembler::const_symbol_iterator it = Asm.symbol_begin(),
+                                          ie = Asm.symbol_end();
+       it != ie; ++it) {
+    if (it->getName() == "deploy.size") {
+      size_t offset = it->getOffset();
+
+      MCFragment* Frag = it->getFragment();
+      if (!Frag) {
+        llvm_unreachable("deploy.size should have a section.");
+      }
+      MCDataFragment *FragWithFixups = dyn_cast<MCDataFragment>(Frag);
+      if (!FragWithFixups) {
+        llvm_unreachable("deploy.size should be in a data frag.");
+      }
+
+      MutableArrayRef<char> Contents = FragWithFixups->getContents();
+      applyFixupValue(Contents, offset, Contents.size());
+
+      LLVM_DEBUG({
+        dbgs() << "deploy.size fixed to: " << Contents.size() << "./n";
+      });
+    }
+  }
 }
 
 void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
@@ -152,22 +188,7 @@ void EVMAsmBackend::applyFixup(const MCAssembler &Asm, const MCFixup &Fixup,
   assert(Fixup.getKind() == FK_SecRel_2);
   assert(Value <= 0xFFFF);
 
-  if (Target.getSymA()->getSymbol().getName() == "deploy.size") {
-    LLVM_DEBUG(
-        dbgs()
-            << "Found \"deploy.size\" symbol, fixing it up with binary size: "
-            << Data.size() << ".\n");
-    assert(Data.size() <= 0xFFFF);
-    Value = Data.size();
-  }
-
-  if (DebugOffset != 0) {
-    LLVM_DEBUG(dbgs() << "Artifically adding " << DebugOffset
-                      << " to all Fixup relocation.\n";);
-  }
-
-  support::endian::write<uint16_t>(&Data[Fixup.getOffset() + DebugOffset],
-                                   static_cast<uint16_t>(Value), Endian);
+  applyFixupValue(Data, Fixup.getOffset(), Value);
 }
 
 std::unique_ptr<MCObjectTargetWriter>
