@@ -134,14 +134,15 @@ def check_result(name: str, result: str, expected: str) -> bool:
     print(result)
     return False
   if result == expected + '\n':
-    print("Test \"" + name + "\" passed.")
+    print("Passed.")
     return True
   else:
-    print("Test \"" + name + "\" failed.")
-    print("expected: " + expected, ", result: " + result)
+    print("Failed.", end="")
+    print(" Expected: " + expected, ", result: " + result)
     return False
 
 def run_assembly(name: str, inputs: List[str], output: str, filename: str) -> bool:
+  print("Executing test: \"" + name + "\": ", end="")
   assembly_filename = Template(
       "/tmp/evm_test_${num}.s").substitute(num=randint(0, 65535))
   generate_asm_file(filename, assembly_filename)
@@ -335,7 +336,7 @@ def execute_tests() -> None:
     inputs = val["input"]
     output = val["output"]
     function = val["func"]
-    run_string_input(name=key, inputs=inputs, output=output, function=function)
+    ##run_string_input(name=key, inputs=inputs, output=output, function=function)
   failed_asembly = assembly_tests()
   print_failed(failed_asembly)
 
