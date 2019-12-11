@@ -309,7 +309,7 @@ void EVMStackification::insertStoreToMemory(unsigned reg, MachineInstr &MI, bool
   MachineFunction &MF = *MBB->getParent();
 
   unsigned index = MFI->get_memory_index(reg);
-  LLVM_DEBUG(dbgs() << "  PUTLOCAL is inserted after: "; MI.dump());
+  LLVM_DEBUG(dbgs() << "  PUTLOCAL(" << index << ") is inserted after: "; MI.dump());
   MachineInstrBuilder putlocal =
       BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r)).addReg(reg).addImm(index);
   if (InsertAfter) {

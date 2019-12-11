@@ -161,7 +161,7 @@ void EVMExpandPseudos::expandRETURN(MachineInstr* MI) const {
   if (opc == EVM::pRETURNSUB_r) {
     llvm_unreachable("unimplemented");
   } else {
-    auto mi = BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
+    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
       .add(MI->getOperand(0));
 
     //uint32_t flags = EVM::BuildCommentFlags(EVM::RETURN_FROM_SUBROUTINE, 0);

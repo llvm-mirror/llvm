@@ -84,7 +84,7 @@ public:
   }
 
   unsigned getNumAllocatedIndexInFunction() const {
-    return reg2index.size();
+    return reg2index.size() + getFrameIndexSize();
   }
 
   unsigned allocate_memory_index(unsigned reg) {
