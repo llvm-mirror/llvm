@@ -247,6 +247,12 @@ loop_tests = OrderedDict({
     "input":  ["0x0000000a", "0x00001000"],
     "output": "0x000000000000000000000000000000000000000000000000000000000000100a"
   },
+  "adds: 100" : {
+    "file": "loops/adds.ll",
+    "input": ["0x00000064"],
+    "output": "0x00000000000000000000000000000000000000000000000000000000000013ba",
+  },
+
 })
 
 setcc_tests = OrderedDict({
@@ -284,22 +290,22 @@ setcc_tests = OrderedDict({
 
 fib_tests = OrderedDict({
   "fibonacci 1" : {
-    "file": "fib/fib.ll",
+    "file": "recursive_tests/fib.ll",
     "input": ["0x00000001"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
   "fibonacci 2" : {
-    "file": "fib/fib.ll",
+    "file": "recursive_tests/fib.ll",
     "input": ["0x00000002"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000002",
   },
   "fibonacci 3" : {
-    "file": "fib/fib.ll",
+    "file": "recursive_tests/fib.ll",
     "input": ["0x00000003"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000003",
   },
   "fibonacci 10" : {
-    "file": "fib/fib.ll",
+    "file": "recursive_tests/fib.ll",
     "input": ["0x0000000a"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000059",
   },
