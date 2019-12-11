@@ -305,7 +305,25 @@ fib_tests = OrderedDict({
   },
 })
 
-test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests]
+rec_tests = OrderedDict({
+  "factorial: 0" : {
+    "file": "recursive_tests/factorial.ll",
+    "input": ["0x00000000"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  },
+  "factorial: 1" : {
+    "file": "recursive_tests/factorial.ll",
+    "input": ["0x00000001"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  },
+  "factorial: 5" : {
+    "file": "recursive_tests/factorial.ll",
+    "input": ["0x00000005"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000078",
+  },
+
+})
+test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests, rec_tests]
 
 def run_testset(testset) -> List[str]:
   failed_tests = []
