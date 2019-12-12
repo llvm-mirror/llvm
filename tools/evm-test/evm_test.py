@@ -342,9 +342,28 @@ rec_tests = OrderedDict({
     "input": ["0x00000005"],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000078",
   },
+  "ackermann: (0, 0)" : {
+    "file": "recursive_tests/ackermann.ll",
+    "input": ["0x00000000", "0x00000000"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  },
+  "ackermann: (3, 2)" : {
+    "file": "recursive_tests/ackermann.ll",
+    "input": ["0x00000003", "0x00000002"],
+    "output": "0x000000000000000000000000000000000000000000000000000000000000001d",
+  },
+})
+
+call_tests = OrderedDict({
+  "a -> b: 0" : {
+    "file": "call_tests/a_to_b.ll",
+    "input": [],
+    "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  },
 
 })
-test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests, rec_tests]
+
+test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests, rec_tests, call_tests]
 
 def run_testset(testset) -> List[str]:
   failed_tests = []
