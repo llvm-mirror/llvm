@@ -94,6 +94,8 @@ uint64_t EVMBinaryObjectWriter::writeObject(MCAssembler &Asm,
   for (const MCSection &Sec : Asm) {
     Asm.writeSectionData(W.OS, &Sec, Layout);
   }
+
+  return W.OS.tell() - StartOffset;
 }
 
 std::unique_ptr<MCObjectWriter>
