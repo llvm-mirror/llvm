@@ -360,10 +360,18 @@ call_tests = OrderedDict({
     "input": [],
     "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
   },
+})
+
+struct_tests = OrderedDict({
+  "array load/stores" : {
+    "file": "struct_tests/array.ll",
+    "input": ["0x12345678"],
+    "output": "0x0000000000000000000000000000000000000000000000000000000012345678",
+  },
 
 })
 
-test_suite = [simple_tests, setcc_tests, loop_tests, fib_tests, rec_tests, call_tests]
+test_suite = [struct_tests, simple_tests, setcc_tests, loop_tests, fib_tests, rec_tests, call_tests]
 
 def run_testset(testset) -> List[str]:
   failed_tests = []
