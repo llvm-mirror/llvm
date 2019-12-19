@@ -54,6 +54,7 @@ private:
 
   void convertSWAP(MachineInstr* MI) const;
   void convertDUP(MachineInstr* MI) const;
+  void convertMOVE(MachineInstr* MI) const;
 };
 } // end anonymous namespace
 
@@ -110,6 +111,9 @@ static unsigned getDUPOpcode(unsigned idx) {
     default:
       llvm_unreachable("invalid index");
   }
+}
+void EVMConvertRegToStack::convertMOVE(MachineInstr* MI) const {
+
 }
 
 void EVMConvertRegToStack::convertSWAP(MachineInstr* MI) const {
@@ -173,6 +177,12 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
       if (opc == EVM::DUP_r) {
         convertDUP(&MI);
+        continue;
+      }
+
+      // MOVE instruction is simply a copy.
+      if (opc == EVM::pMOVE_r) {
+        MI.removeFromParent();
         continue;
       }
 
@@ -266,11 +276,11 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
                 EVM::BuildCommentFlags(EVM::SUBROUTINE_BEGIN, 0));
             StackOpcode = EVM::JUMP;
 
+            MachineBasicBlock::iterator MIT(MI);
+
             // insert JUMPDEST after MI
-            MachineBasicBlock::iterator mit(MI);
-            ++mit;
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::JUMPDEST));
+            const DebugLoc &DL = MI.getDebugLoc();
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::JUMPDEST)));
 
             // restore free pointer from index
             // PUSH FPAddr  (fpaddr)
@@ -284,25 +294,15 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
 
             // PUSH FPAddr  (fpadd,r fp-32)
             // MSTORE     
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::PUSH32))
-                .addImm(fpaddr);
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::MLOAD));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::PUSH32))
-                .addImm(32);
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::SWAP1));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::SUB));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::MLOAD));
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::PUSH32))
-                .addImm(fpaddr);
-            BuildMI(*mit->getParent(), mit, mit->getDebugLoc(),
-                    TII->get(EVM::MSTORE));
+
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::PUSH32)).addImm(fpaddr));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::MLOAD)));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::PUSH32)).addImm(32));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::SWAP1)));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::SUB)));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::MLOAD)));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::PUSH32)).addImm(fpaddr));
+            MIT = MBB.insertAfter(MIT, BuildMI(MF, DL, TII->get(EVM::MSTORE)));
           }
         }
         assert(StackOpcode != -1 && "Failed to convert instruction to stack mode.");

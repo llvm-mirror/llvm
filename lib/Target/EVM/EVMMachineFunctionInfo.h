@@ -88,7 +88,11 @@ public:
   }
 
   unsigned allocate_memory_index(unsigned reg) {
-    assert(reg2index.find(reg) == reg2index.end());
+    if (reg2index.find(reg) != reg2index.end()) {
+      // in non-SSA mode, it is possible to have 
+      // multiple definitions.
+      return get_memory_index(reg);
+    }
     unsigned index = reg2index.size();
     reg2index.insert(std::pair<unsigned, unsigned>(reg, index));
     return index;

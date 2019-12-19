@@ -49,7 +49,7 @@ private:
   void expandLOCAL(MachineInstr* MI) const;
   void expandRETURN(MachineInstr* MI) const;
   void expandJUMP(MachineInstr* MI) const;
-
+  void expandMOVE(MachineInstr* MI) const;
 };
 } // end anonymous namespace
 
@@ -92,6 +92,10 @@ void EVMExpandPseudos::expandJUMP(MachineInstr* MI) const {
         .addReg(destReg);
   }
   MI->eraseFromParent();
+}
+
+void EVMExpandPseudos::expandMOVE(MachineInstr* MI) const {
+
 }
 
 void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
@@ -199,8 +203,7 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
           Changed = true;
           break;
         case EVM::pMOVE_r:
-          llvm_unreachable(
-              "MOVE instructions should have been eliminated already.");
+          expandMOVE(MI);
           break;
         case EVM::pJUMPTO_r:
         case EVM::pJUMPIF_r:

@@ -138,7 +138,7 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
     }
   }
 
-  assert(MI->getOpcode() != EVM::pMOVE_r);
+  //assert(MI->getOpcode() != EVM::pMOVE_r);
   return false;
 }
 
