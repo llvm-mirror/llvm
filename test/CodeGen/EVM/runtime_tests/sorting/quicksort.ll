@@ -1,18 +1,34 @@
-define void @sort() #0 {
-  %1 = alloca [5 x i256], align 16
-  %2 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i256 0, i256 0
-  store i256 5, i256* %2, align 16
-  %3 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i256 0, i256 1
-  store i256 4, i256* %3, align 8
-  %4 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i256 0, i256 2
-  store i256 3, i256* %4, align 16
-  %5 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i256 0, i256 3
-  store i256 1, i256* %5, align 8
-  %6 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i256 0, i256 4
-  store i256 2, i256* %6, align 16
-  %7 = getelementptr inbounds [5 x i256], [5 x i256]* %1, i32 0, i32 0
-  call void @quicksort(i256* %7, i256 0, i256 4)
-  ret void
+define i256 @sort() #0 {
+  %1 = alloca i256, align 8
+  %2 = alloca [5 x i256], align 16
+  %3 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  store i256 5, i256* %3, align 16
+  %4 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 1
+  store i256 4, i256* %4, align 8
+  %5 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 2
+  store i256 3, i256* %5, align 16
+  %6 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 3
+  store i256 1, i256* %6, align 8
+  %7 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 4
+  store i256 2, i256* %7, align 16
+  %8 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  call void @quicksort(i256* %8, i256 0, i256 4)
+  %9 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  %10 = load i256, i256* %9, align 16
+  %11 = icmp eq i256 %10, 1
+  br i1 %11, label %12, label %13
+
+; <label>:12:                                     ; preds = %0
+  store i256 1, i256* %1, align 8
+  br label %14
+
+; <label>:13:                                     ; preds = %0
+  store i256 0, i256* %1, align 8
+  br label %14
+
+; <label>:14:                                     ; preds = %13, %12
+  %15 = load i256, i256* %1, align 8
+  ret i256 %15
 }
 
 define void @quicksort(i256*, i256, i256) #0 {

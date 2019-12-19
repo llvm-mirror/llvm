@@ -425,9 +425,47 @@ safemath_tests = OrderedDict({
     },
 })
 
+math_tests = OrderedDict({
+    "is prime number 0x12345678": {
+        "file": "math/prime.ll",
+        "input": ["0x12345678"],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    },
+    "is prime number 101": {
+        "file": "math/prime.ll",
+        "input": ["0x00000065"],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    },
+})
+
+pointer_tests = OrderedDict ({
+    "swap": {
+        "file": "ptr/swap.ll",
+        "input": ["0x12345678", "0x87654321"],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    },
+})
+
+math_tests = OrderedDict({
+    "insertion sort": {
+        "file": "sorting/insertion.ll",
+        "input": [],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    },
+    "bubble sort": {
+        "file": "sorting/bubble.ll",
+        "input": [],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    },
+    "quick sort": {
+        "file": "sorting/quicksort.ll",
+        "input": [],
+        "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    },
+})
 
 test_suite = [safemath_tests, struct_tests, simple_tests,
-              setcc_tests, loop_tests, fib_tests, rec_tests, call_tests]
+              setcc_tests, loop_tests, fib_tests, rec_tests, call_tests, math_tests]
 
 
 def run_testset(testset) -> List[str]:
