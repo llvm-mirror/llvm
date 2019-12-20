@@ -121,7 +121,9 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   unsigned addrReg  = this->getNewRegister(MI);
 
   const EVMMachineFunctionInfo *MFI = this->MF->getInfo<EVMMachineFunctionInfo>();
-  unsigned fiSize = MFI->getFrameIndexSize();
+
+  //# TODO: improve this
+  unsigned fiSize = this->MF->getFrameInfo().getStackSize();
 
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
       .addImm(ST->getFreeMemoryPointer());

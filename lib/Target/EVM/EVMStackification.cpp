@@ -299,7 +299,8 @@ void EVMStackification::insertLoadFromMemoryBefore(unsigned reg, MachineInstr &M
 
   // deal with physical register.
   unsigned index = MFI->get_memory_index(reg);
-  LLVM_DEBUG(dbgs() << "  GETLOCAL is inserted before: "; MI.dump());
+  unsigned ridx = Register::virtReg2Index(reg);
+  LLVM_DEBUG(dbgs() << "  %" << ridx << " <= GETLOCAL(" << index << ") inserted.\n");
   BuildMI(*MBB, MI, MI.getDebugLoc(), TII->get(EVM::pGETLOCAL_r), reg)
       .addImm(index);
 }
@@ -309,7 +310,9 @@ void EVMStackification::insertStoreToMemory(unsigned reg, MachineInstr &MI, bool
   MachineFunction &MF = *MBB->getParent();
 
   unsigned index = MFI->get_memory_index(reg);
-  LLVM_DEBUG(dbgs() << "  PUTLOCAL(" << index << ") is inserted after: "; MI.dump());
+  unsigned ridx = Register::virtReg2Index(reg);
+  LLVM_DEBUG(dbgs() << "  PUTLOCAL(" << index << ") => %" << ridx << 
+                 "  is inserted.\n");
   MachineInstrBuilder putlocal =
       BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r)).addReg(reg).addImm(index);
   if (InsertAfter) {

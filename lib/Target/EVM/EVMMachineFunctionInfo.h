@@ -84,7 +84,8 @@ public:
   }
 
   unsigned getNumAllocatedIndexInFunction() const {
-    return reg2index.size() + getFrameIndexSize();
+    int64_t reservedSize = MF.getFrameInfo().getStackSize();
+    return reg2index.size() + reservedSize;
   }
 
   unsigned allocate_memory_index(unsigned reg) {
