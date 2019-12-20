@@ -1,12 +1,15 @@
 void insertionSort(long arr[], long n);
 
 long test() {
-  long a[2]; 
-  a[0] = 1;
-  a[1] = 0;
+  long a[5]; 
+  a[0] = 5;
+  a[1] = 4;
+  a[2] = 3;
+  a[3] = 1;
+  a[4] = 2;
 
-  insertionSort(a, 2);
-  if (a[0] == 0 && a[1] == 1) {
+  insertionSort(a, 5);
+  if (a[0] == 1 && a[1] == 2 && a[2] == 3 && a[3] == 4 && a[4] == 5) {
     return 1;
   } else {
     return 0;

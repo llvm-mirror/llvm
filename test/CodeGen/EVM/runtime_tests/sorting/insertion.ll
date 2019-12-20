@@ -1,34 +1,58 @@
 define i256 @test() #0 {
   %1 = alloca i256, align 8
-  %2 = alloca [2 x i256], align 16
-  %3 = getelementptr inbounds [2 x i256], [2 x i256]* %2, i256 0, i256 0
-  store i256 1, i256* %3, align 16
-  %4 = getelementptr inbounds [2 x i256], [2 x i256]* %2, i256 0, i256 1
-  store i256 0, i256* %4, align 8
-  %5 = getelementptr inbounds [2 x i256], [2 x i256]* %2, i256 0, i256 0
-  call void @insertionSort(i256* %5, i256 2)
-  %6 = getelementptr inbounds [2 x i256], [2 x i256]* %2, i256 0, i256 0
-  %7 = load i256, i256* %6, align 16
-  %8 = icmp eq i256 %7, 0
-  br i1 %8, label %9, label %14
+  %2 = alloca [5 x i256], align 16
+  %3 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  store i256 5, i256* %3, align 16
+  %4 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 1
+  store i256 4, i256* %4, align 8
+  %5 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 2
+  store i256 3, i256* %5, align 16
+  %6 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 3
+  store i256 1, i256* %6, align 8
+  %7 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 4
+  store i256 2, i256* %7, align 16
+  %8 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  call void @insertionSort(i256* %8, i256 5)
+  %9 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 0
+  %10 = load i256, i256* %9, align 16
+  %11 = icmp eq i256 %10, 1
+  br i1 %11, label %12, label %29
 
-; <label>:9:                                      ; preds = %0
-  %10 = getelementptr inbounds [2 x i256], [2 x i256]* %2, i256 0, i256 1
-  %11 = load i256, i256* %10, align 8
-  %12 = icmp eq i256 %11, 1
-  br i1 %12, label %13, label %14
+; <label>:12:                                     ; preds = %0
+  %13 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 1
+  %14 = load i256, i256* %13, align 8
+  %15 = icmp eq i256 %14, 2
+  br i1 %15, label %16, label %29
 
-; <label>:13:                                     ; preds = %9
+; <label>:16:                                     ; preds = %12
+  %17 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 2
+  %18 = load i256, i256* %17, align 16
+  %19 = icmp eq i256 %18, 3
+  br i1 %19, label %20, label %29
+
+; <label>:20:                                     ; preds = %16
+  %21 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 3
+  %22 = load i256, i256* %21, align 8
+  %23 = icmp eq i256 %22, 4
+  br i1 %23, label %24, label %29
+
+; <label>:24:                                     ; preds = %20
+  %25 = getelementptr inbounds [5 x i256], [5 x i256]* %2, i256 0, i256 4
+  %26 = load i256, i256* %25, align 16
+  %27 = icmp eq i256 %26, 5
+  br i1 %27, label %28, label %29
+
+; <label>:28:                                     ; preds = %24
   store i256 1, i256* %1, align 8
-  br label %15
+  br label %30
 
-; <label>:14:                                     ; preds = %9, %0
+; <label>:29:                                     ; preds = %24, %20, %16, %12, %0
   store i256 0, i256* %1, align 8
-  br label %15
+  br label %30
 
-; <label>:15:                                     ; preds = %14, %13
-  %16 = load i256, i256* %1, align 8
-  ret i256 %16
+; <label>:30:                                     ; preds = %29, %28
+  %31 = load i256, i256* %1, align 8
+  ret i256 %31
 }
 
 define void @insertionSort(i256*, i256) #0 {
@@ -110,4 +134,3 @@ define void @insertionSort(i256*, i256) #0 {
 ; <label>:51:                                     ; preds = %8
   ret void
 }
-

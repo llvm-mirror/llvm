@@ -8,7 +8,7 @@ long sort() {
   a[3] = 1;
   a[4] = 2;
   quicksort(a, 0, 4);
-  if (a[0] == 1) {
+  if (a[0] == 1 && a[1] == 2 && a[2] == 3 && a[3] == 4 && a[4] == 5) {
     return 1;
   } else {
     return 0;
