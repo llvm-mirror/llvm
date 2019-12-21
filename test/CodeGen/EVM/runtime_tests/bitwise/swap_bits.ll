@@ -7,43 +7,35 @@ define i256 @swap(i256, i256, i256) #0 {
   store i256 %2, i256* %6, align 8
   %7 = load i256, i256* %4, align 8
   %8 = load i256, i256* %5, align 8
-  %9 = trunc i256 %8 to i256
-  %10 = shl i256 1, %9
-  %11 = sext i256 %10 to i256
-  %12 = and i256 %7, %11
-  %13 = load i256, i256* %5, align 8
-  %14 = ashr i256 %12, %13
-  %15 = load i256, i256* %4, align 8
-  %16 = load i256, i256* %6, align 8
-  %17 = trunc i256 %16 to i256
-  %18 = shl i256 1, %17
-  %19 = sext i256 %18 to i256
-  %20 = and i256 %15, %19
-  %21 = load i256, i256* %6, align 8
-  %22 = ashr i256 %20, %21
-  %23 = xor i256 %14, %22
-  %24 = icmp ne i256 %23, 0
-  br i1 %24, label %25, label %38
+  %9 = shl i256 1, %8
+  %10 = and i256 %7, %9
+  %11 = load i256, i256* %5, align 8
+  %12 = ashr i256 %10, %11
+  %13 = load i256, i256* %4, align 8
+  %14 = load i256, i256* %6, align 8
+  %15 = shl i256 1, %14
+  %16 = and i256 %13, %15
+  %17 = load i256, i256* %6, align 8
+  %18 = ashr i256 %16, %17
+  %19 = xor i256 %12, %18
+  %20 = icmp ne i256 %19, 0
+  br i1 %20, label %21, label %30
 
-; <label>:25:                                     ; preds = %3
-  %26 = load i256, i256* %5, align 8
-  %27 = trunc i256 %26 to i256
-  %28 = shl i256 1, %27
-  %29 = sext i256 %28 to i256
-  %30 = load i256, i256* %4, align 8
-  %31 = xor i256 %30, %29
-  store i256 %31, i256* %4, align 8
-  %32 = load i256, i256* %6, align 8
-  %33 = trunc i256 %32 to i256
-  %34 = shl i256 1, %33
-  %35 = sext i256 %34 to i256
-  %36 = load i256, i256* %4, align 8
-  %37 = xor i256 %36, %35
-  store i256 %37, i256* %4, align 8
-  br label %38
+; <label>:21:                                     ; preds = %3
+  %22 = load i256, i256* %5, align 8
+  %23 = shl i256 1, %22
+  %24 = load i256, i256* %4, align 8
+  %25 = xor i256 %24, %23
+  store i256 %25, i256* %4, align 8
+  %26 = load i256, i256* %6, align 8
+  %27 = shl i256 1, %26
+  %28 = load i256, i256* %4, align 8
+  %29 = xor i256 %28, %27
+  store i256 %29, i256* %4, align 8
+  br label %30
 
-; <label>:38:                                     ; preds = %25, %3
-  %39 = load i256, i256* %4, align 8
-  ret i256 %39
+; <label>:30:                                     ; preds = %21, %3
+  %31 = load i256, i256* %4, align 8
+  ret i256 %31
 }
 
