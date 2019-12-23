@@ -72,7 +72,15 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // we plus one so that the return address is included
-  BitVector stackargs(MFI->getNumStackArgs() + 1, false);
+  unsigned stackArgOffset = 1;
+  {
+    // 
+    const Function &F = MF.getFunction();
+    if (EVMSubtarget::isMainFunction(F)) {
+      stackArgOffset = 0;
+    }
+  }
+  BitVector stackargs(MFI->getNumStackArgs() + stackArgOffset, false);
 
   MachineBasicBlock &EntryMBB = MF.front();
   for (MachineInstr &MI : EntryMBB) {
@@ -85,7 +93,7 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
     stackargs.set(index);
   }
 
-  assert(stackargs.size() == MFI->getNumStackArgs() + 1);
+  assert(stackargs.size() == MFI->getNumStackArgs() + stackArgOffset);
 
   unsigned returnAddrReg = 0;
 
@@ -109,10 +117,10 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
     }
   }
 
-  const Function *F = &MF.getFunction();
+  const Function &F = MF.getFunction();
 
   // we now insert a special return address stack argument to the beginning of
-  // the funciton:
+  // the function:
   if (!EVMSubtarget::isMainFunction(F)) {
       // return address is the last stackarg:
       unsigned retAddrStackArgNum = MFI->getNumStackArgs();

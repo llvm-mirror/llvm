@@ -123,10 +123,10 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
                         [IntrWriteMem, IntrHasSideEffects]>;
 
   def int_evm_revert : GCCBuiltin<"__builtin_evm_revert">,
-              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrWriteMem, IntrHasSideEffects]>;
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrWriteMem, IntrHasSideEffects, IntrNoReturn]>;
 
   def int_evm_return : GCCBuiltin<"__builtin_evm_return">,
-              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrReadMem, IntrHasSideEffects]>;
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrReadMem, IntrWriteMem, IntrHasSideEffects, IntrNoReturn]>;
 
   def int_evm_staticcall : GCCBuiltin<"__builtin_evm_staticcall">,
               Intrinsic<[llvm_i256_ty],

@@ -155,7 +155,6 @@ private:
 
   void handleIrregularInstruction(StackStatus &ss, MachineInstr &MI);
 
-  void handleStackArgs(MachineBasicBlock &MBB);
   void handleEntryMBB(StackStatus &ss, MachineBasicBlock &MBB);
   void handleMBB(StackStatus &ss, MachineBasicBlock &MBB);
 

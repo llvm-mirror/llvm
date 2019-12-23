@@ -149,11 +149,12 @@ public:
   static bool shouldSkipFunction(const Function *F) {
     return (F->isDeclaration() ||
             F->isIntrinsic() ||
-            isMainFunction(F)); // skip intrinsics.
+            isMainFunction(*F)); // skip intrinsics.
   }
 
-  static bool isMainFunction(const Function *F) {
-    return F->getName() == StringRef("solidity.main"); // skip intrinsics.
+  static bool isMainFunction(const Function &F) {
+    return F.getName() == StringRef("solidity.main") ||
+           F.getName() == StringRef("main"); // skip intrinsics.
   }
 
   // Memory layout
