@@ -1,5 +1,16 @@
+declare i256 @llvm.evm.calldataload(i256)
+declare void @llvm.evm.return(i256, i256)
+declare void @llvm.evm.mstore(i256, i256)
 
-; Function Attrs: noinline nounwind optnone ssp uwtable
+define void @main() {
+entry:
+  %0 = call i256 @llvm.evm.calldataload(i256 0)
+  %1 = call i256 @dde(i256 %0)
+  call void @llvm.evm.mstore(i256 0, i256 %1)
+  call void @llvm.evm.return(i256 0, i256 32)
+  unreachable
+}
+
 define i256 @dde(i256) #0 {
   %2 = alloca i256, align 4
   %3 = alloca [2 x i256], align 4
