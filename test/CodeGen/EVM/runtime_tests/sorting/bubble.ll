@@ -1,3 +1,15 @@
+declare i256 @llvm.evm.calldataload(i256)
+declare void @llvm.evm.return(i256, i256)
+declare void @llvm.evm.mstore(i256, i256)
+
+define void @main() {
+entry:
+  %0 = call i256 @sort()
+  call void @llvm.evm.mstore(i256 0, i256 %0)
+  call void @llvm.evm.return(i256 0, i256 32)
+  unreachable
+}
+
 define i256 @sort() #0 {
   %1 = alloca i256, align 8
   %2 = alloca [5 x i256], align 16

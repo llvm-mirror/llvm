@@ -1,3 +1,19 @@
+declare i256 @llvm.evm.calldataload(i256)
+declare void @llvm.evm.return(i256, i256)
+declare void @llvm.evm.mstore(i256, i256)
+
+define void @main() {
+entry:
+  %0 = call i256 @llvm.evm.calldataload(i256 0)
+  %1 = call i256 @llvm.evm.calldataload(i256 32)
+  %2 = call i256 @llvm.evm.calldataload(i256 64)
+  %3 = call i256 @llvm.evm.calldataload(i256 96)
+  %4 = call i256 @changebits(i256 %0, i256 %1, i256 %2, i256 %3)
+  call void @llvm.evm.mstore(i256 0, i256 %4)
+  call void @llvm.evm.return(i256 0, i256 32)
+  unreachable
+}
+
 define i256 @changebits(i256, i256, i256, i256) #0 {
   %5 = alloca i256, align 8
   %6 = alloca i256, align 8
