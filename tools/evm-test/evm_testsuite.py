@@ -23,16 +23,16 @@ simple_tests = OrderedDict({
         "input":  ["0x12345678", "0x87654321"],
         "output": "0x0000000000000000000000000000000000000000000000000000000099999999",
     },
-    "simple_test_3": {
-        "file": "simple_tests/simple_test_3.ll",
-        "input":  [],
-        "output": "0x",
-    },
-    "simple_test_4": {
-        "file": "simple_tests/simple_test_4.ll",
-        "input":  ["0x12345678"],
-        "output": "0x",
-    },
+    #"simple_test_3": {
+    #    "file": "simple_tests/simple_test_3.ll",
+    #    "input":  [],
+    #    "output": "0x",
+    #},
+    #"simple_test_4": {
+    #    "file": "simple_tests/simple_test_4.ll",
+    #    "input":  ["0x12345678"],
+    #    "output": "0x",
+    #},
     "simple_test_5.ll": {
         "file": "simple_tests/simple_test_5.ll",
         "input":  ["0x12345678"],
@@ -292,9 +292,6 @@ bitwise_tests = OrderedDict({
         "file": "bitwise/bits_all_one.ll",
         "input": ["0xffffffff"],
         "output": "0x0000000000000000000000000000000000000000000000000000000000000001",
-        "file": "bitwise/bits_all_one.ll",
-        "input": ["0xfff8ffff"],
-        "output": "0x0000000000000000000000000000000000000000000000000000000000000000",
     },
     "Bits are all ones: false": {
         "file": "bitwise/bits_all_one.ll",
@@ -328,6 +325,5 @@ bitwise_tests = OrderedDict({
     },
 })
 
-test_suite = [safemath_tests, struct_tests, simple_tests, bitwise_tests,
-              setcc_tests, loop_tests, fib_tests, rec_tests, call_tests, math_tests, sort_tests]
-test_suite = [math_tests, sort_tests]
+test_suite = [simple_tests, math_tests, bitwise_tests, safemath_tests, call_tests, loop_tests, fib_tests, pointer_tests, rec_tests,
+              setcc_tests, struct_tests, sort_tests]
