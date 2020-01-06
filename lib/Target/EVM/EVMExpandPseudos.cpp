@@ -120,8 +120,6 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   unsigned immReg   = this->getNewRegister(MI);
   unsigned addrReg  = this->getNewRegister(MI);
 
-  const EVMMachineFunctionInfo *MFI = this->MF->getInfo<EVMMachineFunctionInfo>();
-
   //# TODO: improve this
   unsigned fiSize = this->MF->getFrameInfo().getStackSize();
 
@@ -129,7 +127,7 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
       .addImm(ST->getFreeMemoryPointer());
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
     .addReg(reg);
-  unsigned slot_index = MI->getOperand(1).getImm() + fiSize;
+  unsigned slot_index = MI->getOperand(1).getImm() + (fiSize/32);
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), immReg)
       .addImm(slot_index * 32);
   BuildMI(*MBB, MI, DL, TII->get(EVM::ADD_r), addrReg)

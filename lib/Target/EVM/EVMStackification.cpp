@@ -878,6 +878,8 @@ bool EVMStackification::runOnMachineFunction(MachineFunction &MF) {
 
   MF.getProperties().set(MachineFunctionProperties::Property::TracksLiveness);
 
+  LLVM_DEBUG(
+      { MF.print(dbgs() << "After " << getPassName() << ":\n", nullptr); });
 
   return true;
 }

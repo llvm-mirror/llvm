@@ -197,9 +197,6 @@ SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
 
     // Record the FI so that we know how many frame slots are allocated to
     // frames.
-    MachineFunction &MF = DAG.getMachineFunction();
-    EVMMachineFunctionInfo &MFI = *MF.getInfo<EVMMachineFunctionInfo>();
-
     return DAG.getTargetFrameIndex(FI, Op.getValueType());
 }
 

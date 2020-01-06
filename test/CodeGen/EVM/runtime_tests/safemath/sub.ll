@@ -4,6 +4,7 @@ declare void @llvm.evm.mstore(i256, i256)
 
 define void @main() {
 entry:
+  call void @llvm.evm.mstore(i256 64, i256 128)
   %0 = call i256 @llvm.evm.calldataload(i256 0)
   %1 = call i256 @llvm.evm.calldataload(i256 32)
   %2 = call i256 @sub(i256 %0, i256 %1)
