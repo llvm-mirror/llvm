@@ -12,6 +12,8 @@
 
 // Specialized loads from packet
 let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
+  def int_evm_stop : GCCBuiltin<"__builtin_evm_stop">,
+              Intrinsic<[], [], [IntrNoMem]>;
   def int_evm_mload : GCCBuiltin<"__builtin_evm_mload">,
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty], [IntrReadMem]>;
   def int_evm_mstore : GCCBuiltin<"__builtin_evm_mstore">,
@@ -22,6 +24,15 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
   // The following are EVM-specific operations
   def int_evm_exp : GCCBuiltin<"__builtin_evm_exp">,
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
+  def int_evm_byte : GCCBuiltin<"__builtin_evm_byte">,
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
+  def int_evm_shl : GCCBuiltin<"__builtin_evm_shl">,
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
+  def int_evm_shr : GCCBuiltin<"__builtin_evm_shr">,
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
+  def int_evm_sar : GCCBuiltin<"__builtin_evm_sar">,
+              Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
+  
   def int_evm_sha3 : GCCBuiltin<"__builtin_evm_sha3">,
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty, llvm_i256_ty], [IntrReadMem]>;
   def int_evm_address : GCCBuiltin<"__builtin_evm_address">,
@@ -74,6 +85,11 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
               Intrinsic<[llvm_i256_ty], [llvm_i256_ty], [IntrNoMem, IntrHasSideEffects]>;
   def int_evm_sstore : GCCBuiltin<"__builtin_evm_sstore">,
               Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem, IntrHasSideEffects]>;
+  
+  def int_evm_jump : GCCBuiltin<"__builtin_evm_jump">,
+              Intrinsic<[], [llvm_i256_ty], [IntrNoMem]>;
+  def int_evm_jumpi : GCCBuiltin<"__builtin_evm_jumpi">,
+              Intrinsic<[], [llvm_i256_ty, llvm_i256_ty], [IntrNoMem]>;
 
 
   def int_evm_getpc : GCCBuiltin<"__builtin_evm_getpc">,
@@ -82,6 +98,10 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
               Intrinsic<[llvm_i256_ty], [], [IntrNoMem]>;
   def int_evm_gas : GCCBuiltin<"__builtin_evm_gas">,
               Intrinsic<[llvm_i256_ty], [], [IntrNoMem]>;
+
+  def int_evm_jumpdest : GCCBuiltin<"__builtin_evm_jumpdest">,
+              Intrinsic<[], [], [IntrNoMem]>;
+  
 
   def int_evm_log0 : GCCBuiltin<"__builtin_evm_log0">,
               Intrinsic<[], [llvm_i256_ty, llvm_i256_ty],
@@ -138,7 +158,8 @@ let TargetPrefix = "evm" in {  // All intrinsics start with "llvm.evm."
                         [llvm_i256_ty, llvm_i256_ty, llvm_i256_ty,
                          llvm_i256_ty, llvm_i256_ty, llvm_i256_ty],
                         [IntrWriteMem, IntrHasSideEffects]>;
-
+  def int_evm_invalid : GCCBuiltin<"__builtin_evm_invalid">,
+              Intrinsic<[], [], [IntrNoMem]>;
   def int_evm_selfdestruct : GCCBuiltin<"__builtin_evm_selfdestruct">,
               Intrinsic<[], [llvm_i256_ty], [IntrWriteMem, IntrHasSideEffects]>;
 }

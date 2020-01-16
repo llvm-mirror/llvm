@@ -136,7 +136,7 @@ def fiAddr : ComplexPattern<i256, 2, "SelectAddrFI", [frameindex]>;
 // Instructions
 //===----------------------------------------------------------------------===//
 
-defm STOP : Inst_0_0<"STOP", [], 0x00, 0>;
+defm STOP : Inst_0_0<"STOP", [(int_evm_stop)], 0x00, 0>;
 
 // Arithmetic instructions ////////////////////////////////////////////////////
 let isCommutable = 1 in {
@@ -201,13 +201,17 @@ defm ROL : ShiftInst<rotl, "ROL", 0x1e, 3>;
 defm ROR : ShiftInst<rotr, "SAR", 0x1f, 3>;
 
 
-defm BYTE :  Inst_2_1<"BYTE", [], 0x20, 3>;
+defm BYTE :  Inst_2_1<"BYTE",
+                      [(set GPR:$dst, (int_evm_byte GPR:$src1, GPR:$src2))],
+                      0x20, 3>;
 
 let mayLoad = 1, mayStore = 0 in {
 defm SHA3      : Inst_2_1<"SHA3",
                           [(set GPR:$dst, (int_evm_sha3 GPR:$src1, GPR:$src2))],
                           0x21, 30>;
 }
+
+
 
 defm ADDRESS   : Inst_0_1<"ADDRESS",
                           [(set GPR:$dst, (int_evm_address))],
@@ -336,11 +340,12 @@ defm SSTORE : Inst_2_0<"SSTORE",
 let isBranch = 1, isTerminator = 1, isIndirectBranch = 1 in {
 let isBarrier = 1 in {
 defm JUMP : RSInst<(outs), (ins GPR:$dst),
-                   [],
+                   [(int_evm_jump GPR:$dst)],
                    "JUMP_r \t$dst", "JUMP", 0x56, 8>;
 
-defm JUMPI : RSInst<(outs), (ins GPR:$src, GPR:$dst), [],
-                   "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
+defm JUMPI : RSInst<(outs), (ins GPR:$src, GPR:$dst),
+                    [(int_evm_jumpi GPR:$src, GPR:$dst)],
+                    "JUMPI_r \t$src, $dst", "JUMPI", 0x57, 10>;
 }
 }
 
@@ -354,7 +359,7 @@ defm MSIZE    : Inst_0_1<"MSIZE",
 defm GAS      : Inst_0_1<"GAS",
                          [(set GPR:$dst, (int_evm_gas))],
                          0x5a, 2>;
-defm JUMPDEST : Inst_0_0<"JUMPDEST", [], 0x5b, 1>;
+defm JUMPDEST : Inst_0_0<"JUMPDEST", [(int_evm_jumpdest)], 0x5b, 1>;
 
 let BaseName = "PUSH32" in {
 let isCodeGenOnly = 1 in {
@@ -499,7 +504,7 @@ defm REVERT     : Inst_2_0<"REVERT",
                            0xfd, 0>;
 }
 
-defm INVALID    : Inst_0_0<"INVALID", [], 0xfe, 0>;
+defm INVALID    : Inst_0_0<"INVALID", [(int_evm_invalid)], 0xfe, 0>;
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm SELFDESTRUCT : Inst_1_0<"SELFDESTRUCT",
@@ -671,6 +676,13 @@ def : Pat<(int_evm_sstore GPR:$offset, GPR:$value),
 def : Pat<(int_evm_mload GPR:$addr), (MLOAD_r GPR:$addr)>;
 def : Pat<(int_evm_mstore GPR:$offset, GPR:$value),
           (MSTORE_r GPR:$offset, GPR:$value)>;
+
+def : Pat<(i256 (int_evm_shl GPR:$opnd1, GPR:$opnd2)),
+          (SHL_r GPR:$opnd1, GPR:$opnd2)>;
+def : Pat<(i256 (int_evm_shr GPR:$opnd1, GPR:$opnd2)),
+          (SHR_r GPR:$opnd1, GPR:$opnd2)>;
+def : Pat<(i256 (int_evm_sar GPR:$opnd1, GPR:$opnd2)),
+          (SAR_r GPR:$opnd1, GPR:$opnd2)>;
 
 // External calls
 /*
