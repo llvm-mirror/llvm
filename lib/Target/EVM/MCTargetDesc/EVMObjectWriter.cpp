@@ -40,16 +40,6 @@ private:
 
 EVMObjectWriter::EVMObjectWriter() : MCEVMObjectTargetWriter() {}
 
-static const MCSection *getFixupSection(const MCExpr *Expr) {
-  llvm_unreachable("Fixup Section implementation unfinished");
-  if (auto SyExp = dyn_cast<MCSymbolRefExpr>(Expr)) {
-    if (SyExp->getSymbol().isInSection())
-      return &SyExp->getSymbol().getSection();
-  }
-
-  return nullptr;
-}
-
 unsigned EVMObjectWriter::getRelocType(const MCValue &Target,
     const MCFixup &Fixup) const {
   llvm_unreachable("getRelocType implementation unfinished");

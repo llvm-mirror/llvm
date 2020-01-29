@@ -40,12 +40,13 @@ private:
   ///   - defined and used in LIFO order with other stack registers
   BitVector VRegStackified;
   DenseMap<unsigned, unsigned> reg2index;
+  unsigned memoryFrameSize;
 
   unsigned FrameIndexSize;
 
 public:
   EVMMachineFunctionInfo(MachineFunction &MF)
-    : MF(MF), FrameIndexSize(0)
+    : MF(MF), memoryFrameSize(0), FrameIndexSize(0)
   {}
 
   void setNumStackArgs(unsigned size) { NumStackArgs = size; }
@@ -83,26 +84,34 @@ public:
     return VRegStackified.test(I);
   }
 
-  unsigned getNumAllocatedIndexInFunction() const {
-    int64_t reservedSize = MF.getFrameInfo().getStackSize();
-    return reg2index.size() + reservedSize;
+  unsigned get_memory_index(unsigned reg) const {
+    assert(reg2index.find(reg) != reg2index.end());
+    return reg2index.lookup(reg);
   }
 
   unsigned allocate_memory_index(unsigned reg) {
     if (reg2index.find(reg) != reg2index.end()) {
-      // in non-SSA mode, it is possible to have 
+      // in non-SSA mode, it is possible to have
       // multiple definitions.
       return get_memory_index(reg);
     }
     unsigned index = reg2index.size();
     reg2index.insert(std::pair<unsigned, unsigned>(reg, index));
+    updateMemoryFrameSize(index);
     return index;
   }
 
-  unsigned get_memory_index(unsigned reg) const {
-    assert(reg2index.find(reg) != reg2index.end());
-    return reg2index.lookup(reg);
+  void updateMemoryFrameSize(unsigned s) {
+    memoryFrameSize = memoryFrameSize > s ? memoryFrameSize : s;
   }
+
+  unsigned getNumAllocatedIndexInFunction() const {
+    int64_t reservedSize = MF.getFrameInfo().getStackSize();
+    assert(reservedSize % 32 == 0);
+    return memoryFrameSize + reservedSize / 32;
+  }
+
+
 };
 
 } // end namespace llvm

@@ -37,7 +37,6 @@ using namespace llvm;
 namespace {
 /// Parses EVM assembly from a stream.
 class EVMAsmParser : public MCTargetAsmParser {
-  const MCSubtargetInfo &STI;
   MCAsmParser &Parser;
   const MCRegisterInfo *MRI;
   const std::string GENERATE_STUBS = "gs";
@@ -63,7 +62,7 @@ class EVMAsmParser : public MCTargetAsmParser {
 public:
   EVMAsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
                const MCInstrInfo &MII, const MCTargetOptions &Options)
-      : MCTargetAsmParser(Options, STI, MII), STI(STI), Parser(Parser) {
+      : MCTargetAsmParser(Options, STI, MII), Parser(Parser) {
     MCAsmParserExtension::Initialize(Parser);
     MRI = getContext().getRegisterInfo();
 

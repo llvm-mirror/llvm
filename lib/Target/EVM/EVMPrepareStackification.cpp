@@ -70,7 +70,7 @@ bool EVMPrepareStackification::runOnMachineFunction(MachineFunction &MF) {
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // We don't preserve SSA form.
-  MRI.leaveSSA();
+  // MRI.leaveSSA();
 
   // BranchFolding and perhaps other passes don't preserve IMPLICIT_DEF
   // instructions. LiveIntervals requires that all paths to virtual register

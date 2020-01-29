@@ -27,7 +27,6 @@ add_llvm_target(EVMCodeGen
   EVMCallTransformation.cpp
   EVMVRegToMem.cpp
   EVMPrepareStackification.cpp
-  EVMStackification.cpp
   EVMConvertRegToStack.cpp
   EVMShrinkPush.cpp
   EVMPrepareForLiveIntervals.cpp
@@ -35,6 +34,7 @@ add_llvm_target(EVMCodeGen
   EVMExpandPseudos.cpp
   EVMExpandFramePointer.cpp
   EVMFinalization.cpp
+  EVMStackAllocAnalysis.cpp
   EVMUtils.cpp
   )
 
