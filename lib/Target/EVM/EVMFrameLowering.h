@@ -21,9 +21,7 @@ class EVMSubtarget;
 class EVMFrameLowering : public TargetFrameLowering {
 public:
   explicit EVMFrameLowering(const EVMSubtarget &STI)
-      : TargetFrameLowering(StackGrowsUp,
-                            /*StackAlignment=*/16,
-                            /*LocalAreaOffset=*/0),
+      : TargetFrameLowering(TargetFrameLowering::StackGrowsUp, Align(32), 0),
         STI(STI) {}
 
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;

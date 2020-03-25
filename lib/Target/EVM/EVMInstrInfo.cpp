@@ -32,12 +32,16 @@ EVMInstrInfo::EVMInstrInfo()
     : EVMGenInstrInfo(EVM::ADJCALLSTACKDOWN, EVM::ADJCALLSTACKUP), RI() {
 }
 
-void EVMInstrInfo::copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
-                   bool KillSrc) const {
+void copyPhysReg(MachineBasicBlock &MBB,
+                 MachineBasicBlock::iterator MI, const DebugLoc &DL,
+                 MCRegister DestReg, MCRegister SrcReg,
+                 bool KillSrc) {
+  llvm_unreachable("unimplemented for LLVM10");
   // replace the copy with pMOVE_r
-  BuildMI(MBB, I, DL, get(EVM::pMOVE_r), DestReg)
+  /*
+  BuildMI(MBB, MI, DL, get(EVM::pMOVE_r), DestReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
+  */
 }
 
 void EVMInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,

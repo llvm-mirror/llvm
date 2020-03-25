@@ -776,6 +776,7 @@ namespace llvm {
       case i160:
       case v5i32:
       case v5f32: return TypeSize::Fixed(160);
+      case i256:
       case v256i1:
       case v32i8:
       case v16i16:

@@ -19,14 +19,15 @@
 
 #define GET_INSTRINFO_HEADER
 #include "EVMGenInstrInfo.inc"
+#undef GET_INSTRINFO_HEADER
 
 namespace llvm {
 
 namespace EVM {
 enum AsmComments {
   PUTLOCAL = 0,
-  GETLOCAL,              
-  SUBROUTINE_BEGIN,          
+  GETLOCAL,
+  SUBROUTINE_BEGIN,
   SUBROUTINE_END,
   RETURN_FROM_SUBROUTINE,
   LAST_TYPE_OF_COMMENT = 1 << 15 
@@ -66,8 +67,9 @@ public:
                         const DebugLoc &DL,
                         int *BytesAdded = nullptr) const override;
 
-  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
+  void copyPhysReg(MachineBasicBlock &MBB,
+                   MachineBasicBlock::iterator MI, const DebugLoc &DL,
+                   MCRegister DestReg, MCRegister SrcReg,
                    bool KillSrc) const override;
 
 private:

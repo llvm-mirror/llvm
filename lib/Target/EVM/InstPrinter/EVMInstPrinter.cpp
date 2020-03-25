@@ -38,16 +38,16 @@ static void printExpr(const MCExpr *Expr, raw_ostream &O) {
   O << *Expr;
 }
 
-void EVMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
-                                 StringRef Annot, const MCSubtargetInfo &STI) {
+void printInst(const MCInst *MI, uint64_t Address, StringRef Annot,
+               const MCSubtargetInfo &STI, raw_ostream &OS) {
   switch (MI->getOpcode()) {
     default: {
-      printInstruction(MI, STI, O);
+      printInstruction(MI, Address, OS);
       break;
     }
   }
 
-  printAnnotation(O, Annot);
+  printAnnotation(OS, Annot);
 }
 
 void EVMInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
