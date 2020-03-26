@@ -17,6 +17,6 @@
 [component_0]
 type = Library
 name = EVMDisassembler
-parent =EVM 
+parent =EVM
 required_libraries = MCDisassembler EVMInfo Support
 add_to_library_groups = EVM

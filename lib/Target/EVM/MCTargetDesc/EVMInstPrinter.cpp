@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "EVMInstPrinter.h"
+#include "MCTargetDesc/EVMInstPrinter.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -38,11 +38,12 @@ static void printExpr(const MCExpr *Expr, raw_ostream &O) {
   O << *Expr;
 }
 
-void printInst(const MCInst *MI, uint64_t Address, StringRef Annot,
-               const MCSubtargetInfo &STI, raw_ostream &OS) {
+void EVMInstPrinter::printInst(const MCInst *MI, uint64_t Address,
+                               StringRef Annot, const MCSubtargetInfo &STI,
+                               raw_ostream &OS) {
   switch (MI->getOpcode()) {
     default: {
-      printInstruction(MI, Address, OS);
+      printInstruction(MI, Address, STI, OS);
       break;
     }
   }

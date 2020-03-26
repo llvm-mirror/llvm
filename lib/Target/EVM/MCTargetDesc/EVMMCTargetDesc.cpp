@@ -11,9 +11,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "EVMTargetStreamer.h"
-#include "MCTargetDesc/EVMMCTargetDesc.h"
 #include "EVM.h"
-#include "InstPrinter/EVMInstPrinter.h"
+#include "MCTargetDesc/EVMMCTargetDesc.h"
+#include "MCTargetDesc/EVMInstPrinter.h"
 #include "MCTargetDesc/EVMMCAsmInfo.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"

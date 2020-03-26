@@ -13,7 +13,7 @@
 
 #include "EVM.h"
 #include "EVMMCInstLower.h"
-#include "InstPrinter/EVMInstPrinter.h"
+#include "MCTargetDesc/EVMInstPrinter.h"
 #include "EVMTargetMachine.h"
 #include "EVMUtils.h"
 #include "llvm/CodeGen/AsmPrinter.h"

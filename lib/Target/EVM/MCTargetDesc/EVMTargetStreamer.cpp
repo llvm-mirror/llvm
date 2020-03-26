@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "EVMTargetStreamer.h"
-#include "InstPrinter/EVMInstPrinter.h"
+#include "MCTargetDesc/EVMInstPrinter.h"
 #include "EVMMCTargetDesc.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSubtargetInfo.h"

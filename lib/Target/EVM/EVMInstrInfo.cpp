@@ -32,10 +32,12 @@ EVMInstrInfo::EVMInstrInfo()
     : EVMGenInstrInfo(EVM::ADJCALLSTACKDOWN, EVM::ADJCALLSTACKUP), RI() {
 }
 
-void copyPhysReg(MachineBasicBlock &MBB,
-                 MachineBasicBlock::iterator MI, const DebugLoc &DL,
-                 MCRegister DestReg, MCRegister SrcReg,
-                 bool KillSrc) {
+void EVMInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
+                               MachineBasicBlock::iterator MI,
+                               const DebugLoc &DL,
+                               MCRegister DestReg,
+                               MCRegister SrcReg,
+                               bool KillSrc) const {
   llvm_unreachable("unimplemented for LLVM10");
   // replace the copy with pMOVE_r
   /*

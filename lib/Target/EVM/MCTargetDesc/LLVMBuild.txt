@@ -18,5 +18,5 @@
 type = Library
 name = EVMDesc
 parent = EVM
-required_libraries = MC EVMAsmPrinter EVMInfo Support
+required_libraries = MC EVMInfo Support
 add_to_library_groups = EVM

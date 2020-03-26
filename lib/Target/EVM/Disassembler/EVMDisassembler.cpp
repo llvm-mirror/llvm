@@ -34,18 +34,17 @@ typedef MCDisassembler::DecodeStatus DecodeStatus;
 namespace {
 
 /// A disassembler class for EVM.
-class EVMDisassembler final : public MCDisassembler {
+class EVMDisassembler : public MCDisassembler {
 public:
   EVMDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
       : MCDisassembler(STI, Ctx), Ctx(Ctx) {}
-  virtual ~EVMDisassembler() = default;
 
   MCContext &Ctx;
 
   DecodeStatus getInstruction(MCInst &Instr, uint64_t &Size,
                               ArrayRef<uint8_t> Bytes, uint64_t Address,
-                              raw_ostream &VStream,
                               raw_ostream &CStream) const override;
+  ~EVMDisassembler() = default;
 };
 }
 
@@ -67,7 +66,6 @@ extern "C" void LLVMInitializeEVMDisassembler() {
 DecodeStatus EVMDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
                                              ArrayRef<uint8_t> Bytes,
                                              uint64_t Address,
-                                             raw_ostream &VStream,
                                              raw_ostream &CStream) const {
   DecodeStatus Result = DecodeStatus::Fail;
 
