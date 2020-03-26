@@ -38,12 +38,9 @@ void EVMInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MCRegister DestReg,
                                MCRegister SrcReg,
                                bool KillSrc) const {
-  llvm_unreachable("unimplemented for LLVM10");
   // replace the copy with pMOVE_r
-  /*
   BuildMI(MBB, MI, DL, get(EVM::pMOVE_r), DestReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
-  */
 }
 
 void EVMInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
