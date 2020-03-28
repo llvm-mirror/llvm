@@ -15,24 +15,24 @@
 ;===------------------------------------------------------------------------===;
 
 [common]
-subdirectories = TargetInfo MCTargetDesc Disassembler AsmParser
+subdirectories = TargetInfo MCTargetDesc AsmParser
 
 [component_0]
 type = TargetGroup
 name = EVM
 parent = Target
 has_asmprinter = 1
-has_disassembler = 1
 
 [component_1]
 type = Library
 name = EVMCodeGen
 parent = EVM
 required_libraries =
+  Analysis
+  MC
   AsmPrinter
   Core
   CodeGen
-  MC
   EVMDesc
   EVMInfo
   SelectionDAG
