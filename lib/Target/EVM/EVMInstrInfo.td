@@ -444,13 +444,16 @@ def DUP16: EVMInst<(outs), (ins), [], "true", "DUP16", 0x8f, 3>;
 
 let isBranch = 1, isBarrier = 1, isTerminator = 1 in {
 defm JUMPTO : Inst_1_0<"JUMPTO", [], 0xb0, 8>;
-/*
-defm JUMPIF : // TODO: argument type is 4 bytes.
-    : RSInst<(outs GPR:$dst), (ins GPR:$src1, GPR:$src2),
-             pattern,
-             "JUMPIF\t$dst, $src1, $src2", "JUMPIF", 0xb1, 10>;
-*/
+
+def JUMPSUB :
+  EVMInst<(outs), (ins I256Imm:$tgt), [], "true", "JUMPSUB \t$tgt", 0xb3, 8>;
 }
+
+def BEGINSUB  :
+  EVMInst<(outs), (ins), [], "true", "BEGINSUB", 0xb5, 1>;
+def RETURNSUB :
+  EVMInst<(outs), (ins), [], "true", "RETURNSUB", 0xb7, 2>;
+
 
 let mayStore = 1, hasSideEffects = 1 in {
 defm CREATE : Inst_3_1<"CREATE",
@@ -550,18 +553,16 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
   def pJUMPV   : EVMPseudo<(outs), (ins GPR:$src1, brtarget:$dst), []>;
 
   let isReturn = 1 in {
-    def pRETURNSUB_TEMP_r  :
+    def pRETURNSUB_r  :
       EVMPseudo<(outs), (ins GPR:$src),
                 [(EVMRetflag i256:$src)]>;
-    def pRETURNSUBVOID_TEMP_r :
+    def pRETURNSUBVOID_r :
       EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
-    def pRETURNSUB:
-      EVMPseudo<(outs), (ins), []>;
 
     // the version with return address embedded
-    def pRETURNSUB_r  :
+    def pRETURNSUBTO_r  :
       EVMPseudo<(outs), (ins GPR:$ret, GPR:$src), []>;
-    def pRETURNSUBVOID_r :
+    def pRETURNSUBVOIDTO_r :
       EVMPseudo<(outs), (ins GPR:$ret), []>;
   }
 }

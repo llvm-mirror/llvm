@@ -47,7 +47,6 @@ private:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
   void expandLOCAL(MachineInstr* MI) const;
-  void expandRETURN(MachineInstr* MI) const;
   void expandJUMP(MachineInstr* MI) const;
   void expandMOVE(MachineInstr* MI) const;
 };
@@ -153,28 +152,6 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   MI->eraseFromParent();
 }
 
-void EVMExpandPseudos::expandRETURN(MachineInstr* MI) const {
-  MachineBasicBlock* MBB = MI->getParent();
-  DebugLoc DL = MI->getDebugLoc();
-  unsigned opc = MI->getOpcode();
-
-  unsigned numOpnds = MI->getNumOperands();
-  assert(numOpnds <= 2 &&
-         "Does not support more than 1 return values");
-
-  if (opc == EVM::pRETURNSUB_r) {
-    llvm_unreachable("unimplemented");
-  } else {
-    BuildMI(*MBB, MI, DL, TII->get(EVM::JUMP_r))
-      .add(MI->getOperand(0));
-
-    //uint32_t flags = EVM::BuildCommentFlags(EVM::RETURN_FROM_SUBROUTINE, 0);
-    //mi->setAsmPrinterFlag(flags);
-  }
-
-  MI->eraseFromParent();
-}
-
 bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG({
     dbgs() << "********** Expand pseudo instructions **********\n"
@@ -210,12 +187,6 @@ bool EVMExpandPseudos::runOnMachineFunction(MachineFunction &MF) {
           expandJUMP(MI);
           Changed = true;
           break;
-        // suspend it and expand at finalization time
-        //case EVM::pRETURNSUB_r:
-        //case EVM::pRETURNSUBVOID_r:
-        //  expandRETURN(MI);
-        //  Changed = true;
-        //  break;
       }
 
     }

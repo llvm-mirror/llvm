@@ -202,8 +202,8 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         if (StackOpcode == -1) {
           // special handling for return pseudo, as we will expand
           // it at the finalization pass.
-          if (RegOpcode == EVM::pRETURNSUB_r ||
-              RegOpcode == EVM::pRETURNSUBVOID_r) {
+          if (RegOpcode == EVM::pRETURNSUBTO_r ||
+              RegOpcode == EVM::pRETURNSUBVOIDTO_r) {
             StackOpcode = EVM::JUMP;
           }
 

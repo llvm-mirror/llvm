@@ -24,14 +24,21 @@ def HasEIP211 : Predicate<"Subtarget->hasEIP211()">,
 
 def HasEIP615 : Predicate<"Subtarget->hasEIP615()">,
                           AssemblerPredicate<"FeatureEIP615">;
+*/
+
+def FeatureSubroutine : SubtargetFeature<"subroutine",
+                                         "HasSubroutine",
+                                         "true",
+                                         "EVM Subroutine support">;
+
+def HasSubroutine : Predicate<"Subtarget->hasSubroutine()">,
+                    AssemblerPredicate<"FeatureSubroutine">;
 
 class Proc<string Name, list<SubtargetFeature> Features>
  : Processor<Name, NoItineraries, Features>;
 
 def : Proc<"generic", []>;
-def : Proc<"eip211", [EIP211]>;
-def : Proc<"eip615", [EIP211, EIP615]>;
-*/
+def : Proc<"EVM15", [FeatureSubroutine]>;
 
 //===----------------------------------------------------------------------===//
 // Registers, instruction descriptions.

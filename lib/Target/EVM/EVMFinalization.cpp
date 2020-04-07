@@ -133,13 +133,6 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
         MI->eraseFromParent();
         Changed = true;
       }
-      
-      if (opcode == EVM::pRETURNSUB) {
-        // convert it to
-        // JUMP
-        MI->setDesc(TII->get(EVM::JUMP));
-        Changed = true;
-      }
 
       // TODO: add stack-version of these 2 pseudos
       if (opcode == EVM::pADJFPUP ||
