@@ -283,11 +283,6 @@ sort_tests = OrderedDict({
 })
 
 bitwise_tests = OrderedDict({
-    "Round": {
-        "file": "bitwise/round.ll",
-        "input": ["0x12345678"],
-        "output": "0x0000000000000000000000000000000000000000000000000000000020000000",
-    },
     "Bits are all ones: true": {
         "file": "bitwise/bits_all_one.ll",
         "input": ["0xffffffff"],

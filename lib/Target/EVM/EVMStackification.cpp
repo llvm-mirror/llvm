@@ -504,16 +504,40 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     assert(result);
 
     // there is a special case: both the operands are the same.
-    if (firstReg == secondReg) {
+    bool regsAreSame = (firstReg == secondReg);
+    if (regsAreSame) {
       LLVM_DEBUG(
           { dbgs() << "  Special case: both operands are the same.\n"; });
       //we should skip the first one and find the second one.
       result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop,
                                    /*skip = */ 1);
+      // specially handle regs are same cases:
+      // move the second register to top first:
+      if (firstDepthFromTop != 0) {
+        insertSwap(firstDepthFromTop, MI); 
+        ss.swap(firstDepthFromTop);
+      }
+      // now the stack is like: r, xx, xx, r:
+      result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop,
+                                   /*skip first*/ 1);
+      assert(result);
+      assert(secondDepthFromTop > 0);
+      if (secondDepthFromTop != 1) {
+        // move first reg to 2nd place on stack.
+        insertSwap(1, MI);
+        ss.swap(1);
+
+        // move second to first place:
+        insertSwap(secondDepthFromTop, MI);
+        ss.swap(secondDepthFromTop);
+      }
+      ss.pop();
+      ss.pop();
+      return;
     } else {
       result = findRegDepthOnStack(ss, secondReg, &secondDepthFromTop);
+      assert(result);
     }
-    assert(result);
 
     // ideal case, we don't need to do anything
     if (firstDepthFromTop == 0 && secondDepthFromTop == 1) {
