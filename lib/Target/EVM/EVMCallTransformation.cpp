@@ -64,11 +64,6 @@ private:
 
 } // end anonymous namespace
 
-static bool
-isEVMSpecificIntrinsics(Function *F) {
-  return F->isIntrinsic() && F->getName().startswith("llvm.evm");
-}
-
 FunctionType*
 EVMCallTransformation::rebuildFunctionType(FunctionType *OrigType) const {
   Type* RetType = OrigType->getReturnType();

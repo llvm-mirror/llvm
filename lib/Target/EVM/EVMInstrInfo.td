@@ -554,16 +554,10 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 
   let isReturn = 1 in {
     def pRETURNSUB_r  :
-      EVMPseudo<(outs), (ins GPR:$src),
+      EVMPseudo<(outs), (ins GPR:$src, variable_ops),
                 [(EVMRetflag i256:$src)]>;
     def pRETURNSUBVOID_r :
-      EVMPseudo<(outs), (ins), [(EVMRetflag)]>;
-
-    // the version with return address embedded
-    def pRETURNSUBTO_r  :
-      EVMPseudo<(outs), (ins GPR:$ret, GPR:$src), []>;
-    def pRETURNSUBVOIDTO_r :
-      EVMPseudo<(outs), (ins GPR:$ret), []>;
+      EVMPseudo<(outs), (ins variable_ops), [(EVMRetflag)]>;
   }
 }
 

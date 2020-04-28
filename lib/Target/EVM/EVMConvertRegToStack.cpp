@@ -199,12 +199,17 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
         auto RegOpcode = MI.getOpcode();
         auto StackOpcode = llvm::EVM::getStackOpcode(RegOpcode);
 
+        // special handling of 
         if (StackOpcode == -1) {
           // special handling for return pseudo, as we will expand
           // it at the finalization pass.
-          if (RegOpcode == EVM::pRETURNSUBTO_r ||
-              RegOpcode == EVM::pRETURNSUBVOIDTO_r) {
-            StackOpcode = EVM::JUMP;
+          if (RegOpcode == EVM::pRETURNSUB_r ||
+              RegOpcode == EVM::pRETURNSUBVOID_r) {
+            if (MF.getSubtarget<EVMSubtarget>().hasSubroutine()) {
+              StackOpcode = EVM::JUMPSUB;
+            } else {
+              StackOpcode = EVM::JUMP;
+            }
           }
 
           else if (RegOpcode == EVM::pJUMPSUB_r || EVM::pJUMPSUBVOID_r) {
@@ -260,21 +265,29 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
                 .addImm(fpaddr);
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MSTORE));
 
-            // here we build the return address, and insert it as the first argument
-            // of the function.
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::PUSH1))
-                .addImm(4);
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::GETPC));
-            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
+            
+            if (MF.getSubtarget<EVMSubtarget>().hasSubroutine()) {
+              // With subroutine support we do not push return address on to stack
+              StackOpcode = EVM::JUMPSUB;
+            } else {
+              // here we build the return address, and insert it as the first
+              // argument of the function.
+              BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                      TII->get(EVM::PUSH1))
+                  .addImm(4);
+              BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                      TII->get(EVM::GETPC));
+              BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                      TII->get(EVM::ADD));
 
-            // swap the callee address with the return address
-            unsigned uses = std::distance(MI.uses().begin(), MI.uses().end());
-            unsigned opc = getSWAPOpcode(uses);
-            auto mm = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(opc));
-            // setting comment
-            mm->setAsmPrinterFlag(
-                EVM::BuildCommentFlags(EVM::SUBROUTINE_BEGIN, 0));
-            StackOpcode = EVM::JUMP;
+              // swap the callee address with the return address
+              unsigned uses = std::distance(MI.uses().begin(), MI.uses().end());
+              BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                      TII->get(getSWAPOpcode(uses)))
+                  ->setAsmPrinterFlag(
+                      EVM::BuildCommentFlags(EVM::SUBROUTINE_BEGIN, 0));
+              StackOpcode = EVM::JUMP;
+            }
 
             MachineBasicBlock::iterator MIT(MI);
 

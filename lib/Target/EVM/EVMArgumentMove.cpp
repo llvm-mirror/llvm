@@ -48,8 +48,15 @@ public:
   static bool isStackArg(const MachineInstr &MI);
 private:
   void arrangeStackArgs(MachineFunction &MF) const;
-  std::vector<unsigned> unusedArgs;
+  void insertRetAddrArg(MachineFunction &MF) const;
+  unsigned computeStackArgOffset(MachineFunction &MF) const;
+  void sortStackArgs(MachineFunction &MF) const;
+
   const EVMInstrInfo *TII;
+  EVMMachineFunctionInfo *MFI;
+  const Function *F;
+  MachineRegisterInfo *MRI;
+  const EVMSubtarget *Subtarget;
 };
 } // end anonymous namespace
 
@@ -62,24 +69,74 @@ FunctionPass *llvm::createEVMArgumentMove() {
 }
 
 bool EVMArgumentMove::isStackArg(const MachineInstr &MI) {
-  unsigned opc = MI.getOpcode();
+  return (MI.getOpcode() == EVM::pSTACKARG_r);
+}
 
-  return (opc == EVM::pSTACKARG_r);
+void EVMArgumentMove::insertRetAddrArg(MachineFunction& MF) const {
+  unsigned returnAddrReg = 0;
+  // we now insert a special return address stack argument to the beginning of
+  // the function:
+  if (!EVMSubtarget::isMainFunction(*F)) {
+    // return address is the last stackarg:
+    unsigned retAddrStackArgNum = MFI->getNumStackArgs();
+    unsigned destReg = MRI->createVirtualRegister(&EVM::GPRRegClass);
+    MachineBasicBlock &EntryMBB = MF.front();
+    auto bmi =
+        BuildMI(EntryMBB, EntryMBB.front(), EntryMBB.front().getDebugLoc(),
+                TII->get(EVM::pSTACKARG_r), destReg)
+            .addImm(retAddrStackArgNum);
+    returnAddrReg = destReg;
+
+    LLVM_DEBUG({
+      dbgs() << "Creating return address STACKARG: ";
+      bmi->dump();
+    });
+  }
+
+  // we have found the return address, add the return address to instruction
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
+      MachineInstr &MI = *I++;
+      if (MI.getOpcode() == EVM::pRETURNSUB_r) {
+        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                TII->get(EVM::pRETURNSUB_r));
+
+        // TODO: this might change
+        if (!EVMSubtarget::isMainFunction(*F)) {
+            mibuilder.addReg(returnAddrReg);
+        }
+
+        mibuilder.addReg(MI.getOperand(0).getReg());
+        MI.eraseFromParent();
+      }
+      if (MI.getOpcode() == EVM::pRETURNSUBVOID_r) {
+        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                TII->get(EVM::pRETURNSUBVOID_r));
+
+        if (!EVMSubtarget::isMainFunction(*F)) {
+            mibuilder.addReg(returnAddrReg);
+        }
+
+        MI.eraseFromParent();
+      }
+    }
+  }
+}
+
+// This is used to calculate if we need to allocate additional variables for
+// return address on the stack.
+unsigned EVMArgumentMove::computeStackArgOffset(MachineFunction &MF) const {
+  bool hasSubroutine = MF.getSubtarget<EVMSubtarget>().hasSubroutine();
+  if (EVMSubtarget::isMainFunction(*F) || hasSubroutine) {
+    return 0;
+  } else {
+    // we plus one so that the return address is included
+    return 1;
+  }
 }
 
 void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
-  EVMMachineFunctionInfo *MFI = MF.getInfo<EVMMachineFunctionInfo>();
-  MachineRegisterInfo &MRI = MF.getRegInfo();
-
-  bool hasSubroutine = MF.getSubtarget<EVMSubtarget>().hasSubroutine();
-
-  // we plus one so that the return address is included
-  unsigned stackArgOffset = 1;
-  const Function &F = MF.getFunction();
-  if (EVMSubtarget::isMainFunction(F) || hasSubroutine) {
-    stackArgOffset = 0;
-  }
-
+  unsigned stackArgOffset = computeStackArgOffset(MF);
   BitVector stackargs(MFI->getNumStackArgs() + stackArgOffset, false);
 
   MachineBasicBlock &EntryMBB = MF.front();
@@ -95,18 +152,17 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
 
   assert(stackargs.size() == MFI->getNumStackArgs() + stackArgOffset);
 
-  unsigned returnAddrReg = 0;
-
-  // the stack arrangement is:
+  // the stack arrangement is like this:
   // (top) 1st argument, 2nd argument, 3rd argument, ..., return address (if any)
   // (bottom) Iterate over stack args, excluding the index zero one (return
   // address slot)
+
+  // if an arg is deleted (by isel), create the instruction, and insert it
   for (unsigned i = 0; i < MFI->getNumStackArgs(); ++i) {
-    // if an arg is deleted (by isel), create the instruction, and insert it
     if (!stackargs[i]) {
       MachineBasicBlock::iterator insertPt = EntryMBB.begin();
 
-      unsigned destReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
+      unsigned destReg = MRI->createVirtualRegister(&EVM::GPRRegClass);
       BuildMI(EntryMBB, insertPt, insertPt->getDebugLoc(),
               TII->get(EVM::pSTACKARG_r), destReg)
           .addImm(i);
@@ -117,96 +173,31 @@ void EVMArgumentMove::arrangeStackArgs(MachineFunction& MF) const {
     }
   }
 
-  if (hasSubroutine) {
-    return;
-  }
-
-  // we now insert a special return address stack argument to the beginning of
-  // the function:
-  if (!EVMSubtarget::isMainFunction(F)) {
-    // return address is the last stackarg:
-    unsigned retAddrStackArgNum = MFI->getNumStackArgs();
-    unsigned destReg = MRI.createVirtualRegister(&EVM::GPRRegClass);
-    auto bmi =
-        BuildMI(EntryMBB, EntryMBB.front(), EntryMBB.front().getDebugLoc(),
-                TII->get(EVM::pSTACKARG_r), destReg)
-            .addImm(retAddrStackArgNum);
-    returnAddrReg = destReg;
-
-    LLVM_DEBUG({
-      dbgs() << "Creating return address STACKARG: ";
-      bmi->dump();
-    });
-  }
-
-  // we have found the return address, convert the RETURN sub:
-  for (MachineBasicBlock &MBB : MF) {
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
-      MachineInstr &MI = *I++;
-      if (MI.getOpcode() == EVM::pRETURNSUB_r) {
-        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII->get(EVM::pRETURNSUBTO_r));
-
-        // TODO: this might change
-        if (!EVMSubtarget::isMainFunction(F)) {
-            mibuilder.addReg(returnAddrReg);
-        }
-
-        mibuilder.addReg(MI.getOperand(0).getReg());
-        MI.eraseFromParent();
-      }
-      if (MI.getOpcode() == EVM::pRETURNSUBVOID_r) {
-        auto mibuilder = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-                TII->get(EVM::pRETURNSUBVOIDTO_r));
-
-        if (!EVMSubtarget::isMainFunction(F)) {
-            mibuilder.addReg(returnAddrReg);
-        }
-
-        MI.eraseFromParent();
-      }
-    }
+  if (!Subtarget->hasSubroutine()) {
+    insertRetAddrArg(MF);
   }
 }
 
-bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
-  LLVM_DEBUG({
-    dbgs() << "********** Argument Move **********\n"
-           << "********** Function: " << MF.getName() << '\n';
-  });
-
-  // reset
-  unusedArgs.clear();
-
-  TII = MF.getSubtarget<EVMSubtarget>().getInstrInfo();
-
-  MachineRegisterInfo &MRI = MF.getRegInfo();
-
-  bool Changed = false;
+void EVMArgumentMove::sortStackArgs(MachineFunction &MF) const {
   MachineBasicBlock &EntryMBB = MF.front();
-  MachineBasicBlock::iterator InsertPt = EntryMBB.end();
 
-  // fill in deleted stack args
-  arrangeStackArgs(MF);
-
+  std::vector<unsigned> unusedArgs;
   DenseMap<unsigned, MachineInstr*> index2mi;
+  MachineBasicBlock::iterator InsertPt = EntryMBB.end();
 
   // fills index2mi table so we can sort it later.
   for (MachineInstr &MI : EntryMBB) {
     if (EVMArgumentMove::isStackArg(MI)) {
-
       unsigned index = MI.getOperand(1).getImm();
-
       LLVM_DEBUG({
         dbgs() << "Inserting index2mi: " << index << ", ";
         MI.dump();
       });
       index2mi.insert(std::pair<unsigned, MachineInstr *>(index, &MI));
-
       unsigned reg = MI.getOperand(0).getReg();
 
       // record unused stack arguments so we can pop it later.
-      bool IsDead = MRI.use_empty(reg);
+      bool IsDead = MRI->use_empty(reg);
       if (IsDead) {
         LLVM_DEBUG({
           dbgs() << "Stack argument: " << Register::virtReg2Index(reg)
@@ -240,7 +231,6 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
         index2mi[index]->dump();
       });
     EntryMBB.insert(InsertPt, index2mi[index]->removeFromParent());
-    Changed = true;
   }
 
   // TODO: this is buggy
@@ -262,6 +252,25 @@ bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
       llvm_unreachable("there shouldn't be another stack args unmoved.");
     }
   }
+}
 
-  return Changed;
+bool EVMArgumentMove::runOnMachineFunction(MachineFunction &MF) {
+  LLVM_DEBUG({
+    dbgs() << "********** Argument Move **********\n"
+           << "********** Function: " << MF.getName() << '\n';
+  });
+
+  Subtarget = &MF.getSubtarget<EVMSubtarget>();
+  TII = Subtarget->getInstrInfo();
+  MFI = MF.getInfo<EVMMachineFunctionInfo>();
+  F = &MF.getFunction();
+  MRI = &MF.getRegInfo();
+
+  // fill in deleted stack args
+  arrangeStackArgs(MF);
+
+  // sort them in order
+  sortStackArgs(MF);
+
+  return true;
 }
