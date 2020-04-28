@@ -42,6 +42,8 @@ private:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
   bool shouldInsertJUMPDEST(MachineBasicBlock &MBB) const;
+  bool shouldInsertBEGINSUB(MachineBasicBlock &MBB) const;
+
   void expandADJFP(MachineInstr *MI) const;
 };
 } // end anonymous namespace
@@ -56,6 +58,10 @@ FunctionPass *llvm::createEVMFinalization() {
 }
 
 bool EVMFinalization::shouldInsertJUMPDEST(MachineBasicBlock &MBB) const {
+  if (ST->hasSubroutine()) {
+    return false;
+  }
+
   if (MBB.empty()) {
     return false;
   }
@@ -66,6 +72,14 @@ bool EVMFinalization::shouldInsertJUMPDEST(MachineBasicBlock &MBB) const {
   }
 
   // for now we will add a JUMPDEST anyway.
+  return true;
+}
+
+bool EVMFinalization::shouldInsertBEGINSUB(MachineBasicBlock &MBB) const {
+  if (!ST->hasSubroutine()) {
+    return false;
+  }
+
   return true;
 }
 
@@ -116,10 +130,13 @@ bool EVMFinalization::runOnMachineFunction(MachineFunction &MF) {
 
     //// TODO: we force each of those MBB's to have address taken.
     //MBB.setHasAddressTaken();
+    MachineBasicBlock::iterator begin = MBB.begin();
     if (shouldInsertJUMPDEST(MBB)) {
-      MachineBasicBlock::iterator begin = MBB.begin();
       BuildMI(MBB, begin, begin->getDebugLoc(), TII->get(EVM::JUMPDEST));
+    } else if (shouldInsertBEGINSUB(MBB)) {
+      BuildMI(MBB, begin, begin->getDebugLoc(), TII->get(EVM::BEGINSUB));
     }
+
 
     // use iterator since we need to remove pseudo instructions
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
