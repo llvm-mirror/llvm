@@ -26,7 +26,7 @@ using namespace llvm;
 // SelectionDAG operations.
 namespace {
 class EVMDAGToDAGISel final : public SelectionDAGISel {
-  const EVMSubtarget *Subtarget;
+  EVMSubtarget *Subtarget;
 
 public:
   explicit EVMDAGToDAGISel(EVMTargetMachine &TargetMachine)
@@ -38,7 +38,7 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override {
-    Subtarget = &MF.getSubtarget<EVMSubtarget>();
+    Subtarget = const_cast<EVMSubtarget*>(&MF.getSubtarget<EVMSubtarget>());
     return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
@@ -135,6 +135,7 @@ bool EVMDAGToDAGISel::SelectTargetGlobalAddress(SDNode *Node) {
     // the first time we have encountered: allocate a new slot
     offset = GlobalSlots.size() * 32;
     GlobalSlots[Node] = offset;
+    Subtarget->updateAllocatedGlobalSlots(GlobalSlots.size());
   } else {
     offset = GSIter->second; 
   }

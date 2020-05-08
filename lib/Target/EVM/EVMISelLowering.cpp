@@ -203,10 +203,25 @@ SDValue EVMTargetLowering::LowerFrameIndex(SDValue Op,
 SDValue
 EVMTargetLowering::LowerGlobalAddress(SDValue Op,
                                       SelectionDAG &DAG) const {
-  auto DL = DAG.getDataLayout();
-  const GlobalAddressSDNode *GN = cast<GlobalAddressSDNode>(Op);
-  return DAG.getTargetGlobalAddress(GN->getGlobal(), SDLoc(Op),
-                                    getPointerTy(DL), GN->getOffset());
+  SDLoc DL(Op);
+  const auto *GA = cast<GlobalAddressSDNode>(Op);
+  EVT VT = Op.getValueType();
+  assert(GA->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic GlobalAddressSDNode");
+
+  if (GA->getAddressSpace() != 0) {
+    llvm_unreachable("multiple address space unimplemented");
+  }
+
+  if (GA->getGlobal()->getType()->isPointerTy()) { 
+    return DAG.getNode(
+        EVMISD::WRAPPER, DL, VT,
+        DAG.getTargetGlobalAddress(GA->getGlobal(), DL, VT, GA->getOffset()));
+  } else {// if it is a function pointer type
+    auto DL = DAG.getDataLayout();
+    return DAG.getTargetGlobalAddress(GA->getGlobal(), SDLoc(Op),
+                                      getPointerTy(DL), GA->getOffset());
+  }
 }
 
 SDValue

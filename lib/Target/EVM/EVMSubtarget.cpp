@@ -33,7 +33,7 @@ EVMSubtarget &EVMSubtarget::initializeSubtargetDependencies(StringRef CPU,
 
 EVMSubtarget::EVMSubtarget(const Triple &TT, const std::string &CPU,
                            const std::string &FS, const TargetMachine &TM)
-    : EVMGenSubtargetInfo(TT, CPU, FS),
+    : EVMGenSubtargetInfo(TT, CPU, FS), AllocatedGlobalSlots(0),
       FrameLowering(initializeSubtargetDependencies(CPU, FS)),
       InstrInfo(), TLInfo(TM, *this) {
 }
