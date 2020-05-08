@@ -129,6 +129,11 @@ void EVMDAGToDAGISel::PostprocessISelDAG() {
 
 }
 bool EVMDAGToDAGISel::SelectTargetGlobalAddress(SDNode *Node) {
+  const auto *GA = cast<GlobalAddressSDNode>(Node);
+  if (GA->getGlobal()->getValueType()->isFunctionTy()) {
+    return false;
+  }
+
   DenseMap<SDNode *, uint64_t>::iterator GSIter = GlobalSlots.find(Node);
   uint64_t offset;
   if (GSIter == GlobalSlots.end()) {

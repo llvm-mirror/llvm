@@ -213,15 +213,10 @@ EVMTargetLowering::LowerGlobalAddress(SDValue Op,
     llvm_unreachable("multiple address space unimplemented");
   }
 
-  if (GA->getGlobal()->getType()->isPointerTy()) { 
-    return DAG.getNode(
-        EVMISD::WRAPPER, DL, VT,
-        DAG.getTargetGlobalAddress(GA->getGlobal(), DL, VT, GA->getOffset()));
-  } else {// if it is a function pointer type
-    auto DL = DAG.getDataLayout();
-    return DAG.getTargetGlobalAddress(GA->getGlobal(), SDLoc(Op),
-                                      getPointerTy(DL), GA->getOffset());
-  }
+  return DAG.getNode(EVMISD::WRAPPER, DL, VT,
+                     DAG.getTargetGlobalAddress(GA->getGlobal(),
+                                                DL, VT,
+                                                GA->getOffset()));
 }
 
 SDValue
