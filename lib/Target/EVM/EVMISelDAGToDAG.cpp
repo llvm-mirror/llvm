@@ -48,6 +48,7 @@ public:
   void Select(SDNode *Node) override;
 
   bool SelectLOAD(SDNode *Node);
+  bool SelectTargetGlobalAddress(SDNode *Node);
 
   // custom selecting
   bool SelectSETCC(SDNode *Node);
@@ -60,6 +61,7 @@ public:
 
 private:
   void MutateReturnChain();
+  DenseMap<SDNode *, uint64_t> GlobalSlots;
 };
 }
 
@@ -125,6 +127,24 @@ void EVMDAGToDAGISel::PreprocessISelDAG() {
 
 void EVMDAGToDAGISel::PostprocessISelDAG() {
 
+}
+bool EVMDAGToDAGISel::SelectTargetGlobalAddress(SDNode *Node) {
+  DenseMap<SDNode *, uint64_t>::iterator GSIter = GlobalSlots.find(Node);
+  uint64_t offset;
+  if (GSIter == GlobalSlots.end()) {
+    // the first time we have encountered: allocate a new slot
+    offset = GlobalSlots.size() * 32;
+    GlobalSlots[Node] = offset;
+  } else {
+    offset = GSIter->second; 
+  }
+  // change GlobalAddress to the memory location offset
+  SDValue mem_offset =
+      CurDAG->getConstant(offset, SDLoc(Node), MVT::i256);
+  SDNode *push =
+      CurDAG->getMachineNode(EVM::PUSH32_r, SDLoc(Node), MVT::i256, mem_offset);
+  ReplaceNode(Node, push);
+  return true;
 }
 
 bool EVMDAGToDAGISel::SelectLOAD(SDNode *Node) {
@@ -310,6 +330,10 @@ void EVMDAGToDAGISel::Select(SDNode *Node) {
   switch (Opcode) {
     case ISD::LOAD: {
       if (SelectLOAD(Node)) return;
+      break;
+    }
+    case ISD::TargetGlobalAddress: {
+      if (SelectTargetGlobalAddress(Node)) return;
       break;
     }
     case ISD::SETCC:

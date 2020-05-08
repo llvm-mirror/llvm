@@ -431,7 +431,8 @@ void EVMStackification::handleUses(StackStatus &ss, MachineInstr& MI) {
     MachineOperand& MO1 = *MI.uses().begin(); 
     MachineOperand& MO2 = *(MI.uses().begin() + 1); 
 
-    assert(MO1.isReg() && MO2.isReg());
+    assert(MO1.isReg() || MO1.isGlobal());
+    assert(MO2.isReg() || MO2.isGlobal());
 
     unsigned firstReg  = MO1.getReg();
     unsigned secondReg = MO2.getReg();

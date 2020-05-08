@@ -679,6 +679,14 @@ def : Pat<(i256 (int_evm_shr GPR:$opnd1, GPR:$opnd2)),
 def : Pat<(i256 (int_evm_sar GPR:$opnd1, GPR:$opnd2)),
           (SAR_r GPR:$opnd1, GPR:$opnd2)>;
 
+// Global address
+def : Pat<(i256 (EVMWrapper tglobaladdr:$dst)),
+          (MLOAD_r GPR:$dst)>;
+def : Pat<(load (EVMWrapper tglobaladdr:$dst)),
+          (MLOAD_r GPR:$dst)>;
+def : Pat<(store i256:$src, (EVMWrapper tglobaladdr:$dst)),
+          (MSTORE_r GPR:$dst, GPR:$src)>;
+
 // External calls
 /*
 def : Pat<(i256 (EVMCall (EVMWrapper tglobaladdr:$callee))),

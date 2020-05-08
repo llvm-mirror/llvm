@@ -23,6 +23,13 @@
 
 namespace llvm {
 
+namespace EVMII {
+  // MachineOperand target flags
+  enum {
+    MO_GOT,
+  };
+}
+
 namespace EVM {
 enum AsmComments {
   PUTLOCAL = 0,
