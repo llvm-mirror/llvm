@@ -236,6 +236,7 @@ private:
   bool sucessorsContainRegUses(unsigned reg, const MachineBasicBlock *MBB) const;
 
   // the pass to analyze a single basicblock
+  MachineInstr &tryToAnalyzeStackArgs(MachineBasicBlock *MBB);
   void analyzeBasicBlock(MachineBasicBlock *MBB);
 
   void handleDef(MachineInstr &MI);

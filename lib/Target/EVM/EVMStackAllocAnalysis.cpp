@@ -46,7 +46,7 @@ void EVMStackStatus::swap(unsigned depth) {
       unsigned second = stackElements.rbegin()[depth];
       unsigned fst_idx = Register::virtReg2Index(first);
       unsigned snd_idx = Register::virtReg2Index(second);
-      dbgs() << "    >>> SWAP" << depth << ": (%" << fst_idx << "<-> %" << snd_idx
+      dbgs() << "    >>> SWAP" << depth << ": (%" << fst_idx << " <-> %" << snd_idx
              << ")\n";
     });
     std::iter_swap(stackElements.rbegin(), stackElements.rbegin() + depth);
@@ -313,8 +313,6 @@ void EVMStackAlloc::consolidateXRegionForEdgeSet(unsigned edgetSetIndex) {
 }
 
 void EVMStackAlloc::beginOfBlockUpdates(MachineBasicBlock *MBB) {
-  stack.clear();
-
   // find edgeset
   if (MBB->pred_empty()) {
     return;
@@ -448,12 +446,129 @@ void EVMStackAlloc::endOfBlockUpdates(MachineBasicBlock *MBB) {
   }
 }
 
+
+MachineInstr& EVMStackAlloc::tryToAnalyzeStackArgs(MachineBasicBlock *MBB) {
+  if (MBB != &MBB->getParent()->front()) {
+    return MBB->front();
+  }
+
+  assert(stack.getStackDepth() == 0);
+
+  std::vector<MachineInstr*> stackargMIs;
+
+  // handle stack args.
+  LLVM_DEBUG({ dbgs() << "// start of handling stack args.\n"; });
+      // iterate over stackargs:
+  MachineBasicBlock::iterator SI;
+  for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E;
+       ++I) {
+    MachineInstr &MI = *I;
+
+    // iterate until we reach the first non-stack argument.
+    if (MI.getOpcode() != EVM::pSTACKARG_r) {
+      SI = I;
+      break;
+    }
+    // record stack arg status.
+    unsigned reg = MI.getOperand(0).getReg();
+
+    // also push the stack args on to stack.
+    stackargMIs.push_back(&MI);
+    stack.push(reg);
+  }
+
+  // now `SI` points to the first non-stackarg instruction
+  MachineInstr &MI = *SI;
+  LLVM_DEBUG({
+    dbgs() << "  First non-stack arg instruction:";
+    MI.dump();
+  });
+
+  // from top to bottom.
+  std::reverse(stackargMIs.begin(),stackargMIs.end());
+  LLVM_DEBUG({
+    for (size_t i = 0; i < stackargMIs.size(); ++i) {
+      dbgs() << "  Record stackarg[" << i << "]: ";
+      MI.dump();
+    }
+  });
+
+  LLVM_DEBUG({dbgs() << "dumping stack: "; stack.dump();});
+
+  LLVM_DEBUG({ dbgs() << "  Start to insert stack manipulation code:\n"; });
+
+  // now insert stackarg specific manipulation code here:
+  for (unsigned index = 0; index < stackargMIs.size(); ++index) {
+    MachineInstr *stackargMI = stackargMIs[index];
+    unsigned reg = getDefRegister(*stackargMI);
+
+
+    // check for correctness
+    LLVM_DEBUG({
+      assert(stack.findRegDepth(reg) == index);
+      unsigned ridx = Register::virtReg2Index(reg);
+      dbgs() << "  Handling stackarg  %" << ridx << ":";
+    });
+
+    // pop up unused stack args
+    if (MRI->use_nodbg_empty(reg)) {
+      regAssignments.insert(
+          std::pair<unsigned, StackAssignment>(reg, {NO_ALLOCATION, 0}));
+      LLVM_DEBUG(dbgs() << "    Allocating %" << Register::virtReg2Index(reg)
+                        << " to NO_ALLOCATION.\n");
+      insertPopBefore(*stackargMI);
+    } else if (defIsLocal(*stackargMI)) {
+      regAssignments.insert(
+          std::pair<unsigned, StackAssignment>(reg, {L_STACK, 0}));
+      LLVM_DEBUG(dbgs() << "    Allocating %"
+                        << Register::virtReg2Index(reg)
+                        << " to LOCAL STACK.\n");
+      // update stack status
+      currentStackStatus.L.insert(reg);
+    } else if (liveIntervalWithinSameEdgeSet(reg)) {
+      regAssignments.insert(
+          std::pair<unsigned, StackAssignment>(reg, {X_STACK, 0}));
+      LLVM_DEBUG(dbgs() << "    Allocating %"
+                        << Register::virtReg2Index(reg)
+                        << " to X STACK.\n");
+      MachineBasicBlock *ThisMBB = const_cast<MachineInstr &>(*stackargMI).getParent();
+
+      // find the outgoing edge set.
+      assert(!ThisMBB->succ_empty() &&
+             "Cannot allocate XRegion to empty edgeset.");
+      unsigned edgesetIndex =
+          edgeSets.getEdgeSetIndex({ThisMBB, *(ThisMBB->succ_begin())});
+      allocateXRegion(edgesetIndex, reg);
+    } else {
+      // Everything else goes to memory
+      currentStackStatus.M.insert(reg);
+      unsigned slot = allocateMemorySlot(reg);
+      regAssignments.insert(
+          std::pair<unsigned, StackAssignment>(reg, {NONSTACK, slot}));
+
+      insertStoreToMemoryAfter(reg, MI, slot);
+      LLVM_DEBUG({
+        dbgs() << "    Allocating %" << Register::virtReg2Index(reg)
+               << " to memslot: " << slot << "\n";
+      });
+    }
+  }
+
+  LLVM_DEBUG({
+    dbgs() << "// end of handling stack args, next instr:";
+    MI.dump();
+  });
+
+  return MI;
+}
+
 void EVMStackAlloc::analyzeBasicBlock(MachineBasicBlock *MBB) {
   LLVM_DEBUG({ dbgs() << "  Analyzing MBB" << MBB->getNumber() << ":\n"; });
 
-  MachineInstr &BeginMI = *MBB->begin();
-
   // this will alter MBB, so we record begin MI instruction
+  stack.clear();
+
+  MachineInstr &BeginMI = tryToAnalyzeStackArgs(MBB);
   beginOfBlockUpdates(MBB);
 
   LLVM_DEBUG({
@@ -464,7 +579,7 @@ void EVMStackAlloc::analyzeBasicBlock(MachineBasicBlock *MBB) {
   
   for (MachineBasicBlock::iterator I(BeginMI), E = MBB->end(); I != E;) {
     MachineInstr &MI = *I++;
-
+    assert(MI.getOpcode() != EVM::pSTACKARG_r);
     LLVM_DEBUG({ dbgs() << "\n  Instr: "; MI.dump();});
 
     // First consume, then create
