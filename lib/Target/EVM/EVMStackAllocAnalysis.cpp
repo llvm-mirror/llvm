@@ -505,7 +505,6 @@ MachineInstr& EVMStackAlloc::tryToAnalyzeStackArgs(MachineBasicBlock *MBB) {
 
     // check for correctness
     LLVM_DEBUG({
-      assert(stack.findRegDepth(reg) == index);
       unsigned ridx = Register::virtReg2Index(reg);
       dbgs() << "  Handling stackarg  %" << ridx << ":";
     });
@@ -546,11 +545,13 @@ MachineInstr& EVMStackAlloc::tryToAnalyzeStackArgs(MachineBasicBlock *MBB) {
       regAssignments.insert(
           std::pair<unsigned, StackAssignment>(reg, {NONSTACK, slot}));
 
-      insertStoreToMemoryAfter(reg, MI, slot);
+      insertStoreToMemoryBefore(reg, MI, slot);
       LLVM_DEBUG({
         dbgs() << "    Allocating %" << Register::virtReg2Index(reg)
                << " to memslot: " << slot << "\n";
       });
+      unsigned pop_stackreg = stack.pop();
+      assert(reg == pop_stackreg);
     }
   }
 
@@ -948,6 +949,23 @@ void EVMStackAlloc::insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI,
           .addReg(reg)
           .addImm(memSlot);
   MBB->insertAfter(MachineBasicBlock::iterator(MI), putlocal);
+  LIS->InsertMachineInstrInMaps(*putlocal);
+
+  // TODO: insert this new put local to LiveIntervals
+  LLVM_DEBUG(dbgs() << "    >>> PUTLOCAL(" << memSlot << ") <= %"
+                    << Register::virtReg2Index(reg) << "\n");
+}
+
+void EVMStackAlloc::insertStoreToMemoryBefore(unsigned reg, MachineInstr &MI,
+                                              unsigned memSlot) {
+  MachineBasicBlock *MBB = MI.getParent();
+  MachineFunction &MF = *MBB->getParent();
+
+  MachineInstrBuilder putlocal =
+      BuildMI(MF, MI.getDebugLoc(), TII->get(EVM::pPUTLOCAL_r))
+          .addReg(reg)
+          .addImm(memSlot);
+  MBB->insert(MachineBasicBlock::iterator(MI), putlocal);
   LIS->InsertMachineInstrInMaps(*putlocal);
 
   // TODO: insert this new put local to LiveIntervals

@@ -291,6 +291,7 @@ private:
   // Stack manipulation operations
   void insertLoadFromMemoryBefore(unsigned reg, MachineInstr &MI, unsigned memSlot);
   void insertStoreToMemoryAfter(unsigned reg, MachineInstr &MI, unsigned memSlot);
+  void insertStoreToMemoryBefore(unsigned reg, MachineInstr &MI, unsigned memSlot);
   void insertDupBefore(unsigned index, MachineInstr &MI);
   void insertSwapBefore(unsigned index, MachineInstr &MI);
   void insertPopAfter(MachineInstr &MI);
