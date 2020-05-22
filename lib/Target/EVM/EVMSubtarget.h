@@ -159,7 +159,8 @@ public:
            F.getName() == StringRef("main"); // skip intrinsics.
   }
 
-  unsigned getFreeMemoryPointer() const { return (AllocatedGlobalSlots * 32); }
+  unsigned getFramePointer() const { return AllocatedGlobalSlots * 32; }
+  unsigned getStackPointer() const { return getFramePointer() + 32; }
 };
 } // End llvm namespace
 

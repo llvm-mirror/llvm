@@ -67,12 +67,12 @@ bool EVMExpandFramePointer::handleFramePointer(MachineInstr *MI) {
       MachineBasicBlock *MBB = MI->getParent();
       DebugLoc DL = MI->getDebugLoc();
 
-      // $reg = PUSH32_r 64
+      // $reg = PUSH32_r $fp addr
       // $fp = MLOAD $reg
       unsigned fpReg = this->getNewRegister(MI);
       unsigned reg = this->getNewRegister(MI);
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
-          .addImm(ST->getFreeMemoryPointer());
+          .addImm(ST->getFramePointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
           .addReg(reg);
       LLVM_DEBUG({
@@ -108,7 +108,7 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
       unsigned fmpReg = this->getNewRegister(MI);
 
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
-          .addImm(ST->getFreeMemoryPointer());
+          .addImm(ST->getStackPointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))
           .addReg(fmpReg).add(MI->getOperand(1));
       MI->eraseFromParent();
@@ -124,7 +124,7 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
       // dst = MLOAD fmp
       // and remove the MOVE
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
-          .addImm(ST->getFreeMemoryPointer());
+          .addImm(ST->getStackPointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), reg)
           .addReg(fmpReg);
 

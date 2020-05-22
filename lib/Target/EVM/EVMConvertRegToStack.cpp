@@ -236,10 +236,13 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
             // MLOAD (fp)
             // PUSH (index + 1) * 32     (index+1, fp)
             // ADD   (fp[index+1])
+            // DUP1
             // PUSH fpaddr   (fpaddr, fp[index+1])
             // MSTORE
+            // PUSH spaddr
+            // MSTORE
 
-            unsigned fpaddr = MF.getSubtarget<EVMSubtarget>().getFreeMemoryPointer();
+            unsigned fpaddr = MF.getSubtarget<EVMSubtarget>().getFramePointer();
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                     TII->get(EVM::PUSH32))
                 .addImm(fpaddr);
@@ -260,11 +263,21 @@ bool EVMConvertRegToStack::runOnMachineFunction(MachineFunction &MF) {
                     TII->get(EVM::PUSH32))
                 .addImm((index + 1) * 32);
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::ADD));
+
+            // Duplicate the new fp to initialize SP
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::DUP1));
+
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                     TII->get(EVM::PUSH32))
                 .addImm(fpaddr);
             BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MSTORE));
 
+            // Also update stack pointer
+            unsigned spaddr = MF.getSubtarget<EVMSubtarget>().getStackPointer();
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                    TII->get(EVM::PUSH32))
+                .addImm(spaddr);
+            BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(EVM::MSTORE));
             
             if (MF.getSubtarget<EVMSubtarget>().hasSubroutine()) {
               // With subroutine support we do not push return address on to stack

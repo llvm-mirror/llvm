@@ -103,7 +103,7 @@ void EVMFinalization::expandADJFP(MachineInstr* MI) const {
   // ADD/SUB (according to UP or DOWN)
   // PUSH1 freeMem
   // MSTORE
-  unsigned freeMemPointer = ST->getFreeMemoryPointer();
+  unsigned freeMemPointer = ST->getFramePointer();
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH1)).addImm(freeMemPointer);
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD));
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH1)).addImm(index * 32);

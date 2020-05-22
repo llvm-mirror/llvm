@@ -123,7 +123,7 @@ void EVMExpandPseudos::expandLOCAL(MachineInstr* MI) const {
   unsigned fiSize = this->MF->getFrameInfo().getStackSize();
 
   BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), reg)
-      .addImm(ST->getFreeMemoryPointer());
+      .addImm(ST->getFramePointer());
   BuildMI(*MBB, MI, DL, TII->get(EVM::MLOAD_r), fpReg)
     .addReg(reg);
   unsigned slot_index = MI->getOperand(1).getImm() + (fiSize/32);

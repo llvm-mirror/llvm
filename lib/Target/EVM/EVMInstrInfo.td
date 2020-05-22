@@ -562,7 +562,7 @@ let isTerminator = 1, isBarrier = 1, isBranch = 1 in {
 }
 
 // In pre-EIP615 we do a little bit differently (due to the difference).
-// We make the n'th local to be at location FreeMemoryPointer - (n * 32).
+// We make the n'th local to be at location FramePointer - (n * 32).
 let mayLoad = 1 in {
 def pGETLOCAL_r : EVMPseudo<(outs GPR:$dst), (ins i256imm:$idx), []>;
 }
