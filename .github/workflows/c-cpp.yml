@@ -27,9 +27,9 @@ jobs:
         mkdir build
         cd build
         cmake -DLLVM_TARGETS_TO_BUILD=EVM -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=EVM ..
-    - name: Build
+    - name: Build llc
       run: |
         cd build
-        make -j4
+        make -j4 llc
     - name: Integration tests
       run: python evm_llvm/tools/evm-test/evm_test.py
