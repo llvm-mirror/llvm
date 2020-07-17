@@ -13,6 +13,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Set up Python 3
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.6
     - name: Setup cmake
       uses: jwlawson/actions-setup-cmake@v1.0
       with:
@@ -27,3 +31,5 @@ jobs:
       run: |
         cd build
         make -j4
+    - name: Integration tests
+      run: python evm_llvm/tools/evm-test/evm_test.py
