@@ -6,8 +6,13 @@ from random import seed, randint
 import subprocess
 import os
 import json
+import argparse
 
 import evm_testsuite
+
+parser = argparse.ArgumentParser( description = 'Option parser')
+parser.add_argument('--llc-path', dest='llc_path', action='store', default='llc')
+args = parser.parse_args()
 
 def execute_with_input_in_evm(code: str, input: str, expected: str) -> bool:
     def check_result(command: str, result: str, exp: str) -> bool:
@@ -47,21 +52,8 @@ def execute_with_input_in_evm(code: str, input: str, expected: str) -> bool:
     return success
 
 def generate_obj_file(infilename: str, outfilename: str) -> None:
-    defined_llc = False
-    llc_path = None
-    key = 'LLC_PATH'
-    try:
-        llc_path = os.environ[key]
-    except KeyError:
-        #print("LLC_PATH not defined, using $PATH instead")
-        pass
-
-    llc_exec = None
-    if defined_llc:
-        llc_exec = llc_path + "/llc"
-    else:
-        llc_exec = "llc"
-
+    global args
+    llc_exec = args.llc_path
     command = [llc_exec, "-mtriple=evm",
                "-filetype=obj", infilename, "-o", outfilename]
 
@@ -122,14 +114,21 @@ def print_failed(tests: List[str]) -> None:
     for t in tests:
         print("    " + t)
 
-def execute_tests() -> None:
+def execute_tests() -> bool:
     for key, val in evm_testsuite.string_input_fixtures.items():
         inputs = val["input"]
         output = val["output"]
         function = val["func"]
     failed_tests = binary_tests()
     print_failed(failed_tests)
-
+    if not failed_tests:
+        return True
+    else:
+        print("Some tests are failing.")
+        return False
 
 seed(2019)
-execute_tests()
+tests_pass = execute_tests()
+if not tests_pass:
+    sys.exit(1)
+
