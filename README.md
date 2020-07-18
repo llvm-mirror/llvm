@@ -1,4 +1,4 @@
-![Compiler Backend Status](https://github.com/etclabscore/evm_llvm/workflows/Compiler%20Backend%20Status/badge.svg?branch=EVM)
+![Backend Status CI](https://github.com/etclabscore/evm_llvm/workflows/Backend%20Status%20CI/badge.svg)
 
 ![EVM LLVM Image](https://user-images.githubusercontent.com/450283/63640209-85cb3c00-c66b-11e9-9610-0c339ae66ac7.png)
 
