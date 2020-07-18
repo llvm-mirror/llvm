@@ -1,8 +1,6 @@
-name: C/C++ CI
+name: Pull Request CI
 
 on:
-  push:
-    branches: [ EVM ]
   pull_request:
     branches: [ EVM ]
 

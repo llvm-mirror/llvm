@@ -1,0 +1,40 @@
+name: Backend Status CI
+
+on:
+  push:
+    branches: [ EVM ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.6
+    - name: Set up cmake 3.16
+      uses: jwlawson/actions-setup-cmake@v1.0
+      with:
+        cmake-version: '3.16.x'
+    - name: Install Geth
+      run: |
+        sudo add-apt-repository -y ppa:ethereum/ethereum
+        sudo apt-get update
+        sudo apt-get install ethereum
+    - name: Run cmake
+      run: |
+        cd ${{ github.workspace }}
+        mkdir build
+        cd build
+        cmake -DLLVM_TARGETS_TO_BUILD=EVM -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=EVM ..
+    - name: Build llc
+      run: |
+        cd ${{ github.workspace }}/build
+        make -j4 llc
+    - name: Run Integration tests
+      run: |
+        cd ${{ github.workspace }}/tools/evm-test
+        python evm_test.py --llc-path ${{ github.workspace }}/build/bin/llc
