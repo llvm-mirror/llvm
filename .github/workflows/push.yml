@@ -38,13 +38,3 @@ jobs:
       run: |
         cd ${{ github.workspace }}/tools/evm-test
         python evm_test.py --llc-path ${{ github.workspace }}/build/bin/llc
-    - name: Archive
-       run: |
-         zip -j evm-llvm-llc-$GITHUB_SHA.zip build/bin/llc
-         shasum -a 256 evm-llvm-llc-$GITHUB_SHA.zip > evm-llvm-llc-$GITHUB_SHA.zip.sha256
-         cat evm-llvm-llc-$GITHUB_SHA.zip.sha256
-     - name: Upload 
-       uses: actions/upload-artifact@v2
-       with:
-         name: llc-archive
-         path: evm-llvm-llc-*zip*
