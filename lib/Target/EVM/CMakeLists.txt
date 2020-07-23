@@ -9,6 +9,7 @@ tablegen(LLVM EVMGenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM EVMGenMCPseudoLowering.inc -gen-pseudo-lowering)
 tablegen(LLVM EVMGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM EVMGenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM EVMGenDisassemblerTables.inc -gen-disassembler)
 
 add_public_tablegen_target(EVMCommonTableGen)
 
@@ -41,3 +42,4 @@ add_llvm_target(EVMCodeGen
 add_subdirectory(AsmParser)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
+add_subdirectory(Disassembler)
