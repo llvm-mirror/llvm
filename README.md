@@ -7,14 +7,15 @@ But to mature a software infrastructure takes a long time and tremendous efforts
 
 With this project, we prove that industry-strong, LLVM compiler frameworks are still compatible for the EVM platform, even though LLVM is not created specifically for such kind of architectures. 
 
+EVM LLVM is an EVM architecture backend for LLVM. With EVM LLVM you can generate EVM binary code with LLVM-based compilers. The project is a codegen backend, it does not assume language frontends, so developers should be able to plug in a new smart contract language frontend to generate EVM binary, as long as the frontend does not generate language/platform-specific instructions.
 
-EVM LLVM is an EVM architecture backend for LLVM. With EVM LLVM you can generate EVM binary code with LLVM-based compilers. The project is a codegen backend, it does not assume a language frontend, so you should be able to plug in a new smart contract language frontend to generate EVM binary. However, 
+However, there are limitations introduced by the EVM architecture. As a software instruction set architecture, EVM opcodes aims at providing the best security measurements to the community, rather than performance. Because of this, we cannot assume programs running on nowadays x86 machines or cellphones can be ported easily to a blockchain which's execution environement is EVM. 
 
  
 At this moment, this project is based on LLVM 10. Some additional features have added to support EVM codegen.
 
+# References and materials
 
-
-[Technical Paper](https://github.com/etclabscore/evm_llvm/wiki/files/Generating_stack_machine_code_using_LLVM.pdf)
-
-[Wiki](https://github.com/etclabscore/evm_llvm/wiki)
+* [LLVM 10 Release Notes](https://releases.llvm.org/10.0.0/docs/ReleaseNotes.html)
+* [Technical Paper](https://github.com/etclabscore/evm_llvm/wiki/files/Generating_stack_machine_code_using_LLVM.pdf)
+* [EVM LLVM Wiki](https://github.com/etclabscore/evm_llvm/wiki)
