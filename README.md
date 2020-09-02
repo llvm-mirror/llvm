@@ -18,4 +18,5 @@ At this moment, this project is based on LLVM 10. Some additional features have 
 
 * [LLVM 10 Release Notes](https://releases.llvm.org/10.0.0/docs/ReleaseNotes.html)
 * [Technical Paper](https://github.com/etclabscore/evm_llvm/wiki/files/Generating_stack_machine_code_using_LLVM.pdf)
+* [EVM LLVM talk slides](https://github.com/etclabscore/evm_llvm/wiki/files/LLVM_talk.pdf)
 * [EVM LLVM Wiki](https://github.com/etclabscore/evm_llvm/wiki)
