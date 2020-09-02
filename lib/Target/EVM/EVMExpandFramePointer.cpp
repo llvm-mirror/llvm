@@ -107,6 +107,12 @@ bool EVMExpandFramePointer::handleStackPointer(MachineInstr *MI) {
       // them remove MOVE
       unsigned fmpReg = this->getNewRegister(MI);
 
+      LLVM_DEBUG({
+        dbgs() << "Expanding $sp to %"
+               <<Register::virtReg2Index(fmpReg) << " in instruction: ";
+        MI->dump();
+      });
+
       BuildMI(*MBB, MI, DL, TII->get(EVM::PUSH32_r), fmpReg)
           .addImm(ST->getStackPointer());
       BuildMI(*MBB, MI, DL, TII->get(EVM::MSTORE_r))

@@ -234,6 +234,7 @@ private:
   bool rangeContainsRegUses(unsigned reg, SlotIndex &begin,
                             SlotIndex &end) const;
   bool sucessorsContainRegUses(unsigned reg, const MachineBasicBlock *MBB) const;
+  void mergeEdgesetAssigments(unsigned edgeSetIndex, EdgeSetAssignment &EA);
 
   // the pass to analyze a single basicblock
   MachineInstr &tryToAnalyzeStackArgs(MachineBasicBlock *MBB);
@@ -294,6 +295,7 @@ private:
   void insertStoreToMemoryBefore(unsigned reg, MachineInstr &MI, unsigned memSlot);
   void insertDupBefore(unsigned index, MachineInstr &MI);
   void insertSwapBefore(unsigned index, MachineInstr &MI);
+  void insertSwapAfter(unsigned index, MachineInstr &MI);
   void insertPopAfter(MachineInstr &MI);
   void insertPopBefore(MachineInstr &MI);
 
